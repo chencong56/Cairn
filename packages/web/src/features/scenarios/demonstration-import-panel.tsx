@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
+  RECORDING_EXCLUSION_REASON_LABELS,
   stepSchema,
   type ApplyDemonstrationBody,
   type DemonstrationPlacement,
@@ -175,12 +176,17 @@ export function DemonstrationImportPanel(props: RecordingImportPanelProps) {
       setPreview(next)
       setConflict(false)
       // Source IDs are immutable: an OCC refresh preserves the user's edits and reasons.
+      const locked = new Map(
+        (props.exclusions ?? []).map((item) => [item.itemId, RECORDING_EXCLUSION_REASON_LABELS[item.reason]]),
+      )
       setChoices((previous) =>
         Object.fromEntries(
-          next.suggestions.flatMap((item) =>
-            previous[item.id] ? [[item.id, previous[item.id]]] : []
-          )
-        )
+          next.suggestions.flatMap((item) => {
+            const reason = locked.get(item.id)
+            if (reason) return [[item.id, { id: item.id, disposition: 'discard' as const, reason }]]
+            return previous[item.id] ? [[item.id, previous[item.id]]] : []
+          }),
+        ),
       )
     } catch (e) {
       if (ticket === request.current)
@@ -194,7 +200,7 @@ export function DemonstrationImportPanel(props: RecordingImportPanelProps) {
     return () => {
       request.current++
     }
-  }, [open, recordingDraftId, scenarioId, revision, placement])
+  }, [open, recordingDraftId, scenarioId, revision, placement, props.exclusions])
   const pending =
     preview?.suggestions.filter((item) => {
       const choice = choices[item.id]
@@ -402,9 +408,11 @@ export function DemonstrationImportPanel(props: RecordingImportPanelProps) {
                   }
 
                   const groupItems = group.items
+                  const lockedIds = new Set((props.exclusions ?? []).map((item) => item.itemId))
                   const canBatchAccept = groupItems.some(
                     ({ item }) =>
                       item.status === 'mapped' &&
+                      !lockedIds.has(item.id) &&
                       choices[item.id]?.disposition !== 'accept'
                   )
 
@@ -413,7 +421,7 @@ export function DemonstrationImportPanel(props: RecordingImportPanelProps) {
                     setChoices((prev) => {
                       const next = { ...prev }
                       for (const { item } of groupItems) {
-                        if (item.status === 'mapped') {
+                        if (item.status === 'mapped' && !lockedIds.has(item.id)) {
                           next[item.id] = { id: item.id, disposition: 'accept' }
                         }
                       }
@@ -478,7 +486,9 @@ export function DemonstrationImportPanel(props: RecordingImportPanelProps) {
                       </div>
                       <CollapsibleContent className='p-3'>
                         <ol className='space-y-3'>
-                          {group.items.map(({ item, originalIndex }) => (
+                          {group.items.map(({ item, originalIndex }) => {
+                            const locked = props.exclusions?.find((entry) => entry.itemId === item.id)
+                            return (
                             <li
                               key={item.id}
                               className='space-y-3 rounded-lg border border-border/60 bg-background/50 p-3.5'
@@ -488,7 +498,8 @@ export function DemonstrationImportPanel(props: RecordingImportPanelProps) {
                                 index={originalIndex}
                                 choice={choices[item.id]}
                                 inputs={props.inputs}
-                                disabled={applying}
+                                disabled={applying || Boolean(locked)}
+                                lockedReason={locked ? RECORDING_EXCLUSION_REASON_LABELS[locked.reason] : undefined}
                                 onChange={(next) =>
                                   setChoices((old) => ({
                                     ...old,
@@ -497,7 +508,8 @@ export function DemonstrationImportPanel(props: RecordingImportPanelProps) {
                                 }
                               />
                             </li>
-                          ))}
+                            )
+                          })}
                         </ol>
                       </CollapsibleContent>
                     </Collapsible>
@@ -584,6 +596,7 @@ function SuggestionEditor({
   choice,
   inputs,
   disabled,
+  lockedReason,
   onChange,
 }: {
   item: DemonstrationSuggestion
@@ -591,6 +604,7 @@ function SuggestionEditor({
   choice?: Decision
   inputs: RecordingImportPanelProps['inputs']
   disabled: boolean
+  lockedReason?: string
   onChange: (choice: Decision) => void
 }) {
   const [param, setParam] = useState(item.parameter?.key ?? '')
@@ -639,6 +653,9 @@ function SuggestionEditor({
           {message}
         </p>
       ))}
+      {lockedReason ? (
+        <p className='text-label text-muted-foreground'>已在录制草稿剔除（{lockedReason}）。要恢复，回到草稿页。</p>
+      ) : null}
       <div className='flex flex-wrap gap-2'>
         <Button
           size='sm'
@@ -669,7 +686,7 @@ function SuggestionEditor({
           舍弃
         </Button>
       </div>
-      {choice?.disposition === 'discard' && (
+      {choice?.disposition === 'discard' && !lockedReason && (
         <div className='space-y-2'>
           <Label htmlFor={`discard-${item.id}`}>舍弃原因</Label>
           <Textarea

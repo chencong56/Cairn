@@ -185,8 +185,6 @@ describe('resolveSessionPolicy', () => {
       evictionPriority: 0,
       lostDisposition: 'MANUAL',
       accountSessionMode: 'exclusive',
-      notifyOnAuthWait: true,
-      unattendedAuthTimeoutSeconds: 120,
       browserIsolation: 'DEDICATED',
     })
   })

@@ -9,26 +9,27 @@ import { type ScenarioDocument, type Step } from '@cairn/shared'
 describe('patch guardrails & digest manifest', () => {
   const dummyScenario: ScenarioDocument = {
     schemaVersion: 1,
-    title: 'Test Scenario',
     inputs: [{ key: 'orderId', label: 'Order ID', type: 'string', required: true }],
     steps: [
       {
         id: 's1',
         name: 'Step 1',
         type: 'click',
+        effectType: 'SIDE_EFFECT',
         input: {
           target: {
-            kind: 'locator',
             candidates: [{ by: 'css', value: '#submit' }],
+            framePath: [],
           },
         },
-      } as Step,
+      },
       {
         id: 's2',
         name: 'AI Assert Step',
         type: 'ai_assert',
+        effectType: 'READ_ONLY',
         input: {
-          prompt: 'Check order status is confirmed',
+          instruction: 'Check order status is confirmed',
         },
         contextBindings: [
           {
@@ -38,7 +39,7 @@ describe('patch guardrails & digest manifest', () => {
             required: true,
           },
         ],
-      } as Step,
+      },
     ],
   }
 
@@ -82,10 +83,11 @@ describe('patch guardrails & digest manifest', () => {
       id: 's_assert',
       name: 'Verify Result',
       type: 'assert',
+      effectType: 'READ_ONLY',
       input: {
         expect: {
           kind: 'text_contains',
-          expected: 'Success',
+          value: 'Success',
         },
       },
     }
@@ -111,13 +113,13 @@ describe('patch guardrails & digest manifest', () => {
   it('compiler catches invalid and forward-referencing contextBindings', () => {
     const invalidDoc: ScenarioDocument = {
       schemaVersion: 1,
-      title: 'Invalid Context Scenario',
       inputs: [{ key: 'account', label: 'Account', type: 'string', required: true }],
       steps: [
         {
           id: 'step_ai_1',
           name: 'AI Action 1',
           type: 'ai_action',
+          effectType: 'SIDE_EFFECT',
           input: {
             instruction: 'Do something',
           },
@@ -141,15 +143,16 @@ describe('patch guardrails & digest manifest', () => {
               required: true,
             },
           ],
-        } as Step,
+        },
         {
           id: 'step_ai_2',
           name: 'AI Action 2',
           type: 'ai_action',
+          effectType: 'SIDE_EFFECT',
           input: {
             instruction: 'Do next',
           },
-        } as Step,
+        },
       ],
     }
 

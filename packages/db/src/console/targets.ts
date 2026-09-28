@@ -80,7 +80,9 @@ import {
   type CleanupStatus,
   type CleanupStatusResponse,
   type CreateTargetAccountBody,
+  createTargetBodySchema,
   type CreateTargetBody,
+  type CreateTargetInput,
   type DeletePreviewResponse,
   type DeleteResourceBody,
   type DeleteResourceResult,
@@ -358,15 +360,16 @@ export class TargetsStore {
     return this.getTarget(id)
   }
 
-  async createTarget(body: CreateTargetBody, actor: RequestAccount): Promise<TargetDto> {
+  async createTarget(body: CreateTargetInput, actor: RequestAccount): Promise<TargetDto> {
+    const targetData = createTargetBodySchema.parse(body)
     const { targets } = schemaFor(this.db)
     const id = newId()
     const now = new Date()
     try {
       await this.db.transaction(async (tx) => {
         await lockConsoleAuthorization(tx, actor.id)
-        const accountNeedsCredentialAccess = Boolean(body.account && (
-          body.account.password || body.account.totpSecret || body.account.validity || body.account.ownerConsoleAccountId
+        const accountNeedsCredentialAccess = Boolean(targetData.account && (
+          targetData.account.password || targetData.account.totpSecret || targetData.account.validity || targetData.account.ownerConsoleAccountId
         ))
         const scopes = await targetScopesFor(tx, actor.id, [
           'target:read', 'target:write',
@@ -381,21 +384,21 @@ export class TargetsStore {
         }
         await tx.insert(targets).values({
           id,
-          code: body.code,
-          name: body.name,
-          entryUrl: body.entryUrl,
-          loginUrl: body.loginUrl ?? null,
-          authMethod: body.authMethod,
-          captchaMode: body.captchaMode,
-          status: body.status,
-          iconKey: body.iconKey ?? DEFAULT_TARGET_ICON_KEY,
-          accentKey: body.accentKey ?? DEFAULT_TARGET_ACCENT_KEY,
-          loginFields: body.loginFields,
-          loginLeaveTimeoutMs: body.loginLeaveTimeoutMs ?? null,
-          landingSettleMode: body.landingSettleMode ?? 'default',
-          landingSettleTimeoutMs: body.landingSettleTimeoutMs ?? null,
-          captcha: body.captcha ?? null,
-          sensitiveSelectors: body.sensitiveSelectors ?? [],
+          code: targetData.code,
+          name: targetData.name,
+          entryUrl: targetData.entryUrl,
+          loginUrl: targetData.loginUrl ?? null,
+          authMethod: targetData.authMethod,
+          captchaMode: targetData.captchaMode,
+          status: targetData.status,
+          iconKey: targetData.iconKey,
+          accentKey: targetData.accentKey,
+          loginFields: targetData.loginFields,
+          loginLeaveTimeoutMs: targetData.loginLeaveTimeoutMs,
+          landingSettleMode: targetData.landingSettleMode,
+          landingSettleTimeoutMs: targetData.landingSettleTimeoutMs,
+          captcha: targetData.captcha ?? null,
+          sensitiveSelectors: targetData.sensitiveSelectors ?? [],
           createdAt: now,
           updatedAt: now,
         })
@@ -405,14 +408,14 @@ export class TargetsStore {
           'target.create',
           'target',
           id,
-          `${body.name}（${body.code}），外观 ${body.iconKey ?? DEFAULT_TARGET_ICON_KEY}/${body.accentKey ?? DEFAULT_TARGET_ACCENT_KEY}`,
+          `${targetData.name}（${targetData.code}），外观 ${targetData.iconKey}/${targetData.accentKey}`,
         )
-        if (body.account) {
-          await this.insertAccount(tx, id, body.account, actor, now)
+        if (targetData.account) {
+          await this.insertAccount(tx, id, targetData.account, actor, now)
         }
       })
     } catch (error) {
-      await rethrowUnique(this.db, error, 'target', { code: body.code })
+      await rethrowUnique(this.db, error, 'target', { code: targetData.code })
     }
     return this.getTarget(id)
   }

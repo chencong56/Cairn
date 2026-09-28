@@ -377,6 +377,8 @@ describe('run-video-chapters', () => {
               internalToExpanded: {},
               preconditionStepIds: [],
               postconditionStepIds: [],
+              outputVerificationStepIds: [],
+              frozenOutputs: {},
               outputRequired: [],
               inputBindingsDigest: 'sha256:abc',
             },

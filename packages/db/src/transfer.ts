@@ -101,6 +101,7 @@ const ORDER = [
   "sessionEvents",
   "sessionStateSnapshots",
   "recordingDrafts",
+  "recordingDraftExclusions",
   "recordingDemonstrationSources",
   "recordingArtifacts",
   "recordingArtifactUploads",

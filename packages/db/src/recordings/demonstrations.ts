@@ -10,11 +10,14 @@ import {
   recordingImportReceiptSchema,
   syncSha256,
   walkAuthoringNodes,
+  RECORDING_EXCLUSION_REASON_LABELS,
   type ApplyDemonstrationBody,
   type CreateDemonstrationBody,
+  type DemonstrationDecision,
   type PreviewDemonstrationBody,
   type DemonstrationDetail,
   type DemonstrationPreview,
+  type RecordingDraftExclusion,
   type RecordingImportReceipt,
   synthesizeRecordingDraftTitle,
 } from '@cairn/shared'
@@ -37,6 +40,19 @@ import {
 import { recordAudit, type AuditActor } from '../audit/record.js'
 import { expandWithLoader, getScenario, syncScenarioModuleRefsTx } from '../runs/scenarios.js'
 import { assertBindingAcceptsUpload, attachBindingDraft } from './recordings.js'
+import { listRecordingDraftExclusions } from './exclusions.js'
+
+export function enforceDemonstrationExclusions(
+  decisions: DemonstrationDecision[],
+  exclusions: RecordingDraftExclusion[],
+): DemonstrationDecision[] {
+  const excluded = new Map(exclusions.map((item) => [item.itemId, item.reason]))
+  return decisions.map((decision) => {
+    const reason = excluded.get(decision.id)
+    if (!reason) return decision
+    return { id: decision.id, disposition: 'discard', reason: RECORDING_EXCLUSION_REASON_LABELS[reason] }
+  })
+}
 import type { RecordingImportReceiptRow } from '../schema/authoring.js'
 
 export async function assertDemonstrationOwner(db: Db, id: string, actorId: string, write = false) {
@@ -169,6 +185,7 @@ export async function createDemonstration(
       events: [],
       diagnostics: source.omittedConfig.map((key) => `已确认不应用配置 ${key}`),
       items: suggestions.map((s, index) => ({
+        id: s.id,
         index,
         sourceIndexes: source.facts
           .filter((f) => f.sourceIds.some((id) => s.sourceIds.includes(id)))
@@ -326,9 +343,14 @@ export async function applyDemonstrationImport(
       .limit(1)
     if (imported) throw conflict('RECORDING_IMPORT_CONFLICT', '该录制已回填此场景')
     const state = await loadPreview(tx, scenarioId, body, actor.id, true)
+    const enforcedDecisions = enforceDemonstrationExclusions(
+      body.decisions,
+      await listRecordingDraftExclusions(tx, body.recordingDraftId),
+    )
+    const enforcedBody = { ...body, decisions: enforcedDecisions }
     let next
     try {
-      next = applyDemonstrationToDocument(state.document, state.preview, body)
+      next = applyDemonstrationToDocument(state.document, state.preview, enforcedBody)
     } catch (error) {
       if (error instanceof DemonstrationApplyError) throw badRequest(error.code, error.message)
       throw error
@@ -368,15 +390,15 @@ export async function applyDemonstrationImport(
       ...(s.disposition === 'discard'
         ? {
             reason:
-              body.decisions.find(
-                (d) =>
+              enforcedDecisions.find(
+                (d): d is Extract<DemonstrationDecision, { disposition: 'discard' }> =>
                   d.disposition === 'discard' &&
-                  state.preview.suggestions
-                    .find((p) => p.id === d.id)
-                    ?.sourceIds.some((id) => s.sourceIds.includes(id)),
-              )?.disposition === 'discard'
-                ? '用户明确放弃，详见决定'
-                : '用户明确放弃',
+                  Boolean(
+                    state.preview.suggestions
+                      .find((p) => p.id === d.id)
+                      ?.sourceIds.some((id) => s.sourceIds.includes(id)),
+                  ),
+              )?.reason ?? '用户明确放弃',
           }
         : {}),
     }))
@@ -404,7 +426,7 @@ export async function applyDemonstrationImport(
         adapterVersion: body.adapterVersion,
         ruleVersion: body.ruleVersion,
         placement: body.placement,
-        decisions: body.decisions,
+        decisions: enforcedDecisions,
         sourceMap: next.sourceMap,
       },
       createdAt: now,

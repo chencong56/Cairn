@@ -11,11 +11,9 @@ import {
   getRecordingDraft,
   listRecordingDrafts,
   renameRecordingDraft,
-  getOrCreateRecordingGeneralization,
-  saveRecordingGeneralizationDecisions,
-  submitRecordingGeneralizationRound,
-  updateRecordingGeneralizationRoundStatus,
-  handoffCreateScenario,
+  updateRecordingDraftExclusions,
+  createScenarioFromRecordingHandoff,
+  type CreateScenarioHandoffBody,
   type DbHandle,
   type ChangeHintBus,
 } from '@cairn/db'
@@ -25,9 +23,7 @@ import type {
   CreateRecordingBody,
   CreateDemonstrationBody,
   RecordingDraftListQuery,
-  SaveGeneralizationDecisionsBody,
-  SubmitGeneralizationRoundBody,
-  HandoffCreateScenarioBody,
+  UpdateRecordingExclusionsBody,
 } from '@cairn/shared'
 import { hasPermission } from '@cairn/shared'
 import { forbidden } from '@cairn/db'
@@ -129,28 +125,6 @@ export class RecordingsService {
     }
   }
 
-  async getGeneralization(recordingDraftId: string, actorId: string) {
-    try {
-      return await getOrCreateRecordingGeneralization(this.db, recordingDraftId, actorId)
-    } catch (error) {
-      rethrowDomain(error)
-    }
-  }
-
-  async observeGeneralization(recordingDraftId: string, actorId: string, req: Request, res: Response, after = 0) {
-    return observeObject({
-      req,
-      res,
-      after,
-      hints: this.hints,
-      objectId: recordingDraftId,
-      event: 'generalization',
-      matches: (hint) => hint.objectType === 'recording_draft' && hint.objectId === recordingDraftId,
-      snapshot: () => this.getGeneralization(recordingDraftId, actorId),
-      events: async () => [],
-    })
-  }
-
   private async publishHint(recordingDraftId: string) {
     await this.hints
       .publish({
@@ -162,42 +136,13 @@ export class RecordingsService {
       .catch(() => undefined)
   }
 
-  async saveGeneralizationDecisions(
+  async updateExclusions(
     recordingDraftId: string,
-    body: SaveGeneralizationDecisionsBody,
+    body: UpdateRecordingExclusionsBody,
     actor: RequestAccount,
   ) {
     try {
-      const result = await saveRecordingGeneralizationDecisions(this.db, recordingDraftId, body, actor)
-      await this.publishHint(recordingDraftId)
-      return result
-    } catch (error) {
-      rethrowDomain(error)
-    }
-  }
-
-  async submitGeneralizationRound(
-    recordingDraftId: string,
-    body: SubmitGeneralizationRoundBody,
-    actor: RequestAccount,
-  ) {
-    try {
-      const result = await submitRecordingGeneralizationRound(this.db, recordingDraftId, body, actor)
-      await this.publishHint(recordingDraftId)
-      return result
-    } catch (error) {
-      rethrowDomain(error)
-    }
-  }
-
-  async updateGeneralizationRoundStatus(
-    recordingDraftId: string,
-    roundId: string,
-    action: 'accept' | 'reject' | 'revert',
-    actor: RequestAccount,
-  ) {
-    try {
-      const result = await updateRecordingGeneralizationRoundStatus(this.db, recordingDraftId, roundId, action, actor)
+      const result = await updateRecordingDraftExclusions(this.db, recordingDraftId, body, actor)
       await this.publishHint(recordingDraftId)
       return result
     } catch (error) {
@@ -207,11 +152,11 @@ export class RecordingsService {
 
   async handoffCreateScenario(
     recordingDraftId: string,
-    body: HandoffCreateScenarioBody,
+    body: CreateScenarioHandoffBody,
     actor: RequestAccount,
   ) {
     try {
-      const result = await handoffCreateScenario(this.db, recordingDraftId, body, actor)
+      const result = await createScenarioFromRecordingHandoff(this.db, recordingDraftId, body, actor)
       await this.publishHint(recordingDraftId)
       return result
     } catch (error) {

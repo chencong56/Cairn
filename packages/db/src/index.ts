@@ -600,20 +600,12 @@ export const applyRecordingImport = operation(impl4.applyRecordingImport);
 export const continueRecordingMapIngest = operation(
   impl4.continueRecordingMapIngest,
 );
-export const getOrCreateRecordingGeneralization = operation(
-  impl4.getOrCreateRecordingGeneralization,
-);
-export const saveRecordingGeneralizationDecisions = operation(
-  impl4.saveRecordingGeneralizationDecisions,
-);
-export const submitRecordingGeneralizationRound = operation(
-  impl4.submitRecordingGeneralizationRound,
-);
-export const updateRecordingGeneralizationRoundStatus = operation(
-  impl4.updateRecordingGeneralizationRoundStatus,
-);
-export const handoffCreateScenario = operation(impl4.handoffCreateScenario);
+export const listRecordingDraftExclusions = operation(impl4.listRecordingDraftExclusions);
+export const updateRecordingDraftExclusions = operation(impl4.updateRecordingDraftExclusions);
+export const createScenarioFromRecordingHandoff = operation(impl4.createScenarioFromRecordingHandoff);
 export {
+  createScenarioHandoffBodySchema,
+  type CreateScenarioHandoffBody,
   RECORDING_MAP_INGEST_SERVICE_ID,
   recordingMapIngestTestHooks,
 } from "./recordings/index.js";

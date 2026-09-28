@@ -17,7 +17,7 @@ describe.each(DRIVERS)('%s 分析候选人工采纳', { timeout: 60_000 }, drive
     actorId = newId()
     await insertRows(handle.db, consoleAccounts, { id: actorId, displayName: 'reviewer', email: `${actorId}@test.invalid`, status: 'active' })
     const [role] = await handle.db.select().from(consoleRoles).where(eq(consoleRoles.key, 'admin'))
-    await handle.db.insert(consoleAccountRoles).values({ consoleAccountId: actorId, consoleRoleId: role.id, targetScopeMode: 'all' })
+    await handle.db.insert(consoleAccountRoles).values({ consoleAccountId: actorId, consoleRoleId: role!.id, targetScopeMode: 'all' })
   })
   afterAll(async () => { await handle?.close() })
 
@@ -43,7 +43,7 @@ describe.each(DRIVERS)('%s 分析候选人工采纳', { timeout: 60_000 }, drive
     const { candidateId, jobId, scenario } = await fixture()
     const body = await proposalBody(scenario.id)
     const reviewed = await reviewAnalysisCandidate(handle.db, candidateId, body, actor())
-    const candidate = reviewed.candidates![0]
+    const candidate = reviewed.candidates![0]!
     expect(candidate.status).toBe('proposed')
     const destination = candidate.review!.destination
     if (destination.kind !== 'proposal') throw new Error('proposal expected')
@@ -51,13 +51,13 @@ describe.each(DRIVERS)('%s 分析候选人工采纳', { timeout: 60_000 }, drive
     expect(proposal.sources).toEqual([{ kind: 'analysis_candidate', jobId, candidateId }])
     expect(proposal.diffs).toHaveLength(1)
     expect((await getScenario(handle.db, scenario.id)).draft!.revision).toBe(body.expectedDraftRevision)
-    expect((await reviewAnalysisCandidate(handle.db, candidateId, body, actor())).candidates![0].review).toEqual(candidate.review)
+    expect((await reviewAnalysisCandidate(handle.db, candidateId, body, actor())).candidates![0]!.review).toEqual(candidate.review)
     await expect(reviewAnalysisCandidate(handle.db, candidateId, { ...body, document: { ...body.document, steps: body.document.steps.map(step => ({ ...step, name: 'changed' })) } }, actor())).rejects.toMatchObject({ code: 'KNOWLEDGE_IDEMPOTENCY_CONFLICT' })
     await acceptKnowledgeProposal(handle.db, scenario.id, destination.proposalId, { idempotencyKey: newId(), expectedDraftRevision: body.expectedDraftRevision, documentDigest: body.documentDigest }, actor())
     const updated = await getScenario(handle.db, scenario.id)
     expect(updated.latestVersionId).toBe(scenario.latestVersionId)
     expect(updated.draft!.revision).toBe(body.expectedDraftRevision + 1)
-    expect((await getAnalysisJob(handle.db, jobId, actorId)).candidates![0].status).toBe('accepted')
+    expect((await getAnalysisJob(handle.db, jobId, actorId)).candidates![0]!.status).toBe('accepted')
     await expect(reviewAnalysisCandidate(handle.db, candidateId, { kind: 'reject', expectedRevision: 2, idempotencyKey: newId(), reason: 'late' }, actor())).rejects.toMatchObject({ code: 'KNOWLEDGE_REVISION_CONFLICT' })
   })
 
@@ -66,17 +66,17 @@ describe.each(DRIVERS)('%s 分析候选人工采纳', { timeout: 60_000 }, drive
     await expect(reviewAnalysisCandidate(handle.db, f.candidateId, await proposalBody(other.scenario.id), actor())).rejects.toMatchObject({ code: 'KNOWLEDGE_NOT_FOUND' })
     const body = await proposalBody(f.scenario.id)
     const result = await reviewAnalysisCandidate(handle.db, f.candidateId, body, actor())
-    const destination = result.candidates![0].review!.destination
+    const destination = result.candidates![0]!.review!.destination
     if (destination.kind !== 'proposal') throw new Error('proposal expected')
     await saveScenarioDraft(handle.db, f.scenario.id, { revision: body.expectedDraftRevision, document: body.document, actor: actor() })
     await expect(acceptKnowledgeProposal(handle.db, f.scenario.id, destination.proposalId, { idempotencyKey: newId(), expectedDraftRevision: body.expectedDraftRevision, documentDigest: body.documentDigest }, actor())).rejects.toMatchObject({ code: 'AUTHORING_PROPOSAL_STALE' })
     const next = await reviewAnalysisCandidate(handle.db, f.candidateId, await proposalBody(f.scenario.id, 2), actor())
-    expect(next.candidates![0].revision).toBe(3)
+    expect(next.candidates![0]!.revision).toBe(3)
     expect((await getKnowledgeProposal(handle.db, f.scenario.id, destination.proposalId)).proposalStatus).toBe('stale')
     const fresh = await fixture(), noDiff = await proposalBody(fresh.scenario.id)
-    noDiff.document.steps[0].name = '回声'
+    noDiff.document.steps[0]!.name = '回声'
     await expect(reviewAnalysisCandidate(handle.db, fresh.candidateId, noDiff, actor())).rejects.toMatchObject({ code: 'KNOWLEDGE_INVALID_PROPOSAL' })
-    expect((await getAnalysisJob(handle.db, fresh.jobId)).candidates![0].status).toBe('pending')
+    expect((await getAnalysisJob(handle.db, fresh.jobId)).candidates![0]!.status).toBe('pending')
   })
 
   it('并发处理只创建一份术语，来源受权限及目标隔离保护', async () => {
@@ -84,7 +84,7 @@ describe.each(DRIVERS)('%s 分析候选人工采纳', { timeout: 60_000 }, drive
     const body = { kind: 'term' as const, expectedRevision: 1, canonicalName: '订单状态', aliases: [], meaning: '订单的当前处理状态' }
     const results = await Promise.allSettled([1, 2].map(() => reviewAnalysisCandidate(handle.db, f.candidateId, { ...body, idempotencyKey: newId() }, actor())))
     expect(results.filter(item => item.status === 'fulfilled')).toHaveLength(1)
-    const candidate = (await getAnalysisJob(handle.db, f.jobId)).candidates![0]
+    const candidate = (await getAnalysisJob(handle.db, f.jobId)).candidates![0]!
     const destination = candidate.review!.destination
     if (destination.kind !== 'term') throw new Error('term expected')
     const term = await getTerminology(handle.db, f.targetId, destination.termId)
@@ -128,17 +128,17 @@ describe.each(DRIVERS)('%s 分析候选人工采纳', { timeout: 60_000 }, drive
     await updateTerminology(handle.db, f.targetId, term.termId, { expectedRevision: 1, meaning: '人工修改' }, actor())
     const body = { kind: 'term' as const, idempotencyKey: newId(), expectedRevision: 1, canonicalName: '状态', aliases: [], meaning: '审阅后的含义', existingTerm: { termId: term.termId, expectedRevision: 1 } }
     await expect(reviewAnalysisCandidate(handle.db, f.candidateId, body, actor())).rejects.toMatchObject({ code: 'KNOWLEDGE_REVISION_CONFLICT' })
-    expect((await getAnalysisJob(handle.db, f.jobId)).candidates![0].status).toBe('pending')
+    expect((await getAnalysisJob(handle.db, f.jobId)).candidates![0]!.status).toBe('pending')
     expect((await getTerminology(handle.db, f.targetId, term.termId)).meaning).toBe('人工修改')
     const result = await reviewAnalysisCandidate(handle.db, f.candidateId, { ...body, existingTerm: { ...body.existingTerm, expectedRevision: 2 } }, actor())
-    expect(result.candidates![0].review!.destination).toEqual({ kind: 'term', termId: term.termId, revision: 3 })
+    expect(result.candidates![0]!.review!.destination).toEqual({ kind: 'term', termId: term.termId, revision: 3 })
   })
 
   it('拒绝记录原因且幂等，不能与采纳相互覆盖', async () => {
     const f = await fixture()
     const body = { kind: 'reject' as const, idempotencyKey: newId(), expectedRevision: 1, reason: '证据不足' }
     await reviewAnalysisCandidate(handle.db, f.candidateId, body, actor())
-    expect((await reviewAnalysisCandidate(handle.db, f.candidateId, body, actor())).candidates![0]).toMatchObject({ status: 'rejected', revision: 2, review: { destination: { kind: 'reject', reason: '证据不足' } } })
+    expect((await reviewAnalysisCandidate(handle.db, f.candidateId, body, actor())).candidates![0]!).toMatchObject({ status: 'rejected', revision: 2, review: { destination: { kind: 'reject', reason: '证据不足' } } })
     await expect(reviewAnalysisCandidate(handle.db, f.candidateId, await proposalBody(f.scenario.id, 2), actor())).rejects.toMatchObject({ code: 'KNOWLEDGE_REVISION_CONFLICT' })
   })
 

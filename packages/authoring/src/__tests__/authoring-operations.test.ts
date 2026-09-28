@@ -110,9 +110,10 @@ describe('applyAuthoringOperations (原子应用与纯函数受限编辑)', () =
     if (!result.ok) return
 
     const extNode = result.document.nodes[1] as any
+    const baseNode1 = baseDoc.nodes[1] as any
     expect(extNode.step.name).toBe('提取最新客户编号')
-    expect(extNode.origin).toEqual(baseDoc.nodes[1]?.origin)
-    expect(extNode.outcomes).toEqual(baseDoc.nodes[1]?.outcomes)
+    expect(extNode.origin).toEqual(baseNode1?.origin)
+    expect(extNode.outcomes).toEqual(baseNode1?.outcomes)
 
     const assertNode = result.document.nodes[3] as any
     expect(assertNode.step.input.expect.value).toBe('查询成功')
@@ -330,6 +331,7 @@ describe('applyAuthoringOperations (原子应用与纯函数受限编辑)', () =
           id: '01912345-0000-7000-8000-000000000091',
           name: '1',
           type: 'navigate',
+          effectType: 'READ_ONLY',
           input: { url: 'https://a.test' },
         },
       },
@@ -340,6 +342,7 @@ describe('applyAuthoringOperations (原子应用与纯函数受限编辑)', () =
           id: '01912345-0000-7000-8000-000000000092',
           name: '2',
           type: 'navigate',
+          effectType: 'READ_ONLY',
           input: { url: 'https://b.test' },
         },
       },
@@ -350,6 +353,7 @@ describe('applyAuthoringOperations (原子应用与纯函数受限编辑)', () =
           id: '01912345-0000-7000-8000-000000000093',
           name: '3',
           type: 'navigate',
+          effectType: 'READ_ONLY',
           input: { url: 'https://c.test' },
         },
       },

@@ -303,6 +303,8 @@ describe('AM-F 多实现与冻结回退', () => {
           implementationDigest: 'a',
           stepIds: ['s1', 's2'],
           postconditionStepIds: [],
+          outputVerificationStepIds: [],
+          frozenOutputs: {},
           outputStaging: {},
         },
         {
@@ -310,6 +312,8 @@ describe('AM-F 多实现与冻结回退', () => {
           implementationDigest: 'b',
           stepIds: ['s3'],
           postconditionStepIds: [],
+          outputVerificationStepIds: [],
+          frozenOutputs: {},
           outputStaging: {},
         },
       ],

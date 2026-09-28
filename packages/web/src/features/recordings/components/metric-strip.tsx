@@ -1,12 +1,13 @@
-import type { RecordingDraftDetailDto, RecordingItemStatus } from '@cairn/shared'
+import type { RecordingDraftDetailDto } from '@cairn/shared'
 import { AlertCircle, AlertTriangle, CheckCircle2, FileText, KeyRound } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { cn } from '@/lib/utils'
+import type { FilterOption } from './step-stream'
 
 type Props = {
   draft: RecordingDraftDetailDto
-  activeFilter: 'all' | RecordingItemStatus | 'sensitive'
-  onFilterChange: (filter: 'all' | RecordingItemStatus | 'sensitive') => void
+  activeFilter: FilterOption
+  onFilterChange: (filter: FilterOption) => void
 }
 
 export function RecordingMetricStrip({ draft, activeFilter, onFilterChange }: Props) {

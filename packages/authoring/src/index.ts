@@ -75,15 +75,8 @@ export {
   type ApplyAuthoringOperationsOptions,
 } from './authoring-operations.js'
 export {
-  foldRecordingGeneralization,
-  type FoldRecordingGeneralizationResult,
-} from './recording-generalization.js'
-export {
-  generateQuickActionRound,
-  interpretGeneralizationIntent,
-  type GenerateQuickActionRoundOptions,
-  type GenerateQuickActionRoundResult,
-  type InterpretGeneralizationIntentOptions,
-  type TargetDataset,
-  type TargetDatasetColumn,
-} from './recording-rules.js'
+  detectLoginCleansingCandidates,
+  detectMisfireCleansingCandidates,
+  type TargetAuthCleansingContext,
+} from './cleansing-predicates.js'
+

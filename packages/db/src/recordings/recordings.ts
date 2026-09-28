@@ -33,6 +33,8 @@ import { recordingDrafts } from '../schema/authoring.js'
 import { targets } from '../schema/targets.js'
 import { cursorFilter, paginateResults } from '../cursor.js'
 import { continueRecordingMapIngest, ensureRecordingMapIngestTx } from './map-ingest.js'
+import { listRecordingDraftExclusions, loadCleansingHints } from './exclusions.js'
+import { suggestDemonstration } from '@cairn/authoring'
 
 function iso(value: Date): string {
   return value.toISOString()
@@ -356,7 +358,7 @@ async function findIdempotent(db: Db, actorId: string, key: string) {
 }
 
 async function toDetail(db: Db, id: string, actorId?: string): Promise<RecordingDraftDetailDto> {
-  const { consoleAccounts, recordingDrafts, targets } = schemaFor(db)
+  const { consoleAccounts, recordingDrafts, targets, recordingDemonstrationSources } = schemaFor(db)
   const [row] = await db
     .select({
       draft: recordingDrafts,
@@ -372,6 +374,25 @@ async function toDetail(db: Db, id: string, actorId?: string): Promise<Recording
     throw notFound('RECORDING_NOT_FOUND', '录制草稿不存在')
   }
   const importedByDraft = await importedScenarioIds(db, [row.draft.id])
+  const exclusions = await listRecordingDraftExclusions(db, row.draft.id)
+  const cleansingHints = await loadCleansingHints(db, row.draft.id, row.draft.targetId)
+
+  let items = row.draft.items
+  if (row.draft.sourceProtocol === 'demonstration@1') {
+    const [sourceRow] = await db
+      .select({ source: recordingDemonstrationSources.source })
+      .from(recordingDemonstrationSources)
+      .where(eq(recordingDemonstrationSources.recordingDraftId, row.draft.id))
+      .limit(1)
+    if (sourceRow?.source) {
+      const suggestions = suggestDemonstration(sourceRow.source)
+      items = items.map((it, idx) => ({
+        ...it,
+        id: it.id ?? suggestions[idx]?.id ?? `item_${idx}`,
+      }))
+    }
+  }
+
   return recordingDraftDetailSchema.parse({
     id: row.draft.id,
     targetId: row.draft.targetId,
@@ -380,6 +401,7 @@ async function toDetail(db: Db, id: string, actorId?: string): Promise<Recording
     recordingId: row.draft.recordingId,
     sourceVersion: row.draft.sourceVersion,
     sourceProtocol: row.draft.sourceProtocol,
+    revision: row.draft.revision ?? 1,
     eventCount: row.draft.eventCount,
     itemCount: row.draft.itemCount,
     unresolvedCount: row.draft.unresolvedCount,
@@ -388,9 +410,11 @@ async function toDetail(db: Db, id: string, actorId?: string): Promise<Recording
     importedScenarioId: importedByDraft.get(row.draft.id),
     createdAt: iso(row.draft.createdAt),
     updatedAt: iso(row.draft.updatedAt),
-    items: row.draft.items,
+    items,
     diagnostics: row.draft.diagnostics,
     events: row.draft.events,
+    exclusions,
+    cleansingHints,
   })
 }
 

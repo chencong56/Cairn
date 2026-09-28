@@ -1,26 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
-import { hasPermission, recordingSourceLabel } from '@cairn/shared'
+import {
+  hasPermission,
+  recordingItemExclusionId,
+  recordingSourceLabel,
+  type RecordingExclusionReason,
+} from '@cairn/shared'
 import {
   ArrowLeft,
   ArrowRight,
-  ExternalLink,
-  Trash2,
-  Sparkles,
-  ListTree,
-  FileCode2,
-  History,
+  ChevronDown,
   Edit2,
+  ExternalLink,
+  History,
+  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
 import {
   deleteRecording,
   fetchRecording,
-  fetchRecordingGeneralization,
-  observeRecordingGeneralization,
   renameRecording,
+  updateRecordingExclusions,
 } from '@/lib/recordings-api'
 import { fetchDemonstration } from '@/lib/demonstrations-api'
 import { useAuthStore } from '@/stores/auth-store'
@@ -31,15 +33,14 @@ import { QueryErrorState } from '@/components/query-error-state'
 import { ResourceDeleteDialog } from '@/components/resource-delete-dialog'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
+import { CleansingHintsBanner } from './components/cleansing-hints-banner'
 import { RecordingHandoffDialog } from './components/handoff-dialog'
 import { RecordingMetricStrip } from './components/metric-strip'
 import { RecordingStepInspector } from './components/step-inspector'
 import { type FilterOption, RecordingStepStream } from './components/step-stream'
 import { RecordingRenameDialog } from './rename-dialog'
 import { SavedDemonstrationFacts } from './demonstration-facts'
-import { CandidateScenarioPreview } from './components/candidate-preview'
-import { GeneralizationPanel } from './components/generalization-panel'
 
 export function RecordingDetailPage() {
   const { recordingId } = useParams({ from: '/_authenticated/recordings/$recordingId/' })
@@ -60,31 +61,25 @@ export function RecordingDetailPage() {
     enabled: Boolean(draft?.sourceProtocol === 'demonstration@1'),
   })
 
-  const generalizationQuery = useQuery({
-    queryKey: ['recording-generalization', recordingId],
-    queryFn: () => fetchRecordingGeneralization(recordingId),
-    enabled: Boolean(draft?.sourceProtocol === 'demonstration@1'),
-  })
-
-  useEffect(() => {
-    if (draft?.sourceProtocol !== 'demonstration@1') return
-    return observeRecordingGeneralization(recordingId, {
-      onUpdate: (data) => {
-        queryClient.setQueryData(['recording-generalization', recordingId], data)
-      },
-    })
-  }, [draft?.sourceProtocol, recordingId, queryClient])
-
   const [renaming, setRenaming] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [handoffOpen, setHandoffOpen] = useState(false)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
-  const [viewMode, setViewMode] = useState<'workbench' | 'candidate' | 'generalization' | 'facts'>('workbench')
+  const [showFacts, setShowFacts] = useState(false)
 
   // 标题行内编辑状态
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [savingTitle, setSavingTitle] = useState(false)
+
+  const canWrite =
+    Boolean(draft) &&
+    hasPermission(user?.permissions ?? [], 'workflow:write') &&
+    (isAdmin || draft?.createdBy.id === user?.id)
+  const canDelete =
+    Boolean(draft) &&
+    hasPermission(user?.permissions ?? [], 'workflow:delete') &&
+    (isAdmin || draft?.createdBy.id === user?.id)
 
   const handleStartEditTitle = () => {
     if (!canWrite || !draft) return
@@ -125,36 +120,93 @@ export function RecordingDetailPage() {
     }
   }
 
-  const genData = generalizationQuery.data?.generalization
-  const candidateDoc = generalizationQuery.data?.candidateDocument ?? genData?.candidateDocument
-
-  // 步骤交互状态与轻量清洗
+  // 步骤交互状态与剔除清洗
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [statusFilter, setStatusFilter] = useState<FilterOption>('all')
   const [searchQuery, setSearchQuery] = useState('')
-  const [ignoredIndexes, setIgnoredIndexes] = useState<Set<number>>(new Set())
-
-  const handleToggleIgnore = (index: number) => {
-    setIgnoredIndexes((prev) => {
-      const next = new Set(prev)
-      if (next.has(index)) next.delete(index)
-      else next.add(index)
-      return next
-    })
-  }
-
-  const canWrite =
-    Boolean(draft) &&
-    hasPermission(user?.permissions ?? [], 'workflow:write') &&
-    (isAdmin || draft?.createdBy.id === user?.id)
-  const canDelete =
-    Boolean(draft) &&
-    hasPermission(user?.permissions ?? [], 'workflow:delete') &&
-    (isAdmin || draft?.createdBy.id === user?.id)
 
   const items = draft?.items ?? []
+  const exclusions = draft?.exclusions ?? []
+  const excludedItemIds = new Set(exclusions.map((e) => e.itemId))
+
+  const handleApplyCleansing = async (
+    toExclude: Array<{ itemId: string; reason: RecordingExclusionReason }>,
+    successMessage: string,
+  ) => {
+    if (!draft) return
+    const existingMap = new Map(exclusions.map((e) => [e.itemId, e.reason]))
+    for (const item of toExclude) {
+      existingMap.set(item.itemId, item.reason)
+    }
+    const nextExclusions = Array.from(existingMap.entries()).map(([itemId, reason]) => ({
+      itemId,
+      reason,
+    }))
+
+    try {
+      const res = await updateRecordingExclusions(recordingId, {
+        expectedRevision: draft.revision,
+        exclusions: nextExclusions,
+      })
+      queryClient.setQueryData(['recordings', recordingId], {
+        ...draft,
+        revision: res.revision,
+        exclusions: res.exclusions,
+      })
+      toast.success(successMessage)
+      void queryClient.invalidateQueries({ queryKey: ['recordings', recordingId] })
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 409) {
+        toast.error('草稿版本冲突，正在刷新最新状态...')
+        void queryClient.invalidateQueries({ queryKey: ['recordings', recordingId] })
+        return
+      }
+      toast.error(err instanceof Error ? err.message : '更新剔除步骤失败')
+    }
+  }
+
+  const handleToggleExclusion = async (
+    itemId: string,
+    currentReason?: RecordingExclusionReason,
+  ) => {
+    if (!draft) return
+    let nextExclusions: Array<{ itemId: string; reason: RecordingExclusionReason }>
+    if (currentReason) {
+      nextExclusions = exclusions.filter((e) => e.itemId !== itemId)
+    } else {
+      nextExclusions = [
+        ...exclusions.filter((e) => e.itemId !== itemId),
+        { itemId, reason: 'manual_discard' },
+      ]
+    }
+
+    try {
+      const res = await updateRecordingExclusions(recordingId, {
+        expectedRevision: draft.revision,
+        exclusions: nextExclusions,
+      })
+      queryClient.setQueryData(['recordings', recordingId], {
+        ...draft,
+        revision: res.revision,
+        exclusions: res.exclusions,
+      })
+      toast.success(currentReason ? '已恢复步骤' : '已剔除步骤')
+      void queryClient.invalidateQueries({ queryKey: ['recordings', recordingId] })
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.status === 409) {
+        toast.error('草稿版本冲突，正在刷新最新状态...')
+        void queryClient.invalidateQueries({ queryKey: ['recordings', recordingId] })
+        return
+      }
+      toast.error(err instanceof Error ? err.message : '操作失败')
+    }
+  }
 
   const filteredItems = items.filter((item) => {
+    const itemId = recordingItemExclusionId(item)
+    const isExcluded = excludedItemIds.has(itemId)
+    if (statusFilter === 'excluded') return isExcluded
+    if (isExcluded && statusFilter !== 'all') return false
     if (statusFilter === 'mapped' && item.status !== 'mapped') return false
     if (statusFilter === 'parameterized' && item.status !== 'parameterized') return false
     if (statusFilter === 'unresolved' && item.status !== 'unresolved') return false
@@ -180,7 +232,6 @@ export function RecordingDetailPage() {
 
   const handleSelectIndex = (idx: number) => {
     setSelectedIndex(idx)
-    // 窄屏下点击步骤自动唤出移动端检查面板
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       setMobileDrawerOpen(true)
     }
@@ -322,78 +373,10 @@ export function RecordingDetailPage() {
           }
         />
 
-        {draft?.sourceProtocol === 'demonstration@1' ? (
-          <div className='flex items-center justify-between border-b pb-2'>
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as typeof viewMode)}>
-              <TabsList className='grid grid-cols-4 w-full sm:w-auto'>
-                <TabsTrigger value='workbench' className='gap-1.5'>
-                  <ListTree className='size-3.5' />
-                  流水工作台
-                </TabsTrigger>
-                <TabsTrigger value='generalization' className='gap-1.5'>
-                  <Sparkles className='size-3.5 text-primary' />
-                  AI 意图泛化
-                  {genData?.rounds.length ? (
-                    <span className='ml-1 rounded-full bg-primary/10 px-1.5 py-0.2 text-label font-medium text-primary'>
-                      {genData.rounds.length}
-                    </span>
-                  ) : null}
-                </TabsTrigger>
-                <TabsTrigger value='candidate' className='gap-1.5'>
-                  <FileCode2 className='size-3.5' />
-                  候选场景预览
-                  {candidateDoc?.nodes.length !== undefined ? (
-                    <span className='ml-1 rounded-full bg-muted px-1.5 py-0.2 text-label text-muted-foreground'>
-                      {candidateDoc.nodes.length} 步
-                    </span>
-                  ) : null}
-                </TabsTrigger>
-                <TabsTrigger value='facts' className='gap-1.5'>
-                  <History className='size-3.5' />
-                  原始示教事实
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-        ) : null}
-
         {query.isPending ? (
           <PageSkeleton />
         ) : query.isError || !draft ? (
           <QueryErrorState title='无法加载录制草稿' onRetry={() => void query.refetch()} />
-        ) : viewMode === 'generalization' ? (
-          <GeneralizationPanel
-            recordingId={recordingId}
-            generalization={genData}
-            candidateDocument={candidateDoc}
-            onGeneralizationUpdated={(gen, doc) => {
-              queryClient.setQueryData(['recording-generalization', recordingId], {
-                generalization: gen,
-                candidateDocument: doc ?? gen.candidateDocument,
-              })
-            }}
-            canWrite={canWrite}
-            selectedStepId={selectedItem ? `rec_${selectedItem.index}` : undefined}
-            selectedStepName={selectedItem?.name}
-            onClearSelection={() => setSelectedIndex(-1)}
-          />
-        ) : viewMode === 'candidate' ? (
-          <CandidateScenarioPreview
-            candidateDocument={candidateDoc}
-            generalization={genData}
-            onOpenHandoff={() => setHandoffOpen(true)}
-            canWrite={canWrite}
-          />
-        ) : viewMode === 'facts' ? (
-          <div className='flex flex-col gap-4'>
-            <div className='flex items-center justify-between'>
-              <h2 className='text-body font-semibold text-foreground'>原始示教事实溯源</h2>
-              <Button variant='outline' size='sm' onClick={() => setViewMode('workbench')}>
-                返回步骤流水线工作台
-              </Button>
-            </div>
-            <SavedDemonstrationFacts id={draft.id} />
-          </div>
         ) : (
           <div className='flex flex-col gap-5'>
             {/* 就绪度看板条 */}
@@ -401,6 +384,13 @@ export function RecordingDetailPage() {
               draft={draft}
               activeFilter={statusFilter}
               onFilterChange={setStatusFilter}
+            />
+
+            {/* 清洗建议横幅 */}
+            <CleansingHintsBanner
+              hints={draft.cleansingHints}
+              exclusions={exclusions}
+              onApplyCleansing={handleApplyCleansing}
             />
 
             {/* 双栏工作台：左侧步骤时间线流水 + 右侧单步深度透视器 */}
@@ -412,9 +402,9 @@ export function RecordingDetailPage() {
                     <h2 className='text-body font-semibold text-foreground'>
                       操作步骤流水线 ({items.length})
                     </h2>
-                    {ignoredIndexes.size > 0 ? (
+                    {exclusions.length > 0 ? (
                       <span className='text-label text-muted-foreground'>
-                        (已剔除 {ignoredIndexes.size} 步)
+                        (已剔除 {exclusions.length} 步)
                       </span>
                     ) : null}
                   </div>
@@ -432,8 +422,8 @@ export function RecordingDetailPage() {
                   onStatusFilterChange={setStatusFilter}
                   searchQuery={searchQuery}
                   onSearchQueryChange={setSearchQuery}
-                  ignoredIndexes={ignoredIndexes}
-                  onToggleIgnore={handleToggleIgnore}
+                  exclusions={exclusions}
+                  onToggleExclusion={canWrite ? handleToggleExclusion : undefined}
                 />
               </div>
 
@@ -476,6 +466,32 @@ export function RecordingDetailPage() {
                 </div>
               </SheetContent>
             </Sheet>
+
+            {/* 原始示教事实溯源（仅 demonstration@1 协议支持，默认折叠） */}
+            {draft.sourceProtocol === 'demonstration@1' ? (
+              <div className='rounded-lg border border-border bg-card p-4'>
+                <button
+                  type='button'
+                  onClick={() => setShowFacts((prev) => !prev)}
+                  className='flex w-full items-center justify-between text-body font-semibold text-foreground hover:text-primary transition-colors'
+                  aria-expanded={showFacts}
+                >
+                  <div className='flex items-center gap-2'>
+                    <History className='size-4 text-muted-foreground' />
+                    <span>原始示教事实溯源</span>
+                    <span className='text-label font-normal text-muted-foreground'>（供排查与取证排错）</span>
+                  </div>
+                  <ChevronDown
+                    className={cn('size-4 transition-transform text-muted-foreground', showFacts && 'rotate-180')}
+                  />
+                </button>
+                {showFacts ? (
+                  <div className='mt-4 border-t pt-4'>
+                    <SavedDemonstrationFacts id={draft.id} />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         )}
       </Main>
@@ -516,8 +532,7 @@ export function RecordingDetailPage() {
           targetId={draft.targetId}
           targetName={draft.targetName}
           sourceProtocol={draft.sourceProtocol}
-          generalizationRevision={genData?.revision}
-          candidateDigest={genData?.candidateDigest}
+          draftRevision={draft.revision}
         />
       ) : null}
     </>

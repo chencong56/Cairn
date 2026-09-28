@@ -58,13 +58,13 @@ describe('场景集规则', () => {
   })
 
   it('空集合不能发布', () => {
-    expect(assertPublishedSuiteDocument({ schemaVersion: 1, groups: [], members: [], sharedInput: {}, failurePolicy: 'continue', autoGenerateFinalReport: false })).toEqual([
+    expect(assertPublishedSuiteDocument({ schemaVersion: 1, groups: [], stages: [], members: [], sharedInput: {}, executionMode: 'parallel', maxConcurrency: 3, failurePolicy: 'continue', autoGenerateFinalReport: false })).toEqual([
       expect.objectContaining({ code: 'SUITE_EMPTY' }),
     ])
   })
 
   it('支持自动报告及总、子报告默认配置，引用有效性由领域层校验', () => {
-    const issues = assertPublishedSuiteDocument({ schemaVersion: 1, groups: [], members: [{ memberId: 'one', ordinal: 0, scenarioId: 'scenario', scenarioVersionId: 'version', input: {}, reportProfileId: 'member-profile' }], sharedInput: {}, failurePolicy: 'continue', autoGenerateFinalReport: true, reportProfileId: 'profile' })
+    const issues = assertPublishedSuiteDocument({ schemaVersion: 1, groups: [], stages: [], members: [{ memberId: 'one', ordinal: 0, scenarioId: 'scenario', scenarioVersionId: 'version', input: {}, reportProfileId: 'member-profile' }], sharedInput: {}, executionMode: 'parallel', maxConcurrency: 3, failurePolicy: 'continue', autoGenerateFinalReport: true, reportProfileId: 'profile' })
     expect(issues).toEqual([])
   })
 

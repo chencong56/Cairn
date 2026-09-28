@@ -12,7 +12,9 @@ import {
   proposeOutcomeCandidate,
   outcomeCandidateMeaning,
   normalizeAuthoringDocument,
+  RECORDING_EXCLUSION_REASON_LABELS,
   RECORDING_NORMALIZER_VERSION,
+  recordingItemExclusionId,
   RECORDING_TICKET_TTL_SECONDS,
   RECORDING_UPLOAD_TTL_SECONDS,
   RecordingNormalizationError,
@@ -39,6 +41,7 @@ import {
   type RecordingBindingCreated,
   type RecordingBindingDto,
   type RecordingDisposition,
+  type RecordingDraftExclusion,
   type RecordingImportListResponse,
   type RecordingImportPreview,
   type RecordingImportReceipt,
@@ -348,7 +351,14 @@ export async function applyRecordingImport(
       if (preview.sourceDigest !== input.sourceDigest || input.normalizerVersion !== RECORDING_NORMALIZER_VERSION) {
         throw conflict('RECORDING_IMPORT_STALE', '转换结果已变化，请重新预览')
       }
-      const next = applyDispositionsToAuthoring(authoring, preview.items, input.dispositions, input.insertAnchor)
+      const dispositions = enforceRecordingExclusions(preview.items, input.dispositions, recording.exclusions)
+      const next = applyDispositionsToAuthoring(
+        authoring,
+        preview.items,
+        dispositions,
+        input.insertAnchor,
+        input.recordingDraftId,
+      )
       if (authoringHasModuleInvocations(next.document)) {
         const expanded = await expandWithLoader(
           tx as unknown as Db,
@@ -528,11 +538,69 @@ function assertNodeAnchor(document: ScenarioAuthoringDocumentV2, anchor: Recordi
   }
 }
 
+function exclusionReasonForItem(
+  item: { id?: string; sourceIndexes: readonly number[] },
+  exclusions: RecordingDraftExclusion[],
+): string | undefined {
+  const excluded = new Map(exclusions.map((entry) => [entry.itemId, entry.reason]))
+  const reason = excluded.get(recordingItemExclusionId(item)) ?? excluded.get(item.sourceIndexes.join(','))
+  return reason ? RECORDING_EXCLUSION_REASON_LABELS[reason] : undefined
+}
+
+function enforceRecordingExclusions(
+  items: RecordingImportPreview['items'],
+  dispositions: RecordingDisposition[],
+  exclusions: RecordingDraftExclusion[],
+): RecordingDisposition[] {
+  return dispositions.map((disposition) => {
+    const item = items.find((candidate) => sameSourceIndexes(candidate.sourceIndexes, disposition.sourceIndexes))
+    const reason = item ? exclusionReasonForItem(item, exclusions) : undefined
+    if (!reason) return disposition
+    return { sourceIndexes: disposition.sourceIndexes, disposition: 'discard', reason }
+  })
+}
+
+export function composeRecordingHandoffDocument(input: {
+  events: unknown[]
+  sourceVersion: string
+  recordingName: string
+  recordingDraftId: string
+  exclusions: RecordingDraftExclusion[]
+}): {
+  document: ScenarioAuthoringDocumentV2
+  sourceMap: RecordingImportReceipt['sourceMap']
+  sourceDigest: string
+  normalizerVersion: string
+} {
+  const preview = compileImportPreview(input.events, input.sourceVersion, input.recordingName)
+  const dispositions = enforceRecordingExclusions(
+    preview.items,
+    preview.items.map((item) => {
+      const locked = exclusionReasonForItem(item, input.exclusions)
+      if (locked) return { sourceIndexes: item.sourceIndexes, disposition: 'discard' as const, reason: locked }
+      if (item.outcomeCandidate) {
+        return { sourceIndexes: item.sourceIndexes, disposition: 'discard' as const, reason: '未确认为成功条件' }
+      }
+      if (item.ready) return { sourceIndexes: item.sourceIndexes, disposition: 'accept' as const }
+      return { sourceIndexes: item.sourceIndexes, disposition: 'discard' as const, reason: '待处理项已在就地回填中忽略' }
+    }),
+    input.exclusions,
+  )
+  const empty: ScenarioAuthoringDocumentV2 = { authoringSchemaVersion: 2, schemaVersion: 1, inputs: [], nodes: [] }
+  const next = applyDispositionsToAuthoring(empty, preview.items, dispositions, { kind: 'start' }, input.recordingDraftId)
+  return {
+    ...next,
+    sourceDigest: preview.sourceDigest,
+    normalizerVersion: preview.normalizerVersion,
+  }
+}
+
 function applyDispositionsToAuthoring(
   document: ScenarioAuthoringDocumentV2,
   items: RecordingImportPreview['items'],
   dispositions: RecordingDisposition[],
   anchor: RecordingInsertAnchor,
+  recordingDraftId?: string,
 ): { document: ScenarioAuthoringDocumentV2; sourceMap: RecordingImportReceipt['sourceMap'] } {
   if (dispositions.length !== items.length) {
     throw badRequest('RECORDING_IMPORT_INCOMPLETE', '必须处理预览中的每一项')
@@ -544,7 +612,12 @@ function applyDispositionsToAuthoring(
   const at = anchor.kind === 'start' ? 0 : loc!.index + 1
 
   const used = new Set<number>()
-  const inserted: Array<{ kind: 'step'; step: Step; outcomes?: OutcomeContract[] }> = []
+  const inserted: Array<{
+    kind: 'step'
+    step: Step
+    outcomes?: OutcomeContract[]
+    origin?: { kind: 'recording'; recordingDraftId: string; sourceIds: string[] }
+  }> = []
   const extraOutcomes = new Map<string, OutcomeContract[]>()
   const scenarioOutcomes = [...(document.scenarioOutcomes ?? [])]
   const sourceMap: RecordingImportReceipt['sourceMap'] = []
@@ -602,7 +675,19 @@ function applyDispositionsToAuthoring(
     } else {
       step = { ...disposition.step, id: newId() }
     }
-    inserted.push({ kind: 'step', step })
+    inserted.push({
+      kind: 'step',
+      step,
+      ...(recordingDraftId
+        ? {
+            origin: {
+              kind: 'recording' as const,
+              recordingDraftId,
+              sourceIds: item.sourceIndexes.map(String),
+            },
+          }
+        : {}),
+    })
     lastActionId = step.id
     sourceMap.push({
       sourceIndexes: item.sourceIndexes,

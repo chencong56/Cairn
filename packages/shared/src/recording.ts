@@ -147,6 +147,7 @@ export const recordingEventSchema = z
 export type RecordingEvent = z.infer<typeof recordingEventSchema>
 
 export const recordingItemSchema = z.strictObject({
+  id: z.string().optional(),
   index: z.number().int().nonnegative(),
   sourceIndexes: z.array(z.number().int().nonnegative()).min(1),
   status: z.enum(RECORDING_ITEM_STATUSES),
@@ -178,6 +179,55 @@ const recordingActorSchema = z.object({
   displayName: z.string().min(1),
 })
 
+export const RECORDING_EXCLUSION_REASONS = ['login_prefix', 'misfire_click', 'manual_discard'] as const
+export type RecordingExclusionReason = (typeof RECORDING_EXCLUSION_REASONS)[number]
+export const recordingExclusionReasonSchema = z.enum(RECORDING_EXCLUSION_REASONS)
+
+export const RECORDING_EXCLUSION_REASON_LABELS: Record<RecordingExclusionReason, string> = {
+  login_prefix: '登录前缀',
+  misfire_click: '重复点击',
+  manual_discard: '手动剔除',
+}
+
+/** 示教用事实 id；recording@1 用 sourceIndexes，与导入处置同一键。 */
+export function recordingItemExclusionId(item: { id?: string; sourceIndexes?: readonly number[] }): string {
+  if (item.id) return item.id
+  return (item.sourceIndexes ?? []).join(',')
+}
+
+export const recordingDraftExclusionSchema = z.strictObject({
+  id: entityIdSchema,
+  recordingDraftId: entityIdSchema,
+  itemId: z.string().min(1),
+  reason: recordingExclusionReasonSchema,
+  createdAt: utcInstantSchema,
+  updatedAt: utcInstantSchema,
+})
+export type RecordingDraftExclusion = z.infer<typeof recordingDraftExclusionSchema>
+
+export const recordingCleansingHintsSchema = z.strictObject({
+  loginPrefixItemIds: z.array(z.string()),
+  misfireItemIds: z.array(z.string()),
+})
+export type RecordingCleansingHints = z.infer<typeof recordingCleansingHintsSchema>
+
+export const updateRecordingExclusionsBodySchema = z.strictObject({
+  expectedRevision: z.number().int().min(1),
+  exclusions: z.array(
+    z.strictObject({
+      itemId: z.string().min(1),
+      reason: recordingExclusionReasonSchema,
+    }),
+  ),
+})
+export type UpdateRecordingExclusionsBody = z.infer<typeof updateRecordingExclusionsBodySchema>
+
+export const createScenarioHandoffBodySchema = z.strictObject({
+  name: scenarioNameSchema,
+  expectedRevision: z.number().int().min(1),
+})
+export type CreateScenarioHandoffBody = z.infer<typeof createScenarioHandoffBodySchema>
+
 export const recordingDraftSchema = z.object({
   sourceProtocol: z.enum(['recording@1', 'demonstration@1']).optional(),
   id: entityIdSchema,
@@ -186,6 +236,7 @@ export const recordingDraftSchema = z.object({
   name: scenarioNameSchema,
   recordingId: entityIdSchema,
   sourceVersion: z.string().min(1),
+  revision: z.number().int().default(1),
   eventCount: z.number().int().nonnegative(),
   itemCount: z.number().int().nonnegative(),
   unresolvedCount: z.number().int().nonnegative(),
@@ -208,6 +259,8 @@ export const recordingDraftDetailSchema = recordingDraftSchema.extend({
   items: z.array(recordingItemSchema),
   diagnostics: z.array(z.string()),
   events: z.array(recordingEventSchema),
+  exclusions: z.array(recordingDraftExclusionSchema).default([]),
+  cleansingHints: recordingCleansingHintsSchema.optional(),
 })
 export type RecordingDraftDetailDto = z.infer<typeof recordingDraftDetailSchema>
 

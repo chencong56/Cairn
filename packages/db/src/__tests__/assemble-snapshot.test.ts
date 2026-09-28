@@ -45,6 +45,7 @@ const accessPolicy: FrozenTargetAccessPolicy = {
     schemaVersion: TARGET_ACCESS_POLICY_SCHEMA_VERSION,
     policyVersion: 1,
     rules: [{ origin: 'https://erp.example', purpose: 'business_surface', effect: 'allow' }],
+    readOnlyRequests: [],
   },
 }
 
@@ -105,10 +106,10 @@ describe('assembleRunSnapshot', () => {
     expect(first.policy).toEqual(second.policy)
     expect(first.mapConsumption).toEqual({ mode: 'off' })
     expect(first.loginOrigin).toBe('https://erp.example')
-    expect(first.evidencePolicy.screenshot).toBe(FACTORY_PLATFORM_CONFIG.evidence.screenshot)
-    expect(first.evidencePolicy.video).toBe(FACTORY_PLATFORM_CONFIG.evidence.video)
-    expect(first.evidencePolicy.captureContractVersion).toBe(1)
-    expect(first.evidencePolicy.screenshotViewport).toBe('viewport')
+    expect(first.evidencePolicy!.screenshot).toBe(FACTORY_PLATFORM_CONFIG.evidence.screenshot)
+    expect(first.evidencePolicy!.video).toBe(FACTORY_PLATFORM_CONFIG.evidence.video)
+    expect(first.evidencePolicy!.captureContractVersion).toBe(1)
+    expect(first.evidencePolicy!.screenshotViewport).toBe('viewport')
   })
 
   it('地图作业冻结轻量证据策略，不吃平台出厂截图/录像', () => {
@@ -125,6 +126,7 @@ describe('assembleRunSnapshot', () => {
         jobId: '00000000-0000-4000-8000-000000000099',
         sliceOrdinal: 0,
         purpose: 'map_ingest',
+        source: 'manual',
         policyRevision: 1,
         remainingBudgetSeconds: 20,
         consumerVersion: 'map-jobs@1',
@@ -265,9 +267,11 @@ describe('assembleRunSnapshot', () => {
       accessPolicy,
       mapConsumption: { mode: 'off' },
     })
-    expect(open.resolution?.ceiling).toBe('prefer_deterministic')
-    expect(open.resolution?.targetPreference).toBe('prefer_deterministic')
-    expect(open.resolution?.steps[clickId]).toBe('prefer_deterministic')
+    expect(open.resolution?.protocol).toBe('snapshot.resolution@1')
+    if (open.resolution?.protocol !== 'snapshot.resolution@1') throw new Error('snapshot.resolution@1 expected')
+    expect(open.resolution.ceiling).toBe('prefer_deterministic')
+    expect(open.resolution.targetPreference).toBe('prefer_deterministic')
+    expect(open.resolution.steps[clickId]).toBe('prefer_deterministic')
     expect(open.aiExecution?.modelName).toBe('demo')
 
     const leftover = assembleRunSnapshot({

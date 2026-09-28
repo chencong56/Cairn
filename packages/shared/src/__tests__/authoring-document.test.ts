@@ -407,7 +407,7 @@ describe('包裹为条件块 / 解除包裹（复查修复）', () => {
       invocationId: '00000000-0000-4000-8000-000000000002',
     }
     const parsedLegacy = authoringStepOriginSchema.parse(legacy)
-    expect(parsedLegacy.moduleVersionId).toBe(legacy.moduleVersionId)
+    expect(parsedLegacy).toMatchObject({ moduleVersionId: legacy.moduleVersionId })
 
     const solidification = {
       kind: 'ai_solidification' as const,

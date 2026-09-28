@@ -522,6 +522,7 @@ describe('AM-C: 升级、发布状态、提炼与删除保护', { timeout: 30_00
             invocationId: newId(),
             moduleId: mod.id,
             moduleVersionId: ver.id,
+            implementationKey: 'default',
             name: `引用场景 ${i}`,
             inputBindings: { keyword: { kind: 'literal', value: `test-${i}` } },
             outputBindings: {},

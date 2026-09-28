@@ -70,7 +70,7 @@ describe.each(DRIVERS)('%s 账号用途准入', { timeout: 60_000 }, (driver) =>
     const { store, target } = await freshTarget()
     const account = await store.createAccount(
       target.id,
-      { displayName: '业务号', username: `biz-${newId().slice(0, 8)}`, status: 'active' },
+      { displayName: '业务号', username: `biz-${newId().slice(0, 8)}`, status: 'active', usage: 'business' },
       actor(),
     )
     expect(account.usage).toBe('business')

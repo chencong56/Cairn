@@ -13,7 +13,7 @@ import {
 
 const baseContext: ExpansionContext = {
   targetId: '00000000-0000-4000-8000-000000000001',
-  mode: 'save',
+  mode: 'preview',
   loadedModules: new Map(),
 }
 
@@ -47,7 +47,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                 name: '执行正常逻辑',
                 type: 'click',
                 effectType: 'SIDE_EFFECT',
-                input: { target: { candidates: [{ by: 'css', value: '#submit' }] } },
+                input: { target: { candidates: [{ by: 'css', value: '#submit' }], framePath: [] } },
               },
             },
           ],
@@ -59,7 +59,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                 name: '执行备选逻辑',
                 type: 'click',
                 effectType: 'SIDE_EFFECT',
-                input: { target: { candidates: [{ by: 'css', value: '#cancel' }] } },
+                input: { target: { candidates: [{ by: 'css', value: '#cancel' }], framePath: [] } },
               },
             },
           ],
@@ -84,10 +84,13 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
 
     const block = res.controlFlow!.blocks[0]!
     expect(block.blockId).toBe(ID(10))
-    expect(block.decideStepId).toBe(steps[0]!.id)
-    expect(block.branches).toHaveLength(2)
-    expect(block.branches[0]).toEqual({ key: 'then', stepIds: [ID(11)] })
-    expect(block.branches[1]).toEqual({ key: 'else', stepIds: [ID(12)] })
+    expect(block.kind).toBe('if')
+    if (block.kind === 'if') {
+      expect(block.decideStepId).toBe(steps[0]!.id)
+      expect(block.branches).toHaveLength(2)
+      expect(block.branches[0]).toEqual({ key: 'then', stepIds: [ID(11)] })
+      expect(block.branches[1]).toEqual({ key: 'else', stepIds: [ID(12)] })
+    }
   })
 
   it('rejects authored decide steps with DECIDE_STEP_NOT_AUTHORABLE', () => {
@@ -135,7 +138,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                 name: '点击',
                 type: 'click',
                 effectType: 'SIDE_EFFECT',
-                input: { target: { candidates: [{ by: 'css', value: '#go' }] } },
+                input: { target: { candidates: [{ by: 'css', value: '#go' }], framePath: [] } },
               },
             },
           ],
@@ -187,7 +190,8 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
             policy: { timeoutMs: 1000 },
             input: {
               kind: 'element',
-              target: { candidates: [{ by: 'css', value: '#banner' }] },
+              target: { candidates: [{ by: 'css', value: '#banner' }], framePath: [] },
+              state: 'visible',
               waitMs: 2000,
             },
           },
@@ -218,7 +222,9 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
               target: {
                 candidates: [{ by: 'css', value: '#btn' }],
                 semantic: 'AI语义描述',
+                framePath: [],
               },
+              state: 'visible',
               waitMs: 2000,
             },
           },
@@ -254,7 +260,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                 type: 'extract',
                 effectType: 'READ_ONLY',
                 outputKey: 'data_in_branch',
-                input: { target: { candidates: [{ by: 'css', value: '#info' }] }, as: 'text' },
+                input: { target: { candidates: [{ by: 'css', value: '#info' }], framePath: [] }, as: 'text' },
               },
             },
           ],
@@ -354,7 +360,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                 name: '步骤1',
                 type: 'click',
                 effectType: 'SIDE_EFFECT',
-                input: { target: { candidates: [{ by: 'css', value: 'b' }] } },
+                input: { target: { candidates: [{ by: 'css', value: 'b' }], framePath: [] } },
               },
             },
           ],
@@ -366,7 +372,11 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
     expect(manifest).toBeDefined()
     expect(manifest?.protocol).toBe(CONTROL_FLOW_PROTOCOL)
     expect(manifest?.blocks).toHaveLength(1)
-    expect(manifest?.blocks[0]!.branches[0]!.stepIds).toEqual([ID(81)])
+    const derivedBlock = manifest?.blocks[0]!
+    expect(derivedBlock.kind).toBe('if')
+    if (derivedBlock.kind === 'if') {
+      expect(derivedBlock.branches[0]!.stepIds).toEqual([ID(81)])
+    }
 
     // No blocks, but probe step present:
     const probeSteps: Step[] = [
@@ -409,7 +419,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                   name: '点击当前项',
                   type: 'click',
                   effectType: 'SIDE_EFFECT',
-                  input: { target: { candidates: [{ by: 'css', value: '.item' }] } },
+                  input: { target: { candidates: [{ by: 'css', value: '.item' }], framePath: [] } },
                 },
               },
             ],
@@ -458,7 +468,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
               effectType: 'READ_ONLY',
               input: {
                 blockId: ID(110),
-                control: { type: 'repeat', until: { kind: 'literal', value: true }, maxIterations: 5 },
+                control: { type: 'repeat', until: { kind: 'literal', value: true }, maxIterations: 5, onLimit: 'stop' },
               },
             },
           },
@@ -493,7 +503,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                   name: '步骤1',
                   type: 'click',
                   effectType: 'SIDE_EFFECT',
-                  input: { target: { candidates: [{ by: 'css', value: '.x' }] } },
+                  input: { target: { candidates: [{ by: 'css', value: '.x' }], framePath: [] } },
                 },
               },
             ],
@@ -529,7 +539,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                       name: '内部步骤',
                       type: 'click',
                       effectType: 'SIDE_EFFECT',
-                      input: { target: { candidates: [{ by: 'css', value: '.y' }] } },
+                      input: { target: { candidates: [{ by: 'css', value: '.y' }], framePath: [] } },
                     },
                   },
                 ],
@@ -562,7 +572,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                   name: '提取文本',
                   type: 'extract',
                   effectType: 'READ_ONLY',
-                  input: { target: { candidates: [{ by: 'css', value: '.text' }] }, as: 'text' },
+                  input: { target: { candidates: [{ by: 'css', value: '.text' }], framePath: [] }, as: 'text' },
                   outputKey: 'itemText',
                 },
               },
@@ -604,7 +614,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                   name: '提取文本',
                   type: 'extract',
                   effectType: 'READ_ONLY',
-                  input: { target: { candidates: [{ by: 'css', value: '.text' }] }, as: 'text' },
+                  input: { target: { candidates: [{ by: 'css', value: '.text' }], framePath: [] }, as: 'text' },
                   outputKey: 'itemText',
                 },
               },
@@ -644,6 +654,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
                 kind: 'module',
                 invocationId: ID(161),
                 moduleId: ID(162),
+                implementationKey: 'default',
                 moduleVersionId: ID(163),
                 inputBindings: {},
                 outputBindings: {},
@@ -669,7 +680,7 @@ describe('CF-B: Control Flow Expansion and Diagnostics', () => {
             name: `步 ${i}`,
             type: 'click',
             effectType: 'SIDE_EFFECT',
-            input: { target: { candidates: [{ by: 'css', value: `.btn-${i}` }] } },
+            input: { target: { candidates: [{ by: 'css', value: `.btn-${i}` }], framePath: [] } },
           },
         })
       }

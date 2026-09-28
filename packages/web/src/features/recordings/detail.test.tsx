@@ -14,15 +14,8 @@ const mocks = vi.hoisted(() => ({
   fetchDemonstrationImage: vi.fn(),
   fetchScenarios: vi.fn(),
   createScenario: vi.fn(),
-  // 详情页里的目标定位字段（authoring/fields/target.tsx）会查能力清单；
-  // 这里返回 undefined，页面按「能力未知」渲染，与真实的加载中状态一致。
   fetchScenarioCapabilities: vi.fn(async () => undefined),
-  fetchRecordingGeneralization: vi.fn<() => Promise<unknown>>(async () => null),
-  observeRecordingGeneralization: vi.fn(() => () => {}),
-  submitRecordingGeneralizationRound: vi.fn(),
-  acceptRecordingGeneralizationRound: vi.fn(),
-  rejectRecordingGeneralizationRound: vi.fn(),
-  revertRecordingGeneralizationRound: vi.fn(),
+  updateRecordingExclusions: vi.fn(),
   handoffCreateScenario: vi.fn(),
 }))
 
@@ -33,12 +26,7 @@ vi.mock('@/lib/recordings-api', async (importOriginal) => {
     fetchRecording: mocks.fetchRecording,
     renameRecording: mocks.renameRecording,
     deleteRecording: mocks.deleteRecording,
-    fetchRecordingGeneralization: mocks.fetchRecordingGeneralization,
-    observeRecordingGeneralization: mocks.observeRecordingGeneralization,
-    submitRecordingGeneralizationRound: mocks.submitRecordingGeneralizationRound,
-    acceptRecordingGeneralizationRound: mocks.acceptRecordingGeneralizationRound,
-    rejectRecordingGeneralizationRound: mocks.rejectRecordingGeneralizationRound,
-    revertRecordingGeneralizationRound: mocks.revertRecordingGeneralizationRound,
+    updateRecordingExclusions: mocks.updateRecordingExclusions,
     handoffCreateScenario: mocks.handoffCreateScenario,
   }
 })
@@ -79,6 +67,7 @@ const mockDraft: RecordingDraftDetailDto = {
   name: '报销审批流程录制',
   recordingId: 'rec-session-1',
   sourceVersion: 'playwright-crx@0.15.0',
+  revision: 1,
   eventCount: 5,
   itemCount: 3,
   unresolvedCount: 1,
@@ -88,6 +77,7 @@ const mockDraft: RecordingDraftDetailDto = {
   createdAt: '2026-09-17T00:00:00.000Z',
   updatedAt: '2026-09-17T00:00:00.000Z',
   diagnostics: ['检测到 1 处跨域 iframe 操作'],
+  exclusions: [],
   events: [
     {
       name: 'navigate',
@@ -106,6 +96,7 @@ const mockDraft: RecordingDraftDetailDto = {
   ],
   items: [
     {
+      id: 'item_0',
       index: 0,
       sourceIndexes: [0],
       status: 'mapped',
@@ -116,6 +107,7 @@ const mockDraft: RecordingDraftDetailDto = {
       diagnostics: [],
     },
     {
+      id: 'item_1',
       index: 1,
       sourceIndexes: [1],
       status: 'parameterized',
@@ -127,6 +119,7 @@ const mockDraft: RecordingDraftDetailDto = {
       diagnostics: ['密码明文已脱敏，需绑定参数'],
     },
     {
+      id: 'item_2',
       index: 2,
       sourceIndexes: [2],
       status: 'unresolved',
@@ -156,7 +149,6 @@ describe('录制草稿详情页', () => {
       permissions: ['workflow:write', 'workflow:delete'],
     })
     mocks.fetchRecording.mockResolvedValue(mockDraft)
-    mocks.fetchRecordingGeneralization.mockResolvedValue(null)
     mocks.fetchScenarios.mockResolvedValue({ items: [], nextCursor: null })
   })
 
@@ -226,7 +218,7 @@ describe('录制草稿详情页', () => {
     await expect.element(stepList.getByText('打开登录页面')).toBeVisible()
   })
 
-  it('点击回填到场景唤起回填向导并展示插入位置与 Mini-Diff 对比', async () => {
+  it('点击回填到场景唤起回填向导并展示直通新建场景选项', async () => {
     mocks.fetchScenarios.mockResolvedValue({
       items: [
         {
@@ -246,10 +238,6 @@ describe('录制草稿详情页', () => {
     await expect.element(screen.getByText('回填录制草稿到场景')).toBeVisible()
     await expect.element(screen.getByRole('tab', { name: '以草稿新建场景' })).toBeVisible()
     await expect.element(screen.getByText(/确定插入位置/)).toBeVisible()
-    await expect.element(screen.getByText(/追加到流程末尾/)).toBeVisible()
-    await expect.element(screen.getByText(/回填后流程结构对比/)).toBeVisible()
-    await expect.element(screen.getByRole('button', { name: /在 Studio 中深度微调/ })).toBeVisible()
-    await expect.element(screen.getByRole('button', { name: /直接回填至场景/ })).toBeVisible()
     await screen.getByRole('button', { name: '取消' }).click()
   })
 
@@ -272,24 +260,74 @@ describe('录制草稿详情页', () => {
     await screen.getByRole('button', { name: '取消' }).click()
   })
 
-  it('支持在步骤流水线中忽略与恢复步骤', async () => {
+  it('支持在步骤流水线中剔除与恢复步骤并调用 API 持久化', async () => {
+    mocks.updateRecordingExclusions.mockResolvedValue({
+      revision: 2,
+      exclusions: [
+        {
+          id: 'ex-1',
+          recordingDraftId: 'rec-123',
+          itemId: 'item_0',
+          reason: 'manual_discard',
+          createdAt: '2026-09-28T00:00:00.000Z',
+          updatedAt: '2026-09-28T00:00:00.000Z',
+        },
+      ],
+    })
+
     const screen = await renderPage()
 
-    await expect.element(screen.getByText('(已剔除 1 步)')).not.toBeInTheDocument()
+    // 找到第一步的“剔除”按钮并点击
+    const excludeButtons = screen.getByRole('button', { name: '剔除' })
+    await excludeButtons.first().click()
 
-    // 找到第一步的“忽略”按钮并点击
-    const ignoreButtons = screen.getByRole('button', { name: '忽略' })
-    await ignoreButtons.first().click()
-
-    await expect.element(screen.getByText('(已剔除 1 步)')).toBeVisible()
-    await expect.element(screen.getByText('已忽略')).toBeVisible()
-
-    // 再次点击“恢复”
-    await screen.getByRole('button', { name: '恢复' }).click()
-    await expect.element(screen.getByText('(已剔除 1 步)')).not.toBeInTheDocument()
+    expect(mocks.updateRecordingExclusions).toHaveBeenCalledWith('rec-123', {
+      expectedRevision: 1,
+      exclusions: [{ itemId: 'item_0', reason: 'manual_discard' }],
+    })
   })
 
-  it('支持 demonstration@1 协议草稿展示统一工作台与原始示教视图切换', async () => {
+  it('展示清洗建议横幅并支持一键剔除登录步骤与清理误触', async () => {
+    const draftWithHints: RecordingDraftDetailDto = {
+      ...mockDraft,
+      cleansingHints: {
+        loginPrefixItemIds: ['item_0'],
+        misfireItemIds: ['item_1'],
+      },
+    }
+    mocks.fetchRecording.mockResolvedValue(draftWithHints)
+    mocks.updateRecordingExclusions.mockResolvedValue({
+      revision: 2,
+      exclusions: [
+        {
+          id: 'ex-1',
+          recordingDraftId: 'rec-123',
+          itemId: 'item_0',
+          reason: 'login_prefix',
+          createdAt: '2026-09-28T00:00:00.000Z',
+          updatedAt: '2026-09-28T00:00:00.000Z',
+        },
+      ],
+    })
+
+    const screen = await renderPage()
+
+    // 横幅展示登录与误触提示
+    await expect.element(screen.getByText('清洗建议')).toBeVisible()
+    await expect.element(screen.getByText(/检测到开头 1 步为登录前缀/)).toBeVisible()
+    await expect.element(screen.getByText(/500ms 内的重复点击/)).toBeVisible()
+
+    const applyLoginBtn = screen.getByRole('button', { name: '一键剔除登录步骤' })
+    await expect.element(applyLoginBtn).toBeVisible()
+
+    await applyLoginBtn.click()
+    expect(mocks.updateRecordingExclusions).toHaveBeenCalledWith('rec-123', {
+      expectedRevision: 1,
+      exclusions: [{ itemId: 'item_0', reason: 'login_prefix' }],
+    })
+  })
+
+  it('支持 demonstration@1 协议草稿展示统一工作台与原始示教事实折叠区', async () => {
     const demoDraft: RecordingDraftDetailDto = {
       ...mockDraft,
       sourceProtocol: 'demonstration@1',
@@ -310,138 +348,23 @@ describe('录制草稿详情页', () => {
 
     const screen = await renderPage()
 
-    // 依然展示统一工作台
+    // 默认展示统一流水工作台，底部有折叠按钮
     await expect.element(screen.getByText('操作步骤流水线 (3)')).toBeVisible()
-    const rawViewTab = screen.getByRole('tab', { name: /原始示教事实/ })
-    await expect.element(rawViewTab).toBeVisible()
+    const factsButton = screen.getByRole('button', { name: /原始示教事实溯源/ })
+    await expect.element(factsButton).toBeVisible()
 
-    // 切换为原始示教事实溯源视图
-    await rawViewTab.click()
-    await expect.element(screen.getByText('原始示教事实溯源')).toBeVisible()
-    await expect.element(screen.getByRole('button', { name: '返回步骤流水线工作台' })).toBeVisible()
-
-    // 返回工作台
-    await screen.getByRole('button', { name: '返回步骤流水线工作台' }).click()
-    await expect.element(screen.getByText('操作步骤流水线 (3)')).toBeVisible()
+    // 展开原始示教事实
+    await factsButton.click()
+    await expect.element(screen.getByLabelText('示教来源检查')).toBeVisible()
   })
 
-  it('支持 demonstration@1 协议草稿展示 AI 意图泛化与候选场景预览', async () => {
-    const demoDraft: RecordingDraftDetailDto = {
-      ...mockDraft,
-      sourceProtocol: 'demonstration@1',
-      sourceVersion: 'cairn-crx-capture@1',
-    }
-    mocks.fetchRecording.mockResolvedValue(demoDraft)
-
-    const mockGeneralizationData = {
-      generalization: {
-        id: 'gen-123',
-        recordingDraftId: 'rec-123',
-        revision: 1,
-        status: 'editing' as const,
-        factDigest: '11'.repeat(32),
-        suggestionDigest: '22'.repeat(32),
-        adapterVersion: 'midscene@1',
-        ruleVersion: 'recording-generalization@1',
-        candidateDigest: '33'.repeat(32),
-        decisions: [{ id: 'rec_0', disposition: 'accept' as const }],
-        rounds: [
-          {
-            roundId: 'round-1',
-            source: 'rule' as const,
-            intent: '放宽等待调参',
-            status: 'proposed' as const,
-            decisionPatches: [],
-            operations: [
-              {
-                kind: 'set_step_policy' as const,
-                id: 'op-1',
-                stepId: 'step_0',
-                timeoutMs: 30000,
-              },
-            ],
-            intentCoverage: [],
-            diffs: [],
-            diagnostics: [],
-            createdAt: '2026-09-26T12:00:00.000Z',
-          },
-        ],
-        createdAt: '2026-09-26T12:00:00.000Z',
-        updatedAt: '2026-09-26T12:00:00.000Z',
-      },
-      candidateDocument: {
-        authoringSchemaVersion: 2 as const,
-        schemaVersion: 1,
-        inputs: [{ key: 'account', label: '账号', type: 'string' as const }],
-        nodes: [
-          {
-            kind: 'step' as const,
-            step: {
-              type: 'navigate' as const,
-              id: 'step_0',
-              name: '打开登录页面',
-              effectType: 'READ_ONLY' as const,
-              timeoutMs: 30000,
-              input: { targetUrl: 'https://finance.example.com/login' },
-              outcomes: [
-                {
-                  id: 'oc-1',
-                  scope: 'step' as const,
-                  meaning: '页面加载成功',
-                  severity: 'MUST' as const,
-                  onViolation: 'halt' as const,
-                  provenance: 'manual' as const,
-                  rule: {
-                    kind: 'deterministic' as const,
-                    assert: { kind: 'status_ok' as const },
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      },
-    }
-    mocks.fetchRecordingGeneralization.mockResolvedValue(mockGeneralizationData)
-    mocks.acceptRecordingGeneralizationRound.mockResolvedValue({
-      generalization: {
-        ...mockGeneralizationData.generalization,
-        revision: 2,
-        rounds: [
-          {
-            ...mockGeneralizationData.generalization.rounds[0]!,
-            status: 'accepted' as const,
-          },
-        ],
-      },
-      candidateDocument: mockGeneralizationData.candidateDocument,
-    })
-
+  it('草稿页不渲染任何伪 AI 意图泛化页签或提示', async () => {
     const screen = await renderPage()
 
-    // 顶部展示 4 个分段页签
-    await expect.element(screen.getByRole('tab', { name: /流水工作台/ })).toBeVisible()
-    await expect.element(screen.getByRole('tab', { name: /AI 意图泛化/ })).toBeVisible()
-    await expect.element(screen.getByRole('tab', { name: /候选场景预览/ })).toBeVisible()
-    await expect.element(screen.getByRole('tab', { name: /原始示教事实/ })).toBeVisible()
-
-    // 切换到 AI 意图泛化
-    await screen.getByRole('tab', { name: /AI 意图泛化/ }).click()
-    await expect.element(screen.getByText(/泛化轮次历史/)).toBeVisible()
-    await expect.element(screen.getByRole('button', { name: '放宽等待调参' })).toBeVisible()
-    await expect.element(screen.getByText('待审查')).toBeVisible()
-    await expect.element(screen.getByRole('button', { name: '采纳' })).toBeVisible()
-
-    // 点击采纳
-    await screen.getByRole('button', { name: '采纳' }).click()
-    expect(mocks.acceptRecordingGeneralizationRound).toHaveBeenCalledWith('rec-123', 'round-1')
-
-    // 切换到候选场景预览
-    await screen.getByRole('tab', { name: /候选场景预览/ }).click()
-    await expect.element(screen.getByText(/候选场景草稿/)).toBeVisible()
-    await expect.element(screen.getByText('打开登录页面')).toBeVisible()
-    await expect.element(screen.getByText('页面加载成功')).toBeVisible()
-    await expect.element(screen.getByRole('button', { name: '以草稿新建场景' })).toBeVisible()
+    // 确认不存在伪 AI 泛化 Tabs 或输入框
+    await expect.element(screen.getByRole('tab', { name: /AI 意图泛化/ })).not.toBeInTheDocument()
+    await expect.element(screen.getByRole('tab', { name: /候选场景预览/ })).not.toBeInTheDocument()
+    await expect.element(screen.getByText(/意图泛化/)).not.toBeInTheDocument()
   })
 
   it('在详情页点击删除草稿唤起弹窗且确认删除按钮可用', async () => {
@@ -461,5 +384,3 @@ describe('录制草稿详情页', () => {
     expect(mocks.deleteRecording).toHaveBeenCalledWith('rec-123')
   })
 })
-
-

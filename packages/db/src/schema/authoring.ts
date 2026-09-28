@@ -29,6 +29,7 @@ export const recordingDrafts = cairnSchema.table(
     idempotencyKey: text('idempotency_key').notNull(),
     payloadDigest: text('payload_digest').notNull(),
     name: text('name').notNull(),
+    revision: integer('revision').notNull().default(1),
     eventCount: integer('event_count').notNull(),
     itemCount: integer('item_count').notNull(),
     unresolvedCount: integer('unresolved_count').notNull(),
@@ -50,6 +51,27 @@ export const recordingDrafts = cairnSchema.table(
 
 export type RecordingDraftRow = typeof recordingDrafts.$inferSelect
 export type NewRecordingDraftRow = typeof recordingDrafts.$inferInsert
+
+export const recordingDraftExclusions = cairnSchema.table(
+  'recording_draft_exclusions',
+  {
+    id: uuid('id').primaryKey().$defaultFn(newId),
+    recordingDraftId: uuid('recording_draft_id')
+      .notNull()
+      .references(() => recordingDrafts.id, { onDelete: 'cascade' }),
+    itemId: text('item_id').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('recording_draft_exclusions_item_idx').on(t.recordingDraftId, t.itemId),
+    index('recording_draft_exclusions_draft_idx').on(t.recordingDraftId),
+  ],
+)
+
+export type RecordingDraftExclusionRow = typeof recordingDraftExclusions.$inferSelect
+export type NewRecordingDraftExclusionRow = typeof recordingDraftExclusions.$inferInsert
 
 export const recordingBindings = cairnSchema.table(
   'recording_bindings',

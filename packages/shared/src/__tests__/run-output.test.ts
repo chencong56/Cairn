@@ -112,8 +112,8 @@ describe('RunOutput Assembly & Fallback (AC02, AC03, AC04, AC05)', () => {
       effectType: 'READ_ONLY',
       outputKey: 'item_count',
       input: {
-        target: { kind: 'css', selector: '.count' },
-        extract: { kind: 'text' },
+        target: { framePath: [], candidates: [{ by: 'css', value: '.count' }] },
+        as: 'text',
       },
     },
     {
@@ -122,7 +122,7 @@ describe('RunOutput Assembly & Fallback (AC02, AC03, AC04, AC05)', () => {
       type: 'assert',
       effectType: 'READ_ONLY',
       input: {
-        target: { kind: 'css', selector: '.status' },
+        target: { framePath: [], candidates: [{ by: 'css', value: '.status' }] },
         expect: { kind: 'text_equals', value: 'OK' },
       },
     },
@@ -377,6 +377,8 @@ describe('RunOutput Assembly & Fallback (AC02, AC03, AC04, AC05)', () => {
       definition: {
         steps: sampleSteps,
         outputs: {
+          metrics: [],
+          dataRowFields: [],
           summaryTemplate: '巡检报告：发现问题',
         },
       },

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { compileModuleContent } from '@cairn/authoring'
-import { moduleWarningKey, type ModuleContent, type ScenarioAuthoringDocumentV2 } from '@cairn/shared'
+import { moduleWarningKey, type JsonValue, type ModuleContent, type ScenarioAuthoringDocumentV2 } from '@cairn/shared'
 import { newId } from '../id.js'
 import * as api from '../index.js'
 import { connection, expose } from '../database.js'
@@ -147,7 +147,7 @@ describe('AM-E: 模块调用结果投影与统计', { timeout: 30_000 }, () => {
       status: 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'NEEDS_REVIEW'
       stepStatus?: 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'PENDING'
       error?: { code: string; category: string }
-      context?: Record<string, unknown>
+      context?: Record<string, JsonValue>
       eventSeq?: number
     },
   ) {

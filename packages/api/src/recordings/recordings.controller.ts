@@ -7,16 +7,14 @@ import {
   createRecordingBodySchema,
   recordingDraftListQuerySchema,
   renameRecordingBodySchema,
-  saveGeneralizationDecisionsBodySchema,
-  submitGeneralizationRoundBodySchema,
-  handoffCreateScenarioBodySchema,
+  updateRecordingExclusionsBodySchema,
+  createScenarioHandoffBodySchema,
   type ClaimRecordingBindingBody,
   type CreateRecordingBody,
   type RecordingDraftListQuery,
   type RenameRecordingBody,
-  type SaveGeneralizationDecisionsBody,
-  type SubmitGeneralizationRoundBody,
-  type HandoffCreateScenarioBody,
+  type UpdateRecordingExclusionsBody,
+  type CreateScenarioHandoffBody,
 } from '@cairn/shared'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
 import type { RequestAccount } from '../common/request-account'
@@ -41,77 +39,15 @@ export class RecordingsController {
     return this.recordings.demonstration(id, actor)
   }
 
-  @Get(':recordingId/generalization')
-  @RequirePermissions('workflow:write', 'target:read')
-  generalization(@Param('recordingId') id: string, @CurrentAccount() actor: RequestAccount) {
-    return this.recordings.getGeneralization(id, actor.id)
-  }
-
-  @Get(':recordingId/generalization/observe')
-  @RequirePermissions('workflow:write', 'target:read')
-  observeGeneralization(
-    @Param('recordingId') id: string,
-    @CurrentAccount() actor: RequestAccount,
-    @Req() req: Request,
-    @Res() res: Response,
-    @Query('after') after?: string,
-  ) {
-    return this.recordings.observeGeneralization(id, actor.id, req, res, Number(after ?? 0))
-  }
-
-  @Post(':recordingId/generalization/decisions')
+  @Post(':recordingId/exclusions')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('workflow:write', 'target:read')
-  saveDecisions(
+  updateExclusions(
     @Param('recordingId') id: string,
-    @Body(new ZodValidationPipe(saveGeneralizationDecisionsBodySchema)) body: SaveGeneralizationDecisionsBody,
+    @Body(new ZodValidationPipe(updateRecordingExclusionsBodySchema)) body: UpdateRecordingExclusionsBody,
     @CurrentAccount() actor: RequestAccount,
   ) {
-    return this.recordings.saveGeneralizationDecisions(id, body, actor)
-  }
-
-  @Post(':recordingId/generalization/rounds')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermissions('workflow:write', 'target:read')
-  submitRound(
-    @Param('recordingId') id: string,
-    @Body(new ZodValidationPipe(submitGeneralizationRoundBodySchema)) body: SubmitGeneralizationRoundBody,
-    @CurrentAccount() actor: RequestAccount,
-  ) {
-    return this.recordings.submitGeneralizationRound(id, body, actor)
-  }
-
-  @Post(':recordingId/generalization/rounds/:roundId/accept')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermissions('workflow:write', 'target:read')
-  acceptRound(
-    @Param('recordingId') id: string,
-    @Param('roundId') roundId: string,
-    @CurrentAccount() actor: RequestAccount,
-  ) {
-    return this.recordings.updateGeneralizationRoundStatus(id, roundId, 'accept', actor)
-  }
-
-  @Post(':recordingId/generalization/rounds/:roundId/reject')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermissions('workflow:write', 'target:read')
-  rejectRound(
-    @Param('recordingId') id: string,
-    @Param('roundId') roundId: string,
-    @CurrentAccount() actor: RequestAccount,
-  ) {
-    return this.recordings.updateGeneralizationRoundStatus(id, roundId, 'reject', actor)
-  }
-
-  @Post(':recordingId/generalization/rounds/:roundId/revert')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermissions('workflow:write', 'target:read')
-  revertRound(
-    @Param('recordingId') id: string,
-    @Param('roundId') roundId: string,
-    @CurrentAccount() actor: RequestAccount,
-  ) {
-    return this.recordings.updateGeneralizationRoundStatus(id, roundId, 'revert', actor)
+    return this.recordings.updateExclusions(id, body, actor)
   }
 
   @Post(':recordingId/handoff/create-scenario')
@@ -119,7 +55,7 @@ export class RecordingsController {
   @RequirePermissions('workflow:write', 'target:read')
   handoffCreateScenario(
     @Param('recordingId') id: string,
-    @Body(new ZodValidationPipe(handoffCreateScenarioBodySchema)) body: HandoffCreateScenarioBody,
+    @Body(new ZodValidationPipe(createScenarioHandoffBodySchema)) body: CreateScenarioHandoffBody,
     @CurrentAccount() actor: RequestAccount,
   ) {
     return this.recordings.handoffCreateScenario(id, body, actor)

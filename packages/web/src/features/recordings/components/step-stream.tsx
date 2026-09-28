@@ -1,5 +1,12 @@
 import type { KeyboardEvent } from 'react'
-import type { RecordingItem, RecordingItemStatus } from '@cairn/shared'
+import {
+  RECORDING_EXCLUSION_REASON_LABELS,
+  recordingItemExclusionId,
+  type RecordingDraftExclusion,
+  type RecordingExclusionReason,
+  type RecordingItem,
+  type RecordingItemStatus,
+} from '@cairn/shared'
 import {
   AlertCircle,
   CheckCircle2,
@@ -18,7 +25,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-export type FilterOption = 'all' | RecordingItemStatus | 'sensitive'
+export type FilterOption = 'all' | RecordingItemStatus | 'sensitive' | 'excluded'
 
 type Props = {
   items: RecordingItem[]
@@ -28,8 +35,8 @@ type Props = {
   onStatusFilterChange: (filter: FilterOption) => void
   searchQuery: string
   onSearchQueryChange: (query: string) => void
-  ignoredIndexes?: Set<number>
-  onToggleIgnore?: (index: number) => void
+  exclusions?: RecordingDraftExclusion[]
+  onToggleExclusion?: (itemId: string, currentReason?: RecordingExclusionReason) => void
 }
 
 function getStepIcon(action: string, candidateType?: string) {
@@ -78,19 +85,29 @@ export function RecordingStepStream({
   onStatusFilterChange,
   searchQuery,
   onSearchQueryChange,
-  ignoredIndexes,
-  onToggleIgnore,
+  exclusions,
+  onToggleExclusion,
 }: Props) {
-  const mappedCount = items.filter((i) => i.status === 'mapped').length
-  const parameterizedCount = items.filter((i) => i.status === 'parameterized').length
-  const unresolvedCount = items.filter((i) => i.status === 'unresolved').length
+  const exclusionMap = new Map((exclusions ?? []).map((e) => [e.itemId, e.reason]))
+  const excludedCount = exclusions?.length ?? 0
+
+  const activeItems = items.filter((i) => !exclusionMap.has(recordingItemExclusionId(i)))
+  const mappedCount = activeItems.filter((i) => i.status === 'mapped').length
+  const parameterizedCount = activeItems.filter((i) => i.status === 'parameterized').length
+  const unresolvedCount = activeItems.filter((i) => i.status === 'unresolved').length
+
+  const sensitiveCount = activeItems.filter((i) => i.sensitive).length
 
   const filteredItems = items.filter((item) => {
+    const itemId = recordingItemExclusionId(item)
+    const isExcluded = exclusionMap.has(itemId)
+
     // 状态过滤
-    if (statusFilter === 'mapped' && item.status !== 'mapped') return false
-    if (statusFilter === 'parameterized' && item.status !== 'parameterized') return false
-    if (statusFilter === 'unresolved' && item.status !== 'unresolved') return false
-    if (statusFilter === 'sensitive' && !item.sensitive) return false
+    if (statusFilter === 'excluded') return isExcluded
+    if (statusFilter === 'mapped' && (item.status !== 'mapped' || isExcluded)) return false
+    if (statusFilter === 'parameterized' && (item.status !== 'parameterized' || isExcluded)) return false
+    if (statusFilter === 'unresolved' && (item.status !== 'unresolved' || isExcluded)) return false
+    if (statusFilter === 'sensitive' && (!item.sensitive || isExcluded)) return false
 
     // 搜索过滤
     if (searchQuery.trim()) {
@@ -162,6 +179,26 @@ export function RecordingStepStream({
           >
             已就绪 ({mappedCount})
           </Button>
+          {sensitiveCount > 0 ? (
+            <Button
+              size='sm'
+              variant={statusFilter === 'sensitive' ? 'secondary' : 'ghost'}
+              className='h-7 px-2.5 text-label'
+              onClick={() => onStatusFilterChange(statusFilter === 'sensitive' ? 'all' : 'sensitive')}
+            >
+              敏感 ({sensitiveCount})
+            </Button>
+          ) : null}
+          {excludedCount > 0 ? (
+            <Button
+              size='sm'
+              variant={statusFilter === 'excluded' ? 'secondary' : 'ghost'}
+              className='h-7 px-2.5 text-label text-muted-foreground'
+              onClick={() => onStatusFilterChange(statusFilter === 'excluded' ? 'all' : 'excluded')}
+            >
+              已剔除 ({excludedCount})
+            </Button>
+          ) : null}
         </div>
 
         {/* 关键字搜索输入框 */}
@@ -207,7 +244,9 @@ export function RecordingStepStream({
             const isSelected = item.index === selectedIndex
             const targetSummary = extractTargetSummary(item)
             const statusInfo = STATUS_CONFIG[item.status]
-            const isIgnored = Boolean(ignoredIndexes?.has(item.index))
+            const itemId = recordingItemExclusionId(item)
+            const exclusionReason = exclusionMap.get(itemId)
+            const isExcluded = exclusionReason !== undefined
 
             return (
               <li
@@ -216,7 +255,7 @@ export function RecordingStepStream({
                   'w-full text-left rounded-lg border p-3 shadow-card transition-colors flex items-start gap-3',
                   isSelected
                     ? 'border-primary bg-primary-50/80 ring-1 ring-primary/40'
-                    : isIgnored
+                    : isExcluded
                       ? 'border-border-card/60 bg-muted/20 opacity-60'
                       : 'border-border-card bg-card hover:border-border-card-hover hover:bg-muted/40',
                 )}
@@ -240,7 +279,7 @@ export function RecordingStepStream({
                       'flex size-7 shrink-0 items-center justify-center rounded-md text-label font-semibold tracking-tight',
                       isSelected
                         ? 'bg-primary text-primary-foreground'
-                        : isIgnored
+                        : isExcluded
                           ? 'bg-muted text-muted-foreground'
                           : 'bg-surface-subtle text-muted-foreground border border-border-divider',
                     )}
@@ -255,7 +294,7 @@ export function RecordingStepStream({
                       <span
                         className={cn(
                           'text-body font-medium text-foreground truncate',
-                          isIgnored && 'line-through text-muted-foreground',
+                          isExcluded && 'line-through text-muted-foreground',
                         )}
                       >
                         {item.name}
@@ -297,23 +336,28 @@ export function RecordingStepStream({
                   </div>
                 </div>
 
-                {/* 状态徽标与忽略操作区域（与主体点击解耦） */}
+                {/* 状态徽标与剔除/恢复操作区域 */}
                 <div className='flex items-center gap-1.5 shrink-0'>
-                  {isIgnored ? (
-                    <StatusBadge tone='neutral'>已忽略</StatusBadge>
+                  {isExcluded ? (
+                    <StatusBadge tone='neutral'>
+                      {RECORDING_EXCLUSION_REASON_LABELS[exclusionReason] ?? '已剔除'}
+                    </StatusBadge>
                   ) : (
                     <StatusBadge tone={statusInfo.tone}>{statusInfo.label}</StatusBadge>
                   )}
-                  {onToggleIgnore ? (
+                  {onToggleExclusion ? (
                     <Button
                       type='button'
                       size='sm'
                       variant='ghost'
                       className='h-6 px-1.5 text-label text-muted-foreground hover:text-foreground'
-                      onClick={() => onToggleIgnore(item.index)}
-                      title={isIgnored ? '恢复此步骤' : '忽略此步骤（不导入）'}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggleExclusion(itemId, exclusionReason)
+                      }}
+                      title={isExcluded ? '恢复此步骤' : '剔除此步骤（不导入）'}
                     >
-                      {isIgnored ? '恢复' : '忽略'}
+                      {isExcluded ? '恢复' : '剔除'}
                     </Button>
                   ) : null}
                 </div>

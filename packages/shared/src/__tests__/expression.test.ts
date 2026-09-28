@@ -6,7 +6,7 @@ import {
   validateExpression,
   validateSafeRegexPattern,
   type Expr,
-} from '../expression'
+} from '../expression.js'
 
 describe('expression.ts - CF-B 受控表达式引擎', () => {
   describe('安全正则校验 (validateSafeRegexPattern)', () => {

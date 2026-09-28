@@ -26,6 +26,7 @@ describe('AI 动作轨迹转示教草稿与固化（AP-1）', () => {
       source: 'action_edge',
       actionName: 'Navigate',
       sdkVersion: '1.12.6',
+      timestamp: '2026-09-26T10:00:00.000Z',
       binding: {
         status: 'not_applicable',
         redirected: false,
@@ -60,6 +61,8 @@ describe('AI 动作轨迹转示教草稿与固化（AP-1）', () => {
       phase: 'completed',
       source: 'action_edge',
       actionName: 'Input',
+      sdkVersion: '1.12.6',
+      timestamp: '2026-09-26T10:00:02.000Z',
       elementDescription: '用户名输入框',
       binding: {
         status: 'bound',
@@ -95,6 +98,8 @@ describe('AI 动作轨迹转示教草稿与固化（AP-1）', () => {
       phase: 'completed',
       source: 'action_edge',
       actionName: 'Tap',
+      sdkVersion: '1.12.6',
+      timestamp: '2026-09-26T10:00:04.000Z',
       elementDescription: '登录按钮',
       binding: {
         status: 'bound',

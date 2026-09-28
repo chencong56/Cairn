@@ -53,7 +53,7 @@ describe('访问策略路径匹配', () => {
     ]
     expect(urlAllowedByAccessRules(`${shop}/app`, rules, ['business_surface'])).toBe(false)
     expect(
-      originsForAccessPurposes({ schemaVersion: 1, policyVersion: 1, rules }, ['business_surface']),
+      originsForAccessPurposes({ rules }, ['business_surface']),
     ).toEqual([])
   })
 
@@ -84,6 +84,7 @@ describe('访问策略路径匹配', () => {
             { origin: shop, purpose: 'business_surface', effect: 'allow', pathPrefix: '/app' },
             { origin: idp, purpose: 'authentication', effect: 'allow', pathPrefix: '/login' },
           ],
+          readOnlyRequests: [],
         },
       },
       mapJob: {

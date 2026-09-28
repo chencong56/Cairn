@@ -3,11 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchRecording } from '@/lib/recordings-api'
 import { DemonstrationImportPanel } from './demonstration-import-panel'
 import {
+  RECORDING_EXCLUSION_REASON_LABELS,
   RECORDING_NORMALIZER_VERSION,
+  recordingItemExclusionId,
   targetDescriptorSchema,
   type DemonstrationPlacement,
   type RecordingDisposition,
   type RecordingDraftDto,
+  type RecordingDraftExclusion,
   type RecordingImportPreview,
   type RecordingImportPreviewItem,
   type RecordingInsertAnchor,
@@ -97,6 +100,7 @@ export type RecordingImportPanelProps = {
   initialPlacement?: DemonstrationPlacement
   canApply: boolean
   hasLocalChanges?: boolean
+  exclusions?: RecordingDraftExclusion[]
   onOpenChange: (open: boolean) => void
   onSelectDraft: (recordingDraftId: string) => void
   onConflict: () => void
@@ -106,8 +110,16 @@ export type RecordingImportPanelProps = {
 export function RecordingImportPanel(props: RecordingImportPanelProps) {
   const source = useQuery({ queryKey: ['recordings', props.recordingDraftId], queryFn: () => fetchRecording(props.recordingDraftId!), enabled: props.open && Boolean(props.recordingDraftId) })
   if (props.open && props.recordingDraftId && !source.data) return <Sheet open onOpenChange={props.onOpenChange}><SheetContent><SheetHeader><SheetTitle>录制回填预览</SheetTitle><SheetDescription>{source.isError ? '无法读取来源，请重试。' : '正在读取来源…'}</SheetDescription></SheetHeader>{source.isError && <Button onClick={() => void source.refetch()}>重试</Button>}</SheetContent></Sheet>
-  if (source.data?.sourceProtocol === 'demonstration@1') return <DemonstrationImportPanel key={`${props.recordingDraftId}:${props.initialPlaceholderStepId ?? ''}:${props.initialPlacement?.kind ?? ''}`} {...props} />
-  return <LegacyRecordingImportPanel {...props} />
+  if (source.data?.sourceProtocol === 'demonstration@1') {
+    return (
+      <DemonstrationImportPanel
+        key={`${props.recordingDraftId}:${props.initialPlaceholderStepId ?? ''}:${props.initialPlacement?.kind ?? ''}`}
+        {...props}
+        exclusions={source.data.exclusions}
+      />
+    )
+  }
+  return <LegacyRecordingImportPanel {...props} exclusions={source.data?.exclusions ?? []} />
 }
 
 function LegacyRecordingImportPanel({
@@ -119,6 +131,7 @@ function LegacyRecordingImportPanel({
   stepCount,
   inputs,
   canApply,
+  exclusions = [],
   onOpenChange,
   onSelectDraft,
   onConflict,
@@ -167,14 +180,22 @@ function LegacyRecordingImportPanel({
         setPreview(next)
         setChoices(
           Object.fromEntries(
-            next.items.map((item) => [
-              item.sourceIndexes.join(','),
-              item.outcomeCandidate
-                ? { disposition: 'discard' as const, reason: '未确认为成功条件' }
-                : item.ready
-                  ? { disposition: 'accept' as const }
-                  : { disposition: 'discard' as const, reason: DEFAULT_DISCARD_REASON },
-            ]),
+            next.items.map((item) => {
+              const locked = exclusions.find(
+                (entry) =>
+                  entry.itemId === recordingItemExclusionId(item) || entry.itemId === item.sourceIndexes.join(','),
+              )
+              return [
+                item.sourceIndexes.join(','),
+                locked
+                  ? { disposition: 'discard' as const, reason: RECORDING_EXCLUSION_REASON_LABELS[locked.reason] }
+                  : item.outcomeCandidate
+                    ? { disposition: 'discard' as const, reason: '未确认为成功条件' }
+                    : item.ready
+                      ? { disposition: 'accept' as const }
+                      : { disposition: 'discard' as const, reason: DEFAULT_DISCARD_REASON },
+              ]
+            }),
           ),
         )
       })
@@ -183,7 +204,7 @@ function LegacyRecordingImportPanel({
         setPreview(null)
       })
       .finally(() => setLoading(false))
-  }, [insertAnchor, open, recordingDraftId, revision, scenarioId])
+  }, [exclusions, insertAnchor, open, recordingDraftId, revision, scenarioId])
 
   const pending = useMemo(() => {
     if (!preview) return 0
@@ -209,7 +230,10 @@ function LegacyRecordingImportPanel({
     setChoices((prev) => {
       const next = { ...prev }
       for (const item of preview.items) {
-        if (item.ready && !item.outcomeCandidate) {
+        const locked = exclusions.some(
+          (entry) => entry.itemId === recordingItemExclusionId(item) || entry.itemId === item.sourceIndexes.join(','),
+        )
+        if (item.ready && !item.outcomeCandidate && !locked) {
           next[item.sourceIndexes.join(',')] = { disposition: 'accept' }
         }
       }
@@ -527,17 +551,24 @@ function LegacyRecordingImportPanel({
               </div>
             </div>
             <ol className='min-h-0 flex-1 space-y-3 overflow-y-auto pr-1'>
-              {preview.items.map((item) => (
-                <PreviewItem
-                  key={item.sourceIndexes.join(',')}
-                  item={item}
-                  choice={choices[item.sourceIndexes.join(',')]}
-                  inputs={inputs}
-                  onChange={(next) =>
-                    setChoices((current) => ({ ...current, [item.sourceIndexes.join(',')]: next }))
-                  }
-                />
-              ))}
+              {preview.items.map((item) => {
+                const locked = exclusions.find(
+                  (entry) =>
+                    entry.itemId === recordingItemExclusionId(item) || entry.itemId === item.sourceIndexes.join(','),
+                )
+                return (
+                  <PreviewItem
+                    key={item.sourceIndexes.join(',')}
+                    item={item}
+                    choice={choices[item.sourceIndexes.join(',')]}
+                    inputs={inputs}
+                    lockedReason={locked ? RECORDING_EXCLUSION_REASON_LABELS[locked.reason] : undefined}
+                    onChange={(next) =>
+                      setChoices((current) => ({ ...current, [item.sourceIndexes.join(',')]: next }))
+                    }
+                  />
+                )
+              })}
             </ol>
             <SheetFooter className='p-0 pt-2 border-t border-border-divider shrink-0 flex flex-row items-center justify-end gap-2'>
               <Button variant='outline' onClick={() => onOpenChange(false)}>
@@ -562,11 +593,13 @@ function PreviewItem({
   item,
   choice,
   inputs,
+  lockedReason,
   onChange,
 }: {
   item: RecordingImportPreviewItem
   choice?: LocalDisposition
   inputs: readonly ScenarioInputDecl[]
+  lockedReason?: string
   onChange: (next: LocalDisposition) => void
 }) {
   const accepted = choice?.disposition === 'accept'
@@ -604,11 +637,14 @@ function PreviewItem({
           {line}
         </p>
       ))}
+      {lockedReason ? (
+        <p className='mt-2 text-label text-muted-foreground'>已在录制草稿剔除（{lockedReason}）。要恢复，回到草稿页。</p>
+      ) : null}
       <div className='mt-3 flex flex-wrap gap-2'>
         <Button
           size='sm'
           variant={accepted ? 'default' : 'outline'}
-          disabled={!item.ready}
+          disabled={!item.ready || Boolean(lockedReason)}
           onClick={() => onChange({ disposition: 'accept' })}
         >
           <CircleCheck className='size-3.5' />
@@ -617,6 +653,7 @@ function PreviewItem({
         <Button
           size='sm'
           variant={discarded ? 'default' : 'outline'}
+          disabled={Boolean(lockedReason)}
           onClick={() =>
             onChange({
               disposition: 'discard',
@@ -628,7 +665,7 @@ function PreviewItem({
           舍弃
         </Button>
       </div>
-      {fillTarget ? (
+      {fillTarget && !lockedReason ? (
         <FillParameterBinding
           item={item}
           fillTarget={fillTarget}
@@ -637,7 +674,7 @@ function PreviewItem({
           onChange={onChange}
         />
       ) : null}
-      {discarded ? (
+      {discarded && !lockedReason ? (
         <Textarea
           className='mt-2'
           rows={2}

@@ -322,7 +322,7 @@ describe('compileScenarioDocument', () => {
         name: '点',
         type: 'click',
         effectType: 'SIDE_EFFECT',
-        input: { target: { semantic: '查询按钮' } },
+        input: { target: { semantic: '查询按钮', candidates: [], framePath: [] } },
       },
     ])
     const saved = compileScenarioDocument(semanticOnly, { mode: 'save' })
@@ -414,7 +414,7 @@ describe('compileScenarioDocument', () => {
         name: '点',
         type: 'click',
         effectType: 'SIDE_EFFECT',
-        input: { target: { semantic: '查询按钮' } },
+        input: { target: { semantic: '查询按钮', candidates: [], framePath: [] } },
       },
     ])
     const result = compileScenarioDocument(source, {
@@ -527,7 +527,10 @@ describe('compileScenarioDocument', () => {
   })
 
   it('发布时阻断未知的业务结论模板变量', () => {
-    const source = { ...document([navigate(ids.a)]), outputs: { summaryTemplate: '结果：${unknown_var}' } }
+    const source = {
+      ...document([navigate(ids.a)]),
+      outputs: { summaryTemplate: '结果：${unknown_var}', metrics: [], dataRowFields: [] },
+    }
     const draft = compileScenarioDocument(source, { mode: 'save' })
     expect(draft.diagnostics.find((item) => item.code === 'OUTPUT_VARIABLE_UNRESOLVED')?.severity).toBe('warning')
     const published = compileScenarioDocument(source, { mode: 'release' })

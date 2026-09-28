@@ -35,6 +35,7 @@ const list: RecordingDraftListResponse = {
       name: '录制 shop.example',
       recordingId: '22222222-2222-4222-8222-222222222222',
       sourceVersion: 'playwright-crx@0.15.0',
+      revision: 1,
       eventCount: 4,
       itemCount: 3,
       unresolvedCount: 1,

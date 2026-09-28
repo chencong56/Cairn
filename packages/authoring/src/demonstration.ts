@@ -25,6 +25,7 @@ import {
   type DemonstrationPreview,
   type DemonstrationSource,
   type DemonstrationSuggestion,
+  type ScenarioInputDecl,
   type Step,
 } from '@cairn/shared'
 import { demonstrationFactDigest, sanitizeDemonstrationSource } from './demonstration-adapters.js'
@@ -32,6 +33,21 @@ import { deterministicStepId } from './expand.js'
 
 function literal(fact: DemonstrationFact): string | undefined {
   return fact.data.value?.state === 'literal' ? fact.data.value.text : undefined
+}
+
+function redactedInputKey(fact: DemonstrationFact): string | undefined {
+  return fact.data.value?.state === 'redacted' ? `input_${fact.sequence + 1}` : undefined
+}
+
+function inputBindingDecl(step: Step): ScenarioInputDecl | undefined {
+  const from =
+    step.type === 'fill'
+      ? step.input.from
+      : step.type === 'ai_action' && 'operation' in step.input && step.input.operation === 'input'
+        ? step.input.from
+        : undefined
+  if (!from) return undefined
+  return { key: from, label: step.name, type: 'string', required: true }
 }
 
 function toStep(fact: DemonstrationFact, source: DemonstrationSource): Step | undefined {
@@ -58,30 +74,33 @@ function toStep(fact: DemonstrationFact, source: DemonstrationSource): Step | un
         input = { operation: 'tap', targetDescription: d.targetDescription }
       }
     } else if (fact.action === 'fill') {
+      const from = redactedInputKey(fact)
       if (d.mode === 'type_only') {
         type = 'ai_action'
         input = {
           operation: 'input',
           targetDescription: d.targetDescription || '输入框',
           mode: 'type_only',
-          value: value ?? '',
+          ...(from ? { from } : { value: value ?? '' }),
         }
       } else if (d.target) {
         type = 'fill'
-        if (d.value?.state === 'reference') {
+        if (from) {
+          input = { target: d.target, from, sensitive: true }
+        } else if (d.value?.state === 'reference') {
           input = { target: d.target, from: d.value.from }
         } else if (d.mode === 'clear') {
           input = { target: d.target, value: '' }
         } else {
           input = { target: d.target, value: value ?? '' }
         }
-      } else if (d.targetDescription) {
+      } else if (d.targetDescription || from) {
         type = 'ai_action'
         input = {
           operation: 'input',
-          targetDescription: d.targetDescription,
+          targetDescription: d.targetDescription || '输入框',
           mode: d.mode ?? 'replace',
-          ...(d.mode === 'clear' ? {} : { value: value ?? '' }),
+          ...(d.mode === 'clear' ? {} : from ? { from } : { value: value ?? '' }),
         }
       }
     } else if (fact.action === 'keyboard') {
@@ -104,7 +123,8 @@ function toStep(fact: DemonstrationFact, source: DemonstrationSource): Step | un
     type = 'navigate'
     input = { url: d.url }
   } else if (fact.action === 'fill') {
-    input = { target: d.target, value }
+    const from = redactedInputKey(fact)
+    input = from && d.target ? { target: d.target, from, sensitive: true } : { target: d.target, value }
   } else if (fact.action === 'click' && !midscene) {
     input = { target: d.target, button: d.button, clickCount: d.clickCount, modifiers: d.modifiers }
   } else if (fact.action === 'press') {
@@ -120,13 +140,15 @@ function toStep(fact: DemonstrationFact, source: DemonstrationSource): Step | un
     const targetDescription = d.targetDescription
     if (fact.action === 'aiTap' || (midscene && fact.action === 'click'))
       input = { operation: 'tap', targetDescription }
-    if (fact.action === 'aiInput' || fact.action === 'input')
+    if (fact.action === 'aiInput' || fact.action === 'input') {
+      const from = redactedInputKey(fact)
       input = {
         operation: 'input',
-        targetDescription,
-        mode: d.mode,
-        ...(d.mode === 'clear' ? {} : { value }),
+        targetDescription: targetDescription || (from ? '输入框' : targetDescription),
+        mode: from ? (d.mode === 'clear' ? 'clear' : (d.mode ?? 'replace')) : d.mode,
+        ...(d.mode === 'clear' ? {} : from ? { from } : { value }),
       }
+    }
     if (fact.action === 'aiKeyboardPress' || fact.action === 'keydown')
       input = { operation: 'keyboard', targetDescription, key: d.key }
     if (fact.action === 'aiScroll' && d.scrollType === 'singleAction')
@@ -180,7 +202,8 @@ export function suggestDemonstration(sourceInput: DemonstrationSource): Demonstr
       (fact.action === 'aiAssert' && fact.data.instruction
         ? { kind: 'ai' as const, instruction: fact.data.instruction }
         : undefined)
-    if (rule && previousActionId && !item.diagnostics.length) {
+    const blockingDiagnostics = item.diagnostics.filter((line) => line !== '敏感值不作为普通参数或默认值保存')
+    if (rule && previousActionId && blockingDiagnostics.length === 0) {
       item.outcome = {
         meaning: (fact.data.instruction ?? `录制成功条件：${fact.action}`).slice(0, 512),
         rule,
@@ -190,7 +213,7 @@ export function suggestDemonstration(sourceInput: DemonstrationSource): Demonstr
         afterSourceId: previousActionId,
       }
       item.status = 'mapped'
-    } else if (!item.diagnostics.length && !rule) {
+    } else if (blockingDiagnostics.length === 0 && !rule) {
       item.step = toStep(fact, source)
       if (item.step) item.status = 'mapped'
     }
@@ -311,7 +334,10 @@ export function applyDemonstrationToDocument(
     preview.suggestions.some((s) => !decisions.has(s.id))
   )
     reject('每项来源必须处理一次，不能遗漏或重复')
-  const document = normalizeAuthoringDocument(structuredClone(documentInput))
+  const document =
+    documentInput.nodes.length === 0
+      ? structuredClone(documentInput)
+      : normalizeAuthoringDocument(structuredClone(documentInput))
   const place = body.placement
   const anchorLoc = place.kind === 'start' ? undefined : locateNode(document, place.nodeId)
   if (place.kind !== 'start' && !anchorLoc) reject('插入或替换位置已不存在')
@@ -375,8 +401,24 @@ export function applyDemonstrationToDocument(
         const { value: _value, ...input } = step.input
         step = stepSchema.parse({ ...step, input: { ...input, from: parameter.key } })
       } else reject('此动作不支持参数绑定')
+    } else {
+      const binding = inputBindingDecl(step)
+      if (binding) {
+        const existing = document.inputs.find((input) => input.key === binding.key)
+        if (existing && canonicalJson(existing) !== canonicalJson(binding))
+          reject('参数名已存在且声明不同，请显式选用原声明或更名')
+        if (!existing) document.inputs.push(binding)
+      }
     }
-    const node = { kind: 'step' as const, step }
+    const node = {
+      kind: 'step' as const,
+      step,
+      origin: {
+        kind: 'recording' as const,
+        recordingDraftId: preview.recordingDraftId,
+        sourceIds: item.sourceIds,
+      },
+    }
     replacements.push(node)
     bySource.set(item.id, node)
     mapping.nodeId = step.id
@@ -470,5 +512,6 @@ export function applyDemonstrationToDocument(
       currentAnchor = authoringNodeId(r)
     }
   }
+  if (updatedDoc.nodes.length === 0) reject('至少保留一个录制动作')
   return { document: scenarioAuthoringDocumentV2Schema.parse(updatedDoc), sourceMap }
 }

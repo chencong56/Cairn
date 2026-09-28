@@ -20,6 +20,7 @@ import {
   storedPlatformConfigDocumentSchema,
   upgradePlatformConfigDocument,
 } from '../platform-config.js'
+import { DEFAULT_SESSION_POLICY } from '../session.js'
 
 const enabledAi = platformConfigDocumentSchema.parse({
   ...FACTORY_PLATFORM_CONFIG,
@@ -553,6 +554,7 @@ describe('平台配置契约', () => {
         rawDigest: raw,
         legacyDigest: legacy,
         snapshotSession: {
+          ...DEFAULT_SESSION_POLICY,
           reuse: 'NEW_PAGE',
           idleTtlSeconds: 600,
           maxLifetimeSeconds: 14_400,

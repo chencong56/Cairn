@@ -70,7 +70,7 @@ describe('定位计划 v2', () => {
       limits: { allowed: ['rule', 'text_ai', 'vision_ai'] },
     })
     const step = { id: '00000000-0000-4000-8000-000000000101', name: '查询', type: 'click' as const,
-      effectType: 'SIDE_EFFECT' as const, input: { target: { candidates: [{ by: 'text' as const, value: '查询' }] } },
+      effectType: 'SIDE_EFFECT' as const, input: { target: { framePath: [], candidates: [{ by: 'text' as const, value: '查询' }] } },
       policy: { resolution: 'prefer_ai' as const } }
     const upgraded = upgradeAuthoringLocatorDocument({
       document: { authoringSchemaVersion: 2, schemaVersion: 1, inputs: [], nodes: [{ kind: 'step', step }] },

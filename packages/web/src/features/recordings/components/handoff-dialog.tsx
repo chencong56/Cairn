@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import {
-  DEMONSTRATION_HANDOFF_PLACEHOLDER_NAME,
+  RECORDING_EXCLUSION_REASON_LABELS,
   RECORDING_NORMALIZER_VERSION,
+  recordingItemExclusionId,
   type ApplyDemonstrationBody,
   type RecordingDisposition,
   type RecordingInsertAnchor,
@@ -22,7 +23,6 @@ import {
 import { ApiRequestError } from '@/lib/api-client'
 import {
   applyRecordingImport,
-  createScenario,
   fetchScenario,
   fetchScenarios,
   previewRecordingImport,
@@ -52,7 +52,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { createBlankStep } from '@/features/authoring'
 
 type Props = {
   open: boolean
@@ -62,8 +61,7 @@ type Props = {
   targetId: string
   targetName: string
   sourceProtocol?: 'recording@1' | 'demonstration@1'
-  generalizationRevision?: number
-  candidateDigest?: string
+  draftRevision?: number
 }
 
 export function RecordingHandoffDialog({
@@ -74,8 +72,7 @@ export function RecordingHandoffDialog({
   targetId,
   targetName,
   sourceProtocol,
-  generalizationRevision,
-  candidateDigest,
+  draftRevision,
 }: Props) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -114,7 +111,12 @@ export function RecordingHandoffDialog({
     enabled: open && Boolean(recordingId),
   })
   const draftItems = draftQuery.data?.items ?? []
-  const unresolvedCount = draftQuery.data?.unresolvedCount ?? 0
+  const excludedIds = new Set((draftQuery.data?.exclusions ?? []).map((item) => item.itemId))
+  const keptItems = draftItems.filter((item) => !excludedIds.has(recordingItemExclusionId(item)))
+  const excludedCount = draftItems.length - keptItems.length
+  const importedItems = keptItems.filter((item) => item.status === 'mapped')
+  const readyCount = importedItems.length
+  const unreadyCount = keptItems.length - readyCount
 
   // 预取选中目标场景的现有步骤与版本
   const targetScenarioQuery = useQuery({
@@ -126,11 +128,12 @@ export function RecordingHandoffDialog({
   const targetScenario = targetScenarioQuery.data
   const existingSteps = targetScenario?.steps ?? []
   const lastStep = existingSteps[existingSteps.length - 1]
+  const lastStepId = lastStep?.id
   const firstStep = existingSteps[0]
   const currentRevision = targetScenario?.draft?.revision ?? 1
 
-  // 计算当前选择的插入锚点
-  const currentAnchor: RecordingInsertAnchor = useMemo(() => {
+  // 计算当前选择的插入锚点。只在点击时读取，不必手动缓存。
+  const currentAnchor: RecordingInsertAnchor = (() => {
     if (anchorMode === 'start') return { kind: 'start' }
     if (anchorMode === 'after_step' && selectedAfterStepId) {
       return { kind: 'after', stepId: selectedAfterStepId }
@@ -138,11 +141,10 @@ export function RecordingHandoffDialog({
     if (anchorMode === 'replace' && selectedReplaceStepId) {
       return { kind: 'after', stepId: selectedReplaceStepId }
     }
-    // 默认末尾追加
-    return lastStep ? { kind: 'after', stepId: lastStep.id } : { kind: 'start' }
-  }, [anchorMode, selectedAfterStepId, selectedReplaceStepId, lastStep])
+    return lastStepId ? { kind: 'after', stepId: lastStepId } : { kind: 'start' }
+  })()
 
-  const currentPlacement: DemonstrationPlacement = useMemo(() => {
+  const currentPlacement: DemonstrationPlacement = (() => {
     if (anchorMode === 'start') return { kind: 'start' }
     if (anchorMode === 'after_step' && selectedAfterStepId) {
       return { kind: 'after', nodeId: selectedAfterStepId }
@@ -150,9 +152,8 @@ export function RecordingHandoffDialog({
     if (anchorMode === 'replace' && selectedReplaceStepId) {
       return { kind: 'replace', nodeId: selectedReplaceStepId }
     }
-    // 默认末尾追加
-    return lastStep ? { kind: 'after', nodeId: lastStep.id } : { kind: 'start' }
-  }, [anchorMode, selectedAfterStepId, selectedReplaceStepId, lastStep])
+    return lastStepId ? { kind: 'after', nodeId: lastStepId } : { kind: 'start' }
+  })()
 
   // 通道 B：前往 Studio 深度微调（带齐确定的锚点与放置参数）
   const handleGoExistingStudio = () => {
@@ -193,11 +194,15 @@ export function RecordingHandoffDialog({
           placement: currentPlacement,
         })
         if (preview.suggestions.length === 0) throw new Error('没有可回填的步骤')
-        const decisions: ApplyDemonstrationBody['decisions'] = preview.suggestions.map((suggestion) =>
-          suggestion.status === 'mapped'
+        const decisions: ApplyDemonstrationBody['decisions'] = preview.suggestions.map((suggestion) => {
+          const reason = (draftQuery.data?.exclusions ?? []).find((item) => item.itemId === suggestion.id)?.reason
+          if (reason) {
+            return { id: suggestion.id, disposition: 'discard', reason: RECORDING_EXCLUSION_REASON_LABELS[reason] }
+          }
+          return suggestion.status === 'mapped'
             ? { id: suggestion.id, disposition: 'accept' }
-            : { id: suggestion.id, disposition: 'discard', reason: '待处理项已在就地回填中忽略' },
-        )
+            : { id: suggestion.id, disposition: 'discard', reason: '待处理项已在就地回填中忽略' }
+        })
         const fingerprint = JSON.stringify({ effectiveScenarioId, recordingId, preview, decisions })
         if (directAttempt.current?.fingerprint !== fingerprint)
           directAttempt.current = { fingerprint, key: newDemonstrationId() }
@@ -225,13 +230,24 @@ export function RecordingHandoffDialog({
           insertAnchor: currentAnchor,
         })
         if (preview.items.length === 0) throw new Error('没有可回填的步骤')
-        const dispositions: RecordingDisposition[] = preview.items.map((item) =>
-          item.outcomeCandidate
+        const dispositions: RecordingDisposition[] = preview.items.map((item) => {
+          const reason = (draftQuery.data?.exclusions ?? []).find(
+            (entry) =>
+              entry.itemId === recordingItemExclusionId(item) || entry.itemId === item.sourceIndexes.join(','),
+          )?.reason
+          if (reason) {
+            return {
+              sourceIndexes: item.sourceIndexes,
+              disposition: 'discard',
+              reason: RECORDING_EXCLUSION_REASON_LABELS[reason],
+            }
+          }
+          return item.outcomeCandidate
             ? { sourceIndexes: item.sourceIndexes, disposition: 'discard', reason: '未确认为成功条件' }
             : item.ready
               ? { sourceIndexes: item.sourceIndexes, disposition: 'accept' }
-              : { sourceIndexes: item.sourceIndexes, disposition: 'discard', reason: '待处理项已在就地回填中忽略' },
-        )
+              : { sourceIndexes: item.sourceIndexes, disposition: 'discard', reason: '待处理项已在就地回填中忽略' }
+        })
         const fingerprint = JSON.stringify({ effectiveScenarioId, recordingId, preview, dispositions })
         if (directAttempt.current?.fingerprint !== fingerprint)
           directAttempt.current = { fingerprint, key: newDemonstrationId() }
@@ -266,52 +282,20 @@ export function RecordingHandoffDialog({
       return
     }
     setCreating(true)
-    if (sourceProtocol === 'demonstration@1' && candidateDigest && generalizationRevision) {
-      try {
-        const res = await handoffCreateScenario(recordingId, {
-          name: newScenarioName.trim(),
-          revision: generalizationRevision,
-          candidateDigest,
-        })
-        toast.success(`新场景「${res.scenario.name}」已由泛化候选原子创建并回填`)
-        onOpenChange(false)
-        void navigate({
-          to: '/scenarios/$scenarioId',
-          params: { scenarioId: res.scenario.id },
-        })
-      } catch (error) {
-        toast.error(
-          error instanceof ApiRequestError ? error.message : '创建场景失败'
-        )
-      } finally {
-        setCreating(false)
-      }
-      return
-    }
-
     try {
-      const created = await createScenario({
-        targetId,
+      const res = await handoffCreateScenario(recordingId, {
         name: newScenarioName.trim(),
-        steps: [
-          {
-            ...createBlankStep('navigate'),
-            ...(sourceProtocol === 'demonstration@1'
-              ? { name: DEMONSTRATION_HANDOFF_PLACEHOLDER_NAME }
-              : {}),
-          },
-        ],
+        expectedRevision: draftQuery.data?.revision ?? draftRevision ?? 1,
       })
-      toast.success(`新场景「${created.name}」已创建`)
+      toast.success(`新场景「${res.scenario.name}」已由录制草稿创建并完成回填`)
       onOpenChange(false)
       void navigate({
         to: '/scenarios/$scenarioId',
-        params: { scenarioId: created.id },
-        search: { import: recordingId },
+        params: { scenarioId: res.scenario.id },
       })
     } catch (error) {
       toast.error(
-        error instanceof ApiRequestError ? error.message : '创建场景失败'
+        error instanceof ApiRequestError ? error.message : '创建场景失败',
       )
     } finally {
       setCreating(false)
@@ -540,14 +524,14 @@ export function RecordingHandoffDialog({
                       3. 回填后流程结构对比 (Mini-Diff)
                     </span>
                     <span className='text-muted-foreground font-normal'>
-                      原 {existingSteps.length} 步 + 本次 {draftItems.length} 步 = 变更后 {existingSteps.length + draftItems.length} 步
+                      原 {existingSteps.length} 步 + 本次 {readyCount} 步 = 变更后 {existingSteps.length + readyCount} 步
                     </span>
                   </div>
 
                   {/* 微缩步骤流水线时间轴展示 */}
                   <div className='flex flex-wrap items-center gap-1.5 py-1 text-label overflow-x-auto'>
                     {/* 开头插入标记 */}
-                    {anchorMode === 'start' && draftItems.map((item, idx) => (
+                    {anchorMode === 'start' && importedItems.map((item, idx) => (
                       <span
                         key={`ins-start-${idx}`}
                         className='inline-flex items-center gap-1 rounded bg-status-success-background border border-status-success-accent/40 px-2 py-1 font-medium text-status-success-foreground'
@@ -590,7 +574,7 @@ export function RecordingHandoffDialog({
                               {idx + 1}. {s.name.slice(0, 10)}
                             </span>
                             {/* 在指定步骤后插入的预览 */}
-                            {isAfterAnchor && draftItems.map((item, dIdx) => (
+                            {isAfterAnchor && importedItems.map((item, dIdx) => (
                               <span
                                 key={`ins-after-${dIdx}`}
                                 className='inline-flex items-center gap-1 rounded bg-status-success-background border border-status-success-accent/40 px-2 py-1 font-medium text-status-success-foreground'
@@ -607,7 +591,7 @@ export function RecordingHandoffDialog({
                     )}
 
                     {/* 末尾追加标记 */}
-                    {anchorMode === 'end' && draftItems.map((item, idx) => (
+                    {anchorMode === 'end' && importedItems.map((item, idx) => (
                       <span
                         key={`ins-end-${idx}`}
                         className='inline-flex items-center gap-1 rounded bg-status-success-background border border-status-success-accent/40 px-2 py-1 font-medium text-status-success-foreground'
@@ -619,9 +603,12 @@ export function RecordingHandoffDialog({
                     ))}
                   </div>
 
-                  {unresolvedCount > 0 ? (
+                  <p className='text-label text-muted-foreground pt-0.5'>
+                    将导入 {readyCount} 步，剔除名单排除 {excludedCount} 步，未就绪另弃 {unreadyCount} 步。
+                  </p>
+                  {unreadyCount > 0 ? (
                     <p className='text-label text-status-warning-foreground pt-0.5'>
-                      ⚠️ 注意：草稿中包含 {unresolvedCount} 个待处理项，回填时未就绪动作将被自动舍弃；若需逐个替换，请选择「在 Studio 中深度微调」。
+                      ⚠️ 注意：草稿中包含 {unreadyCount} 个待处理项，回填时未就绪动作将被自动舍弃；若需逐个替换，请选择「在 Studio 中深度微调」。
                     </p>
                   ) : (
                     <p className='text-label text-status-success-foreground pt-0.5'>
@@ -671,7 +658,7 @@ export function RecordingHandoffDialog({
                 maxLength={128}
               />
               <p className='text-label text-muted-foreground'>
-                将基于目标系统「{targetName}」创建新场景，并在创建后自动合入本草稿全部操作。
+                将基于目标系统「{targetName}」创建新场景。将导入 {readyCount} 步，剔除名单排除 {excludedCount} 步，未就绪另弃 {unreadyCount} 步。
               </p>
             </div>
             <DialogFooter>

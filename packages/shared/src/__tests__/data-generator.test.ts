@@ -40,6 +40,7 @@ describe('Data Generator Engine (DC-01, DC-02)', () => {
     const spec: DataGeneratorSpec = {
       kind: 'random_string',
       prefix: 'SKU_',
+      suffix: '',
       length: 12,
       charset: 'alphanumeric',
       unique: true,
@@ -85,7 +86,7 @@ describe('Data Generator Engine (DC-01, DC-02)', () => {
 
   it('materializeBatchInputs 跨行排重并补全缺省入参', () => {
     const schemaInputs: ScenarioInputDecl[] = [
-      { key: 'orderNo', label: '订单号', type: 'string', required: true, defaultGenerator: { kind: 'random_string', prefix: 'ORD_', length: 8, charset: 'numeric', unique: true } },
+      { key: 'orderNo', label: '订单号', type: 'string', required: true, defaultGenerator: { kind: 'random_string', prefix: 'ORD_', suffix: '', length: 8, charset: 'numeric', unique: true } },
       { key: 'customerName', label: '客户姓名', type: 'string', required: true, defaultGenerator: { kind: 'mock_preset', preset: 'name_cn', unique: false } },
     ]
 

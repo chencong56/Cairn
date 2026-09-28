@@ -13,6 +13,7 @@ import {
   signInternalHeaders,
   stepSchema,
   verifyInternalHeaders,
+  type NodeHealthSignInput,
 } from '../index.js'
 
 const pageRef = {
@@ -139,7 +140,7 @@ describe('internal HMAC', () => {
       '../internal-auth.js'
     )
     const secret = requireInternalSecret(DEV_INTERNAL_AUTH_SECRET)
-    const node = {
+    const node: NodeHealthSignInput = {
       method: 'GET' as const,
       path: WORKER_NODE_HEALTH_PATH,
       body: '',

@@ -650,13 +650,14 @@ describe.each(DRIVERS)('%s Worker 登记与舰队', { timeout: 60_000 }, (driver
 
     // 7. purgeStaleWorkers 清理离线节点
     const orphanId = `stale-${newId().slice(0, 8)}`
+    const orphanInstanceId = newId()
     await registerWorker(handle.db, {
       workerId: orphanId,
-      instanceId: newId(),
+      instanceId: orphanInstanceId,
       capacity: 1,
       lostAfterSeconds: 60,
     })
-    await markWorkerStopped(handle.db, { workerId: orphanId, instanceId: newId() }).catch(() => {})
+    await markWorkerStopped(handle.db, orphanId, orphanInstanceId).catch(() => {})
     const { workers } = schemaFor(handle.db)
     await handle.db.update(workers).set({ status: 'STOPPED' }).where(eq(workers.id, orphanId))
 

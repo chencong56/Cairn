@@ -39,6 +39,8 @@ function entry(overrides: Partial<ModuleManifestEntry> = {}): ModuleManifestEntr
     internalToExpanded: { act: stepAct, assert: stepAssert },
     preconditionStepIds: [],
     postconditionStepIds: [stepAssert],
+    outputVerificationStepIds: [],
+    frozenOutputs: {},
     outputRequired: ['result'],
     inputBindingsDigest: 'b',
     ...overrides,

@@ -21,7 +21,9 @@ import {
   decideStepSchema,
   computeStepSchema,
   type AuthoringBlockNode,
+  type AuthoringBlockNodeIf,
   type AuthoringStepNode,
+  type ScenarioAuthoringDocumentV2,
   type Step,
 } from '../index.js'
 
@@ -94,8 +96,10 @@ describe('Control Flow B: Schemas & AST', () => {
     expect(parsed.kind).toBe('block')
     expect(parsed.blockId).toBe(block1.blockId)
     expect(parsed.control.type).toBe('if')
-    expect(parsed.then).toHaveLength(1)
-    expect(parsed.else).toHaveLength(1)
+    if ('then' in parsed) {
+      expect(parsed.then).toHaveLength(1)
+      expect(parsed.else).toHaveLength(1)
+    }
   })
 
   it('scenarioAuthoringDocumentV2Schema 能校验包含条件块的场景', () => {
@@ -141,8 +145,8 @@ describe('Control Flow B: Schemas & AST', () => {
   })
 
   it('walkAuthoringNodes 深度优先先序遍历带 ancestry 与 branchKey', () => {
-    const doc = {
-      authoringSchemaVersion: 2 as const,
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
       schemaVersion: 1,
       inputs: [],
       nodes: [step1, block1, step4After],
@@ -171,8 +175,8 @@ describe('Control Flow B: Schemas & AST', () => {
   })
 
   it('nodesBefore 隔离互斥分支变量', () => {
-    const doc = {
-      authoringSchemaVersion: 2 as const,
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
       schemaVersion: 1,
       inputs: [],
       nodes: [step1, block1, step4After],
@@ -198,8 +202,8 @@ describe('Control Flow B: Schemas & AST', () => {
   })
 
   it('isNodeOutputPossiblyAbsent 正确识别可能缺失的输出', () => {
-    const doc = {
-      authoringSchemaVersion: 2 as const,
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
       schemaVersion: 1,
       inputs: [],
       nodes: [step1, block1, step4After],
@@ -216,8 +220,8 @@ describe('Control Flow B: Schemas & AST', () => {
   })
 
   it('AST 树级修改函数可以在分支内增删改移', () => {
-    const doc = {
-      authoringSchemaVersion: 2 as const,
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
       schemaVersion: 1,
       inputs: [],
       nodes: [step1, block1, step4After],
@@ -235,7 +239,7 @@ describe('Control Flow B: Schemas & AST', () => {
       },
     }
     const inserted = insertNodeAfter(doc, step2Then.step.id, newStepInThen)
-    const blockThen = (inserted.nodes[1] as AuthoringBlockNode).then
+    const blockThen = (inserted.nodes[1] as AuthoringBlockNodeIf).then
     expect(blockThen).toHaveLength(2)
     expect(blockThen[1]?.kind === 'step' && blockThen[1].step.id).toBe(newStepInThen.step.id)
 
@@ -244,17 +248,17 @@ describe('Control Flow B: Schemas & AST', () => {
       ...newStepInThen,
       step: { ...newStepInThen.step, name: '已更名' },
     })
-    const replacedStep = (replaced.nodes[1] as AuthoringBlockNode).then[1] as AuthoringStepNode
+    const replacedStep = (replaced.nodes[1] as AuthoringBlockNodeIf).then?.[1] as AuthoringStepNode
     expect(replacedStep.step.name).toBe('已更名')
 
     // 3. 在分支内移动步骤
     const moved = moveNodeWithin(inserted, newStepInThen.step.id, -1)
-    const movedThen = (moved.nodes[1] as AuthoringBlockNode).then
+    const movedThen = (moved.nodes[1] as AuthoringBlockNodeIf).then
     expect(authoringNodeId(movedThen[0]!)).toBe(newStepInThen.step.id)
 
     // 4. 从分支中删除步骤
     const removed = removeNode(moved, newStepInThen.step.id)
-    expect((removed.nodes[1] as AuthoringBlockNode).then).toHaveLength(1)
+    expect((removed.nodes[1] as AuthoringBlockNodeIf).then).toHaveLength(1)
   })
 
   it('页面检查步骤 (probe) 校验规则', () => {
@@ -477,18 +481,22 @@ describe('Control Flow B: Schemas & AST', () => {
       const parsedForEach = authoringBlockNodeSchema.parse(forEachBlock)
       expect(parsedForEach.kind).toBe('block')
       expect(parsedForEach.control.type).toBe('for_each')
-      if (parsedForEach.control.type === 'for_each') {
-        expect(parsedForEach.control.as).toBe('currentAlert')
+      if ('body' in parsedForEach) {
+        if (parsedForEach.control.type === 'for_each') {
+          expect(parsedForEach.control.as).toBe('currentAlert')
+          expect(parsedForEach.collect).toHaveLength(1)
+        }
         expect(parsedForEach.body).toHaveLength(1)
-        expect(parsedForEach.collect).toHaveLength(1)
       }
 
       const parsedRepeat = authoringBlockNodeSchema.parse(repeatBlock)
       expect(parsedRepeat.kind).toBe('block')
       expect(parsedRepeat.control.type).toBe('repeat')
-      if (parsedRepeat.control.type === 'repeat') {
-        expect(parsedRepeat.control.maxIterations).toBe(20)
-        expect(parsedRepeat.control.onLimit).toBe('fail')
+      if ('body' in parsedRepeat) {
+        if (parsedRepeat.control.type === 'repeat') {
+          expect(parsedRepeat.control.maxIterations).toBe(20)
+          expect(parsedRepeat.control.onLimit).toBe('fail')
+        }
         expect(parsedRepeat.body).toHaveLength(1)
       }
     })

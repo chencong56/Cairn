@@ -142,6 +142,9 @@ const observation: RunObservation = {
     startedAt: '2026-09-14T00:00:01.000Z',
     finishedAt: '2026-09-14T00:00:10.000Z',
     evidenceStatus: 'COMPLETE',
+    outcomeStatus: 'PASS',
+    executionOrigin: 'standalone',
+    outcomeResults: [],
     snapshot: {
       schemaVersion: 1,
       scenarioId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
@@ -158,6 +161,7 @@ const observation: RunObservation = {
         type: 'fill',
         ordinal: 0,
         status: 'SUCCEEDED',
+        outcomeStatus: 'PASS',
         startedAt: '2026-09-14T00:00:01.000Z',
         finishedAt: '2026-09-14T00:00:02.000Z',
         attempts: [

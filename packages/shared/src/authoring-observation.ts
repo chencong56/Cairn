@@ -134,7 +134,7 @@ export function pageIdentityChanged(
 export function observationShowsFragileCss(observation: {
   diagnostics?: {
     framePathResolved?: string[]
-    candidatesTried?: Array<{ by: string; matches: number }>
+    candidatesTried?: Array<{ by: string; matches: number; value?: string; index?: number }>
   }
 }): boolean {
   const tried = observation.diagnostics?.candidatesTried ?? []

@@ -49,7 +49,7 @@ describe('Authoring proposals schemas (AI-03 Phase 1)', () => {
     }
     const parsed = authoringEditProposalSchema.parse(proposal)
     expect(parsed.nodes).toHaveLength(2)
-    expect(parsed.missingSlots[0].key).toBe('password')
+    expect(parsed.missingSlots[0]!.key).toBe('password')
   })
 
   it('validates C2 OutcomeAssistProposal', () => {
@@ -121,7 +121,7 @@ describe('Authoring proposals schemas (AI-03 Phase 1)', () => {
       createdAt: new Date().toISOString(),
     }
     const parsed = demonstrationSemanticProposalSchema.parse(proposal)
-    expect(parsed.businessGroups[0].sourceIds).toEqual(['act-1', 'act-2'])
+    expect(parsed.businessGroups[0]!.sourceIds).toEqual(['act-1', 'act-2'])
 
     // applyDemonstrationBody with modelProposalDigest
     const applyBody = {
@@ -167,7 +167,7 @@ describe('Authoring proposals schemas (AI-03 Phase 1)', () => {
       createdAt: new Date().toISOString(),
     }
     const parsedProfile = datasetProfileSchema.parse(profile)
-    expect(parsedProfile.columns[0].inferredType).toBe('string')
+    expect(parsedProfile.columns[0]!.inferredType).toBe('string')
 
     const mapping = {
       datasetId: '11111111-1111-4111-8111-111111111115',

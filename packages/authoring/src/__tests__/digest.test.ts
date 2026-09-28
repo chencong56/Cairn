@@ -43,7 +43,7 @@ describe('digest pure functions', () => {
     expect(stripped.uiPosition).toBeUndefined()
     expect(stripped.draftRevision).toBeUndefined()
 
-    const step = (stripped.steps as Record<string, unknown>[])[0]
+    const step = (stripped.steps as Record<string, unknown>[])[0]!
     expect(step.id).toBe('step-1')
     expect(step.action).toBe('click')
     expect(step.description).toBeUndefined()

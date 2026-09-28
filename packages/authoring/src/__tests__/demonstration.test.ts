@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { DEMONSTRATION_LIMITS, canonicalJson, type DemonstrationProfile } from '@cairn/shared'
 import { parseDemonstrationFile, demonstrationFactDigest } from '../demonstration-adapters.js'
-import { previewDemonstration, suggestDemonstration } from '../demonstration.js'
+import { applyDemonstrationToDocument, previewDemonstration, suggestDemonstration } from '../demonstration.js'
+import { walkAuthoringNodes, type ScenarioAuthoringDocumentV2 } from '@cairn/shared'
 
 const targetId = '00000000-0000-4000-8000-000000000001'
 const captureId = '00000000-0000-4000-8000-000000000002'
@@ -49,6 +50,41 @@ describe('demonstration source adapters and immutable suggestions', () => {
     for (const value of ['private-cookie', 'hidden-password', 'private&', 'u:secret', '#secret']) expect(wire).not.toContain(value)
     expect(source.omittedConfig).toContain('target.cookies')
     expect(source.facts[1]!.data.value?.state).toBe('redacted')
+    const preview = previewDemonstration({
+      source,
+      scenarioId: captureId,
+      recordingDraftId: captureId,
+      baseRevision: 1,
+      placement: { kind: 'start' },
+      remainingCapacity: 20,
+    })
+    const password = preview.suggestions.find((item) => item.action === 'aiInput')
+    expect(password?.status).toBe('mapped')
+    expect(password?.step?.input).toMatchObject({ operation: 'input', from: expect.stringMatching(/^input_/) })
+    expect(password?.step?.input).not.toHaveProperty('value')
+    const document: ScenarioAuthoringDocumentV2 = { authoringSchemaVersion: 2, schemaVersion: 1, inputs: [], nodes: [] }
+    const applied = applyDemonstrationToDocument(document, preview, {
+      protocolVersion: 'demonstration@1',
+      recordingDraftId: captureId,
+      baseRevision: 1,
+      placement: { kind: 'start' },
+      idempotencyKey: 'redacted-bind',
+      factDigest: preview.factDigest,
+      suggestionDigest: preview.suggestionDigest,
+      adapterVersion: preview.adapterVersion,
+      ruleVersion: preview.ruleVersion,
+      decisions: preview.suggestions.map((item) =>
+        item.status === 'mapped'
+          ? { id: item.id, disposition: 'accept' as const }
+          : { id: item.id, disposition: 'discard' as const, reason: '未就绪' },
+      ),
+    })
+    expect(applied.document.inputs).toEqual([
+      expect.objectContaining({ type: 'string', required: true, label: '密码' }),
+    ])
+    const bound = walkAuthoringNodes(applied.document).find((node) => node.node.kind === 'step' && node.node.step.type === 'ai_action')
+    expect(bound?.node.kind === 'step' ? bound.node.step.input : {}).toMatchObject({ from: applied.document.inputs[0]?.key })
+    expect(bound?.node.kind === 'step' ? bound.node.origin : undefined).toMatchObject({ kind: 'recording' })
   })
   it('retains Midscene event identities and navigation observations; absolute scroll is unresolved', () => {
     const source = parse(JSON.stringify([

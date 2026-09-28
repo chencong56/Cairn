@@ -20,7 +20,7 @@ describe('地图作业契约', () => {
 
   it('从入口派生授权且资源域不进入可操作 origin', () => {
     const rules = seedTargetAccessRules('https://shop.example/orders', 'https://idp.example/login')
-    const policy = { schemaVersion: 1 as const, policyVersion: 1, rules }
+    const policy = { schemaVersion: 1 as const, policyVersion: 1, rules, readOnlyRequests: [] }
     expect(originsForAccessPurposes(policy, ['business_surface'])).toEqual(['https://shop.example'])
     expect(originsForAccessPurposes(policy, ['authentication'])).toEqual(['https://idp.example'])
     expect(originsForAccessPurposes(policy, ['resource'])).toEqual([])
@@ -34,6 +34,7 @@ describe('地图作业契约', () => {
         { origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'allow' as const },
         { origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'deny' as const },
       ],
+      readOnlyRequests: [],
     }
     expect(originsForAccessPurposes(policy, ['business_surface'])).toEqual([])
   })
@@ -46,6 +47,7 @@ describe('地图作业契约', () => {
         { origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'allow' as const, pathPrefix: '/' },
         { origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'deny' as const, pathPrefix: '/admin' },
       ],
+      readOnlyRequests: [],
     }
     expect(originsForAccessPurposes(policy, ['business_surface'])).toEqual(['https://shop.example'])
   })

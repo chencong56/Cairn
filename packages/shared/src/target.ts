@@ -297,6 +297,7 @@ export const createTargetBodySchema = z
     landingSettleTimeoutMs: body.landingSettleTimeoutMs ?? null,
   }))
 export type CreateTargetBody = z.infer<typeof createTargetBodySchema>
+export type CreateTargetInput = z.input<typeof createTargetBodySchema>
 
 export const updateTargetBodySchema = z
   .strictObject({

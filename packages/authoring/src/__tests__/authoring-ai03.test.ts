@@ -4,39 +4,88 @@ import {
   computeDatasetProfile,
   buildV2AuthoringSlice,
 } from '../index.js'
-import type { DemonstrationSource, AuthoringDocument } from '@cairn/shared'
+import type { DemonstrationSource, ScenarioAuthoringDocumentV2 } from '@cairn/shared'
 
 describe('AI-03 Phase 1 Authoring pure functions', () => {
   describe('buildDemonstrationSemanticProposal', () => {
     const mockSource: DemonstrationSource = {
       protocolVersion: 'demonstration@1',
+      captureId: '00000000-0000-4000-8000-000000000001',
+      targetId: '00000000-0000-4000-8000-000000000002',
+      sourceKind: 'interaction_trace',
+      channel: 'extension',
+      producerKind: 'cairn_crx',
+      actorKind: 'human',
+      authorship: 'human',
       importProfile: 'playwright-crx@0.15.0',
-      recordedAt: new Date().toISOString(),
-      viewport: { width: 1280, height: 720 },
-      actions: [
+      producerVersion: '0.15.0',
+      detectedShape: 'browser_session',
+      adapterVersion: 'demonstration-adapters@1',
+      redactionVersion: 'demonstration-redaction@1',
+      capturedAt: '2026-09-26T10:00:00.000Z',
+      facts: [
         {
           id: 'act-1',
-          type: 'navigation',
-          url: 'https://example.com/login',
-          observation: { status: 'captured', observedAt: new Date().toISOString() },
+          sourceIds: ['act-1'],
+          sequence: 0,
+          kind: 'action',
+          action: 'navigation',
+          pageId: null,
+          documentEpoch: null,
+          framePath: null,
+          timestampPrecision: 'millisecond',
+          data: { url: 'https://example.com/login' },
+          diagnostics: [],
+          before: { status: 'missing', reason: 'not_captured' },
+          after: { status: 'missing', reason: 'not_captured' },
         },
         {
           id: 'act-2',
-          type: 'fill',
-          text: 'admin',
-          observation: { status: 'captured', observedAt: new Date().toISOString() },
+          sourceIds: ['act-2'],
+          sequence: 1,
+          kind: 'action',
+          action: 'fill',
+          pageId: null,
+          documentEpoch: null,
+          framePath: null,
+          timestampPrecision: 'millisecond',
+          data: { value: { state: 'literal', text: 'admin' } },
+          diagnostics: [],
+          before: { status: 'missing', reason: 'not_captured' },
+          after: { status: 'missing', reason: 'not_captured' },
         },
         {
           id: 'act-3',
-          type: 'click',
-          observation: { status: 'captured', observedAt: new Date().toISOString() },
+          sourceIds: ['act-3'],
+          sequence: 2,
+          kind: 'action',
+          action: 'click',
+          pageId: null,
+          documentEpoch: null,
+          framePath: null,
+          timestampPrecision: 'millisecond',
+          data: {},
+          diagnostics: [],
+          before: { status: 'missing', reason: 'not_captured' },
+          after: { status: 'missing', reason: 'not_captured' },
         },
         {
           id: 'act-orphan',
-          type: 'scroll',
-          observation: { status: 'captured', observedAt: new Date().toISOString() },
+          sourceIds: ['act-orphan'],
+          sequence: 3,
+          kind: 'action',
+          action: 'scroll',
+          pageId: null,
+          documentEpoch: null,
+          framePath: null,
+          timestampPrecision: 'millisecond',
+          data: {},
+          diagnostics: [],
+          before: { status: 'missing', reason: 'not_captured' },
+          after: { status: 'missing', reason: 'not_captured' },
         },
       ],
+      omittedConfig: [],
       assetManifest: [],
     }
 
@@ -120,10 +169,10 @@ describe('AI-03 Phase 1 Authoring pure functions', () => {
 
   describe('buildV2AuthoringSlice', () => {
     it('slices V2 document retaining upstream dependencies including module outputs and redacts secrets', () => {
-      const doc: AuthoringDocument = {
+      const doc: ScenarioAuthoringDocumentV2 = {
         authoringSchemaVersion: 2,
         schemaVersion: 1,
-        inputs: [{ name: 'baseUrl', type: 'string', defaultValue: 'https://test.com' }],
+        inputs: [{ key: 'baseUrl', label: 'baseUrl', type: 'string' }],
         nodes: [
           {
             kind: 'step',
@@ -151,7 +200,7 @@ describe('AI-03 Phase 1 Authoring pure functions', () => {
               type: 'fill',
               effectType: 'READ_ONLY',
               input: {
-                target: { candidates: [{ by: 'css', value: '#pwd' }] },
+                target: { candidates: [{ by: 'css', value: '#pwd' }], framePath: [] },
                 value: 'superSecret123',
                 sensitive: true,
               },
@@ -165,7 +214,7 @@ describe('AI-03 Phase 1 Authoring pure functions', () => {
               type: 'fill',
               effectType: 'READ_ONLY',
               input: {
-                target: { candidates: [{ by: 'css', value: '#token' }] },
+                target: { candidates: [{ by: 'css', value: '#token' }], framePath: [] },
                 value: '${authToken}',
                 from: 'authToken',
               },
@@ -178,7 +227,7 @@ describe('AI-03 Phase 1 Authoring pure functions', () => {
               name: '无关后续步骤',
               type: 'click',
               effectType: 'READ_ONLY',
-              input: { target: { candidates: [{ by: 'css', value: '#other' }] } },
+              input: { target: { candidates: [{ by: 'css', value: '#other' }], framePath: [] } },
             },
           },
         ],

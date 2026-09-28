@@ -244,7 +244,7 @@ describe('平台 AI 传输', () => {
       })
       .mockResolvedValue({ done: true, value: undefined })
     const cancel = vi.fn(async () => undefined)
-    const fetcher = vi.fn(async () => ({
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => ({
       ok: true,
       body: { getReader: () => ({ read, cancel }) },
     }))

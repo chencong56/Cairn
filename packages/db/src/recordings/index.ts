@@ -26,9 +26,13 @@ export {
 export { createDemonstration, getDemonstration, previewDemonstrationImport, applyDemonstrationImport } from './demonstrations.js'
 export { reserveRecordingArtifactUpload, commitRecordingArtifactUpload, abandonRecordingArtifactUpload, readRecordingArtifact, claimRecordingArtifactCleanup, settleRecordingArtifactCleanup, RECORDING_UPLOAD_DEADLINE_MS } from './artifacts.js'
 export {
-  getOrCreateRecordingGeneralization,
-  saveRecordingGeneralizationDecisions,
-  submitRecordingGeneralizationRound,
-  updateRecordingGeneralizationRoundStatus,
-  handoffCreateScenario,
-} from './generalizations.js'
+  listRecordingDraftExclusions,
+  updateRecordingDraftExclusions,
+  loadCleansingHints,
+  assertRecordingDraftOwner,
+} from './exclusions.js'
+export {
+  createScenarioFromRecordingHandoff,
+  createScenarioHandoffBodySchema,
+  type CreateScenarioHandoffBody,
+} from './handoff.js'

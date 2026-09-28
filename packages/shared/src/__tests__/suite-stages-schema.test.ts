@@ -27,6 +27,7 @@ describe('Suite Stages Schema & Orchestration Contracts', () => {
       ordinal: 0,
       executionMode: 'sequential',
       maxConcurrency: 1,
+      failurePolicy: 'continue',
       members: [
         {
           memberId: 'login',
@@ -67,8 +68,8 @@ describe('Suite Stages Schema & Orchestration Contracts', () => {
     expect(suiteDocumentSchema.parse(flatDoc)).toBeDefined()
     const effStages = effectiveSuiteStages(flatDoc)
     expect(effStages).toHaveLength(1)
-    expect(effStages[0].id).toBe('default')
-    expect(effStages[0].members).toHaveLength(1)
+    expect(effStages[0]!.id).toBe('default')
+    expect(effStages[0]!.members).toHaveLength(1)
     expect(allSuiteMembers(flatDoc)).toHaveLength(1)
 
     // 2. Document with stages
@@ -82,6 +83,7 @@ describe('Suite Stages Schema & Orchestration Contracts', () => {
           ordinal: 0,
           executionMode: 'sequential',
           maxConcurrency: 1,
+          failurePolicy: 'continue',
           members: [
             {
               memberId: 's1_m1',
@@ -98,6 +100,7 @@ describe('Suite Stages Schema & Orchestration Contracts', () => {
           ordinal: 1,
           executionMode: 'parallel',
           maxConcurrency: 5,
+          failurePolicy: 'continue',
           members: [
             {
               memberId: 's2_m1',
@@ -129,6 +132,7 @@ describe('Suite Stages Schema & Orchestration Contracts', () => {
         ordinal: 0,
         executionMode: 'parallel',
         maxConcurrency: 2,
+        failurePolicy: 'continue',
         members: [
           {
             memberId: 'm1',
@@ -154,6 +158,7 @@ describe('Suite Stages Schema & Orchestration Contracts', () => {
         ordinal: 1,
         executionMode: 'parallel',
         maxConcurrency: 2,
+        failurePolicy: 'continue',
         members: [
           {
             memberId: 'm3',
@@ -267,9 +272,9 @@ describe('Suite Stages Schema & Orchestration Contracts', () => {
       gridRows: [],
       aggregatedFindings: [
         {
+          id: 'f-1',
           severity: 'HIGH',
-          category: 'TIMEOUT',
-          message: '发现 3 单超时未派发工单',
+          title: '发现 3 单超时未派发工单',
           memberId: 'm_dispatch',
           displayName: '订单履约中心',
         },
