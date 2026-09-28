@@ -193,9 +193,9 @@ export async function listRecordingDrafts(
         ? sql`${recordingDrafts.unresolvedCount} = 0`
         : undefined,
     parsed.imported === true
-      ? sql`exists (select 1 from recording_import_receipts r where r.recording_draft_id = ${recordingDrafts.id})`
+      ? sql`exists (select 1 from recording_import_receipts r inner join scenarios s on s.id = r.scenario_id where r.recording_draft_id = ${recordingDrafts.id} and s.deleted_at is null)`
       : parsed.imported === false
-        ? sql`not exists (select 1 from recording_import_receipts r where r.recording_draft_id = ${recordingDrafts.id})`
+        ? sql`not exists (select 1 from recording_import_receipts r inner join scenarios s on s.id = r.scenario_id where r.recording_draft_id = ${recordingDrafts.id} and s.deleted_at is null)`
         : undefined,
     ...createdAtBounds(recordingDrafts.createdAt, parsed.from, parsed.to),
     cursorFilter(recordingDrafts.createdAt, recordingDrafts.id, parsed.cursor),
@@ -333,14 +333,21 @@ export async function deleteRecordingDraft(
 async function importedScenarioIds(db: Db, draftIds: string[]): Promise<Map<string, string>> {
   const imported = new Map<string, string>()
   if (draftIds.length === 0) return imported
-  const { recordingImportReceipts } = schemaFor(db)
+  const { recordingImportReceipts, scenarios } = schemaFor(db)
   const rows = await db
     .select({
       recordingDraftId: recordingImportReceipts.recordingDraftId,
       scenarioId: recordingImportReceipts.scenarioId,
     })
     .from(recordingImportReceipts)
-    .where(inArray(recordingImportReceipts.recordingDraftId, draftIds))
+    .innerJoin(scenarios, eq(recordingImportReceipts.scenarioId, scenarios.id))
+    .where(
+      and(
+        inArray(recordingImportReceipts.recordingDraftId, draftIds),
+        isNull(scenarios.deletedAt),
+      ),
+    )
+    .orderBy(desc(recordingImportReceipts.createdAt))
   for (const row of rows) {
     if (!imported.has(row.recordingDraftId)) imported.set(row.recordingDraftId, row.scenarioId)
   }

@@ -12,7 +12,8 @@ import {
   loadCleansingHints,
 } from '../recordings/exclusions.js'
 import { createScenarioFromRecordingHandoff } from '../recordings/handoff.js'
-import { getScenario } from '../runs/scenarios.js'
+import { getRecordingDraft, listRecordingDrafts } from '../recordings/recordings.js'
+import { deleteScenario, getScenario } from '../runs/scenarios.js'
 
 describe.each(DRIVERS)(
   '%s recording draft exclusions and handoff',
@@ -211,6 +212,30 @@ describe.each(DRIVERS)(
       const loadedScenario = await getScenario(handle.db, result.scenario.id)
       expect(loadedScenario.name).toBe(handoffName)
       expect(loadedScenario.draft?.revision).toBe(2)
+
+      // 验证回填后草稿显示已回填，且带有目标场景 ID
+      const draftBeforeDelete = await getRecordingDraft(handle.db, draftId, actorId)
+      expect(draftBeforeDelete.imported).toBe(true)
+      expect(draftBeforeDelete.importedScenarioId).toBe(result.scenario.id)
+
+      // 删除回填生成的场景
+      await deleteScenario(handle.db, result.scenario.id, actor())
+
+      // 验证场景被软删除后，草稿的回填状态自动解除，避免死链与错误按钮状态
+      const draftAfterDelete = await getRecordingDraft(handle.db, draftId, actorId)
+      expect(draftAfterDelete.imported).toBe(false)
+      expect(draftAfterDelete.importedScenarioId).toBeUndefined()
+
+      const list = await listRecordingDrafts(handle.db, actorId)
+      const draftInList = list.items.find((i) => i.id === draftId)
+      expect(draftInList?.imported).toBe(false)
+      expect(draftInList?.importedScenarioId).toBeUndefined()
+
+      const importedList = await listRecordingDrafts(handle.db, actorId, { imported: true })
+      expect(importedList.items.some((i) => i.id === draftId)).toBe(false)
+
+      const unimportedList = await listRecordingDrafts(handle.db, actorId, { imported: false })
+      expect(unimportedList.items.some((i) => i.id === draftId)).toBe(true)
     })
   },
 )
