@@ -517,13 +517,6 @@ export const observeEventSchema = z.discriminatedUnion('event', [
 ])
 export type ObserveEvent = z.infer<typeof observeEventSchema>
 
-const SENSITIVE_KEY_PATTERN = /password|secret|token|otp|\bpin\b|密码|口令|验证码|私钥/i
-
-export function resolveContextSensitivity(text: string): 'public' | 'business' | 'restricted' {
-  if (SENSITIVE_KEY_PATTERN.test(text)) return 'restricted'
-  return 'business'
-}
-
 export interface EvaluationSample {
   id: string
   datasetVersion: string

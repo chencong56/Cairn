@@ -15,11 +15,9 @@
     "@cairn/authoring": "workspace:*",
     "@cairn/shared": "workspace:*",
     "codemirror": "5.65.18",
-    "idb-keyval": "^6.2.1",
     "playwright-crx": "0.15.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-modal-promise": "^1.0.2",
     "xterm": "^5.1.0",
     "xterm-addon-fit": "^0.7.0",
     "yaml": "^2.6.0"
@@ -30,7 +28,6 @@
     "@types/node": "^25.9.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@types/wicg-file-system-access": "^2023.10.5",
     "typescript": "~6.0.3",
     "vite": "^6.3.4",
     "vitest": "^4.1.11"

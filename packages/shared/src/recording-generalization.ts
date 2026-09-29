@@ -20,8 +20,6 @@ import {
 } from './demonstration.js'
 import { scenarioAuthoringDocumentV2Schema, type ScenarioAuthoringDocumentV2 } from './authoring-document.js'
 
-export const RECORDING_GENERALIZATION_RULE_VERSION = 'recording-generalization@1' as const
-
 export const generalizationDecisionPatchSchema = z.strictObject({
   id: z.string().min(1).max(128),
   parameter: scenarioInputDeclSchema.optional(),

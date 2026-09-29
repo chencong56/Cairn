@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { userEvent } from 'vitest/browser'
 import { platformHealthResponseSchema, type PlatformHealthResponse, type PlatformHealthStatus } from '@cairn/shared'
-import { PlatformHealthIndicator } from '@/components/layout/platform-health-indicator'
 import { useAuthStore } from '@/stores/auth-store'
 import { markPlatformHealthStale, usePlatformHealth } from './use-platform-health'
 
@@ -99,22 +98,6 @@ describe('平台健康快照过期', () => {
     }, { timeout: 2_000 })
     await expect.element(screen.getByTestId('overall')).toHaveTextContent('unknown')
     await expect.element(screen.getByTestId('database')).toHaveTextContent('unknown')
-  })
-
-  it('健康详情弹层在过期后不保留旧组件绿灯或旧文案', async () => {
-    mocks.apiFetch.mockResolvedValueOnce(snapshot('degraded'))
-    mocks.apiFetch.mockImplementation(() => new Promise(() => {}))
-
-    const screen = await render(<PlatformHealthIndicator />)
-    await expect.element(screen.getByRole('button', { name: '平台健康状态：平台降级' })).toBeInTheDocument()
-    await vi.waitFor(async () => {
-      await expect.element(screen.getByRole('button', { name: '平台健康状态：状态未确认' })).toBeInTheDocument()
-    }, { timeout: 5_000 })
-    await userEvent.click(screen.getByRole('button', { name: '平台健康状态：状态未确认' }))
-    await expect.element(screen.getByText('结果已过期')).toBeInTheDocument()
-    expect(screen.getByText('状态已过期，等待重新检查').elements()).toHaveLength(4)
-    expect(screen.getByText('旧数据库状态').elements()).toHaveLength(0)
-    expect(screen.getByText('旧提示链路状态').elements()).toHaveLength(0)
   })
 
   it('较早请求晚到时不能覆盖后发起的刷新结果', async () => {

@@ -509,18 +509,3 @@ function applyVerification(
 function stateObservation(_state: MapProjectionState, _observationId: string): MapObservation | undefined {
   return undefined
 }
-
-export function emptyProjectionPlan(cursor: number): MapProjectionPlan {
-  return mapProjectionPlanSchema.parse({
-    protocol: MAP_ASSETS_PROTOCOL,
-    algorithmVersion: MAP_IDENTITY_RULE_VERSION,
-    pages: [],
-    objects: [],
-    assignments: [],
-    implementations: [],
-    descriptors: [],
-    assets: [],
-    conflicts: [],
-    nextCursor: cursor,
-  })
-}

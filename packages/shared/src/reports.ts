@@ -29,7 +29,6 @@ export const REPORT_LIMITS = Object.freeze({
 
 export const REPORT_SUBJECTS = ['RUN', 'SUITE_RUN'] as const
 export type ReportSubjectKind = (typeof REPORT_SUBJECTS)[number]
-export const reportSubjectKindSchema = z.enum(REPORT_SUBJECTS)
 
 export const REPORT_SCOPES = ['run', 'suite_summary', 'suite_bundle'] as const
 export type ReportScope = (typeof REPORT_SCOPES)[number]
@@ -57,7 +56,6 @@ export const artifactKindSchema = z.enum(ARTIFACT_KINDS)
 
 export const OBJECT_OWNER_KINDS = ['run', 'artifact', 'fixture'] as const
 export type ObjectOwnerKind = (typeof OBJECT_OWNER_KINDS)[number]
-export const objectOwnerKindSchema = z.enum(OBJECT_OWNER_KINDS)
 
 export const REPORT_TITLE_VARIABLES = REPORT_TITLE_CATALOG.map((item) => item.key)
 export type ReportTitleVariable = (typeof REPORT_TITLE_VARIABLES)[number]
@@ -653,11 +651,9 @@ export {
 
 export const REPORT_TRIGGER_STATUSES = ['pending', 'processing', 'created', 'skipped', 'failed'] as const
 export type ReportTriggerStatus = (typeof REPORT_TRIGGER_STATUSES)[number]
-export const reportTriggerStatusSchema = z.enum(REPORT_TRIGGER_STATUSES)
 
 export const reportProfileListQuerySchema = z.object({ targetId: entityIdSchema, limit: z.coerce.number().int().min(1).max(100).default(50), cursor: z.string().optional() })
 export const reportProfileListResponseSchema = z.object({ items: z.array(reportProfileDtoSchema), nextCursor: nextCursorSchema })
-export const reportProfileVersionsResponseSchema = z.object({ items: z.array(reportProfileDtoSchema), nextCursor: nextCursorSchema })
 export const scenarioReportDefaultsSchema = z.object({ scenarioId: entityIdSchema, profileId: entityIdSchema.nullable(), revision: z.number().int().nonnegative(), outputPolicy: outputPolicySchema.optional() })
 export const saveScenarioReportDefaultsBodySchema = z.strictObject({ profileId: entityIdSchema.nullable(), expectedRevision: z.number().int().nonnegative(), outputPolicy: outputPolicySchema.optional() })
 export const uploadReportAssetBodySchema = z.strictObject({
@@ -667,6 +663,5 @@ export const uploadReportAssetBodySchema = z.strictObject({
   contentType: z.enum(['image/png', 'image/jpeg']),
   base64: z.string().min(1).max(Math.ceil(REPORT_LIMITS.logoBytes / 3) * 4),
 })
-export const uploadReportAssetBodySchema_type = uploadReportAssetBodySchema
 export type UploadReportAssetBody = z.infer<typeof uploadReportAssetBodySchema>
 export const retryExportJobBodySchema = z.strictObject({ idempotencyKey: z.string().trim().min(8).max(128) })

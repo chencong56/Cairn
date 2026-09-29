@@ -15,7 +15,6 @@ import { nextCursorSchema } from './rbac.js'
 export const SESSION_MAINTENANCE_PROTOCOL = 'session-maintenance@1' as const
 
 export type SessionMaintenanceKind = (typeof SESSION_MAINTENANCE_KINDS)[number]
-export const sessionMaintenanceKindSchema = z.enum(SESSION_MAINTENANCE_KINDS)
 
 export const SESSION_LEASE_CLAIM_KINDS = [
   'PREPARE',

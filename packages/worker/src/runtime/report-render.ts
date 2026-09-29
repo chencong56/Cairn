@@ -56,7 +56,6 @@ export async function renderReportInThread(document: ReportDocument, images: Ima
       finish(err instanceof Error ? err : new Error(String(err)))
     })
     thread.once('exit', (code) => {
-      console.log('[THREAD ONCE EXIT]', code)
       if (!settled) finish(new Error(`渲染进程异常结束（${code}），可重试文件任务`))
     })
   })

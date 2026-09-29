@@ -535,10 +535,3 @@ export async function operateOutboundDelivery(
     return { eventId: delivery.eventId }
   })
 }
-
-// Backward-compatible aliases
-export const listNotificationEvents = listOutboundEvents
-export const getNotificationEvent = getOutboundEvent
-export const getNotificationChannels = getOutboundChannels
-export const createNotificationTest = createOutboundTest
-export const operateNotificationDelivery = operateOutboundDelivery

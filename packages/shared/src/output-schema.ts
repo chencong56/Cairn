@@ -77,10 +77,6 @@ export type OutputShape =
   | { kind: 'object'; fields: readonly { name: string; type: OutputFieldType | 'json'; required: boolean }[] }
   | { kind: 'list'; item: ListItemOutputShape; maxItems?: number }
 
-export function fieldsOfOutputSchema(schema: AiOutputSchema): readonly AiOutputField[] {
-  return schema.kind === 'object' ? schema.fields : []
-}
-
 export function parseAiOutput(
   raw: unknown,
   schema: AiOutputSchema,

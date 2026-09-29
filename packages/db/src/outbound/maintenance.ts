@@ -117,8 +117,3 @@ export async function purgeOutboundHistory(db: Db, options: { now?: Date } = {})
     return events.length
   })
 }
-
-// Backward-compatible aliases
-export const importLegacyNotificationNotices = importLegacyOutboundNotices
-export const reconcileNotificationSuppressions = reconcileOutboundSuppressions
-export const purgeNotificationHistory = purgeOutboundHistory

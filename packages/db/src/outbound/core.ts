@@ -476,16 +476,3 @@ export async function repairOutboundIntents(db: Db) {
     .limit(100)
   for (const run of candidates) await atomic(db, (tx) => enqueueRunOutboundIntentTx(tx, run.id))
 }
-
-// Backward-compatible aliases
-export const lockNotificationDispatch = lockOutboundDispatch
-export const notificationControlValues = outboundControlValues
-export const bumpNotificationControl = bumpOutboundControl
-export const freezeNotificationBindings = freezeOutboundBindings
-export const freezeRunNotificationPolicy = freezeRunOutboundPolicy
-export const enqueueRunNotificationIntentTx = enqueueRunOutboundIntentTx
-export const materializeNotificationDeliveries = materializeOutboundDeliveries
-export const prepareNotificationEvents = prepareOutboundEvents
-export const enqueueAlertNotificationTx = enqueueAlertOutboundTx
-export const enqueueTakeoverNotificationTx = enqueueTakeoverOutboundTx
-export const repairNotificationIntents = repairOutboundIntents

@@ -145,18 +145,6 @@ export class AssistantAsyncRunner implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * @deprecated 排队上下文已持久化至数据库 assistant_turns.request_payload，不再使用内存注册。
-   */
-  registerQueued(
-    _turnId: string,
-    _actor: Actor,
-    _body: CreateAssistantTurnBody,
-    _processingToken: string,
-  ): void {
-    // No-op: request payload is persisted directly in database
-  }
-
-  /**
    * Fire-and-forget background execution of an assistant turn.
    */
   startExecution(

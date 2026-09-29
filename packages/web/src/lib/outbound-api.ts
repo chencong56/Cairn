@@ -62,7 +62,6 @@ export const postOutbound = <T>(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-export const postNotification = postOutbound
 
 export async function subscribeOutbound(
   query: Record<string, unknown>,
@@ -84,4 +83,3 @@ export async function subscribeOutbound(
     signal
   )
 }
-export const subscribeNotifications = subscribeOutbound

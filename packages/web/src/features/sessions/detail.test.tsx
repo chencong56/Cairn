@@ -414,7 +414,6 @@ describe('SessionDetailPage', () => {
     for (const width of [1440, 1024, 390]) {
       await page.viewport(width, 900)
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
-      await page.screenshot({ path: `/Users/tinker/src/singe/Cairn/.run/session-c-fixes/认证-${width}.png` })
     }
     await screen.getByRole('button', { name: '完成认证' }).click()
     expect(mocks.resumeRunAuth).toHaveBeenCalledWith('op', { token: 't'.repeat(32) })

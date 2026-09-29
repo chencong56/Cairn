@@ -59,7 +59,6 @@ export async function withOutboundDeadline<T>(
     signal.removeEventListener('abort', abort)
   }
 }
-export const withNotificationDeadline = withOutboundDeadline
 
 export async function resolveOutboundDestination(
   url: string,
@@ -85,7 +84,6 @@ export async function resolveOutboundDestination(
     throw fail('destination_blocked')
   return addresses
 }
-export const resolveNotificationDestination = resolveOutboundDestination
 
 export function outboundWebhookBody(job: OutboundJob): string {
   const payload = job.event.payload!
@@ -127,7 +125,6 @@ export function outboundWebhookBody(job: OutboundJob): string {
   if (Buffer.byteLength(body) > 32 * 1024) throw fail('outbound_payload_too_large')
   return body
 }
-export const notificationWebhookBody = outboundWebhookBody
 
 /** Pure formatting. No template expression evaluation and no untrusted HTML. */
 export function outboundEmailText(
@@ -164,7 +161,6 @@ export function outboundEmailText(
     .filter(Boolean)
     .join('\n')
 }
-export const notificationEmailText = outboundEmailText
 
 export async function sendOutboundWebhook(input: {
   url: string
@@ -250,7 +246,6 @@ export async function sendOutboundWebhook(input: {
     req.end(input.body)
   })
 }
-export const sendNotificationWebhook = sendOutboundWebhook
 
 export type OutboundEmailAttachment = {
   filename: string
@@ -346,7 +341,6 @@ export async function sendOutboundEmail(input: {
     transport.close()
   }
 }
-export const sendNotificationEmail = sendOutboundEmail
 
 export type OutboundDeliveryDeps = {
   db: DbHandle
@@ -360,7 +354,6 @@ export type OutboundDeliveryDeps = {
   /** Transport fixture injection; runtime assembly always uses the pinned public resolver. */
   resolveDestination?: typeof resolveOutboundDestination
 }
-export type NotificationDeliveryDeps = OutboundDeliveryDeps
 
 export async function deliverOutbound(input: OutboundDeliveryDeps): Promise<number> {
   await importLegacyOutboundNotices(input.db)
@@ -503,4 +496,3 @@ export async function deliverOutbound(input: OutboundDeliveryDeps): Promise<numb
   )
   return jobs.length
 }
-export const deliverNotifications = deliverOutbound

@@ -153,13 +153,6 @@ export function isValidTimeZone(timeZone: string): boolean {
   }
 }
 
-export const timeZoneSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(64)
-  .refine(isValidTimeZone, '须为有效 IANA 时区')
-
 export const credentialValidityPolicySchema = z
   .strictObject({
     mode: credentialValidityModeSchema,

@@ -1,3 +1,5 @@
+2026-09-29--项目清理第一轮（只删不改行为）：删除 web 零引用死文件 5 个（credentials-api/notifications-api/authoring-api/extension-bridge/platform-health-indicator）与 notifications→outbound 更名残留别名四包 60 余个、shared/map/storage/api 零散死导出与死函数（含 browser-ai 死函数簇与孤立 import）；移除无用依赖 drizzle-kit、idb-keyval、react-modal-promise、@types/wicg-file-system-access；清理 worker 调试 console.log 与两处测试内本机绝对路径截图；全量编译、类型检查、契约/不变量门禁、单测及 db/api/worker 集成测试通过（OCC-03 为既有失败，已用还原法归因与本轮无关）。
+
 2026-09-29--试跑结果弹窗与录像步骤导航重构：将录像步骤控制拆分为顶层状态信息栏与横向自适应单行胶囊轨（固定高度 28px、单行不挤压断字、语义状态微点、平滑滚动居中并移除 <= 8 硬门槛），消除试跑弹窗外层嵌套卡片冗余边框；补齐多步与超量场景浏览器仿真单测与视觉验收。
 
 2026-09-29--验收意图（二期）：自由描述拆解、验收体检与跨页意图落地：承接一期管线支持自由描述一段话（≤500字）模型拆解为结构化意图（不可拆解项记入 unsupported 不静默丢弃）；落地纯函数式验收体检 auditAcceptance 与 6 条体检规则（编译器诊断转译与提取未引用/无摘要/无耗时观测等规则）配合模型增补与 Web 验收体检弹窗（一键勾选应用建议意图卡）；扩展场景级耗时 run_duration 成功条件与 fromRunDuration 指标（从最早步骤 startedAt 到最后先前步骤 finishedAt 真实墙钟计时）；扩展跨页数值一致性 value_consistency 意图与静态主干/outputKey 门禁（VALUE_SOURCE_MISSING），自动插入 compute 计算步骤与场景级差值断言；Web 工作台增加自由描述输入区、跨页配置项与场景级意图徽标呈现；全量契约、不变量、数据库可移植性、单测、类型检查与全栈探活 STACK_OK

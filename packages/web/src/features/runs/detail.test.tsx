@@ -511,7 +511,6 @@ describe('RunDetailPage', () => {
       expect(screen.getByRole('button', { name: '新建完整试跑' }).elements()).toHaveLength(0)
       for (const width of [1440, 390]) {
         await page.viewport(width, 900)
-        await page.screenshot({ path: `/Users/tinker/src/singe/Cairn/.run/session-d-fixes/核查-${width}.png` })
       }
       await page.viewport(1440, 900)
     } else {

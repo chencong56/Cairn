@@ -228,7 +228,3 @@ export function mapGapObservation(
 
 export const finishAttemptMapFactsSchema = z.array(mapFactBatchItemSchema).max(20)
 export type FinishAttemptMapFact = MapFactBatchItem
-
-export const createRecordingMapIngestSchema = z.strictObject({
-  recordingDraftId: entityIdSchema,
-})

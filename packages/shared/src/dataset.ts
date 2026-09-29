@@ -5,7 +5,6 @@ import { scenarioInputDeclSchema, scenarioInputTypeSchema } from './step.js'
 
 export const DATASET_STATUSES = ['active', 'archived'] as const
 export type DatasetStatus = (typeof DATASET_STATUSES)[number]
-export const datasetStatusSchema = z.enum(DATASET_STATUSES)
 
 export const DATASET_SOURCE_TYPES = ['excel', 'csv', 'table'] as const
 export type DatasetSourceType = (typeof DATASET_SOURCE_TYPES)[number]

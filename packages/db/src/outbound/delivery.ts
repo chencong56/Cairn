@@ -316,8 +316,3 @@ export async function finishOutboundDelivery(
     return true
   })
 }
-
-// Backward-compatible aliases
-export const claimNotificationDeliveries = claimOutboundDeliveries
-export const beginNotificationSubmission = beginOutboundSubmission
-export const finishNotificationDelivery = finishOutboundDelivery

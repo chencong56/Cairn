@@ -7,21 +7,18 @@ export {
   stableObjectToken,
 } from './identity.js'
 export { chooseImplementation, evaluateCondition, isMoreSpecific, knownConditionFields } from './conditions.js'
-export { applyDimension, attributeVerification, lifecycleFromEvidence, mergeLocalState } from './verification.js'
-export { emptyProjectionPlan, planProjectionBatch, projectionFactPrefix, projectionWorkingSetHints } from './projection.js'
+export { applyDimension, attributeVerification, lifecycleFromEvidence } from './verification.js'
+export { planProjectionBatch, projectionFactPrefix, projectionWorkingSetHints } from './projection.js'
 export type { ProjectionWorkingSetHints } from './projection.js'
 export { queryMap } from './query.js'
 export {
   applyGovernanceOverlay,
   mapListQueryKey,
-  mapCursorPayload,
-  parseMapCursorPayload,
   proposeMapReferenceCandidates,
   cluesFromScenarioStep,
   gradeMapImpact,
   resolveBindingAfterIdentity,
   groupMapDiagnosisClues,
-  overlayLifecycleMap,
   applyDetailApplicability,
 } from './governance.js'
 export type { ScenarioStepClue, MapScanAsset, MapReferenceCandidate } from './governance.js'

@@ -186,13 +186,3 @@ export function lifecycleFromEvidence(input: {
   return 'DISCOVERED'
 }
 
-export function mergeLocalState(
-  current: Record<string, unknown> | undefined,
-  observation: MapObservation,
-): Record<string, unknown> {
-  return {
-    ...(current ?? {}),
-    ...observation.stateSummary.regions,
-    predicates: observation.semanticSummary.predicates,
-  }
-}

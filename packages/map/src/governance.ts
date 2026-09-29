@@ -45,18 +45,6 @@ export function mapListQueryKey(input: {
   }
 }
 
-export function mapCursorPayload(digest: string, sortKey: string): { d: string; k: string } {
-  return { d: digest, k: sortKey }
-}
-
-export function parseMapCursorPayload(value: unknown): { digest: string; sortKey: string } {
-  const parsed = value && typeof value === 'object' ? (value as { d?: unknown; k?: unknown }) : {}
-  if (typeof parsed.d !== 'string' || typeof parsed.k !== 'string' || !parsed.d || !parsed.k) {
-    throw new Error('MAP_CURSOR_EXPIRED')
-  }
-  return { digest: parsed.d, sortKey: parsed.k }
-}
-
 export type ScenarioStepClue = {
   stepId: string
   name?: string
@@ -290,12 +278,6 @@ export function groupMapDiagnosisClues(
   if (locator?.verdict === 'rejected') hypotheses.push('定位失败，需核对对象身份与实现条件')
   if (clues.every((item) => item.verdict === 'not_observed')) gaps.push('没有足够的分维验证事实')
   return { clues, hypotheses, counterExamples, gaps }
-}
-
-export function overlayLifecycleMap(
-  overlays: readonly { assetRefKey: string; lifecycle: MapOverlayLifecycle }[],
-): Map<string, MapOverlayLifecycle> {
-  return new Map(overlays.map((item) => [item.assetRefKey, item.lifecycle]))
 }
 
 export function applyDetailApplicability(

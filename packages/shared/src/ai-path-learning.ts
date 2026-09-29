@@ -23,11 +23,9 @@ export type TraceIntegrityState = (typeof TRACE_INTEGRITY_STATES)[number]
 
 export const AI_CALL_INTENTS = ['ai_act', 'ai_atomic', 'ai_locate', 'ai_extract', 'ai_assert'] as const
 export type AiCallIntent = (typeof AI_CALL_INTENTS)[number]
-export const aiCallIntentSchema = z.enum(AI_CALL_INTENTS)
 
 export const AI_CALL_ROUTES = ['vision', 'aria_text'] as const
 export type AiCallRoute = (typeof AI_CALL_ROUTES)[number]
-export const aiCallRouteSchema = z.enum(AI_CALL_ROUTES)
 
 /** 单个 Attempt 最多记录的动作数（按动作序号计，不按事件行计）。 */
 export const MAX_AI_TASK_EVENTS_PER_ATTEMPT = 200

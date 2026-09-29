@@ -1,10 +1,6 @@
 import {
   DomainError,
   forbidden,
-  getPlatformConfig,
-  loadResolutionLayers,
-  loadScenarioVersion,
-  type DbHandle,
 } from '@cairn/db'
 import {
   FACTORY_PLATFORM_CONFIG,
@@ -25,10 +21,6 @@ import {
 } from '@cairn/shared'
 import { config } from './env'
 import type { RequestAccount } from '../common/request-account'
-
-export function platformDocumentOrFactory(document?: PlatformConfigDocument | null) {
-  return document ?? FACTORY_PLATFORM_CONFIG
-}
 
 export function browserAiCapabilitiesFrom(
   document: PlatformConfigDocument,
@@ -101,36 +93,4 @@ export function assertAiExecutePermission(
   if (!hasPermission(actor.permissions, 'ai:execute')) {
     throw forbidden('AI_EXECUTE_FORBIDDEN', '缺少 ai:execute，不能运行含 AI 步骤或 AI 解析档位的场景')
   }
-}
-
-export async function loadPlatformForRuntime(db: DbHandle): Promise<{
-  document: PlatformConfigDocument
-  revision: number
-}> {
-  const current = await getPlatformConfig(db)
-  return {
-    document: platformDocumentOrFactory(current?.document),
-    revision: current?.revision ?? 1,
-  }
-}
-
-export async function resolveRunAiExecution(
-  db: DbHandle,
-  input: { scenarioId: string; scenarioVersionId?: string; actor: RequestAccount },
-): Promise<AiExecutionConfig | undefined> {
-  const { scenario, version } = await loadScenarioVersion(db, input.scenarioId, input.scenarioVersionId)
-  const layers = await loadResolutionLayers(db, scenario.targetId)
-  assertAiExecutePermission(input.actor, version.definition.steps, {
-    document: layers.document,
-    documentResolution: version.definition.resolution,
-    documentLocatorPlan: version.definition.locatorPlan,
-    locatorProtocol: version.definition.locatorProtocol,
-    targetCeiling: layers.targetCeiling,
-    targetPreference: layers.targetPreference,
-    targetPolicy: layers.targetPolicy,
-  })
-  if (version.definition.locatorProtocol === 2 || version.definition.locatorPlan || version.definition.steps.some((step) => step.policy?.locatorPlan)) return undefined
-  return resolveAiExecution(version.definition.steps, layers.document, {
-    revision: layers.revision,
-  })
 }

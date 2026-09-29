@@ -368,10 +368,6 @@ export function isSelectablePublication(status: ModulePublicationStatus): boolea
   return status === 'published' || status === 'deprecated'
 }
 
-export function describeUpgradeSkip(code: string, message: string) {
-  return { code, message }
-}
-
 export function sourceDescription(input: {
   scenarioName: string
   scenarioId: string
