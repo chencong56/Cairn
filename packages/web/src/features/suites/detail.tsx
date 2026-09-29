@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import {
@@ -47,6 +47,11 @@ function newIdempotencyKey() {
 
 const EMPTY_PERMISSIONS: string[] = []
 
+export type SelectedEntity =
+  | { type: 'suite' }
+  | { type: 'stage'; stageIndex: number }
+  | { type: 'member'; memberId: string; stageIndex?: number }
+
 export function SuiteDetailPage() {
   const { suiteId } = useParams({ from: '/_authenticated/suites/$suiteId/' })
   const navigate = useNavigate()
@@ -75,6 +80,7 @@ export function SuiteDetailPage() {
   const [description, setDescription] = useState('')
   const [document, setDocument] = useState<SuiteDocument>(EMPTY_SUITE_DOCUMENT)
   const [editingMember, setEditingMember] = useState<SuiteMember | null>(null)
+  const [selectedEntity, setSelectedEntity] = useState<SelectedEntity>({ type: 'suite' })
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -96,7 +102,7 @@ export function SuiteDetailPage() {
     return JSON.stringify(document) !== JSON.stringify(query.data.draft.document)
   }, [name, description, document, query.data])
 
-  async function save() {
+  const save = useCallback(async () => {
     if (!query.data) return
     setBusy(true)
     try {
@@ -113,7 +119,21 @@ export function SuiteDetailPage() {
     } finally {
       setBusy(false)
     }
-  }
+  }, [query.data, suiteId, name, description, document, queryClient])
+
+  // Desktop keyboard shortcuts: Cmd+S to save draft, Esc to deselect to suite
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        void save()
+      } else if (e.key === 'Escape') {
+        setSelectedEntity({ type: 'suite' })
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [save])
 
   async function publish() {
     if (!query.data) return
@@ -176,20 +196,39 @@ export function SuiteDetailPage() {
 
   const isStageMode = Boolean(document.stages && document.stages.length > 0)
 
+  // Find currently selected member and stage for the Inspector
+  const selectedMember = useMemo(() => {
+    if (selectedEntity.type !== 'member') return null
+    if (isStageMode && document.stages) {
+      for (const stage of document.stages) {
+        const found = stage.members.find((m) => m.memberId === selectedEntity.memberId)
+        if (found) return found
+      }
+    }
+    return document.members.find((m) => m.memberId === selectedEntity.memberId) ?? null
+  }, [selectedEntity, isStageMode, document])
+
+  const selectedStage = useMemo(() => {
+    if (selectedEntity.type !== 'stage' || !document.stages) return null
+    return document.stages[selectedEntity.stageIndex] ?? null
+  }, [selectedEntity, document.stages])
+
   // Flat mode member handlers
   function addMemberFlat(scenarioId: string) {
     const scenario = scenarios.data?.items.find((item) => item.id === scenarioId)
     if (!scenario) return
     const allMembers = allSuiteMembers(document)
+    const newId = nextMemberId(allMembers)
     const member: SuiteMember = {
-      memberId: nextMemberId(allMembers),
+      memberId: newId,
       ordinal: document.members.length,
       scenarioId: scenario.id,
       scenarioVersionId: scenario.latestVersionId,
-      displayName: scenario.name,
+      displayName: undefined,
       input: {},
     }
     setDocument({ ...document, members: [...document.members, member] })
+    setSelectedEntity({ type: 'member', memberId: newId })
   }
 
   function moveMemberFlat(index: number, delta: number) {
@@ -202,6 +241,10 @@ export function SuiteDetailPage() {
   }
 
   function removeMemberFlat(index: number) {
+    const removing = document.members[index]
+    if (selectedEntity.type === 'member' && selectedEntity.memberId === removing?.memberId) {
+      setSelectedEntity({ type: 'suite' })
+    }
     setDocument({
       ...document,
       members: document.members
@@ -224,18 +267,20 @@ export function SuiteDetailPage() {
     const allMembers = allSuiteMembers(document)
     const stage = document.stages[stageIndex]
     if (!stage) return
+    const newId = nextMemberId(allMembers)
     const member: SuiteMember = {
-      memberId: nextMemberId(allMembers),
+      memberId: newId,
       ordinal: stage.members.length,
       scenarioId: scenario.id,
       scenarioVersionId: scenario.latestVersionId,
-      displayName: scenario.name,
+      displayName: undefined,
       input: {},
     }
     const nextStages = document.stages.map((s, idx) =>
       idx === stageIndex ? { ...s, members: [...s.members, member] } : s,
     )
     setDocument({ ...document, stages: nextStages })
+    setSelectedEntity({ type: 'member', memberId: newId, stageIndex })
   }
 
   function moveMemberInStage(stageIndex: number, memberIndex: number, delta: number) {
@@ -259,6 +304,10 @@ export function SuiteDetailPage() {
     if (!document.stages) return
     const stage = document.stages[stageIndex]
     if (!stage) return
+    const removing = stage.members[memberIndex]
+    if (selectedEntity.type === 'member' && selectedEntity.memberId === removing?.memberId) {
+      setSelectedEntity({ type: 'stage', stageIndex })
+    }
     const nextMembers = stage.members
       .filter((_, idx) => idx !== memberIndex)
       .map((m, ordinal) => ({ ...m, ordinal }))
@@ -282,6 +331,28 @@ export function SuiteDetailPage() {
     setDocument({ ...document, stages: nextStages })
   }
 
+  function updateSelectedMember(updater: (m: SuiteMember) => SuiteMember) {
+    if (selectedEntity.type !== 'member') return
+    const memberId = selectedEntity.memberId
+    if (isStageMode && document.stages) {
+      const nextStages = document.stages.map((stage) => ({
+        ...stage,
+        members: stage.members.map((m) => (m.memberId === memberId ? updater(m) : m)),
+      }))
+      setDocument({ ...document, stages: nextStages })
+    } else {
+      const nextMembers = document.members.map((m) => (m.memberId === memberId ? updater(m) : m))
+      setDocument({ ...document, members: nextMembers })
+    }
+  }
+
+  function updateSelectedStage(updater: (s: SuiteStage) => SuiteStage) {
+    if (selectedEntity.type !== 'stage' || !document.stages) return
+    const stageIndex = selectedEntity.stageIndex
+    const nextStages = document.stages.map((s, idx) => (idx === stageIndex ? updater(s) : s))
+    setDocument({ ...document, stages: nextStages })
+  }
+
   function addStage() {
     const currentStages = document.stages ?? []
     const newOrdinal = currentStages.length
@@ -296,10 +367,14 @@ export function SuiteDetailPage() {
       members: [],
     }
     setDocument({ ...document, stages: [...currentStages, newStage] })
+    setSelectedEntity({ type: 'stage', stageIndex: newOrdinal })
   }
 
   function removeStage(stageIndex: number) {
     if (!document.stages) return
+    if (selectedEntity.type === 'stage' && selectedEntity.stageIndex === stageIndex) {
+      setSelectedEntity({ type: 'suite' })
+    }
     const nextStages = document.stages
       .filter((_, idx) => idx !== stageIndex)
       .map((s, ordinal) => ({ ...s, ordinal }))
@@ -344,6 +419,7 @@ export function SuiteDetailPage() {
     if (isStageMode) {
       const flat = allSuiteMembers(document).map((m, ordinal) => ({ ...m, ordinal }))
       setDocument({ ...document, stages: [], members: flat })
+      setSelectedEntity({ type: 'suite' })
       toast.info('已转换为平铺模式')
     } else {
       const initialStage: SuiteStage = {
@@ -356,6 +432,7 @@ export function SuiteDetailPage() {
         members: [...document.members],
       }
       setDocument({ ...document, stages: [initialStage], members: [] })
+      setSelectedEntity({ type: 'stage', stageIndex: 0 })
       toast.success('已开启多阶段依赖编排模式')
     }
   }
@@ -411,6 +488,22 @@ export function SuiteDetailPage() {
             availableScenarios={scenarios.data?.items ?? []}
             targetAccounts={targetAccounts.data?.items ?? []}
             targetId={suite.targetId}
+            selectedMemberId={selectedEntity.type === 'member' ? selectedEntity.memberId : null}
+            selectedStageIndex={selectedEntity.type === 'stage' ? selectedEntity.stageIndex : null}
+            onSelectMember={(memberId, stageIndex) => {
+              if (memberId) {
+                setSelectedEntity({ type: 'member', memberId, stageIndex })
+              } else {
+                setSelectedEntity({ type: 'suite' })
+              }
+            }}
+            onSelectStage={(stageIndex) => {
+              if (stageIndex !== null) {
+                setSelectedEntity({ type: 'stage', stageIndex })
+              } else {
+                setSelectedEntity({ type: 'suite' })
+              }
+            }}
             onToggleStageMode={toggleStageMode}
             onAddStage={addStage}
             onMoveStage={moveStage}
@@ -427,11 +520,13 @@ export function SuiteDetailPage() {
             onUpdateMemberFlat={updateMemberFlat}
             onMoveMemberFlat={moveMemberFlat}
             onRemoveMemberFlat={removeMemberFlat}
-            onOpenInputEditor={(member) => setEditingMember(member)}
+            onOpenInputEditor={(member) => {
+              setSelectedEntity({ type: 'member', memberId: member.memberId })
+            }}
           />
         </div>
 
-        {/* Right: Inspector Properties & Execution Config (Secondary) */}
+        {/* Right: Context-Sensitive Inspector (Suite / Stage / Member) */}
         <div className='min-w-0 lg:sticky lg:top-6'>
           <SuiteInspector
             name={name}
@@ -441,14 +536,21 @@ export function SuiteDetailPage() {
             canWrite={canWrite}
             targetAccounts={targetAccounts.data?.items ?? []}
             targetId={suite.targetId}
+            selectedMember={selectedMember}
+            selectedStage={selectedStage}
+            scenarioNames={scenarioNames}
+            onClearSelection={() => setSelectedEntity({ type: 'suite' })}
             onUpdateName={setName}
             onUpdateDescription={setDescription}
             onUpdateDocument={(updater) => setDocument(updater(document))}
+            onUpdateMember={updateSelectedMember}
+            onUpdateStage={updateSelectedStage}
+            onOpenInputDialog={(member) => setEditingMember(member)}
           />
         </div>
       </div>
 
-      {/* Member Input Override Dialog */}
+      {/* Member Input Override Dialog (Escape hatch for JSON mode) */}
       <MemberInputDialog
         open={editingMember !== null}
         document={document}

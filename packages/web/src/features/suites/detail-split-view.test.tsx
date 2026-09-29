@@ -310,4 +310,79 @@ describe('SuiteDetailPage 左右双栏流水线工作台 UI 验收', () => {
 
     await page.screenshot({ path: '__screenshots__/split-view-picker-preview.png' })
   })
+
+  it('Apple Design 交互验收：ScenarioQuickPicker 智能快捷添加与右侧上下文检视器联动', async () => {
+    useAuthStore.getState().auth.setUser({
+      id: 'u1',
+      displayName: '管理员',
+      email: null,
+      roles: [],
+      permissions: ['suite:read', 'suite:write', 'run:execute', 'target:read', 'workflow:read'],
+    })
+
+    mocks.fetchSuite.mockResolvedValue({
+      id: 'suite-01',
+      targetId: 'target-01',
+      name: 'modelapi中转站-全链路巡检套件',
+      description: '每日巡检工作套件',
+      status: 'active',
+      draft: {
+        revision: 1,
+        document: {
+          schemaVersion: 1,
+          groups: [],
+          members: [
+            {
+              memberId: 'm1',
+              ordinal: 0,
+              scenarioId: 'sc-1',
+              scenarioVersionId: 'v1',
+              displayName: '账号登录检查',
+              input: { region: 'cn-beijing' },
+            },
+          ],
+          sharedInput: { env: 'production' },
+          executionMode: 'parallel',
+          maxConcurrency: 4,
+          failurePolicy: 'continue',
+          autoGenerateFinalReport: true,
+        },
+      },
+      published: { id: 'pub-0', versionNo: 1 },
+      createdAt: '2026-09-23T00:00:00.000Z',
+      updatedAt: '2026-09-23T00:00:00.000Z',
+    })
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await render(
+      <QueryClientProvider client={queryClient}>
+        <SuiteDetailPage />
+      </QueryClientProvider>,
+    )
+    await page.viewport(1440, 900)
+
+    // 1. 验证 ScenarioQuickPicker 浮层搜索与选择场景加入流水线
+    const quickPickerTrigger = page.getByRole('button', { name: '添加已发布场景' })
+    await quickPickerTrigger.click()
+
+    await expect.element(page.getByPlaceholder('搜索场景名称、关键词...')).toBeVisible()
+    await page.screenshot({ path: '__screenshots__/apple-design-quick-picker.png' })
+
+    // 在快捷选择器中点击选择“风控拦截场景”
+    const option = page.getByRole('group', { name: '全部可用场景 (2)' }).getByText('风控拦截场景')
+    await option.click()
+
+    // 2. 加入后自动聚焦该成员节点，右侧检视器无缝切换为该成员的属性与参数覆盖面板
+    await expect.element(page.getByText('场景信息与展示名称')).toBeVisible()
+    await expect.element(page.getByText('参数覆盖 (Overrides)')).toBeVisible()
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    await page.screenshot({ path: '__screenshots__/apple-design-context-inspector.png' })
+
+    // 3. 点击返回全局设置，右侧切回全局配置
+    const returnBtn = page.getByRole('button', { name: '全局设置' })
+    await returnBtn.click()
+
+    await expect.element(page.getByText('基本信息')).toBeVisible()
+    await expect.element(page.getByText('执行与并发策略')).toBeVisible()
+  })
 })

@@ -1,3 +1,7 @@
+2026-09-29--场景集详情页 Apple Design 体验重构：以 Spotlight 风格 ScenarioQuickPicker 统一替换「超长无过滤下拉+查找按钮」双轨入口（支持实时搜索、常用推荐、在集防重提示与全键盘流）；重构右侧 SuiteInspector 为三级上下文检视器（Suite/Stage/Member 动态聚焦联动，参数覆盖内嵌 KeyValueEditor 彻底消灭阻断式 Modal 弹窗）；轻量化流水线 Member 节点去除截断的固定表单框并注入高亮激活态；全套自动化测试、类型检查、Lint 与无头真实浏览器走查 100% 绿灯通过。
+
+2026-09-29--验收意图二期复查修复：全程耗时两口径对齐（执行期 runTotal 改取全 scope 运行账本、结算期 fromRunDuration 起点改用各步首次尝试，恢复「结算期恒≥执行期」登记差）；DURATION_UNAVAILABLE 度量缺失改判 UNKNOWN 并按 onViolation 继续、不再把整个 Run 打成 FAILED；settleRunOutput/getRunDetail 打通 runStartedAt 降级路径；修复自由描述路径丢弃面板结构化意图的合并缺陷并新增 parsedIntents 契约把拆解结果回填为可编辑意图卡；面板补齐澄清一轮（首轮描述+回答合并重发）、无模型禁用说明、体检建议 MAX_ACCEPTANCE_INTENTS 上限与超出提示、体检缺口跳转步骤、真实覆盖度呈现与场景配置工作区体检入口；场景配置工作区 run_duration 条件落入页面对象编辑分支致改动静默丢弃的问题修复（新增比较方式与阈值编辑）；unsupported 提示条移至方案区顶部、零意图 clarify 追问带回未支持部分、模型拆解无效意图转 unsupported 不再静默丢弃、跨页一致对动作模块内步骤给出准确拦截文案；体检调用绑定草稿修订；体检取数引用判定只统计后续步骤；补齐 shared 意图/耗时/指标三选一、authoring 场景级 add_outcome 与 run_duration 派生、worker outcome-collector 与执行口径测试；全量契约、不变量、可移植性、单测、类型检查与 lint 通过
+
 2026-09-29--项目清理第一轮（只删不改行为）：删除 web 零引用死文件 5 个（credentials-api/notifications-api/authoring-api/extension-bridge/platform-health-indicator）与 notifications→outbound 更名残留别名四包 60 余个、shared/map/storage/api 零散死导出与死函数（含 browser-ai 死函数簇与孤立 import）；移除无用依赖 drizzle-kit、idb-keyval、react-modal-promise、@types/wicg-file-system-access；清理 worker 调试 console.log 与两处测试内本机绝对路径截图；全量编译、类型检查、契约/不变量门禁、单测及 db/api/worker 集成测试通过（OCC-03 为既有失败，已用还原法归因与本轮无关）。
 
 2026-09-29--试跑结果弹窗与录像步骤导航重构：将录像步骤控制拆分为顶层状态信息栏与横向自适应单行胶囊轨（固定高度 28px、单行不挤压断字、语义状态微点、平滑滚动居中并移除 <= 8 硬门槛），消除试跑弹窗外层嵌套卡片冗余边框；补齐多步与超量场景浏览器仿真单测与视觉验收。

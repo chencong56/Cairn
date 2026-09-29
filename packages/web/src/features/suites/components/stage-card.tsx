@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { SuiteMember, SuiteStage } from '@cairn/shared'
-import { ArrowDown, ArrowUp, ChevronDown, Plus, Search, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, Search, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/select'
 import { MemberNode } from './member-node'
 import { MemberPickerDialog } from './member-picker-dialog'
+import { ScenarioQuickPicker } from './scenario-quick-picker'
+import { cn } from '@/lib/utils'
 
 export function StageCard({
   stage,
@@ -23,6 +25,10 @@ export function StageCard({
   availableScenarios,
   targetAccounts,
   targetId,
+  selectedMemberId,
+  isSelected = false,
+  onSelectStage,
+  onSelectMember,
   onUpdateStageName,
   onUpdateStageMode,
   onUpdateStageConcurrency,
@@ -43,6 +49,10 @@ export function StageCard({
   availableScenarios: Array<{ id: string; name: string; latestVersionId?: string }>
   targetAccounts: Array<{ id: string; displayName: string; username: string }>
   targetId: string
+  selectedMemberId?: string | null
+  isSelected?: boolean
+  onSelectStage?: () => void
+  onSelectMember?: (memberId: string) => void
   onUpdateStageName: (name: string) => void
   onUpdateStageMode: (mode: 'parallel' | 'sequential') => void
   onUpdateStageConcurrency: (concurrency: number) => void
@@ -61,12 +71,20 @@ export function StageCard({
   return (
     <div className='flex flex-col'>
       {/* Stage Container: subtle cool tint background for visual depth */}
-      <div className='rounded-xl border border-border-card bg-muted/20 p-4 shadow-card space-y-4'>
+      <div
+        onClick={onSelectStage}
+        className={cn(
+          'rounded-xl border p-4 shadow-card space-y-4 transition-all',
+          isSelected
+            ? 'border-primary ring-2 ring-primary/20 bg-muted/30 shadow-card-hover'
+            : 'border-border-card bg-muted/20 hover:border-border'
+        )}
+      >
         {/* Stage Header: Structured 2-row layout for rock-solid alignment */}
         <div className='border-b border-border-divider pb-3.5 space-y-2.5'>
           {/* Row 1: Stage Identity and Action Buttons */}
           <div className='flex items-center justify-between gap-3'>
-            <div className='flex items-center gap-2 min-w-0 flex-1'>
+            <div className='flex items-center gap-2 min-w-0 flex-1' onClick={(e) => e.stopPropagation()}>
               <Badge
                 variant='outline'
                 className='font-mono text-label bg-card shadow-xs shrink-0 cursor-default'
@@ -88,7 +106,7 @@ export function StageCard({
 
             {/* Stage Reorder and Delete Actions */}
             {canWrite ? (
-              <div className='flex items-center gap-0.5 shrink-0'>
+              <div className='flex items-center gap-0.5 shrink-0' onClick={(e) => e.stopPropagation()}>
                 <Button
                   variant='ghost'
                   size='icon'
@@ -123,7 +141,7 @@ export function StageCard({
           </div>
 
           {/* Row 2: Execution Policy Controls Bar */}
-          <div className='flex flex-wrap items-center gap-4 text-label'>
+          <div className='flex flex-wrap items-center gap-4 text-label' onClick={(e) => e.stopPropagation()}>
             {/* Mode Selector */}
             <div className='flex items-center gap-1.5'>
               <span className='text-label text-muted-foreground shrink-0'>执行模式:</span>
@@ -202,6 +220,8 @@ export function StageCard({
                 scenarioName={scenarioNames.get(member.scenarioId) ?? member.scenarioId.slice(0, 8)}
                 targetAccounts={targetAccounts}
                 targetId={targetId}
+                isSelected={selectedMemberId === member.memberId}
+                onSelect={() => onSelectMember?.(member.memberId)}
                 canMoveUp={mIdx > 0}
                 canMoveDown={mIdx < stage.members.length - 1}
                 onUpdateDisplayName={(displayName) =>
@@ -221,33 +241,17 @@ export function StageCard({
           )}
         </div>
 
-        {/* Add Member Actions */}
+        {/* Add Member Actions: Unified ScenarioQuickPicker & Search Dialog */}
         {canWrite ? (
-          <div className='flex items-center gap-2 pt-1'>
-            {/* Quick dropdown select (compatible with tests and fast picking) */}
-            <Select onValueChange={(scenarioId) => onAddMember(scenarioId)}>
-              <SelectTrigger
-                className='w-64 h-8 text-label bg-card'
-                aria-label={`为阶段 ${stage.ordinal + 1} 添加场景`}
-              >
-                <div className='flex items-center gap-1.5'>
-                  <Plus className='size-3.5' />
-                  <SelectValue placeholder='添加场景至此阶段' />
-                </div>
-              </SelectTrigger>
-              <SelectContent>
-                {availableScenarios.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    <span className='inline-flex items-center gap-1.5'>
-                      <Plus className='size-3 text-muted-foreground' />
-                      {item.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className='flex items-center gap-2 pt-1' onClick={(e) => e.stopPropagation()}>
+            <ScenarioQuickPicker
+              availableScenarios={availableScenarios}
+              currentMemberScenarioIds={stage.members.map((m) => m.scenarioId)}
+              onSelectScenario={onAddMember}
+              onOpenSearchDialog={() => setPickerOpen(true)}
+              triggerText='添加场景至此阶段'
+            />
 
-            {/* Enhanced dialog browser for larger libraries */}
             <Button
               variant='outline'
               size='sm'

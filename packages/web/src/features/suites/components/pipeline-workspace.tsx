@@ -3,16 +3,10 @@ import type { SuiteDocument, SuiteMember } from '@cairn/shared'
 import { Layers, Plus, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { StageCard } from './stage-card'
 import { MemberNode } from './member-node'
 import { MemberPickerDialog } from './member-picker-dialog'
+import { ScenarioQuickPicker } from './scenario-quick-picker'
 
 export function PipelineWorkspace({
   document,
@@ -22,6 +16,10 @@ export function PipelineWorkspace({
   availableScenarios,
   targetAccounts,
   targetId,
+  selectedMemberId,
+  selectedStageIndex,
+  onSelectMember,
+  onSelectStage,
   onToggleStageMode,
   onAddStage,
   onMoveStage,
@@ -47,6 +45,10 @@ export function PipelineWorkspace({
   availableScenarios: Array<{ id: string; name: string; latestVersionId?: string }>
   targetAccounts: Array<{ id: string; displayName: string; username: string }>
   targetId: string
+  selectedMemberId?: string | null
+  selectedStageIndex?: number | null
+  onSelectMember: (memberId: string | null, stageIndex?: number) => void
+  onSelectStage: (stageIndex: number | null) => void
   onToggleStageMode: () => void
   onAddStage: () => void
   onMoveStage: (index: number, delta: number) => void
@@ -74,7 +76,7 @@ export function PipelineWorkspace({
       <div className='flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-card bg-card p-4 shadow-card'>
         <div>
           <div className='flex items-center gap-2'>
-            <h2 className='text-title'>流水线编排</h2>
+            <h2 className='text-title font-semibold'>流水线编排</h2>
             {isStageMode ? (
               <Badge variant='outline' className='font-normal text-label text-primary border-primary/30'>
                 多阶段依赖编排 ({stages.length} 个阶段)
@@ -107,24 +109,14 @@ export function PipelineWorkspace({
 
           {!isStageMode && canWrite ? (
             <div className='flex items-center gap-1.5'>
-              <Select onValueChange={onAddMemberFlat}>
-                <SelectTrigger className='w-48 h-8 text-label' aria-label='添加成员场景'>
-                  <div className='flex items-center gap-1.5'>
-                    <Plus className='size-3.5' />
-                    <SelectValue placeholder='添加已发布场景' />
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  {availableScenarios.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      <span className='inline-flex items-center gap-1.5'>
-                        <Plus className='size-3 text-muted-foreground' />
-                        {item.name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Unified Spotlight Quick Picker replacing raw long dropdown */}
+              <ScenarioQuickPicker
+                availableScenarios={availableScenarios}
+                currentMemberScenarioIds={document.members.map((m) => m.scenarioId)}
+                onSelectScenario={onAddMemberFlat}
+                onOpenSearchDialog={() => setFlatPickerOpen(true)}
+                triggerText='添加已发布场景'
+              />
               <Button
                 variant='outline'
                 size='sm'
@@ -166,6 +158,10 @@ export function PipelineWorkspace({
                 availableScenarios={availableScenarios}
                 targetAccounts={targetAccounts}
                 targetId={targetId}
+                selectedMemberId={selectedMemberId}
+                isSelected={selectedStageIndex === stageIndex}
+                onSelectStage={() => onSelectStage(stageIndex)}
+                onSelectMember={(memberId) => onSelectMember(memberId, stageIndex)}
                 onUpdateStageName={(name) => onUpdateStageName(stageIndex, name)}
                 onUpdateStageMode={(mode) => onUpdateStageMode(stageIndex, mode)}
                 onUpdateStageConcurrency={(concurrency) => onUpdateStageConcurrency(stageIndex, concurrency)}
@@ -208,6 +204,8 @@ export function PipelineWorkspace({
                 scenarioName={scenarioNames.get(member.scenarioId) ?? member.scenarioId.slice(0, 8)}
                 targetAccounts={targetAccounts}
                 targetId={targetId}
+                isSelected={selectedMemberId === member.memberId}
+                onSelect={() => onSelectMember(member.memberId)}
                 canMoveUp={index > 0}
                 canMoveDown={index < document.members.length - 1}
                 onUpdateDisplayName={(displayName) =>
@@ -219,7 +217,10 @@ export function PipelineWorkspace({
                 onUpdateReportProfile={(reportProfileId) =>
                   onUpdateMemberFlat(index, (m) => ({ ...m, reportProfileId }))
                 }
-                onOpenInputEditor={() => onOpenInputEditor(member)}
+                onOpenInputEditor={() => {
+                  onSelectMember(member.memberId)
+                  onOpenInputEditor(member)
+                }}
                 onMove={(delta) => onMoveMemberFlat(index, delta)}
                 onRemove={() => onRemoveMemberFlat(index)}
               />
@@ -240,4 +241,3 @@ export function PipelineWorkspace({
     </div>
   )
 }
-
