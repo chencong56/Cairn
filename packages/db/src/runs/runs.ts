@@ -17,7 +17,7 @@ import { canonicalJson, syncSha256, type OutcomeStatus, type RepairSourceRunKind
 import {
   assembleRunOutput,
   deriveFallbackSummary,
-  projectRunOutputSummary,
+  projectRunOutput,
   CANCELLED_ATTEMPT_ERROR,
   TERMINAL_RUN_STATUSES,
   cleanupStatusResponseSchema,
@@ -454,7 +454,7 @@ export async function listRuns(
       suiteRunId: row.suiteRunId ?? null,
       suiteMemberId: row.suiteMemberId ?? null,
       outputSummary:
-        (row.output ? projectRunOutputSummary(row.output, row.status, row.outcomeStatus).summary : null) ??
+        (row.output ? projectRunOutput(row.output, row.status, row.outcomeStatus).summary : null) ??
         (isFinishedRunStatus(row.status)
           ? deriveFallbackSummary(row.status, row.outcomeStatus)
           : null),
@@ -925,7 +925,7 @@ export async function loadRunDetail(db: Db, runId: string, actorId?: string): Pr
       : null)
 
   const output = assembledOutput
-    ? projectRunOutputSummary(assembledOutput, row.status, row.outcomeStatus)
+    ? projectRunOutput(assembledOutput, row.status, row.outcomeStatus)
     : null
 
   const reportStatuses = await resolveRunReportStatuses(db, [runId])

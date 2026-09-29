@@ -43,7 +43,7 @@ import {
   type ServiceWebhookPayload,
   type ServiceWebhookWrite,
   projectExternalRunOutput,
-  projectRunOutputSummary,
+  projectRunOutput,
   type RunOutput,
 } from '@cairn/shared'
 import { settleRunOutput } from '../runs/output.js'
@@ -572,7 +572,7 @@ async function buildWebhookPayload(
       outputs,
       runOutput: (settledOutput && snapshot.serviceDelivery?.runOutput)
         ? (projectExternalRunOutput(
-            projectRunOutputSummary(settledOutput, input.run.status, outcomeStatus),
+            projectRunOutput(settledOutput, input.run.status, outcomeStatus),
             snapshot.outputs,
           ) ?? undefined)
         : undefined,

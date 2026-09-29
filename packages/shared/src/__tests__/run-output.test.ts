@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   assembleRunOutput,
   projectRunOutput,
-  projectRunOutputSummary,
   runOutputSchema,
   scenarioDocumentSchema,
   scenarioOutputDeclSchema,
@@ -289,7 +288,7 @@ describe('RunOutput Assembly & Fallback (AC02, AC03, AC04, AC05)', () => {
     expect(output.metrics).toEqual({ item_count: 1 })
     expect(output.dataRow).toEqual({ report_id: 7 })
 
-    const projected = projectRunOutputSummary({ ...output, summary: '密钥已创建，状态正常' }, 'SUCCEEDED', outcomeStatus)
+    const projected = projectRunOutput({ ...output, summary: '密钥已创建，状态正常' }, 'SUCCEEDED', outcomeStatus)
     expect(projected.summary).toBe(summary)
     expect(projected.status).toBe(outcomeStatus === 'FAIL' ? 'ANOMALOUS' : 'UNDETERMINED')
     expect(projected.metrics).toEqual(output.metrics)

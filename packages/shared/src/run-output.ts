@@ -260,9 +260,6 @@ export function projectRunOutput(
   }
 }
 
-/** @deprecated 使用 projectRunOutput；保留旧导出以兼容既有调用方。 */
-export const projectRunOutputSummary = projectRunOutput
-
 /**
  * 纯函数：根据 Run 终态信息装配标准化业务输出包 RunOutput。
  * 遵循三级降级漏斗、纯数据无毒性与 64 KiB 上限截断保护。

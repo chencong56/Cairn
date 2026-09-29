@@ -21,7 +21,7 @@ import {
   suiteSummaryBlockSchema,
   stepRunFor,
   computeSuiteHealthScore,
-  projectRunOutputSummary,
+  projectRunOutput,
   runOutputSchema,
   type CreateReportBody,
   type CreateReportRevisionBody,
@@ -376,7 +376,7 @@ export async function captureSource(db: Db, subject: ReportSubject, actorId?: st
         outcomeStatus: run.outcomeStatus,
         evidenceStatus: run.evidenceStatus,
         output: (row!.output
-          ? projectRunOutputSummary(row!.output, row!.status, row!.outcomeStatus)
+          ? projectRunOutput(row!.output, row!.status, row!.outcomeStatus)
           : null) as JsonValue,
         scenarioName: context?.displayName ?? row!.snapshot.outboundPolicy?.scenarioName ?? row!.snapshot.notificationPolicy?.scenarioName ?? run.scenarioName,
         targetName: context?.targetName ?? row!.snapshot.outboundPolicy?.targetName ?? row!.snapshot.notificationPolicy?.targetName ?? run.targetName,
@@ -526,7 +526,7 @@ function assembleSuiteBusinessSummary(source: Record<string, JsonValue>): SuiteS
       const outcomeStatus = String(childRun.outcomeStatus ?? '')
       const parsedOutput = runOutputSchema.safeParse(childOutput)
       const safeOutput = parsedOutput.success
-        ? projectRunOutputSummary(parsedOutput.data, runStatus, outcomeStatus)
+        ? projectRunOutput(parsedOutput.data, runStatus, outcomeStatus)
         : childOutput
       const outputStatus = String(safeOutput.status)
       if (outcomeStatus === 'FAIL') {
