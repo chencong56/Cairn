@@ -166,7 +166,7 @@ function gatePoolConnect(handle: DbHandle, gate: Promise<void>, onClaim: () => v
     return origConnect().then((client) => {
       const query = client.query.bind(client)
       ;(client as { query: typeof query }).query = ((text: unknown, values?: unknown, cb?: unknown) => {
-        if (/skip locked/i.test(sqlText(text))) {
+        if (/runs/i.test(sqlText(text)) && /skip locked/i.test(sqlText(text))) {
           onClaim()
           return gate.then(() => query(text as never, values as never, cb as never))
         }

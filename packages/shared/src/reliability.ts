@@ -295,6 +295,7 @@ export const assetReliabilityQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 })
 export type AssetReliabilityQuery = z.infer<typeof assetReliabilityQuerySchema>
+export type AssetReliabilityQueryInput = z.input<typeof assetReliabilityQuerySchema>
 
 export const assetReliabilityListResponseSchema = z.object({
   items: z.array(assetReliabilityItemSchema),

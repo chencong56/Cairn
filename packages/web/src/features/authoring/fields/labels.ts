@@ -20,6 +20,7 @@ export const KIND_LABELS: Record<AssertExpect['kind'], string> = {
   visible: '元素可见',
   text_equals: '文本等于',
   text_contains: '文本包含',
+  text_absent: '文本不出现',
   number_compare: '数值比较',
   aria_snapshot: '快照匹配 (Aria)',
 }

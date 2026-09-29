@@ -87,7 +87,7 @@ describe.each(DRIVERS)('%s 总览多维分析聚合', { timeout: 30_000 }, (driv
     const now = await clockNow(handle.db)
     const run1 = await createRunWithSnapshot(handle.db, {
       scenarioId: scenarioA.id,
-      scenarioVersionId: scenarioA.versionId,
+      scenarioVersionId: scenarioA.latestVersionId,
       actor: { id: actorId },
     })
 
@@ -105,7 +105,7 @@ describe.each(DRIVERS)('%s 总览多维分析聚合', { timeout: 30_000 }, (driv
     // 创建 run2（失败）
     const run2 = await createRunWithSnapshot(handle.db, {
       scenarioId: scenarioA.id,
-      scenarioVersionId: scenarioA.versionId,
+      scenarioVersionId: scenarioA.latestVersionId,
       actor: { id: actorId },
     })
 
@@ -122,7 +122,7 @@ describe.each(DRIVERS)('%s 总览多维分析聚合', { timeout: 30_000 }, (driv
     // 创建 run3（场景B，成功）
     const run3 = await createRunWithSnapshot(handle.db, {
       scenarioId: scenarioB.id,
-      scenarioVersionId: scenarioB.versionId,
+      scenarioVersionId: scenarioB.latestVersionId,
       actor: { id: actorId },
     })
 
@@ -205,12 +205,12 @@ describe.each(DRIVERS)('%s 总览多维分析聚合', { timeout: 30_000 }, (driv
     })
     await createRunWithSnapshot(handle.db, {
       scenarioId: visibleScenario.id,
-      scenarioVersionId: visibleScenario.versionId,
+      scenarioVersionId: visibleScenario.latestVersionId,
       actor: { id: actorId },
     })
     await createRunWithSnapshot(handle.db, {
       scenarioId: hiddenScenario.id,
-      scenarioVersionId: hiddenScenario.versionId,
+      scenarioVersionId: hiddenScenario.latestVersionId,
       actor: { id: actorId },
     })
 

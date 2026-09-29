@@ -25,6 +25,7 @@ import {
   type RunSnapshot,
   type SessionGrant,
   type Step,
+  isBrowserStepType,
 } from '@cairn/shared'
 import { isAbortError, type EngineClock } from './clock.js'
 import { recordStepHardTimeout } from '../runtime/step-timeout-stats.js'
@@ -92,6 +93,21 @@ export type StepSuccessPlan = {
   isLast?: boolean
   runStatus?: 'SUCCEEDED' | 'FAILED'
   skipRemaining?: boolean
+}
+
+async function maybeCaptureStructure(
+  engine: ExecutionEngine,
+  input: CompleteAttemptInput,
+): Promise<{ snapshot: string; truncated: boolean; url?: string; title?: string } | undefined> {
+  if (
+    input.snapshot.captureStructure &&
+    isBrowserStepType(input.step.type) &&
+    input.sessionGrant &&
+    engine.browser?.captureStructureSnapshot
+  ) {
+    return await engine.browser.captureStructureSnapshot(input.sessionGrant, input.stop).catch(() => undefined)
+  }
+  return undefined
 }
 
 export async function completeAttempt(this: ExecutionEngine, input: CompleteAttemptInput): Promise<AttemptOutcome> {
@@ -208,6 +224,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
           evidencePolicy: input.evidencePolicy,
           grant: input.grant,
           snapshot: input.snapshot,
+          scopePath: input.scopePath,
         })
         if (outcome.timedOut) recordStepHardTimeout()
         const remainingAfter = Math.max(0, input.policy.timeoutMs - (input.clock.now() - stepStarted))
@@ -362,6 +379,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
       const screenshot = input.suppressMediaEvidence ? undefined : outcome.screenshot
       const trace = input.suppressMediaEvidence ? undefined : outcome.trace
       const isFailedOverall = dynamicRunStatus === 'FAILED' || headerFinish?.status === 'FAILED'
+      const structureSnapshot = await maybeCaptureStructure(this, input)
       const closed = await this.close({
         runId: input.runId,
         attemptId,
@@ -374,6 +392,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         headerFinish,
         screenshot,
         trace,
+        structureSnapshot,
         stepRunStatus: 'SUCCEEDED',
         runStatus: hold
           ? 'HOLDING'
@@ -440,6 +459,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         runStatus: 'NEEDS_REVIEW',
         detail: { stepRuns: await loadRunStepStates(db, input.runId, input.scopePath) },
       })
+      const structureSnapshot = await maybeCaptureStructure(this, input)
       await this.close({
         runId: input.runId,
         attemptId,
@@ -448,6 +468,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         diagnostics: outcome.diagnostics,
         screenshot: outcome.screenshot,
         trace: outcome.trace,
+        structureSnapshot,
         stepRunStatus: 'FAILED',
         runStatus: 'NEEDS_REVIEW',
         scopePath: input.scopePath,
@@ -522,6 +543,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         : input.last
           ? ('SUCCEEDED' as const)
           : undefined
+      const structureSnapshot = await maybeCaptureStructure(this, input)
       const closed = await this.close({
         runId: input.runId,
         attemptId,
@@ -531,6 +553,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         diagnostics: outcome.diagnostics,
         screenshot: outcome.screenshot,
         trace: outcome.trace,
+        structureSnapshot,
         stepRunStatus: 'SKIPPED',
         stepSkipReason: 'optional_absent',
         runStatus: hold ? 'HOLDING' : absentRunStatus,
@@ -575,6 +598,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
           detail: { stepRuns: stepStates },
         })
       : undefined
+    const structureSnapshot = await maybeCaptureStructure(this, input)
     const closed = await this.close({
       runId: input.runId,
       attemptId,
@@ -584,6 +608,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
       diagnostics: outcome.diagnostics,
       screenshot: outcome.screenshot,
       trace: outcome.trace,
+      structureSnapshot,
       stepRunStatus: shouldKeepRunning ? 'RUNNING' : 'FAILED',
       runStatus: shouldKeepRunning || failPlan?.keepRunOpen ? undefined : hold ? 'HOLDING' : 'FAILED',
       skipRemaining: !shouldKeepRunning && !hold && !failPlan?.keepRunOpen,
@@ -662,6 +687,7 @@ export async function runExecutor(
     evidencePolicy: ReturnType<typeof resolveEvidencePolicy>
     grant: RunGrant
     snapshot: RunSnapshot
+    scopePath?: string
   },
 ): Promise<ExecutorOutcome> {
   const { step, timeoutMs, stop, clock } = input
@@ -700,6 +726,9 @@ export async function runExecutor(
       evidencePolicy: input.evidencePolicy,
       grant: input.grant,
       snapshot: input.snapshot,
+      scopePath: input.scopePath,
+      loadStepStates: (scope?: string | null) =>
+        loadRunStepStates(this.handle, input.runId, scope === undefined ? input.scopePath : scope),
     })
 
     // 执行器可能把中止收成一个普通失败结果返回（AI SDK 会把 abort 包成自己的错误）。

@@ -441,6 +441,8 @@ export const runSnapshotSchema = z
     pauseBeforeStepId: entityIdSchema.optional(),
     /** 修复候选验证目标（R3：自愈修复闭环）。可选，严禁 .default()。 */
     validationSubject: validationSubjectSchema.optional(),
+    /** 调试基线运行页面结构快照自动采集。可选，严禁 .default()。 */
+    captureStructure: z.boolean().optional(),
     /** 预留给 P1。摘要不能代替内嵌的 steps。 */
     digest: z.string().min(1).max(128).optional(),
   })

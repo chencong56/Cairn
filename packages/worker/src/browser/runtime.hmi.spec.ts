@@ -20,22 +20,7 @@ import {
 } from './runtime'
 import { ensureProfileDir } from './profiles'
 import { withTestOccupancy } from './test-occupancy'
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const b = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('launch timeout')), 8_000),
-      ),
-    ])
-    await b.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 describe('browser runtime + HMI 夹具', { timeout: 120_000 }, () => {
   let hasBrowser = false
@@ -45,7 +30,7 @@ describe('browser runtime + HMI 夹具', { timeout: 120_000 }, () => {
   let profileRoot: string
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
     if (!hasBrowser) return
 
     // 内嵌最小登录页，避免依赖外部 HMI 进程

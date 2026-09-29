@@ -42,8 +42,8 @@ function sessionGrant(): SessionGrant {
   return {
     leaseId: '00000000-0000-4000-8000-0000000000e2',
     sessionId: '00000000-0000-4000-8000-0000000000e3',
-    fencingToken: 1,
-    holderWorkerId: 'w1',
+    generation: 1,
+    sessionFencingToken: 1,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   }
 }
@@ -96,7 +96,7 @@ describe('BrowserStepExecutor - 失败兜底截图', () => {
     appendResolutionDecision.mockImplementation(async (_handle: unknown, input: { decision: unknown }) => input.decision)
     const execute = vi.fn()
     const pointer: ScreenshotPointer = { objectKey: 'obj-on-error', contentType: 'image/png', byteSize: 10, digest: 'x' }
-    const captureFailureScreenshot = vi.fn(async () => pointer)
+    const captureFailureScreenshot = vi.fn(async (_grant?: any, _evidence?: any, _signal?: any) => pointer)
     const browser: BrowserPort = {
       execute,
       captureFailureScreenshot,

@@ -574,12 +574,14 @@ describe('ExecutionEngine Control Flow C 循环执行与迭代（集成）', { t
 
     let pollCount = 0
     const originalRunExecutor = engine.runExecutor.bind(engine)
-    engine.runExecutor = async (params) => {
+    engine.runExecutor = async (params: any) => {
       if (params.step.id === bodyStepId) {
         pollCount++
         return {
           kind: 'success',
           output: pollCount >= 3 ? 'DONE' : 'PENDING',
+          timedOut: false,
+          aborted: false,
         }
       }
       return originalRunExecutor(params)
@@ -604,6 +606,7 @@ describe('ExecutionEngine Control Flow C 循环执行与迭代（集成）', { t
                 right: { kind: 'literal', value: 'DONE' },
               },
               maxIterations: 10,
+              onLimit: 'fail',
             },
             body: [
               {

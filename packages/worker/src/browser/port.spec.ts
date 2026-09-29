@@ -157,3 +157,15 @@ describe('createBrowserPort 失败截图', () => {
     await expect(import('node:fs/promises').then((fs) => fs.stat(tracePath))).rejects.toThrow()
   })
 })
+
+describe('createBrowserPort 结构快照', () => {
+  it('把基线运行的页面结构采集转给会话管理器', async () => {
+    const snapshot = { snapshot: '- heading "订单"', truncated: false, url: 'https://example.com' }
+    const manager = {
+      captureStructureSnapshot: vi.fn().mockResolvedValue(snapshot),
+    } as unknown as BrowserSessionManager
+    const port = createBrowserPort(manager)
+    await expect(port.captureStructureSnapshot?.(grant)).resolves.toEqual(snapshot)
+    expect(manager.captureStructureSnapshot).toHaveBeenCalledWith(grant, undefined)
+  })
+})

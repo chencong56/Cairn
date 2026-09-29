@@ -576,3 +576,239 @@ export async function generateScenarioAuthoringProposal(
   }
   return { output: result.value }
 }
+
+/** 模型常把「没有」写成空串；可选文本一律把空串当作未提供。 */
+function optionalModelText(max: number) {
+  return z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().min(1).max(max).optional(),
+  )
+}
+
+const modelAcceptanceLocatorSchema = z.strictObject({
+  by: z.enum(['role', 'label', 'text', 'title', 'testId']),
+  value: z.string().trim().min(1).max(256),
+  name: optionalModelText(256),
+})
+
+export const modelAcceptanceTargetsSchema = z.strictObject({
+  items: z
+    .array(
+      z.strictObject({
+        key: z.string().min(1).max(64),
+        /** 找不到可靠对象时留空，并在 clarify 说明缺什么。 */
+        candidates: z.array(modelAcceptanceLocatorSchema).max(3).optional(),
+        semantic: optionalModelText(256),
+        /** 仅表格：candidates 同时匹配到的表头行数，用于从行数里扣除。 */
+        headerRows: z.number().int().min(0).max(3).optional(),
+        /** 对象的业务叫法，如「订单列表」「库存数量」。 */
+        label: optionalModelText(32),
+        rationale: z.string().trim().min(1).max(512),
+        clarify: optionalModelText(256),
+      }),
+    )
+    .max(8),
+})
+export type ModelAcceptanceTargets = z.infer<typeof modelAcceptanceTargetsSchema>
+
+/**
+ * 按基线运行的页面结构快照为验收意图找页面对象。只允许用快照里出现过的角色、名称和文字，
+ * 不给 css：快照里没有样式信息，给出来就是编造。
+ */
+export async function generateAcceptanceTargets(
+  session: AssistantModelSession,
+  facts: {
+    items: Array<{
+      key: string
+      kind: string
+      stepName: string
+      goal: string
+      snapshot: string
+    }>
+  },
+  signal?: AbortSignal,
+): Promise<{ output?: ModelAcceptanceTargets; error?: string }> {
+  const result = await session.completeJson(
+    'acceptance-targets',
+    modelAcceptanceTargetsSchema,
+    [
+      {
+        role: 'system',
+        content: `你是识途的验收配置助手。每一项给出一个验收意图和该步骤完成后页面的无障碍结构快照（Aria YAML，已脱敏）。
+请为每一项在快照里找出要检查的页面对象，输出定位候选。
+
+【定位候选】
+- by=role：value 为角色（如 table、row、heading、button、cell、status），name 为快照里该节点的无障碍名称（引号内文字）。
+- by=text / label / title / testId：value 必须是快照里原样出现的文字。
+- 最多 3 个候选，按可靠程度排序；禁止输出 css，禁止编造快照中不存在的名称或文字。
+
+【按意图】
+- page_reachable：找能代表「页面已正常打开」的稳定对象（页面标题、主区域标题、主表格），不要选会随数据变化的文字。
+- table_non_empty：候选要能同时匹配表格的每一行（通常 by=role, value=row，不带 name）。若这些行里包含表头行（行内是 columnheader），在 headerRows 填表头行数；若页面有多张表格导致 row 会串表，改用 clarify 说明。
+- number_range / extract_to_report：找承载该数值或文字的单个对象（如某个 cell、status、heading），name 用快照里的名称。
+  数值本身每次运行都会变，禁止把数值或金额文字（如 "$9942.41"、"308"、"共 12 条"里的数字）当作 value 或 name；
+  要用它稳定的标签或所在节点（如 role=status name="余额"、带固定标签的 cell）。找不到稳定标签就写 clarify，请用户点选。
+- label 用 2~8 个字的业务叫法，便于写进报告。
+
+【无法确定时】
+- 快照里找不到对应对象、或有多个同样合理的对象时，不给 candidates，写 clarify 说明需要用户点选什么。
+
+输出 JSON：{"items":[{"key":"...","candidates":[...],"headerRows":0,"label":"...","rationale":"...","clarify":"..."}]}`,
+      },
+      { role: 'user', content: JSON.stringify(facts) },
+    ],
+    signal,
+    true,
+  )
+  if (!result.ok) return { error: result.message }
+  return { output: result.value }
+}
+
+export const modelAcceptanceIntentsSchema = z.strictObject({
+  intents: z
+    .array(
+      z.strictObject({
+        kind: z.enum([
+          'page_reachable',
+          'page_duration',
+          'table_non_empty',
+          'number_range',
+          'text_present_or_absent',
+          'extract_to_report',
+          'scenario_duration',
+          'value_consistency',
+        ]),
+        stepId: z.string().min(1).max(64).optional(),
+        stepIdA: z.string().min(1).max(64).optional(),
+        stepIdB: z.string().min(1).max(64).optional(),
+        severity: z.enum(['MUST', 'SHOULD']).optional(),
+        maxMs: z.number().int().min(100).max(600_000).optional(),
+        op: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']).optional(),
+        value: z.number().finite().optional(),
+        tolerance: z.number().finite().nonnegative().optional(),
+        text: optionalModelText(256),
+        absent: z.boolean().optional(),
+        metricName: optionalModelText(64),
+        unit: optionalModelText(16),
+      }),
+    )
+    .max(6),
+  clarify: optionalModelText(256),
+  unsupported: z
+    .array(
+      z.strictObject({
+        excerpt: z.string().trim().min(1).max(200),
+        reason: z.string().trim().min(1).max(256),
+      }),
+    )
+    .optional(),
+})
+export type ModelAcceptanceIntents = z.infer<typeof modelAcceptanceIntentsSchema>
+
+/** 把一段话或一句话目标拆成封闭意图目录里的意图卡；超出目录的部分输出到 unsupported，拿不准就 clarify。 */
+export async function generateAcceptanceIntents(
+  session: AssistantModelSession,
+  question: string,
+  steps: Array<{ id: string; name: string; type: string }>,
+  signal?: AbortSignal,
+): Promise<{ output?: ModelAcceptanceIntents; error?: string }> {
+  const result = await session.completeJson(
+    'acceptance-intents',
+    modelAcceptanceIntentsSchema,
+    [
+      {
+        role: 'system',
+        content: `你是识途的验收配置助手。用户用一段话或一句话说出要检查什么、报告看什么，请把它拆成以下封闭意图（最多 6 个）：
+- page_reachable：某步之后的页面能正常打开（提供 stepId）
+- page_duration：某步耗时上限（提供 stepId, maxMs 毫秒）
+- table_non_empty：某步之后的列表/表格有数据（提供 stepId，可给 metricName 作为行数指标名）
+- number_range：某步之后某个数值满足比较（提供 stepId, op, value，可给 metricName）
+- text_present_or_absent：某步之后页面出现（absent=false）或不出现（absent=true）某段文字（提供 stepId, text）
+- extract_to_report：把某步之后页面上的某个值放进报告（提供 stepId, metricName 必填，unit 可选）
+- scenario_duration：全程耗时上限（不带 stepId，提供 maxMs 毫秒，默认 60000）
+- value_consistency：两步提取的数值一致性比较（提供 stepIdA 与 stepIdB，可选 tolerance 容差，可选 metricName 指标名）
+
+规则：
+- stepId/stepIdA/stepIdB 只能取给定步骤列表里的 id。
+- 用户说「异常」「必须」对应 severity=MUST，说「警告」「提醒」对应 SHOULD；没说时留空。
+- 缺少必要参数或语义过于模糊时，不要猜，在 clarify 里说明。
+- 用户要求超出以上 8 类意图的部分（如多标签页操作、外部接口调用等），放入 unsupported 列表（每项包含 excerpt 原文片段和 reason 不支持原因说明）。
+
+输出 JSON：{"intents":[...],"clarify":"...","unsupported":[...]}`,
+      },
+      { role: 'user', content: JSON.stringify({ question, steps }) },
+    ],
+    signal,
+    true,
+  )
+  if (!result.ok) return { error: result.message }
+  return { output: result.value }
+}
+
+export const modelAcceptanceAuditSchema = z.strictObject({
+  suggestedIntents: z
+    .array(
+      z.strictObject({
+        kind: z.enum([
+          'page_reachable',
+          'page_duration',
+          'table_non_empty',
+          'number_range',
+          'text_present_or_absent',
+          'extract_to_report',
+          'scenario_duration',
+          'value_consistency',
+        ]),
+        stepId: z.string().min(1).max(64).optional(),
+        stepIdA: z.string().min(1).max(64).optional(),
+        stepIdB: z.string().min(1).max(64).optional(),
+        label: z.string().trim().min(1).max(128),
+        rationale: z.string().trim().min(1).max(512),
+        severity: z.enum(['MUST', 'SHOULD']).optional(),
+        maxMs: z.number().int().min(100).max(600_000).optional(),
+        op: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']).optional(),
+        value: z.number().finite().optional(),
+        tolerance: z.number().finite().nonnegative().optional(),
+        text: optionalModelText(256),
+        absent: z.boolean().optional(),
+        metricName: optionalModelText(64),
+        unit: optionalModelText(16),
+      }),
+    )
+    .max(6),
+})
+export type ModelAcceptanceAudit = z.infer<typeof modelAcceptanceAuditSchema>
+
+export async function generateAcceptanceAuditSuggestions(
+  session: AssistantModelSession,
+  facts: {
+    steps: Array<{ id: string; name: string; type: string }>
+    findings: Array<{ code: string; message: string; stepId?: string }>
+  },
+  signal?: AbortSignal,
+): Promise<{ output?: ModelAcceptanceAudit; error?: string }> {
+  const result = await session.completeJson(
+    'acceptance-audit',
+    modelAcceptanceAuditSchema,
+    [
+      {
+        role: 'system',
+        content: `你是识途的场景验收体检助手。结合场景步骤列表与确定性体检发现，从业务视角推荐 1~3 条补充验收意图（必须从封闭意图目录中选择）：
+- page_reachable：末尾或关键业务页面的可达性
+- table_non_empty：核心结果表格有数据（如「筛选结果表应该有数据」）
+- text_present_or_absent：页面不能有错误提示或必须有成功反馈
+- extract_to_report：核心业务产出数据作为指标进入报告
+- scenario_duration：全程耗时监控
+- value_consistency：跨步骤数据一致性核对
+
+每条建议意图必须包含清晰的 label 和 rationale（说明为何该项对业务至关重要）。
+输出 JSON：{"suggestedIntents":[...]}`,
+      },
+      { role: 'user', content: JSON.stringify(facts) },
+    ],
+    signal,
+    true,
+  )
+  if (!result.ok) return { error: result.message }
+  return { output: result.value }
+}

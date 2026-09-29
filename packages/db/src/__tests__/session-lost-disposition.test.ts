@@ -152,7 +152,7 @@ describe.each(DRIVERS)('%s 失联处置策略', { timeout: 60_000 }, (driver) =>
       workerId: input.workerId,
       instanceId: input.instanceId,
       maxSessions: 8,
-      scheduling: await readSessionScheduling(handle.db),
+      scheduling: (await readSessionScheduling(handle.db)).scheduling,
     })
   }
 
@@ -418,10 +418,18 @@ describe.each(DRIVERS)('%s 失联处置策略', { timeout: 60_000 }, (driver) =>
     const initial = await store.getTarget(targetId)
     expect(initial.sessionPolicy).toBeNull()
     expect(initial.effectiveSessionPolicy?.lostDisposition).toBe('MANUAL')
-    const updated = await store.updateSessionPolicy(targetId, { lostDisposition: 'AUTO' }, { id: actorId })
+    const actor = {
+      id: actorId,
+      displayName: 'test-admin',
+      email: `${actorId}@example.com`,
+      status: 'active' as const,
+      roles: [],
+      permissions: ['target:read', 'target:write'],
+    }
+    const updated = await store.updateSessionPolicy(targetId, { lostDisposition: 'AUTO' }, actor)
     expect(updated.sessionPolicy).toEqual({ lostDisposition: 'AUTO' })
     expect(updated.effectiveSessionPolicy?.lostDisposition).toBe('AUTO')
-    const cleared = await store.updateSessionPolicy(targetId, { lostDisposition: null }, { id: actorId })
+    const cleared = await store.updateSessionPolicy(targetId, { lostDisposition: null }, actor)
     expect(cleared.sessionPolicy).toBeNull()
     expect(cleared.effectiveSessionPolicy?.lostDisposition).toBe('MANUAL')
   })

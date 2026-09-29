@@ -19,6 +19,7 @@ import { RecordingsService } from '../recordings/recordings.service'
 import { ScenariosService } from './scenarios.service'
 import { TargetsService } from '../targets/targets.service'
 import { credentialKeyFromEnv, LocalSecretProvider } from '../secrets/local-secret-provider'
+import { unusedChangeHint } from '../__tests__/http-app.js'
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_recimp`
 
@@ -61,7 +62,7 @@ describe('录制绑定与回填（真实库）', { timeout: 30_000 }, () => {
     other = { ...actor, id: otherId, displayName: 'other', email: `rec-${otherId}@example.com` }
     targets = new TargetsService(handle, new LocalSecretProvider(credentialKeyFromEnv(DEV_CREDENTIAL_KEY)))
     scenarios = new ScenariosService(handle)
-    recordings = new RecordingsService(handle)
+    recordings = new RecordingsService(handle, unusedChangeHint)
   })
 
   afterAll(async () => {
@@ -149,6 +150,7 @@ describe('录制绑定与回填（真实库）', { timeout: 30_000 }, () => {
       },
       actor,
     )
+    if (!('items' in preview)) throw new Error('Expected import preview to have items')
     expect(preview.normalizerVersion).toBe(RECORDING_NORMALIZER_VERSION)
     expect(preview.items.filter((item) => item.ready)).toHaveLength(2)
     expect(preview.remainingStepCapacity).toBe(31)

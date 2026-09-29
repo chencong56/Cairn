@@ -22,7 +22,7 @@ import {
   type DbHandle,
 } from '@cairn/db/testing'
 import { OBJECT_MISSING_REASONS, writeRunVideoPayload, type Step } from '@cairn/shared'
-import { LocalObjectStore } from '@cairn/storage'
+import { LocalObjectStore, type ObjectStore } from '@cairn/storage'
 import { ObjectService } from './object.service.js'
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_ost`
@@ -243,8 +243,9 @@ describe('对象存储托管协议（集成）', { timeout: 30_000 }, () => {
   })
 
   it('delete 永久失败的键不饿死同批其他对象', async () => {
-    const failing = {
+    const failing: ObjectStore = {
       put: store.put.bind(store),
+      putFile: store.putFile.bind(store),
       get: store.get.bind(store),
       delete: async (key: string) => {
         if (key.includes('fail-me')) {
@@ -252,6 +253,7 @@ describe('对象存储托管协议（集成）', { timeout: 30_000 }, () => {
         }
         return store.delete(key)
       },
+      probe: store.probe.bind(store),
     }
     const svc = new ObjectService(handle, failing, {
       retainDays: 30,
@@ -353,14 +355,16 @@ describe('对象存储托管协议（集成）', { timeout: 30_000 }, () => {
   it('同一调用内第一次 put 失败、退避后第二次成功，对象只有一份', async () => {
     const attemptId = await newAttempt(runId)
     let puts = 0
-    const flaky = {
+    const flaky: ObjectStore = {
       put: async (input: { key: string; body: Uint8Array; contentType: string }) => {
         puts += 1
         if (puts === 1) throw new Error('s3 5xx')
         return store.put(input)
       },
+      putFile: store.putFile.bind(store),
       get: store.get.bind(store),
       delete: store.delete.bind(store),
+      probe: store.probe.bind(store),
     }
     const svc = new ObjectService(handle, flaky, {
       retainDays: 30,
@@ -385,12 +389,14 @@ describe('对象存储托管协议（集成）', { timeout: 30_000 }, () => {
 
   it('同一调用内连续失败直到上限后判 missing', async () => {
     const attemptId = await newAttempt(runId)
-    const failing = {
+    const failing: ObjectStore = {
       put: async () => {
         throw new Error('still down')
       },
+      putFile: store.putFile.bind(store),
       get: store.get.bind(store),
       delete: store.delete.bind(store),
+      probe: store.probe.bind(store),
     }
     const svc = new ObjectService(handle, failing, {
       retainDays: 30,
@@ -416,13 +422,15 @@ describe('对象存储托管协议（集成）', { timeout: 30_000 }, () => {
   it('put 已成功、证据 commit 失败时重试只补证据，不再 put', async () => {
     const attemptId = await newAttempt(runId)
     let puts = 0
-    const counting = {
+    const counting: ObjectStore = {
       put: async (input: { key: string; body: Uint8Array; contentType: string }) => {
         puts += 1
         return store.put(input)
       },
+      putFile: store.putFile.bind(store),
       get: store.get.bind(store),
       delete: store.delete.bind(store),
+      probe: store.probe.bind(store),
     }
     let interrupted = false
     const svc = new ObjectService(handle, counting, {

@@ -75,11 +75,17 @@ describe('RunsService.createSolidificationDraft', () => {
   }
 
   const sampleEvent: AiTaskEvent = {
+    attemptId,
+    runId,
+    stepRunId,
+    source: 'action_edge',
     agentInstanceId: 'agent-1',
     ordinal: 1,
     phase: 'completed',
     actionName: 'Tap',
     sdkVersion: '1.0.0',
+    writeSignalCount: 0,
+    writeSignalPaths: [],
     elementDescription: '提交按钮',
     binding: {
       status: 'bound',

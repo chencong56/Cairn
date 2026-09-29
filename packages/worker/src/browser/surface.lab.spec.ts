@@ -14,6 +14,7 @@ import { executeOnPage as executeOnPageRaw } from './surface'
 import { launchSession, stopSession, type BrowserHandle } from './runtime'
 import { ensureProfileDir } from './profiles'
 import { withTestOccupancy } from './test-occupancy'
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 function executeOnPage(...args: Parameters<typeof executeOnPageRaw>) {
   return withTestOccupancy(() => executeOnPageRaw(...args))
@@ -26,19 +27,11 @@ const MIME: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
 }
 
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launch timeout')), 8_000)),
-    ])
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
+/**
+ * 浸泡采样次数：交付门默认 3 次采样（确定性回归由同文件其余用例捕获），
+ * 概率性误点的深浸泡走 `pnpm --filter @cairn/worker test:soak`（20 次）。
+ */
+const SOAK_ITERS = Math.max(1, Number(process.env.CAIRN_SOAK_ITERS ?? 3))
 
 function button(name: string, extra: Partial<TargetDescriptor> = {}): TargetDescriptor {
   return {
@@ -55,7 +48,7 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
   let handle: BrowserHandle | undefined
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
     if (!hasBrowser) return
     server = createServer(async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -103,57 +96,63 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
     return executeOnPage(handle.basePage, command)
   }
 
-  it('普通 DOM / 两层 iframe / 重挂载 / popup / 行内锚点 各 20 次无误点', async ({ skip }) => {
+  it(`普通 DOM / 两层 iframe / 重挂载 / popup / 行内锚点 各 ${SOAK_ITERS} 次无误点（CAIRN_SOAK_ITERS 可调）`, async ({ skip }) => {
     if (!hasBrowser) skip()
-    for (let i = 0; i < 20; i++) {
-      const page = await open('/')
-      const clicked = await executeOnPage(page, { type: 'click', target: button('查询') })
-      expect(clicked.ok, `普通 DOM #${i}`).toBe(true)
-      expect(await page.locator('#status').innerText()).toBe('已查询')
-    }
+    try {
+      for (let i = 0; i < SOAK_ITERS; i++) {
+        const page = await open('/')
+        const clicked = await executeOnPage(page, { type: 'click', target: button('查询') })
+        expect(clicked.ok, `普通 DOM #${i}`).toBe(true)
+        expect(await page.locator('#status').innerText()).toBe('已查询')
+      }
 
-    for (let i = 0; i < 20; i++) {
-      const page = await open('/nested.html')
-      await page.waitForSelector('iframe[name="outer"]')
-      const clicked = await executeOnPage(page, {
-        type: 'click',
-        target: button('深层确认', {
-          framePath: [{ urlPattern: 'frame-outer.html' }, { urlPattern: 'frame-inner.html' }],
-        }),
-      })
-      expect(clicked.ok, `嵌套 iframe #${i}`).toBe(true)
-    }
+      for (let i = 0; i < SOAK_ITERS; i++) {
+        const page = await open('/nested.html')
+        await page.waitForSelector('iframe[name="outer"]')
+        const clicked = await executeOnPage(page, {
+          type: 'click',
+          target: button('深层确认', {
+            framePath: [{ urlPattern: 'frame-outer.html' }, { urlPattern: 'frame-inner.html' }],
+          }),
+        })
+        expect(clicked.ok, `嵌套 iframe #${i}`).toBe(true)
+      }
 
-    for (let i = 0; i < 20; i++) {
-      const page = await open('/remount.html')
-      await page.waitForSelector('iframe[name="live"]')
-      const clicked = await executeOnPage(page, {
-        type: 'click',
-        target: button('心跳', { framePath: [{ urlPattern: 'remount-frame.html' }] }),
-      })
-      expect(clicked.ok, `重挂载 #${i}`).toBe(true)
-    }
+      for (let i = 0; i < SOAK_ITERS; i++) {
+        const page = await open('/remount.html')
+        await page.waitForSelector('iframe[name="live"]')
+        const clicked = await executeOnPage(page, {
+          type: 'click',
+          target: button('心跳', { framePath: [{ urlPattern: 'remount-frame.html' }] }),
+        })
+        expect(clicked.ok, `重挂载 #${i}`).toBe(true)
+      }
 
-    for (let i = 0; i < 20; i++) {
-      const page = await open('/popup.html')
-      const opened = await executeOnPage(page, { type: 'click', target: button('打开子窗') })
-      expect(opened.ok, `popup 打开 #${i}`).toBe(true)
-      const child = page.context().pages().at(-1)
-      expect(child).toBeTruthy()
-      await child!.waitForLoadState('domcontentloaded')
-      const confirmed = await executeOnPage(child!, { type: 'click', target: button('子窗确认') })
-      expect(confirmed.ok, `popup 点击 #${i}`).toBe(true)
-      await child!.close()
-    }
+      for (let i = 0; i < SOAK_ITERS; i++) {
+        const page = await open('/popup.html')
+        const opened = await executeOnPage(page, { type: 'click', target: button('打开子窗') })
+        expect(opened.ok, `popup 打开 #${i}`).toBe(true)
+        const child = page.context().pages().at(-1)
+        expect(child).toBeTruthy()
+        await child!.waitForLoadState('domcontentloaded')
+        const confirmed = await executeOnPage(child!, { type: 'click', target: button('子窗确认') })
+        expect(confirmed.ok, `popup 点击 #${i}`).toBe(true)
+        await child!.close()
+      }
 
-    for (let i = 0; i < 20; i++) {
-      const page = await open('/icons.html')
-      const clicked = await executeOnPage(page, {
-        type: 'click',
-        target: button('删除', { anchor: { withinText: '乙订单', scope: 'row' } }),
-      })
-      expect(clicked.ok, `小图标 #${i}`).toBe(true)
-      expect(await page.locator('#deleted').innerText()).toBe('乙订单')
+      for (let i = 0; i < SOAK_ITERS; i++) {
+        const page = await open('/icons.html')
+        const clicked = await executeOnPage(page, {
+          type: 'click',
+          target: button('删除', { anchor: { withinText: '乙订单', scope: 'row' } }),
+        })
+        expect(clicked.ok, `小图标 #${i}`).toBe(true)
+        expect(await page.locator('#deleted').innerText()).toBe('乙订单')
+      }
+    } catch (error) {
+      // 采样命中概率性信号时给出确定性复跑路径，避免在浅采样上反复猜
+      error.message = `${error.message}\n[浸泡采样] 当前每场景 ${SOAK_ITERS} 次采样命中失败：请用 CAIRN_SOAK_ITERS=20 复跑定位（pnpm --filter @cairn/worker test:soak）`
+      throw error
     }
   })
 

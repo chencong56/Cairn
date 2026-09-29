@@ -42,6 +42,11 @@ type TrialDialogProps = {
   inputs: ScenarioInputDecl[]
   needsAccount?: boolean
   pauseBeforeStepId?: string
+  /**
+   * 验收用途：baseline 为基线运行（逐步停住并采集页面结构；带 pauseBeforeStepId 时直接跑到该步前），
+   * verify 为采纳后的完整复跑。缺省为普通试跑。
+   */
+  purpose?: 'trial' | 'baseline' | 'verify'
   onCreated: (run: RunDetailDto) => void
   onConflict: () => void
 }
@@ -83,6 +88,7 @@ export function TrialDialog({
   inputs,
   needsAccount = false,
   pauseBeforeStepId,
+  purpose = 'trial',
   onCreated,
   onConflict,
 }: TrialDialogProps) {
@@ -106,7 +112,7 @@ export function TrialDialog({
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [failure, setFailure] = useState<{ message: string; diagnostics: string[] } | null>(null)
-  const fingerprint = JSON.stringify({ revision, targetAccountId, values, pauseBeforeStepId })
+  const fingerprint = JSON.stringify({ revision, targetAccountId, values, pauseBeforeStepId, purpose })
   const keyRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
@@ -122,11 +128,19 @@ export function TrialDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='sm:max-w-lg'>
         <DialogHeader>
-          <DialogTitle>{pauseBeforeStepId ? '运行到此步前置' : '试跑当前草稿'}</DialogTitle>
+          <DialogTitle>
+            {purpose === 'baseline' ? '基线运行' : purpose === 'verify' ? '复跑验证' : pauseBeforeStepId ? '运行到此步前置' : '试跑当前草稿'}
+          </DialogTitle>
           <DialogDescription>
-            {pauseBeforeStepId
-              ? '从第一步执行已保存的草稿，并在指定步骤前暂停。结果留在本页并自动跟随进度。'
-              : '从第一步执行已保存的草稿。结果留在本页并自动跟随进度。本次试跑不会改草稿。'}
+            {purpose === 'baseline'
+              ? pauseBeforeStepId
+                ? '从第一步执行已保存的草稿，停在指定步骤完成后的页面，并采集页面结构供验收定位。'
+                : '从第一步执行已保存的草稿，每步后停住并采集页面结构，供验收定位与点选。'
+              : purpose === 'verify'
+                ? '完整执行已保存的草稿，确认新加的检查都出了结论，并预览报告。'
+                : pauseBeforeStepId
+                  ? '从第一步执行已保存的草稿，并在指定步骤前暂停。结果留在本页并自动跟随进度。'
+                  : '从第一步执行已保存的草稿。结果留在本页并自动跟随进度。本次试跑不会改草稿。'}
           </DialogDescription>
         </DialogHeader>
         <div className='space-y-4'>
@@ -215,6 +229,11 @@ export function TrialDialog({
                 targetAccountId: targetAccountId || undefined,
                 input: parsed.data,
                 pauseBeforeStepId,
+                ...(purpose === 'baseline'
+                  ? { debugMode: pauseBeforeStepId ? 'holdOnFailure' as const : 'holdAfterEach' as const, captureStructure: true }
+                  : purpose === 'verify'
+                    ? { debugMode: 'runThrough' as const }
+                    : {}),
                 idempotencyKey: keyRef.current,
               })
                 .then((detail) => {

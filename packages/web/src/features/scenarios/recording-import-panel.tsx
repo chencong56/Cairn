@@ -105,6 +105,8 @@ export type RecordingImportPanelProps = {
   onSelectDraft: (recordingDraftId: string) => void
   onConflict: () => void
   onApplied: (scenario: ScenarioDetailDto, insertedIds: string[]) => void
+  /** 回填后引导到 Studio「补全验收」。 */
+  onOpenAcceptance?: () => void
 }
 
 export function RecordingImportPanel(props: RecordingImportPanelProps) {
@@ -136,6 +138,7 @@ function LegacyRecordingImportPanel({
   onSelectDraft,
   onConflict,
   onApplied,
+  onOpenAcceptance,
 }: RecordingImportPanelProps) {
   const [preview, setPreview] = useState<RecordingImportPreview | null>(null)
   const [loading, setLoading] = useState(false)
@@ -295,6 +298,11 @@ function LegacyRecordingImportPanel({
         result.receipt.insertedStepIds.length > 0
           ? `已插入 ${result.receipt.insertedStepIds.length} 个步骤`
           : '已确认成功条件',
+        {
+          ...(onOpenAcceptance
+            ? { action: { label: '补全验收（推荐）', onClick: onOpenAcceptance } }
+            : {}),
+        },
       )
       onOpenChange(false)
     } catch (error) {

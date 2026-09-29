@@ -164,6 +164,7 @@ describe.each(DRIVERS)('%s AI 调用预算', { timeout: 30_000 }, (driver) => {
         },
       ],
       actor: { id: actorId },
+      compileMode: 'save',
     })
     await expect(
       createRunWithSnapshot(handle.db, {

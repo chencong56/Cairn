@@ -2,26 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startScreencast } from './screencast.js'
 import type { CapturedFrame } from './captured-frame.js'
 import type { PageRef } from '@cairn/shared'
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launch timeout')), 8_000)),
-    ])
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 describe('screencast 帧身份', () => {
   let hasBrowser = false
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
   })
 
   afterAll(() => undefined)
@@ -49,7 +36,8 @@ describe('screencast 帧身份', () => {
       })
       for (let i = 0; i < 8; i += 1) {
         await page.evaluate((n) => {
-          document.body.style.background = `rgb(${20 + n * 20}, 40, 180)`
+          const doc = (globalThis as any).document
+          doc.body.style.background = `rgb(${20 + n * 20}, 40, 180)`
         }, i)
         await page.waitForTimeout(180)
       }
@@ -90,12 +78,14 @@ describe('screencast 帧身份', () => {
         liveFrames.push(frame)
       })
       await page.evaluate(() => {
-        document.body.style.background = '#333'
+        const doc = (globalThis as any).document
+        doc.body.style.background = '#333'
       })
       await page.waitForTimeout(100)
       currentEpoch = 2
       await page.evaluate(() => {
-        document.body.style.background = '#444'
+        const doc = (globalThis as any).document
+        doc.body.style.background = '#444'
       })
       await page.waitForTimeout(200)
       stopListen()

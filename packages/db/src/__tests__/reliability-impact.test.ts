@@ -5,7 +5,7 @@ import type { DbHandle } from '../client.js'
 import { schemaFor } from '../native.js'
 import { newId } from '../id.js'
 import { getIncidentImpactSnapshot, executeMaintenanceBatchUpgrade, getMaintenanceUpgradeJob } from '../reliability/impact.js'
-import { RELIABILITY_ERROR_CODES, type ScenarioAuthoringDocumentV2 } from '@cairn/shared'
+import { RELIABILITY_ERROR_CODES, type ModuleContent, type ScenarioAuthoringDocumentV2 } from '@cairn/shared'
 import { moduleContentDigest } from '@cairn/authoring'
 
 describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operations', (driver) => {
@@ -28,9 +28,8 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
 
     await handle.db.insert(t.consoleAccounts).values({
       id: consoleAccountId,
-      username: `admin-${consoleAccountId.slice(0, 8)}`,
+      email: `admin-${consoleAccountId.slice(0, 8)}@example.com`,
       displayName: '管理员',
-      passwordHash: 'hash',
       status: 'active',
     })
     await grantScopedPermissions(handle.db, consoleAccountId, ['target:read', 'reliability:read', 'reliability:triage'])
@@ -58,7 +57,7 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
 
     // Create Module Version 1
     version1Id = newId()
-    const content1 = {
+    const content1: ModuleContent = {
       contract: {
         inputs: [{ key: 'username', label: '用户名', valueType: 'string' as const, required: false }],
         outputs: [{ key: 'token', label: '令牌', shape: { kind: 'scalar' as const, type: 'string' as const } }],
@@ -74,7 +73,7 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
             {
               id: newId(),
               name: '回显步骤',
-              type: 'echo',
+              type: 'echo' as const,
               effectType: 'READ_ONLY' as const,
               outputKey: 'token',
               input: { from: 'username' },
@@ -100,7 +99,7 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
 
     // Create Module Version 2 (Published latest)
     version2Id = newId()
-    const content2 = {
+    const content2: ModuleContent = {
       contract: {
         inputs: [{ key: 'username', label: '用户名', valueType: 'string' as const, required: false }],
         outputs: [{ key: 'token', label: '令牌', shape: { kind: 'scalar' as const, type: 'string' as const } }],
@@ -116,7 +115,7 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
             {
               id: newId(),
               name: '回显步骤v2',
-              type: 'echo',
+              type: 'echo' as const,
               effectType: 'READ_ONLY' as const,
               outputKey: 'token',
               input: { from: 'username' },
@@ -261,7 +260,7 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
       lastSeenAt: new Date(),
       title: '登录模块定位漂移告警',
       summary: '检测到登录按钮定位策略降级',
-      evidenceScores: { supportScore: 40, counterScore: 10, totalScore: 30 },
+      evidenceScores: { supportingScore: 40, counterScore: 10, supportingFactors: [], counterFactors: [] },
       revision: 1,
     })
 
@@ -358,7 +357,7 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
       lastSeenAt: new Date(),
       title: '外目标成员引用',
       summary: '成员引用不应暴露外目标运行',
-      evidenceScores: { supportScore: 40, counterScore: 10, totalScore: 30 },
+      evidenceScores: { supportingScore: 40, counterScore: 10, supportingFactors: [], counterFactors: [] },
       revision: 1,
     })
     await handle.db.insert(t.reliabilityIncidentMembers).values(['attempt-1', 'attempt-2', 'attempt-3'].map((suffix) => ({
@@ -403,8 +402,8 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
     expect(job.incidentId).toBe(incidentId)
     expect(job.status).toBe('completed')
     expect(job.results.length).toBe(1)
-    expect(job.results[0].scenarioId).toBe(scenario1Id)
-    expect(job.results[0].status).toBe('upgraded')
+    expect(job.results[0]!.scenarioId).toBe(scenario1Id)
+    expect(job.results[0]!.status).toBe('upgraded')
 
     // Verify retrieval by jobId
     const fetchedJob = await getMaintenanceUpgradeJob(handle.db, job.jobId, consoleAccountId)

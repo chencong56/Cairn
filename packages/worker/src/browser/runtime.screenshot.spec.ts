@@ -3,26 +3,13 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { screenshotPage } from './runtime.js'
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launch timeout')), 8_000)),
-    ])
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 describe('screenshotPage 无副作用', () => {
   let hasBrowser = false
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
   })
 
   it('截图前后输入值、焦点、滚动不变，且不派发 input/change', async ({ skip }) => {
@@ -50,27 +37,36 @@ describe('screenshotPage 无副作用', () => {
         </script>
       </body></html>`)
       await page.evaluate(() => {
-        document.getElementById('note')?.focus()
-        window.scrollTo(0, 240)
+        const win = globalThis as any
+        win.document.getElementById('note')?.focus()
+        win.scrollTo(0, 240)
       })
-      const before = await page.evaluate(() => ({
-        user: (document.getElementById('user') as HTMLInputElement).value,
-        pass: (document.getElementById('pass') as HTMLInputElement).value,
-        note: (document.getElementById('note') as HTMLTextAreaElement).value,
-        focus: document.activeElement?.id ?? '',
-        scroll: window.scrollY,
-        events: [...((window as unknown as { __events: string[] }).__events ?? [])],
-      }))
+      const before = await page.evaluate(() => {
+        const win = globalThis as any
+        const doc = win.document
+        return {
+          user: doc.getElementById('user').value,
+          pass: doc.getElementById('pass').value,
+          note: doc.getElementById('note').value,
+          focus: doc.activeElement?.id ?? '',
+          scroll: win.scrollY,
+          events: [...((win as unknown as { __events: string[] }).__events ?? [])],
+        }
+      })
       const png = await screenshotPage(page)
       expect(png[0]).toBe(0x89)
-      const after = await page.evaluate(() => ({
-        user: (document.getElementById('user') as HTMLInputElement).value,
-        pass: (document.getElementById('pass') as HTMLInputElement).value,
-        note: (document.getElementById('note') as HTMLTextAreaElement).value,
-        focus: document.activeElement?.id ?? '',
-        scroll: window.scrollY,
-        events: [...((window as unknown as { __events: string[] }).__events ?? [])],
-      }))
+      const after = await page.evaluate(() => {
+        const win = globalThis as any
+        const doc = win.document
+        return {
+          user: doc.getElementById('user').value,
+          pass: doc.getElementById('pass').value,
+          note: doc.getElementById('note').value,
+          focus: doc.activeElement?.id ?? '',
+          scroll: win.scrollY,
+          events: [...((win as unknown as { __events: string[] }).__events ?? [])],
+        }
+      })
       expect(after.user).toBe('alice')
       expect(after.pass).toBe('s3cret-password')
       expect(after.note).toBe('keep')
@@ -138,7 +134,7 @@ function isMaskMagenta(r: number, g: number, b: number): boolean {
 }
 
 async function countHue(
-  sharp: typeof import('sharp').default,
+  sharp: typeof import('sharp'),
   png: Buffer,
   pred: (r: number, g: number, b: number) => boolean,
 ): Promise<number> {

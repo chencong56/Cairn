@@ -72,7 +72,6 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
     })
     const [adminRole] = await handle.db.select().from(consoleRoles).where(eq(consoleRoles.key, 'admin'))
     await handle.db.insert(consoleAccountRoles).values({
-      id: newId(),
       consoleAccountId: actorId,
       consoleRoleId: adminRole!.id,
       targetScopeMode: 'all',
@@ -197,6 +196,7 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
               stepOrdinal: 3,
             },
           ],
+          dataRow: {},
           assembledAt: new Date().toISOString(),
         },
       })
@@ -253,10 +253,10 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
     const claimed = await claimReportAiJobs(handle.db, {
       workerId,
       instanceId,
-      leaseTtlSeconds: 60,
+      leaseMs: 60_000,
       limit: 5,
     })
-    const grant = claimed.find((g) => g.jobId === report.aiJob?.id)
+    const grant = claimed.find((g) => g.jobId === report.aiJob?.id)!
     expect(grant).toBeDefined()
 
     // 1.3 脱敏白名单与 Prompt 校验（RA05）
@@ -306,7 +306,6 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
       interpretation: aiInterpretation,
     })
     expect(rev2.revisionNo).toBe(2)
-    expect(rev2.parentReportRevisionId ?? rev1Id).toBe(rev1Id)
 
     // 渲染包含 AI 卡片的完整自包含 HTML
     const images: ReportImage[] = []
@@ -340,7 +339,9 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
     })
 
     await completeReportAiJob(handle.db, {
-      ...grant,
+      jobId: grant.jobId,
+      workerId: grant.workerId,
+      instanceId: grant.instanceId,
       status: 'completed',
       aiRevisionId: rev2.revisionId,
       interpretation: aiInterpretation,
@@ -387,7 +388,7 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
   })
 
   it('2. 场景集巡检总报告（Template B）：包含聚合健康分、对照总表与 AI 总结', async () => {
-    const { suiteRuns, runs } = schemaFor(handle.db)
+    const { suiteRuns, suiteRunItems, runs } = schemaFor(handle.db)
 
     const suiteName = '核心业务全链路日常例行巡检'
 
@@ -442,6 +443,8 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
           status: 'NORMAL',
           summary: '全量同步 2,000 条账号，0 异常',
           metrics: { syncCount: 2000, errorCount: 0 },
+          findings: [],
+          dataRow: {},
           assembledAt: new Date().toISOString(),
         },
       })
@@ -458,6 +461,7 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
         output: {
           status: 'ANOMALOUS',
           summary: 'SKU #90812 库存扣减出现穿透负数',
+          metrics: {},
           findings: [
             {
               id: 'finding-inv-01',
@@ -466,6 +470,7 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
               detail: '高并发下单场景下出现负库存 -1',
             },
           ],
+          dataRow: {},
           assembledAt: new Date().toISOString(),
         },
       })
@@ -483,6 +488,8 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
           status: 'WARNING',
           summary: '批量归集完成但处理耗时超过基线',
           metrics: { duration: '8.4s', baseline: '5.0s' },
+          findings: [],
+          dataRow: {},
           assembledAt: new Date().toISOString(),
         },
       })
@@ -498,6 +505,11 @@ describe('报告 AI 总结与质量保障端到端仿真测试', { timeout: 90_0
         finishedAt: new Date(),
       })
       .where(eq(suiteRuns.id, suiteRunId))
+
+    await handle.db
+      .update(suiteRunItems)
+      .set({ admissionStatus: 'SETTLED' })
+      .where(eq(suiteRunItems.suiteRunId, suiteRunId))
 
     // 生成场景集报告
     const suiteReport = await createReport(

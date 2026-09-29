@@ -78,8 +78,10 @@ export const observeGrantSchema = z.strictObject({
 })
 export type ObserveGrant = z.infer<typeof observeGrantSchema>
 
+export const MAX_STRUCTURE_SNAPSHOT_CHARS = 32_000
+
 export const observeOperationSchema = z.strictObject({
-  op: z.enum(['highlight', 'pick']),
+  op: z.enum(['highlight', 'pick', 'structure']),
   x: z.number().optional(),
   y: z.number().optional(),
   target: targetDescriptorSchema.optional(),
@@ -87,6 +89,16 @@ export const observeOperationSchema = z.strictObject({
   clearOverlayStepId: entityIdSchema.optional(),
 })
 export type ObserveOperation = z.infer<typeof observeOperationSchema>
+
+export const structureObservationSchema = z.strictObject({
+  evidenceId: entityIdSchema,
+  pageRef: pageRefSchema.optional(),
+  url: z.string().optional(),
+  title: z.string().optional(),
+  snapshot: z.string(),
+  truncated: z.boolean(),
+})
+export type StructureObservation = z.infer<typeof structureObservationSchema>
 
 export const DEBUG_ACTIONS = [
   'retry_current',

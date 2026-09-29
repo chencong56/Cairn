@@ -43,7 +43,6 @@ describe.each(DRIVERS)('%s 报告 AI 异步修订与原子提升', { timeout: 60
     })
     const [admin] = await handle.db.select().from(consoleRoles).where(eq(consoleRoles.key, 'admin'))
     await handle.db.insert(consoleAccountRoles).values({
-      id: newId(),
       consoleAccountId: actorId,
       consoleRoleId: admin!.id,
       targetScopeMode: 'all',
@@ -161,7 +160,7 @@ describe.each(DRIVERS)('%s 报告 AI 异步修订与原子提升', { timeout: 60
     const claimed = await claimReportAiJobs(handle.db, {
       workerId,
       instanceId,
-      leaseTtlSeconds: 60,
+      leaseMs: 60_000,
       limit: 10,
     })
     expect(claimed.length).toBeGreaterThanOrEqual(1)
@@ -228,7 +227,9 @@ describe.each(DRIVERS)('%s 报告 AI 异步修订与原子提升', { timeout: 60
 
     // 8. 标记 AI 作业完成
     await completeReportAiJob(handle.db, {
-      ...grant!,
+      jobId: grant!.jobId,
+      workerId: grant!.workerId,
+      instanceId: grant!.instanceId,
       status: 'completed',
       aiRevisionId: rev2.revisionId,
       interpretation: aiDoc.aiInterpretation,
@@ -292,14 +293,16 @@ describe.each(DRIVERS)('%s 报告 AI 异步修订与原子提升', { timeout: 60
     const claimed = await claimReportAiJobs(handle.db, {
       workerId,
       instanceId,
-      leaseTtlSeconds: 60,
+      leaseMs: 60_000,
       limit: 10,
     })
     const grant = claimed.find((g) => g.jobId === report.aiJob?.id)
     expect(grant).toBeDefined()
 
     await completeReportAiJob(handle.db, {
-      ...grant!,
+      jobId: grant!.jobId,
+      workerId: grant!.workerId,
+      instanceId: grant!.instanceId,
       status: 'failed',
       error: '模型网关超时 504 Gateway Timeout',
     })
@@ -359,7 +362,7 @@ describe.each(DRIVERS)('%s 报告 AI 异步修订与原子提升', { timeout: 60
     const claimed = await claimReportAiJobs(handle.db, {
       workerId,
       instanceId,
-      leaseTtlSeconds: 60,
+      leaseMs: 60_000,
       limit: 10,
     })
     const grant = claimed.find((g) => g.jobId === report.aiJob?.id)
@@ -387,14 +390,16 @@ describe.each(DRIVERS)('%s 报告 AI 异步修订与原子提升', { timeout: 60
       reportId: report.id,
       baseRevisionId: rev1Id,
       interpretation: {
-        status: 'definitive',
+        status: 'conclusive',
         model: 'deepseek-v3',
         observation: '执行观察',
         findings: [{ statement: '测试事实陈述', citationIds: ['00000000-0000-4000-8000-0000000000d1'] }],
+        hypotheses: [],
+        suggestions: [],
         generatedAt: new Date().toISOString(),
       },
     })
-    expect(aiRev.parentReportRevisionId ?? rev1Id).toBe(rev1Id)
+    expect(aiRev.document.identity!.parentRevisionId).toBe(rev1Id)
 
     const dummyHtml = await createArtifact(handle.db, {
       targetId,

@@ -1363,7 +1363,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       leaseTtlSeconds: 60,
     })
     expect(prepared?.session).toBeTruthy()
-    const preparedSession = prepared!.session
+    const preparedSession = prepared!.session!
     await setSessionStatus(handle.db, {
       sessionId: preparedSession.id,
       expectedVersion: preparedSession.version,

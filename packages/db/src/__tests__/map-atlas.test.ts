@@ -29,8 +29,6 @@ describe.each(DRIVERS)('%s 地图群岛汇聚与海岛测绘', { timeout: 60_000
       code: targetId,
       name: 'Atlas Test Target',
       entryUrl: 'https://app.example.com',
-      targetKey: `tgt_${targetId.slice(0, 8)}`,
-      createdByConsoleAccountId: actorId,
     })
   })
 
@@ -150,22 +148,22 @@ describe.each(DRIVERS)('%s 地图群岛汇聚与海岛测绘', { timeout: 60_000
 
     // Sorted by uniqueObjectCount DESC, so pageId1 is first
     const [first, second] = res.items
-    expect(first.pageId).toBe(pageId1)
-    expect(first.uniqueObjectCount).toBe(3)
-    expect(first.uniqueNeedsAttentionCount).toBe(1)
-    expect(first.routeSummary).toBe('/workspaces/:id/projects')
-    expect(first.displayName).toBe('/workspaces/:id/projects')
-    expect(first.nameSource).toBe('sanitized_route')
+    expect(first!.pageId).toBe(pageId1)
+    expect(first!.uniqueObjectCount).toBe(3)
+    expect(first!.uniqueNeedsAttentionCount).toBe(1)
+    expect(first!.routeSummary).toBe('/workspaces/:id/projects')
+    expect(first!.displayName).toBe('/workspaces/:id/projects')
+    expect(first!.nameSource).toBe('sanitized_route')
 
-    expect(second.pageId).toBe(pageId2)
-    expect(second.uniqueObjectCount).toBe(1)
-    expect(second.uniqueNeedsAttentionCount).toBe(0)
-    expect(second.routeSummary).toBe('/settings')
+    expect(second!.pageId).toBe(pageId2)
+    expect(second!.uniqueObjectCount).toBe(1)
+    expect(second!.uniqueNeedsAttentionCount).toBe(0)
+    expect(second!.routeSummary).toBe('/settings')
 
     // Search filter test
-    const searchRes = await listMapAtlasPages(handle.db, targetId, { search: 'settings' })
+    const searchRes = await listMapAtlasPages(handle.db, targetId, { search: 'settings', limit: 10 })
     expect(searchRes.totalObservedPages).toBe(2)
     expect(searchRes.matchedIslands).toBe(1)
-    expect(searchRes.items[0].pageId).toBe(pageId2)
+    expect(searchRes.items[0]!.pageId).toBe(pageId2)
   })
 })

@@ -1,4 +1,5 @@
 import {
+  isPageLevelAssertExpect,
   COMPILER_VERSION,
   EXECUTABLE_STEP_TYPES,
   FACTORY_COMPILE_RESOLUTION,
@@ -436,16 +437,29 @@ export function compileScenarioDocument(document: ScenarioDocument, ctx: Compile
   }
 
   if (document.outputs) {
+    const docStepIds = new Set(document.steps.map((s) => s.id))
     if (document.outputs.metrics) {
       for (const m of document.outputs.metrics) {
-        if (!available.has(m.fromContextKey)) {
-          add(
-            diagnostics,
-            'OUTPUT_VARIABLE_UNRESOLVED',
-            'warning',
-            `业务输出指标「${m.name}」引用的变量「${m.fromContextKey}」未在输入或任何步骤的 outputKey 中定义`,
-            { fieldPath: ['outputs', 'metrics', m.key, 'fromContextKey'] },
-          )
+        if (m.fromContextKey) {
+          if (!available.has(m.fromContextKey)) {
+            add(
+              diagnostics,
+              'OUTPUT_VARIABLE_UNRESOLVED',
+              'warning',
+              `业务输出指标「${m.name}」引用的变量「${m.fromContextKey}」未在输入或任何步骤的 outputKey 中定义`,
+              { fieldPath: ['outputs', 'metrics', m.key, 'fromContextKey'] },
+            )
+          }
+        } else if (m.fromStepDuration) {
+          if (!docStepIds.has(m.fromStepDuration.stepId)) {
+            add(
+              diagnostics,
+              'OUTPUT_VARIABLE_UNRESOLVED',
+              'warning',
+              `业务输出指标「${m.name}」引用的步骤「${m.fromStepDuration.stepId}」不存在`,
+              { fieldPath: ['outputs', 'metrics', m.key, 'fromStepDuration', 'stepId'] },
+            )
+          }
         }
       }
     }
@@ -545,7 +559,7 @@ function addOutcomeTargetMissingDiagnostics(
 ): void {
   for (const entry of entries) {
     if (entry.rule.kind !== 'deterministic') continue
-    if (entry.rule.expect.kind === 'aria_snapshot') continue
+    if (isPageLevelAssertExpect(entry.rule.expect)) continue
     if (entry.rule.target) continue
     add(
       diagnostics,

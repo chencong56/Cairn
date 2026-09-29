@@ -107,6 +107,7 @@ describe('recording artifacts: real DB, decoding, and object-write faults', () =
       delete: async (key) => {
         objects.delete(key)
       },
+      putFile: async () => ({ key: '', digest: '', byteSize: 0 }),
       probe: async () => ({ ok: true, latencyMs: 0, errorClass: null }),
     }
     return { store, objects, writes: () => writes }

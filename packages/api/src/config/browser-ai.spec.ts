@@ -21,6 +21,7 @@ const actor = (permissions: string[]): RequestAccount => ({
 const enabled: PlatformConfigDocument = {
   ...FACTORY_PLATFORM_CONFIG,
   browserAi: {
+    ...FACTORY_PLATFORM_CONFIG.browserAi,
     enabled: true,
     baseUrl: 'https://model.example/v1',
     model: 'demo-model',

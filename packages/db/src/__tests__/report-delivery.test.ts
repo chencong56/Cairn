@@ -110,7 +110,7 @@ describe.each(DRIVERS)('%s 报告交付与恢复', (driver) => {
     const { observation } = await createSuiteRun(handle.db, { suiteId: suite.id, idempotencyKey: newId() }, actor())
     const { targets } = schemaFor(handle.db)
     await handle.db.update(targets).set({ name: '运行结束后的新名称' }).where(eq(targets.id, targetId))
-    const child = await createReport(handle.db, { ...body(observation.items[0]!.childRunId), stage: 'phase' }, actor())
+    const child = await createReport(handle.db, { ...body(observation.items[0]!.childRunId!), stage: 'phase' }, actor())
     const summary = await createReport(handle.db, { subject: { kind: 'SUITE_RUN', suiteRunId: observation.id }, stage: 'phase', scope: 'suite_summary', config: { title: '{systemName} {runNumber}' }, idempotencyKey: newId() }, actor())
     expect(child.currentRevision!.title).toContain('报告系统')
     expect(summary.currentRevision!.title).toBe(`报告系统 ${observation.id.slice(0, 8)}`)

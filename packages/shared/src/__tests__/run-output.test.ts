@@ -7,6 +7,7 @@ import {
   scenarioDocumentSchema,
   scenarioOutputDeclSchema,
   MAX_RUN_OUTPUT_BYTES,
+  scenarioMetricDeclSchema,
   type Step,
 } from '../index.js'
 
@@ -371,6 +372,21 @@ describe('RunOutput Assembly & Fallback (AC02, AC03, AC04, AC05)', () => {
     })
   })
 
+  it('应当成立（SHOULD）的条件不通过记警告，报告为 WARNING 而非异常', () => {
+    const output = assembleRunOutput({
+      definition: { steps: sampleSteps },
+      context: {},
+      outcomeResults: [
+        { id: 'out-1', contractId: 'contract-duration', meaning: '页面 3 秒内打开', severity: 'SHOULD', verdict: 'FAIL', stepId: 'step-1' },
+      ],
+      stepRuns: [{ id: 'sr-1', stepId: 'step-1', ordinal: 0, status: 'SUCCEEDED' }],
+      status: 'SUCCEEDED',
+      outcomeStatus: 'WARN',
+    })
+    expect(output.findings[0]?.severity).toBe('WARN')
+    expect(output.status).toBe('WARNING')
+  })
+
   it('AC05: 体积超限截断保护（>64 KiB 安全截断至上限内，添加截断标记）', () => {
     // 构造 50 个大详情的 findings，总大小超过 64 KiB (65536 bytes)
     const output = assembleRunOutput({
@@ -398,5 +414,65 @@ describe('RunOutput Assembly & Fallback (AC02, AC03, AC04, AC05)', () => {
     expect(new TextEncoder().encode(serialized).length).toBeLessThanOrEqual(MAX_RUN_OUTPUT_BYTES)
     expect(output.summary).toContain('(已截断)')
     expect(runOutputSchema.parse(output)).toBeDefined()
+  })
+
+  it('支持 fromRunDuration 装配全程耗时指标（优先 stepRuns 首末跨度，缺失退退 runStartedAt）', () => {
+    const outputs = {
+      summaryTemplate: '耗时 ${duration} ms',
+      metrics: [
+        {
+          key: 'duration',
+          name: '全程耗时',
+          fromRunDuration: true as const,
+          unit: 'ms',
+        },
+      ],
+      dataRowFields: [],
+    }
+
+    const outputWithStepRuns = assembleRunOutput({
+      definition: { steps: sampleSteps, outputs },
+      stepRuns: [
+        { id: 'sr-1', stepId: 'step-1', startedAt: '2026-09-29T10:00:00.000Z', completedAt: '2026-09-29T10:00:02.000Z' },
+        { id: 'sr-2', stepId: 'step-2', startedAt: '2026-09-29T10:00:02.000Z', completedAt: '2026-09-29T10:00:05.500Z' },
+      ],
+      status: 'SUCCEEDED',
+      outcomeStatus: 'PASS',
+    })
+    expect(outputWithStepRuns.metrics.duration).toBe(5500)
+    expect(outputWithStepRuns.summary).toBe('耗时 5500 ms')
+
+    const outputFallback = assembleRunOutput({
+      definition: { steps: sampleSteps, outputs },
+      stepRuns: [],
+      runStartedAt: '2026-09-29T10:00:00.000Z',
+      now: '2026-09-29T10:00:08.000Z',
+      status: 'SUCCEEDED',
+      outcomeStatus: 'PASS',
+    })
+    expect(outputFallback.metrics.duration).toBe(8000)
+  })
+})
+
+describe('scenarioMetricDeclSchema 来源三选一（二期）', () => {
+  it('fromRunDuration 单独成立；与其他来源并用或缺来源均被拒绝', () => {
+    expect(
+      scenarioMetricDeclSchema.safeParse({ key: 'run_ms', name: '全程耗时', fromRunDuration: true }).success,
+    ).toBe(true)
+
+    // 缺任何来源
+    expect(
+      scenarioMetricDeclSchema.safeParse({ key: 'run_ms', name: '全程耗时' }).success,
+    ).toBe(false)
+
+    // 与 fromContextKey 并用
+    expect(
+      scenarioMetricDeclSchema.safeParse({
+        key: 'run_ms',
+        name: '全程耗时',
+        fromRunDuration: true,
+        fromContextKey: 'diff',
+      }).success,
+    ).toBe(false)
   })
 })

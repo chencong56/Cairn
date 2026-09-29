@@ -71,6 +71,26 @@ export function collectAttemptOutcomeResults(input: {
     return { outcomeResults: results, continueMode }
   }
 
+  // 2.5 度量缺失（DURATION_UNAVAILABLE）：巡检类耗时条件取不到度量时不是流程闸门，
+  // 判 UNKNOWN 并按 onViolation 约定决定是否继续，不把整个 Run 打成 FAILED。
+  if (outcome.error.code === 'DURATION_UNAVAILABLE') {
+    const continueMode = entries.every((e) => e.onViolation === 'continue')
+    const results: OutcomeResultInsertItem[] = entries.map((e) => ({
+      contractId: e.contractId,
+      scope: e.scope,
+      meaning: e.meaning,
+      severity: e.severity,
+      onViolation: e.onViolation,
+      provenance: e.provenance,
+      verdict: 'UNKNOWN',
+      expected: extractExpected(step, e),
+      actual: null,
+      details: { code: outcome.error.code, safeMessage: outcome.error.safeMessage },
+      evaluatedAt: now,
+    }))
+    return { outcomeResults: results, continueMode }
+  }
+
   // 3. 非断言基础设施异常（TARGET_NOT_FOUND, TIMEOUT, PAGE_CRASH, SURFACE_LOST 等）
   // 规范明文要求：取值定位失败判 UNKNOWN，不判 FAIL
   const results: OutcomeResultInsertItem[] = entries.map((e) => ({
@@ -96,12 +116,25 @@ function extractExpected(step: Step, entry?: OutcomeManifestEntry): JsonValue | 
   if (step.type === 'ai_assert' && step.input && typeof step.input === 'object' && 'instruction' in step.input) {
     return (step.input as { instruction: JsonValue }).instruction
   }
+  if (step.type === 'check_context' && step.input && typeof step.input === 'object' && 'expect' in step.input) {
+    return (step.input as { expect: JsonValue }).expect
+  }
+  if (step.type === 'check_duration' && step.input && typeof step.input === 'object') {
+    const inp = step.input as { op: string; valueMs: number }
+    return { op: inp.op, valueMs: inp.valueMs }
+  }
   if (entry?.rule) {
     if (entry.rule.kind === 'deterministic') {
       return entry.rule.expect as unknown as JsonValue
     }
     if (entry.rule.kind === 'ai') {
       return entry.rule.instruction as unknown as JsonValue
+    }
+    if (entry.rule.kind === 'context') {
+      return entry.rule.expect as unknown as JsonValue
+    }
+    if (entry.rule.kind === 'step_duration' || entry.rule.kind === 'run_duration') {
+      return { op: entry.rule.op, valueMs: entry.rule.valueMs }
     }
   }
   return null

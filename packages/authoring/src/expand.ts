@@ -119,6 +119,88 @@ export function deterministicStepId(
 }
 
 /**
+ * 挂在 assert / ai_assert 上的页面类成功条件沿用宿主步骤的执行结果；
+ * 上下文与耗时规则与宿主结果无关，必须派生独立检查步骤才会真正求值。
+ */
+export function isEvaluatedByHostStep(step: Pick<Step, 'type'>, rule: OutcomeRule): boolean {
+  return (step.type === 'assert' || step.type === 'ai_assert') && (rule.kind === 'deterministic' || rule.kind === 'ai')
+}
+
+function requireSourceStepId(sourceStepId: string | undefined): string {
+  if (!sourceStepId) throw new Error('step_duration 成功条件缺少源步骤')
+  return sourceStepId
+}
+
+export function deriveStepFromOutcomeRule(
+  derivedId: string,
+  meaning: string,
+  rule: OutcomeRule,
+  sourceStepId?: string,
+): Step {
+  const name = meaning.slice(0, 128)
+  switch (rule.kind) {
+    case 'deterministic':
+      return {
+        id: derivedId,
+        name,
+        type: 'assert',
+        effectType: 'READ_ONLY',
+        input: {
+          ...(rule.target ? { target: rule.target } : {}),
+          expect: rule.expect,
+        },
+      }
+    case 'ai':
+      return {
+        id: derivedId,
+        name,
+        type: 'ai_assert',
+        effectType: 'READ_ONLY',
+        input: {
+          instruction: rule.instruction,
+        },
+      }
+    case 'context':
+      return {
+        id: derivedId,
+        name,
+        type: 'check_context',
+        effectType: 'READ_ONLY',
+        input: {
+          key: rule.key,
+          ...(rule.field ? { field: rule.field } : {}),
+          expect: rule.expect,
+        },
+      }
+    case 'step_duration':
+      return {
+        id: derivedId,
+        name,
+        type: 'check_duration',
+        effectType: 'READ_ONLY',
+        input: {
+          // 场景级条件在契约层已禁止 step_duration；这里缺源步骤属于编程错误。
+          sourceStepId: requireSourceStepId(sourceStepId),
+          op: rule.op,
+          valueMs: rule.valueMs,
+        },
+      }
+    case 'run_duration':
+      return {
+        id: derivedId,
+        name,
+        type: 'check_duration',
+        effectType: 'READ_ONLY',
+        input: {
+          runTotal: true,
+          op: rule.op,
+          valueMs: rule.valueMs,
+        },
+      }
+  }
+}
+
+/**
  * 从 Authoring Document 或 ScenarioDefinition 中提取/重构 OutcomeManifest。
  * 若提供 authoringDocument，则从其契约定义与存量断言中生成；
  * 若未提供 authoringDocument 但有 definition，则从 definition.steps 中按 legacy_assert 收编存量断言。
@@ -145,7 +227,7 @@ export function deriveOutcomeManifest(input: {
         const step = node.step
         if (node.outcomes && node.outcomes.length > 0) {
           for (const contract of node.outcomes) {
-            if (step.type === 'assert' || step.type === 'ai_assert') {
+            if (isEvaluatedByHostStep(step, contract.rule)) {
               entries.push({
                 contractId: contract.id,
                 scope: contract.scope,
@@ -1287,7 +1369,7 @@ export function expandAuthoringDocument(
 
       if (node.outcomes && node.outcomes.length > 0) {
         for (const contract of node.outcomes) {
-          if (step.type === 'assert' || step.type === 'ai_assert') {
+          if (isEvaluatedByHostStep(step, contract.rule)) {
             manifestSink.push({
               contractId: contract.id,
               scope: contract.scope,
@@ -1300,27 +1382,7 @@ export function expandAuthoringDocument(
             })
           } else {
             const derivedId = deterministicStepId(step.id, contract.id)
-            const derivedStep: Step =
-              contract.rule.kind === 'deterministic'
-                ? {
-                    id: derivedId,
-                    name: contract.meaning.slice(0, 128),
-                    type: 'assert',
-                    effectType: 'READ_ONLY',
-                    input: {
-                      ...(contract.rule.target ? { target: contract.rule.target } : {}),
-                      expect: contract.rule.expect,
-                    },
-                  }
-                : {
-                    id: derivedId,
-                    name: contract.meaning.slice(0, 128),
-                    type: 'ai_assert',
-                    effectType: 'READ_ONLY',
-                    input: {
-                      instruction: contract.rule.instruction,
-                    },
-                  }
+            const derivedStep = deriveStepFromOutcomeRule(derivedId, contract.meaning, contract.rule, step.id)
             if (step.disabled) derivedStep.disabled = true
             addStep(derivedStep, item.ancestry)
             manifestSink.push({
@@ -1679,27 +1741,7 @@ export function expandAuthoringDocument(
   if (document.scenarioOutcomes && document.scenarioOutcomes.length > 0) {
     for (const contract of document.scenarioOutcomes) {
       const derivedId = deterministicStepId('scenario', contract.id)
-      const derivedStep: Step =
-        contract.rule.kind === 'deterministic'
-          ? {
-              id: derivedId,
-              name: contract.meaning.slice(0, 128),
-              type: 'assert',
-              effectType: 'READ_ONLY',
-              input: {
-                ...(contract.rule.target ? { target: contract.rule.target } : {}),
-                expect: contract.rule.expect,
-              },
-            }
-          : {
-              id: derivedId,
-              name: contract.meaning.slice(0, 128),
-              type: 'ai_assert',
-              effectType: 'READ_ONLY',
-              input: {
-                instruction: contract.rule.instruction,
-              },
-            }
+      const derivedStep = deriveStepFromOutcomeRule(derivedId, contract.meaning, contract.rule)
       expandedSteps.push(derivedStep)
       outcomeManifestEntries.push({
         contractId: contract.id,

@@ -39,7 +39,7 @@ export const BROWSER_STEP_TYPES = [
   'map_ingest',
 ] as const
 export const AI_STEP_TYPES = ['ai_action', 'ai_extract', 'ai_assert'] as const
-export const SYSTEM_STEP_TYPES = ['verify_context', 'decide', 'compute', 'loop'] as const
+export const SYSTEM_STEP_TYPES = ['verify_context', 'decide', 'compute', 'loop', 'check_context', 'check_duration'] as const
 export const EXECUTABLE_STEP_TYPES = [
   ...FIXTURE_STEP_TYPES,
   ...BROWSER_STEP_TYPES,
@@ -705,6 +705,66 @@ export const loopStepSchema = z.strictObject({
 })
 export type LoopStep = z.infer<typeof loopStepSchema>
 
+export const CONTEXT_NUMBER_COMPARE_OPS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] as const
+export type ContextNumberCompareOp = (typeof CONTEXT_NUMBER_COMPARE_OPS)[number]
+
+export const contextExpectSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('number_compare'),
+    op: z.enum(CONTEXT_NUMBER_COMPARE_OPS),
+    value: z.number().finite(),
+  }),
+  z.strictObject({
+    kind: z.literal('non_empty'),
+  }),
+  z.strictObject({
+    kind: z.literal('text_contains'),
+    value: z.string().min(1).max(2048),
+  }),
+])
+export type ContextExpect = z.infer<typeof contextExpectSchema>
+
+export const checkContextInputSchema = z.strictObject({
+  key: contextKeySchema,
+  field: outputFieldNameSchema.optional(),
+  expect: contextExpectSchema,
+})
+export type CheckContextInput = z.infer<typeof checkContextInputSchema>
+
+export const checkContextStepSchema = z.strictObject({
+  ...stepCommon,
+  type: z.literal('check_context'),
+  effectType: z.literal('READ_ONLY'),
+  input: checkContextInputSchema,
+})
+export type CheckContextStep = z.infer<typeof checkContextStepSchema>
+
+export const checkDurationInputSchema = z
+  .strictObject({
+    sourceStepId: entityIdSchema.optional(),
+    runTotal: z.literal(true).optional(),
+    op: z.enum(['lte', 'lt']),
+    valueMs: z.number().int().nonnegative(),
+  })
+  .superRefine((val, ctx) => {
+    if (!val.runTotal && !val.sourceStepId) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['sourceStepId'],
+        message: '单步耗时检查必须指定 sourceStepId',
+      })
+    }
+  })
+export type CheckDurationInput = z.infer<typeof checkDurationInputSchema>
+
+export const checkDurationStepSchema = z.strictObject({
+  ...stepCommon,
+  type: z.literal('check_duration'),
+  effectType: z.literal('READ_ONLY'),
+  input: checkDurationInputSchema,
+})
+export type CheckDurationStep = z.infer<typeof checkDurationStepSchema>
+
 export const stepSchema = z
   .discriminatedUnion('type', [
     echoStepSchema,
@@ -729,6 +789,8 @@ export const stepSchema = z
     decideStepSchema,
     computeStepSchema,
     loopStepSchema,
+    checkContextStepSchema,
+    checkDurationStepSchema,
   ])
   .superRefine((step, ctx) => {
     if (step.type === 'ai_action' && (step.policy?.retryLimit ?? 0) > 0) {

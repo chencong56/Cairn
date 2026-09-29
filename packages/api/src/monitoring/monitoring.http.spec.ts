@@ -1,3 +1,25 @@
+import {
+  summarizeFleet,
+  summarizeQueues,
+  summarizeAnomalies,
+  summarizeAi,
+  summarizeAiModels,
+  summarizeSla,
+  summarizeTargetSla,
+  listMonitorProfiles,
+  listMonitorAlerts,
+  listMonitorAlertRules,
+  updateAlertingRules,
+  upsertAlertChannel,
+  silenceMonitorAlert,
+  registerStandaloneSecret,
+  listApiInstanceCard,
+  readObjectStoreCard,
+  readMonitorSeries,
+  recordManualObjectStoreProbe,
+  readSchemaVersion,
+  readMonitorClock,
+} from '@cairn/db'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -63,29 +85,6 @@ vi.mock('@cairn/db', async (importOriginal) => {
     latestLogicalVersionForDriver: vi.fn(() => '0062'),
   }
 })
-
-const {
-  summarizeFleet,
-  summarizeQueues,
-  summarizeAnomalies,
-  summarizeAi,
-  summarizeAiModels,
-  summarizeSla,
-  summarizeTargetSla,
-  listMonitorProfiles,
-  listMonitorAlerts,
-  listMonitorAlertRules,
-  updateAlertingRules,
-  upsertAlertChannel,
-  silenceMonitorAlert,
-  registerStandaloneSecret,
-  listApiInstanceCard,
-  readObjectStoreCard,
-  readMonitorSeries,
-  recordManualObjectStoreProbe,
-  readSchemaVersion,
-  readMonitorClock,
-} = await import('@cairn/db')
 
 const AS_OF = new Date('2026-09-18T03:00:00.000Z')
 

@@ -11,20 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { launchSession, stopSession, type BrowserHandle } from './runtime'
 import { ensureProfileDir } from './profiles'
 import { testOccupancyGrant, withTestOccupancy } from './test-occupancy'
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launch timeout')), 8_000)),
-    ])
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 function listen(server: Server): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -55,10 +42,16 @@ function chromiumPidsUsing(profileDir: string): number[] {
 
 async function originState(handle: BrowserHandle, url: string): Promise<{ slot: string | null; cookie: string }> {
   await handle.basePage.goto(url, { waitUntil: 'domcontentloaded' })
-  return handle.basePage.evaluate(() => ({
-    slot: localStorage.getItem('cairn-slot'),
-    cookie: document.cookie,
-  }))
+  return handle.basePage.evaluate(() => {
+    const scope = globalThis as unknown as {
+      document: { cookie: string }
+      localStorage: { getItem(k: string): string | null }
+    }
+    return {
+      slot: scope.localStorage.getItem('cairn-slot'),
+      cookie: scope.document.cookie,
+    }
+  })
 }
 
 describe('同一进程两套独立 Chromium Profile', { timeout: 120_000 }, () => {
@@ -68,7 +61,7 @@ describe('同一进程两套独立 Chromium Profile', { timeout: 120_000 }, () =
   let root = ''
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
     if (!hasBrowser) return
     server = createServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -115,8 +108,12 @@ describe('同一进程两套独立 Chromium Profile', { timeout: 120_000 }, () =
 
         await left.basePage.goto(baseUrl, { waitUntil: 'domcontentloaded' })
         await left.basePage.evaluate(() => {
-          localStorage.setItem('cairn-slot', 'one')
-          document.cookie = 'cairn_slot=one; path=/; max-age=3600'
+          const scope = globalThis as unknown as {
+            document: { cookie: string }
+            localStorage: { setItem(k: string, v: string): void }
+          }
+          scope.localStorage.setItem('cairn-slot', 'one')
+          scope.document.cookie = 'cairn_slot=one; path=/; max-age=3600'
         })
         const isolated = await originState(right, baseUrl)
         const kept = await originState(left, baseUrl)

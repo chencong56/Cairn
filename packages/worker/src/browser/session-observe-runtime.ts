@@ -15,8 +15,10 @@ import {
   getWorkerById,
   touchSessionUsed,
   updateRunDebugOverlay,
+  insertLogEvidence,
   type SessionRecord
 } from '@cairn/db'
+import { randomUUID } from 'node:crypto'
 import {
   DEFAULT_MANAGED_BROWSER_CAPABILITIES,
   BROWSER_FRAME_MAX_FPS,
@@ -36,8 +38,13 @@ import {
   type ObserveOperation,
   type PageRef,
   type TargetObservation,
+  type StructureObservation,
+  type JsonValue,
+  MAX_STRUCTURE_SNAPSHOT_CHARS,
+  stepRunFor,
   type SessionGrant
 } from '@cairn/shared'
+import { getAriaSnapshot } from './aria-snapshot.js'
 import { highlightOnPage, pickOnPage } from './observe'
 import { resolveObserveGrant } from './observe-grant'
 import { refreshScreencastIfStale, startScreencast } from './screencast'
@@ -164,7 +171,7 @@ export async function describeHoldPage(this: SessionManagerContext, runId: strin
     }
   }
 
-export async function observeRun(this: SessionManagerContext, input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation> {
+export async function observeRun(this: SessionManagerContext, input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation> {
     const { session, live, run } = await this.requireLiveAuthSession(input.runId)
     const detail = await loadRunDetail(this.dbHandle, input.runId)
     const sessionAuthoring = !detail && session?.status === 'OPEN'
@@ -179,6 +186,43 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
     }
     const entry = this.ensureRunPage(live, input.runId)
     const pageRef = pageRefFor(session.id, session.generation, entry)
+    const url = entry.page.url()
+    const title = await entry.page.title().catch(() => undefined)
+
+    if (input.op.op === 'structure') {
+      const snapshotRes = await getAriaSnapshot(entry.page, {
+        timeoutMs: 5000,
+        maxLength: MAX_STRUCTURE_SNAPSHOT_CHARS,
+      })
+      const evidenceId = randomUUID()
+      const checkpointStepId = detail?.checkpoint?.stepId
+      const stepRun = checkpointStepId && detail
+        ? stepRunFor(detail.stepRuns, checkpointStepId)
+        : undefined
+      const lastAttempt = stepRun?.attempts[stepRun.attempts.length - 1]
+      await insertLogEvidence(this.dbHandle, {
+        evidenceId,
+        runId: input.runId,
+        stepRunId: stepRun?.id,
+        attemptId: lastAttempt?.id,
+        payload: {
+          role: 'structure',
+          snapshot: snapshotRes.text,
+          truncated: snapshotRes.truncated,
+          url,
+          title,
+        } as unknown as JsonValue,
+      })
+      return {
+        evidenceId,
+        pageRef,
+        url,
+        title,
+        snapshot: snapshotRes.text,
+        truncated: snapshotRes.truncated,
+      }
+    }
+
     const now = Date.now()
     const resolved = resolveObserveGrant({
       op: input.op.op,
@@ -192,9 +236,8 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
       throw conflict('OBSERVE_GRANT_EXPIRED', '观察授权已过期，请重新校验或再次点选指认')
     }
     this.observeGrants.set(input.runId, resolved.issued)
+
     const grantOnly = input.op.op === 'highlight' && !input.op.target && !input.op.clearOverlayStepId
-    const url = entry.page.url()
-    const title = await entry.page.title().catch(() => undefined)
     const observation = grantOnly
       ? {
           outcome: 'NOT_FOUND' as const,

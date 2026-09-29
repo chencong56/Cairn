@@ -10,7 +10,7 @@ import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core'
 import { Test } from '@nestjs/testing'
 import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PERMISSIONS, targetAccountSchema, targetListResponseSchema, targetOverviewResponseSchema, targetSchema } from '@cairn/shared'
+import { PERMISSIONS, targetAccountSchema, targetListResponseSchema, targetOverviewResponseSchema, targetSchema, type CleanupStatusResponse } from '@cairn/shared'
 import { AllExceptionsFilter } from '../common/all-exceptions.filter'
 import type { RequestAccount } from '../common/request-account'
 import { PermissionsGuard } from '../rbac/permissions.guard'
@@ -109,14 +109,14 @@ function mockService() {
     deleteTarget: vi.fn(async () => ({
       resourceId: target.id,
       resourceType: 'target' as const,
-      status: 'completed' as const,
+      status: 'completed' as CleanupStatusResponse['status'],
       totalObjects: 0,
       purgedObjects: 0,
       failedObjects: 0,
       totalBytes: 0,
       purgedBytes: 0,
-      lastError: null,
-      completedAt: now,
+      lastError: null as string | null,
+      completedAt: now as string | null,
     })),
     getTargetCleanupStatus: vi.fn(async () => ({
       resourceId: target.id,
@@ -547,6 +547,8 @@ describe('Targets HTTP', () => {
       failedObjects: 0,
       totalBytes: 512,
       purgedBytes: 0,
+      lastError: null,
+      completedAt: null,
     })
     const res = await request(adminApp.getHttpServer()).post(`/targets/${target.id}/delete`).expect(202)
     expect(res.body.totalObjects).toBe(3)

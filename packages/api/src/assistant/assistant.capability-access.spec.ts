@@ -259,7 +259,7 @@ describe('平台助手能力契约、多租户授权与轮次安全底座测试'
       revision: 1,
       baseUrl: 'http://127.0.0.1:9999',
       model: 'test-model',
-      provider: 'openai',
+      provider: 'deepseek',
       thinkingMode: 'off',
       apiKey: 'test-key',
       requestTimeoutMs: 10000,
@@ -535,7 +535,7 @@ describe('平台助手能力契约、多租户授权与轮次安全底座测试'
       expect(record.turn.status).toBe('INTERRUPTED')
       expect(record.turn.stopReason).toBe('REQUEST_LOST_ON_RESTART')
       expect(record.turn.result?.kind).toBe('unsupported')
-      expect(record.turn.result?.reasonCode).toBe('REQUEST_LOST_ON_RESTART')
+      expect((record.turn.result as any)?.reasonCode).toBe('REQUEST_LOST_ON_RESTART')
     })
 
     it('排队任务持久化 request_payload，冷启动或跨实例可无损出队并执行', async () => {
@@ -630,7 +630,7 @@ describe('平台助手能力契约、多租户授权与轮次安全底座测试'
             },
           ],
           scope: { targetId: targetBId },
-          coverage: { totalVisible: 1, hasMore: false, nextCursor: null, observedAt: new Date().toISOString() },
+          coverage: { totalVisible: 1, hasMore: false, nextCursor: undefined, observedAt: new Date().toISOString() },
           message: '发现结果',
         },
       }).catch(() => undefined)
@@ -672,13 +672,13 @@ describe('平台助手能力契约、多租户授权与轮次安全底座测试'
 
       // Query invocations as User A
       const userAInvocations = await assistantService.listModelInvocations(userA, {})
-      expect(userAInvocations.items.some((i) => i.ownerRef.turnId === turnA.turnId)).toBe(true)
-      expect(userAInvocations.items.some((i) => i.ownerRef.turnId === turnB.turnId)).toBe(false)
+      expect(userAInvocations.items.some((i) => (i.ownerRef as any).turnId === turnA.turnId)).toBe(true)
+      expect(userAInvocations.items.some((i) => (i.ownerRef as any).turnId === turnB.turnId)).toBe(false)
 
       // Query invocations as User B
       const userBInvocations = await assistantService.listModelInvocations(userB, {})
-      expect(userBInvocations.items.some((i) => i.ownerRef.turnId === turnB.turnId)).toBe(true)
-      expect(userBInvocations.items.some((i) => i.ownerRef.turnId === turnA.turnId)).toBe(false)
+      expect(userBInvocations.items.some((i) => (i.ownerRef as any).turnId === turnB.turnId)).toBe(true)
+      expect(userBInvocations.items.some((i) => (i.ownerRef as any).turnId === turnA.turnId)).toBe(false)
     })
 
     it('未启用平台 AI 时，createTurn 后端硬拦截并拒绝（403 ASSISTANT_MODEL_DISABLED）', async () => {

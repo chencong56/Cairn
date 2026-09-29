@@ -53,6 +53,7 @@ describe('助手公开结果边界', () => {
       base: { draftRevision: 1, documentDigest: digest, dependencyFingerprint: 'same-draft' },
       operations: [], diffs: [], diagnostics: [], intentCoverage: [],
       proposalId: '44444444-4444-4444-8444-444444444444', candidateDigest: digest,
+      source: 'step',
       executable: true,
       validation: { schema: 'passed', expansion: 'passed', compiler: 'passed' },
     } as AssistantAuthoringProposal

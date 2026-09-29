@@ -506,6 +506,33 @@ describe('compileScenarioDocument', () => {
     expect(result.diagnostics.some((item) => item.code === 'OUTCOME_RULE_TARGET_MISSING')).toBe(false)
   })
 
+  it('整页出现 / 不出现某段文字的成功条件允许省略 target', () => {
+    const source = document([navigate(ids.a)])
+    for (const pageExpect of [
+      { kind: 'text_absent' as const, value: '系统异常' },
+      { kind: 'text_contains' as const, value: '提交成功' },
+    ]) {
+      const result = compileScenarioDocument(source, {
+        mode: 'release',
+        outcomeManifest: {
+          entries: [
+            {
+              contractId: ids.b,
+              scope: 'step',
+              meaning: '整页文字检查',
+              severity: 'MUST',
+              onViolation: 'continue',
+              provenance: 'ai_compiled',
+              stepId: ids.a,
+              rule: { kind: 'deterministic', expect: pageExpect },
+            },
+          ],
+        },
+      })
+      expect(result.diagnostics.some((item) => item.code === 'OUTCOME_RULE_TARGET_MISSING')).toBe(false)
+    }
+  })
+
   it('outputs 业务输出引用未定义变量产生 OUTPUT_VARIABLE_UNRESOLVED 警告', () => {
     const source = {
       ...document([navigate(ids.a)]),

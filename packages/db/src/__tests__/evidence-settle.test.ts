@@ -8,6 +8,7 @@ import {
   REDACTED,
   writeRunVideoPayload,
   writeEvidenceArtifactKey,
+  type JsonValue,
   type Step,
 } from '@cairn/shared'
 import {
@@ -651,7 +652,7 @@ describe.each(DRIVERS)('%s 证据轴与收尾（集成）', { timeout: 30_000 },
     expect(listed.items.filter((item) => item.type === 'video' && !item.attemptId)).toHaveLength(1)
   })
 
-  async function commitAvailableRunVideo(runId: string, payload: unknown) {
+  async function commitAvailableRunVideo(runId: string, payload: JsonValue) {
     const reserved = await reserveObjectEvidence(handle.db, {
       runId,
       type: 'video',

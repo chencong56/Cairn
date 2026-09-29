@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { recordPlatformAiCall } from '@cairn/db'
 import { PLATFORM_AI_OUTPUT_TRUNCATED_CODE } from '@cairn/shared'
-import { AssistantModelSession, modelSupervisorRouteSchema, type PlatformAiAccess } from './model-session'
+import { AssistantModelSession, modelAcceptanceTargetsSchema, modelSupervisorRouteSchema, type PlatformAiAccess } from './model-session'
 import type { PlatformModelClient } from './model-client'
 
 vi.mock('@cairn/db', () => ({ recordPlatformAiCall: vi.fn(async () => undefined) }))
@@ -107,7 +107,7 @@ describe('assistant model-call validation records', () => {
   })
 
   it('uses a purpose-specific non-thinking mode without repeating a truncated call', async () => {
-    const complete = vi.fn(async () => ({ text: '{"answer":', model: 'test-model', finishReason: 'length' }))
+    const complete = vi.fn(async (_input: any) => ({ text: '{"answer":', model: 'test-model', finishReason: 'length' }))
     const result = await session(complete, { thinkingMode: 'on' })
       .completeJson('knowledge_answer', schema, messages, undefined, false, 'off')
 
@@ -136,5 +136,15 @@ describe('supervisor route slot normalization', () => {
       slots: { keywords: ['确定性步骤', '重试'], nested: { unsupported: true }, runId: 'run-1' },
     })).toEqual({ skillId: 'knowledge.answer', confidence: 0.88,
       slots: { keywords: '确定性步骤 重试', runId: 'run-1' } })
+  })
+})
+
+describe('验收定位输出', () => {
+  it('模型把可选名称写成空串时视为未提供', () => {
+    const parsed = modelAcceptanceTargetsSchema.parse({
+      items: [{ key: 'rows', candidates: [{ by: 'role', value: 'row', name: '' }], headerRows: 1, label: '', rationale: '表格数据行', clarify: '' }],
+    })
+    expect(parsed.items[0]?.candidates?.[0]).toEqual({ by: 'role', value: 'row' })
+    expect(parsed.items[0]?.label).toBeUndefined()
   })
 })

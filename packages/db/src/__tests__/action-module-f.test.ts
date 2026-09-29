@@ -29,7 +29,7 @@ describe('AM-F: 多实现发布与试跑', { timeout: 30_000 }, () => {
     const target = await targets.createTarget({
       loginFields: null, authMethod: 'manual', captchaMode: 'none', status: 'active',
       name: 'AM-F 目标',
-      code: `AMF_${newId().slice(0, 8)}`,
+      code: `amf-${newId().slice(0, 8)}`,
       entryUrl: 'https://example.com',
     }, account)
     return { db, account, target }

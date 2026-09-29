@@ -6,7 +6,6 @@ import { encodeJpegDirectoryToWebm, encodeJpegFilesToWebm, isPlayableWebm, isPla
 import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 function solidJpeg(width: number, height: number, r: number, g: number, b: number): Uint8Array {
   const data = Buffer.alloc(width * height * 4)
@@ -30,9 +29,9 @@ describe('encodeJpegFilesToWebm', () => {
       fps: 2,
       maxBytes: 512_000,
     })
-    expect(isPlayableWebm(encoded.bytes)).toBe(true)
-    expect(encoded.bytes[0]).not.toBe(0xff)
-    expect(Buffer.from(encoded.bytes.subarray(0, 64)).includes(Buffer.from('webm'))).toBe(true)
+    expect(isPlayableWebm(encoded.bytes!)).toBe(true)
+    expect(encoded.bytes![0]).not.toBe(0xff)
+    expect(Buffer.from(encoded.bytes!.subarray(0, 64)).includes(Buffer.from('webm'))).toBe(true)
     expect(encoded.truncated).toBe(false)
     expect(encoded.decodedFrames).toBeGreaterThanOrEqual(1)
     expect(encoded.decodedDurationMs).toBeGreaterThan(0)
@@ -111,7 +110,7 @@ describe('encodeJpegFilesToWebm', () => {
     const sealedTMs = 16_000
     await writeFile(join(dir, 'timeline.json'), JSON.stringify({ frames, sealedTMs }))
 
-    const childScript = join(dirname(fileURLToPath(import.meta.url)), 'video-encoder-child.cjs')
+    const childScript = join(__dirname, 'video-encoder-child.cjs')
     const child = spawn(process.execPath, [childScript, dir, join(dir, 'out.webm'), '2', '2000000'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     })

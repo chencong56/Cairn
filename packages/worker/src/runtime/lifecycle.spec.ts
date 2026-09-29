@@ -249,7 +249,7 @@ describe("LifecycleService", () => {
     vi.mocked(claimSessionOperation).mockResolvedValue(null);
     vi.mocked(registerWorker).mockReset();
     vi.mocked(registerWorker).mockResolvedValue({
-      worker: { id: "stub" },
+      worker: { id: "stub" } as any,
       revokedRunIds: [],
     });
     const {
@@ -281,7 +281,7 @@ describe("LifecycleService", () => {
     const { cleanupRunFileWorkspaces } = await import("../engine/run-file-workspace.js");
     vi.mocked(cleanupRunFileWorkspaces).mockReset();
     vi.mocked(cleanupRunFileWorkspaces).mockResolvedValue(0);
-    const { deliverServiceWebhooks } = await import("./service-webhook-delivery");
+    const { deliverServiceWebhooks } = await import("./service-webhook-delivery.js");
     vi.mocked(deliverServiceWebhooks).mockReset();
     vi.mocked(deliverServiceWebhooks).mockResolvedValue(0);
     await app?.close().catch(() => {});
@@ -691,7 +691,7 @@ describe("LifecycleService", () => {
     const order: string[] = [];
     vi.mocked(registerWorker).mockImplementation(async () => {
       order.push("register");
-      return { worker: { id: "stub" }, revokedRunIds: [] };
+      return { worker: { id: "stub" } as any, revokedRunIds: [] };
     });
     vi.mocked(heartbeatWorker).mockImplementation(async () => {
       order.push("heartbeat");
@@ -715,7 +715,7 @@ describe("LifecycleService", () => {
     vi.mocked(heartbeatWorker).mockResolvedValue("ok");
     vi.mocked(claimSessionOperation).mockResolvedValue(null);
     vi.mocked(registerWorker).mockResolvedValue({
-      worker: { id: "stub" },
+      worker: { id: "stub" } as any,
       revokedRunIds: [],
     });
   });
@@ -734,7 +734,7 @@ describe("LifecycleService", () => {
     });
     vi.mocked(registerWorker).mockImplementation(async () => {
       order.push("register");
-      return { worker: { id: "stub" }, revokedRunIds: [] };
+      return { worker: { id: "stub" } as any, revokedRunIds: [] };
     });
     vi.mocked(claimSessionOperation).mockImplementation(async () => {
       order.push("claim");
@@ -757,7 +757,7 @@ describe("LifecycleService", () => {
     vi.mocked(heartbeatWorker).mockResolvedValue("ok");
     vi.mocked(claimSessionOperation).mockResolvedValue(null);
     vi.mocked(registerWorker).mockResolvedValue({
-      worker: { id: "stub" },
+      worker: { id: "stub" } as any,
       revokedRunIds: [],
     });
   });
@@ -1299,7 +1299,7 @@ describe("LifecycleService", () => {
   });
 
   it("maintenance 角色通过独立单飞周期派发服务 Webhook", async () => {
-    const { deliverServiceWebhooks } = await import("./service-webhook-delivery");
+    const { deliverServiceWebhooks } = await import("./service-webhook-delivery.js");
     vi.mocked(deliverServiceWebhooks).mockClear();
     const svc = await buildLifecycle();
     await vi.waitFor(() => expect(deliverServiceWebhooks).toHaveBeenCalled());
@@ -1847,7 +1847,7 @@ describe("LifecycleService", () => {
     }).compile();
     app = moduleRef.createNestApplication();
     const svc = moduleRef.get(LifecycleService);
-    svc.rolesForAssembly = { executor: false, scheduler: false, maintenance: true };
+    svc.rolesForAssembly = { executor: false, scheduler: false, maintenance: true, analyst: false };
     svc.exitProcess = vi.fn();
     await svc.onApplicationBootstrap();
     overrides?.();

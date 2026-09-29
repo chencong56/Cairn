@@ -420,10 +420,12 @@ describe.skipIf(!parsed.success)('迁移与 Drizzle schema 一致性（集成）
       { column_name: 'fencing_token', is_nullable: 'NO' },
       { column_name: 'generation', is_nullable: 'NO' },
       { column_name: 'health', is_nullable: 'NO' },
+      { column_name: 'host_id', is_nullable: 'YES' },
       { column_name: 'id', is_nullable: 'NO' },
       { column_name: 'identity_state', is_nullable: 'YES' },
       { column_name: 'identity_verified_at', is_nullable: 'YES' },
       { column_name: 'idle_ttl_seconds', is_nullable: 'NO' },
+      { column_name: 'isolation', is_nullable: 'YES' },
       { column_name: 'keep_alive_seconds', is_nullable: 'YES' },
       { column_name: 'keep_alive_until', is_nullable: 'YES' },
       { column_name: 'last_auth_checked_at', is_nullable: 'YES' },
@@ -616,6 +618,8 @@ describe.skipIf(!parsed.success)('迁移与 Drizzle schema 一致性（集成）
       'platform_ai_calls.context_manifest_id',
       'repair_candidates.candidate_id',
       'suite_run_items.stage_id',
+      'browser_sessions.host_id',
+      'recording_draft_exclusions.item_id',
     ])
     const { rows } = await pool.query<{ table_name: string; column_name: string; data_type: string }>(
       `SELECT table_name, column_name, data_type FROM information_schema.columns
@@ -730,6 +734,10 @@ describe.skipIf(!parsed.success)('迁移与 Drizzle schema 一致性（集成）
       'snapshot_id→target_business_source_snapshots',
       'case_id→module_test_cases',
       'execution_id→module_case_executions',
+      'handed_off_receipt_id→recording_import_receipts',
+      'base_revision_id→report_revisions',
+      'ai_revision_id→report_revisions',
+      'entry_id→map_menu_entries',
     ])
     const violations = rows.filter((r) => {
       if (!r.column_name.endsWith('_id')) return false

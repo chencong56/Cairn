@@ -598,7 +598,7 @@ export async function handleScenarioProposeStep(
       return {
         ...op,
         id: opId,
-        stepId: idMap.get(op.stepId) ?? op.stepId,
+        ...('stepId' in op && op.stepId ? { stepId: idMap.get(op.stepId) ?? op.stepId } : {}),
         anchorStepId:
           'anchorStepId' in op && op.anchorStepId
             ? idMap.get(op.anchorStepId as string) ?? op.anchorStepId
@@ -642,6 +642,7 @@ export async function handleScenarioProposeStep(
 
     const authoringProposal: AssistantAuthoringProposal = {
       kind: 'authoring_proposal',
+      source: 'step',
       proposalId: newId(),
       scenarioId: detail.id,
       base: {

@@ -102,6 +102,7 @@ export function RunVideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const progressBarRef = useRef<HTMLDivElement>(null)
+  const activeCapsuleRef = useRef<HTMLButtonElement>(null)
 
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
@@ -156,6 +157,17 @@ export function RunVideoPlayer({
       onChapterChange?.(chapId)
     }
   }, [currentChapter, onChapterChange])
+
+  // 当前选中步骤切换时，胶囊自动滚动居中
+  useEffect(() => {
+    if (activeCapsuleRef.current && typeof activeCapsuleRef.current.scrollIntoView === 'function') {
+      activeCapsuleRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'center',
+      })
+    }
+  }, [currentChapter?.stepRunId])
 
   // 受控 Seek
   const prevTokenRef = useRef<number | null>(null)
@@ -570,50 +582,30 @@ export function RunVideoPlayer({
         </Button>
       </div>
 
-      {/* 控件第二层：说明行与步骤互跳 */}
-      <div className='flex flex-wrap items-center justify-between gap-2 border-t border-border-card/40 px-1 pt-1.5'>
+      {/* 控件第二层：当前步骤说明与步进控制 */}
+      <div className='flex items-center justify-between gap-3 border-t border-border-card/40 px-1 pt-2'>
         {/* 当前步骤说明 */}
-        <p className='text-label font-medium text-foreground'>{descriptionText}</p>
+        <p className='min-w-0 truncate text-label font-medium text-foreground' title={descriptionText}>
+          {descriptionText}
+        </p>
 
-        {/* 右侧：标签与导航按钮 */}
-        <div className='flex flex-wrap items-center gap-1.5'>
-          {/* 章节 <= 8 且屏幕宽度允许时放可点标签 */}
-          {chapterModel.chapters.length > 0 && chapterModel.chapters.length <= 8 ? (
-            <div className='hidden items-center gap-1 sm:flex'>
-              {chapterModel.chapters.map((chap) => (
-                <button
-                  key={chap.stepRunId}
-                  type='button'
-                  onClick={() => {
-                    handleSeekTo(chap.fromMs, 'chapter')
-                    onSelectStep?.(chap.stepRunId)
-                  }}
-                  className={`rounded-sm px-1.5 py-0.5 text-small transition-colors ${
-                    currentChapter?.stepRunId === chap.stepRunId
-                      ? 'bg-primary text-primary-foreground font-medium'
-                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
-                  }`}
-                >
-                  {chap.ordinal + 1}. {chap.name}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
+        {/* 右侧：步进控制与位置指示 */}
+        <div className='flex shrink-0 items-center gap-1.5'>
           {/* 循环头章节：按项跳转 */}
           {currentChapter?.iterations?.length ? (
-            <div className='flex max-w-full flex-wrap items-center gap-1' aria-label='按项跳转'>
+            <div className='flex items-center gap-1 mr-1' aria-label='按项跳转'>
+              <span className='hidden sm:inline text-caption text-muted-foreground mr-0.5'>循环项:</span>
               {currentChapter.iterations.map((segment) => (
                 <button
                   key={segment.index}
                   type='button'
                   title={`第 ${segment.index + 1} 项`}
                   onClick={() => handleSeekTo(segment.fromMs, 'chapter')}
-                  className={`min-w-6 rounded-sm px-1 py-0.5 text-small tabular-nums ${
+                  className={`min-w-6 rounded-sm px-1 py-0.5 text-small tabular-nums transition-colors ${
                     segment.status === 'FAILED'
                       ? 'bg-status-error-background text-status-error-foreground'
                       : currentMs >= segment.fromMs && currentMs < segment.toMs
-                        ? 'bg-primary text-primary-foreground'
+                        ? 'bg-primary text-primary-foreground font-medium'
                         : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
                   }`}
                 >
@@ -622,6 +614,15 @@ export function RunVideoPlayer({
               ))}
             </div>
           ) : null}
+
+          {/* 步骤计数 */}
+          {chapterModel.chapters.length > 0 && (
+            <span className='hidden sm:inline-block text-caption tabular-nums text-muted-foreground px-1 select-none'>
+              {currentChapterIndex >= 0
+                ? `${currentChapterIndex + 1} / ${chapterModel.chapters.length}`
+                : `共 ${chapterModel.chapters.length} 步`}
+            </span>
+          )}
 
           {/* 上一步 / 下一步 */}
           <Button
@@ -632,7 +633,7 @@ export function RunVideoPlayer({
             onClick={handlePrevChapter}
             className='h-7 px-2 text-small'
           >
-            <ChevronLeft className='size-3' />
+            <ChevronLeft className='size-3 mr-0.5' />
             上一步
           </Button>
           <Button
@@ -644,10 +645,65 @@ export function RunVideoPlayer({
             className='h-7 px-2 text-small'
           >
             下一步
-            <ChevronRight className='size-3' />
+            <ChevronRight className='size-3 ml-0.5' />
           </Button>
         </div>
       </div>
+
+      {/* 控件第三层：横向自适应步骤胶囊轨 */}
+      {chapterModel.chapters.length > 0 ? (
+        <div className='relative mt-1 px-1'>
+          <div
+            className='flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 scroll-smooth'
+            role='tablist'
+            aria-label='视频步骤分段'
+          >
+            {chapterModel.chapters.map((chap) => {
+              const isSelected = currentChapter?.stepRunId === chap.stepRunId
+              const statusDotClass =
+                chap.status === 'SUCCEEDED'
+                  ? isSelected
+                    ? 'bg-emerald-300'
+                    : 'bg-status-success'
+                  : chap.status === 'FAILED'
+                    ? isSelected
+                      ? 'bg-red-300 ring-1 ring-white/50'
+                      : 'bg-status-error'
+                    : chap.status === 'RUNNING'
+                      ? isSelected
+                        ? 'bg-sky-200 animate-pulse'
+                        : 'bg-status-info animate-pulse'
+                      : isSelected
+                        ? 'bg-white/70'
+                        : 'bg-muted-foreground/50'
+
+              return (
+                <button
+                  key={chap.stepRunId}
+                  ref={isSelected ? activeCapsuleRef : null}
+                  type='button'
+                  role='tab'
+                  aria-selected={isSelected}
+                  title={`${chap.ordinal + 1}. ${chap.name} (${STEP_RUN_STATUS_LABELS[chap.status] ?? chap.status})`}
+                  onClick={() => {
+                    handleSeekTo(chap.fromMs, 'chapter')
+                    onSelectStep?.(chap.stepRunId)
+                  }}
+                  className={`group inline-flex shrink-0 items-center gap-1.5 h-7 px-2.5 rounded-full text-small transition-all select-none whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                    isSelected
+                      ? 'bg-primary text-primary-foreground font-medium shadow-xs'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground border border-border-card/60'
+                  }`}
+                >
+                  <span className={`size-1.5 shrink-0 rounded-full transition-colors ${statusDotClass}`} />
+                  <span className='tabular-nums'>{chap.ordinal + 1}.</span>
+                  <span className='max-w-64 truncate'>{chap.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

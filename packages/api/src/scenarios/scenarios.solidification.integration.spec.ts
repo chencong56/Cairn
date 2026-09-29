@@ -160,7 +160,7 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
       )
     }
 
-    const reloaded = await scenariosService.get(created.id, actor)
+    const reloaded = await scenariosService.get(created.id)
     return { scenario: reloaded, navStep, aiStep }
   }
 
@@ -168,7 +168,7 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
     scenarioId: string
     scenarioVersionId: string
     aiStep: Step
-    traceIntegrity?: 'complete' | 'missing'
+    traceIntegrity?: 'complete' | 'none'
     attemptStatus?: 'SUCCEEDED' | 'FAILED'
   }) {
     const runId = newId()
@@ -214,28 +214,6 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
       } as any,
       snapshotDigest: 'test-digest',
       context: {},
-      stepRuns: [
-        {
-          id: stepRunId,
-          stepId: input.aiStep.id,
-          name: input.aiStep.name,
-          ordinal: 0,
-          scopePath: '',
-          status: attemptStatus,
-          resolvedStepSnapshot: {
-            stepDefinitionDigest: stepDigest,
-          },
-          attempts: [
-            {
-              id: attemptId,
-              attemptNo: 1,
-              status: attemptStatus,
-              startedAt: new Date().toISOString(),
-              finishedAt: new Date().toISOString(),
-            },
-          ],
-        },
-      ] as any,
     })
 
     // 2. 写入 StepRun & Attempt
@@ -270,7 +248,7 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
       targetId,
       stepDefinitionDigest: stepDigest,
       namespaceDigest: 'ns-test',
-      solidifiableLevel: 'recommended',
+      solidifiableLevel: 'full',
       traceIntegrity,
       actionCount: 2,
       modelCalls: 2,
@@ -347,7 +325,7 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
     const { scenario, aiStep } = await seedScenarioWithAiStep()
     const { runId, attemptId } = await seedExecutionFacts({
       scenarioId: scenario.id,
-      scenarioVersionId: scenario.published.versionId,
+      scenarioVersionId: scenario.published!.versionId,
       aiStep,
     })
 
@@ -411,8 +389,8 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
     expect(applyResult.receipt.insertedStepIds).toHaveLength(2)
 
     // 4. 深度验证场景草稿的最新 AST
-    const updated = await scenariosService.get(scenario.id, actor)
-    const nodes = walkAuthoringNodes(updated.draft!.document)
+    const updated = await scenariosService.get(scenario.id)
+    const nodes = walkAuthoringNodes(normalizeAuthoringDocument(updated.draft!.document))
 
     // 原来 2 个节点（navigate + ai_action），ai_action 被 2 个确定性步骤替换，总计应为 3 个节点
     expect(nodes).toHaveLength(3)
@@ -480,9 +458,9 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
     const { scenario, aiStep } = await seedScenarioWithAiStep()
     const { runId, attemptId } = await seedExecutionFacts({
       scenarioId: scenario.id,
-      scenarioVersionId: scenario.published.versionId,
+      scenarioVersionId: scenario.published!.versionId,
       aiStep,
-      traceIntegrity: 'missing',
+      traceIntegrity: 'none',
     })
 
     await expect(
@@ -494,7 +472,7 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
     const { scenario, aiStep } = await seedScenarioWithAiStep()
     const { runId, attemptId } = await seedExecutionFacts({
       scenarioId: scenario.id,
-      scenarioVersionId: scenario.published.versionId,
+      scenarioVersionId: scenario.published!.versionId,
       aiStep,
       attemptStatus: 'FAILED',
     })
@@ -508,7 +486,7 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
     const { scenario, aiStep, navStep } = await seedScenarioWithAiStep()
     const { runId, attemptId } = await seedExecutionFacts({
       scenarioId: scenario.id,
-      scenarioVersionId: scenario.published.versionId,
+      scenarioVersionId: scenario.published!.versionId,
       aiStep,
     })
 
@@ -536,7 +514,7 @@ describe('AI 步骤固化端到端全链路（AP-1 集成测试）', { timeout: 
     const { scenario, aiStep } = await seedScenarioWithAiStep()
     const { runId, attemptId } = await seedExecutionFacts({
       scenarioId: scenario.id,
-      scenarioVersionId: scenario.published.versionId,
+      scenarioVersionId: scenario.published!.versionId,
       aiStep,
     })
 

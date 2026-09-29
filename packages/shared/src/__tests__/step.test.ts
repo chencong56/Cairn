@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAiStepType, isBrowserStepType, isExecutableStepType, stepSchema, stepUsesBrowser } from '../step.js'
+import { checkDurationInputSchema, isAiStepType, isBrowserStepType, isExecutableStepType, stepSchema, stepUsesBrowser } from '../step.js'
 
 const echoId = '00000000-0000-4000-8000-000000000011'
 const delayId = '00000000-0000-4000-8000-000000000012'
@@ -255,5 +255,27 @@ describe('stepSchema', () => {
         selector: '#submit',
       }),
     ).toThrow()
+  })
+})
+
+describe('checkDurationInputSchema（二期全程耗时）', () => {
+  it('runTotal: true 时 sourceStepId 可选；未开启 runTotal 时 sourceStepId 必填', () => {
+    expect(
+      checkDurationInputSchema.safeParse({ runTotal: true, op: 'lte', valueMs: 30_000 }).success,
+    ).toBe(true)
+
+    expect(
+      checkDurationInputSchema.safeParse({ op: 'lte', valueMs: 30_000 }).success,
+    ).toBe(false)
+
+    expect(
+      checkDurationInputSchema.safeParse({ sourceStepId: echoId, op: 'lte', valueMs: 30_000 }).success,
+    ).toBe(true)
+  })
+
+  it('存量快照形状（无 runTotal 字段）可正常反序列化', () => {
+    expect(
+      checkDurationInputSchema.parse({ sourceStepId: echoId, op: 'lt', valueMs: 5_000 }),
+    ).toMatchObject({ op: 'lt', valueMs: 5_000 })
   })
 })

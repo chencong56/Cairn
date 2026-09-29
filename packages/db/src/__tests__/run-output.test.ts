@@ -114,6 +114,7 @@ describe('assembleRunSnapshot outputs 保真与摘要', () => {
         schemaVersion: 1 as any,
         policyVersion: 1,
         rules: [{ origin: 'https://example.com', purpose: 'business_surface' as const, effect: 'allow' as const }],
+        readOnlyRequests: [],
       },
     },
     mapConsumption: { mode: 'off' as const },
@@ -233,7 +234,7 @@ describe.each(DRIVERS)('%s 业务输出 settleRunOutput 与 API 读取集成', {
 
     // 验证 loadRunDetail 携带完整 output
     const detail = await loadRunDetail(handle.db, runId)
-    expect(detail.output).toEqual(settled)
+    expect(detail!.output).toEqual(settled)
   })
 
   it('历史运行（runs.output 为 null）：loadRunDetail 动态回退组装且不回写物理行', async () => {
@@ -264,12 +265,12 @@ describe.each(DRIVERS)('%s 业务输出 settleRunOutput 与 API 读取集成', {
 
     // 检查库中依然为 null
     const [beforeRow] = await handle.db.select().from(runs).where(eq(runs.id, runId)).limit(1)
-    expect(beforeRow.output).toBeNull()
+    expect(beforeRow!.output).toBeNull()
 
     // 读取 detail 时动态组装输出
     const detail = await loadRunDetail(handle.db, runId)
-    expect(detail.output).not.toBeNull()
-    expect(detail.output?.status).toBe('NORMAL')
+    expect(detail!.output).not.toBeNull()
+    expect(detail!.output?.status).toBe('NORMAL')
 
     // 验证 listRuns 也能动态推导出保底 outputSummary
     const list = await listRuns(handle.db, { targetId })
@@ -279,7 +280,7 @@ describe.each(DRIVERS)('%s 业务输出 settleRunOutput 与 API 读取集成', {
 
     // 物理库仍然为 null，不被隐式变动
     const [afterRow] = await handle.db.select().from(runs).where(eq(runs.id, runId)).limit(1)
-    expect(afterRow.output).toBeNull()
+    expect(afterRow!.output).toBeNull()
   })
 
   it('历史失败运行的列表和详情不显示成功结论，保留部分数据且不改写原始输出', async () => {
@@ -330,6 +331,6 @@ describe.each(DRIVERS)('%s 业务输出 settleRunOutput 与 API 读取集成', {
     expect((reportSource.payload.output as RunOutput).dataRow).toEqual({ report_id: 7 })
 
     const [afterRead] = await handle.db.select({ output: runs.output }).from(runs).where(eq(runs.id, run.detail.id))
-    expect(afterRead.output).toEqual(storedOutput)
+    expect(afterRead!.output).toEqual(storedOutput)
   })
 })

@@ -41,10 +41,13 @@ describe('managed helpers', () => {
 </html>`)
 
         // 初始状态下两个容器 scrollTop 均为 0
-        const initialScroll = await page.evaluate(() => ({
-          sidebar: document.getElementById('sidebar')!.scrollTop,
-          main: document.getElementById('main')!.scrollTop,
-        }))
+        const initialScroll = await page.evaluate(() => {
+          const doc = (globalThis as any).document
+          return {
+            sidebar: doc.getElementById('sidebar')!.scrollTop,
+            main: doc.getElementById('main')!.scrollTop,
+          }
+        })
         expect(initialScroll).toEqual({ sidebar: 0, main: 0 })
 
         // 1. 光标落点在侧边栏内 (x: 100, y: 150)，派发滚轮 120px
@@ -63,11 +66,14 @@ describe('managed helpers', () => {
         await applyAuthInput(page, sidebarWheelCommand)
 
         // 验证：侧边栏发生滚动，而主体完全未滚动！
-        await page.waitForFunction(() => document.getElementById('sidebar')!.scrollTop > 0, { timeout: 2000 })
-        const afterSidebarWheel = await page.evaluate(() => ({
-          sidebar: document.getElementById('sidebar')!.scrollTop,
-          main: document.getElementById('main')!.scrollTop,
-        }))
+        await page.waitForFunction(() => (globalThis as any).document.getElementById('sidebar')!.scrollTop > 0, { timeout: 2000 })
+        const afterSidebarWheel = await page.evaluate(() => {
+          const doc = (globalThis as any).document
+          return {
+            sidebar: doc.getElementById('sidebar')!.scrollTop,
+            main: doc.getElementById('main')!.scrollTop,
+          }
+        })
         expect(afterSidebarWheel.sidebar).toBeGreaterThan(0)
         expect(afterSidebarWheel.main).toBe(0)
 
@@ -87,11 +93,14 @@ describe('managed helpers', () => {
         await applyAuthInput(page, mainWheelCommand)
 
         // 验证：主体发生滚动，侧边栏维持之前位移不变！
-        await page.waitForFunction(() => document.getElementById('main')!.scrollTop > 0, { timeout: 2000 })
-        const afterMainWheel = await page.evaluate(() => ({
-          sidebar: document.getElementById('sidebar')!.scrollTop,
-          main: document.getElementById('main')!.scrollTop,
-        }))
+        await page.waitForFunction(() => (globalThis as any).document.getElementById('main')!.scrollTop > 0, { timeout: 2000 })
+        const afterMainWheel = await page.evaluate(() => {
+          const doc = (globalThis as any).document
+          return {
+            sidebar: doc.getElementById('sidebar')!.scrollTop,
+            main: doc.getElementById('main')!.scrollTop,
+          }
+        })
         expect(afterMainWheel.sidebar).toBe(afterSidebarWheel.sidebar)
         expect(afterMainWheel.main).toBeGreaterThan(0)
 
@@ -108,8 +117,8 @@ describe('managed helpers', () => {
         }
         await applyAuthInput(page, pageDownCommand)
 
-        await page.waitForFunction((prev) => document.getElementById('main')!.scrollTop > prev, afterMainWheel.main, { timeout: 2000 })
-        const afterPageDown = await page.evaluate(() => document.getElementById('main')!.scrollTop)
+        await page.waitForFunction((prev) => (globalThis as any).document.getElementById('main')!.scrollTop > prev, afterMainWheel.main, { timeout: 2000 })
+        const afterPageDown = await page.evaluate(() => (globalThis as any).document.getElementById('main')!.scrollTop)
         expect(afterPageDown).toBeGreaterThan(afterMainWheel.main)
       } finally {
         await browser.close()

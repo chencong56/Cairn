@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { TargetAccessPolicy } from './map-jobs.js'
 import { targetDescriptorSchema } from './target-descriptor.js'
 import { entityIdSchema, utcInstantSchema } from './wire.js'
 
@@ -286,3 +287,54 @@ export const targetKnowledgeContextSchema = z.strictObject({
   truncated: z.boolean(),
 })
 export type TargetKnowledgeContext = z.infer<typeof targetKnowledgeContextSchema>
+
+export type ExploreGuardOptions = {
+  allowedOrigins: string[]
+  accessPolicy?: TargetAccessPolicy
+  allowedSpaHashPrefixes?: string[]
+  allowInferredReadPosts?: boolean
+  pageKey?: () => string | undefined
+}
+
+export type BlockedRequestRecord = {
+  url: string
+  method: string
+  resourceType: string
+  reason: string
+  impactBasis?: 'unclassified' | 'unreadable_ping' | 'verified_non_content_rule'
+  pageKey?: string
+  timestamp: string
+}
+
+export type InferredReadPostRecord = {
+  url: string
+  resourceType: 'xhr' | 'fetch'
+  pageKey?: string
+  timestamp: string
+}
+
+export type DialogRecord = { type: string; message: string; timestamp: string }
+
+export interface ExploreGuardController {
+  wasDialogEncountered(): boolean
+  getDialogs(): readonly DialogRecord[]
+  getBlockedRequests(): readonly BlockedRequestRecord[]
+  getInferredReadPosts(): readonly InferredReadPostRecord[]
+  uninstall(): Promise<void>
+}
+
+export type IngestNodeResult = { label: string; code: string; pageKey?: string }
+
+export type IngestSliceResult = {
+  cursor: MapIngestCursor
+  nodes: IngestNodeResult[]
+  detectedMenus: Array<{ label: string; url?: string; menuAnchor: { label: string }; hasChildren: boolean }>
+  blockedPostPaths: Array<{ path: string; count: number }>
+  inferredReadPostPaths: Array<{ path: string; count: number }>
+  inferredReadPostCount: number
+  blockedReasonCounts: Array<{ reason: string; count: number }>
+  blockedImpactCounts: { unclassified: number; unreadable_ping: number; verified_non_content_rule: number }
+  blockedRequests: BlockedRequestRecord[]
+  dialogs: number
+  dialogRecords: DialogRecord[]
+}

@@ -5,6 +5,7 @@ import {
   consoleAccounts,
   createRunWithSnapshot,
   createScenarioWithVersion,
+  enterRunWaitingForAuth,
   getRun,
   loadRunDetail,
   newId,
@@ -17,15 +18,21 @@ import {
   setSessionProbe,
   setSessionStatus,
   targetAccounts,
+  targetAuthProfiles,
   targets,
   type DbHandle,
 } from '@cairn/db/testing'
 import {
+  createRuntimeInvariant,
   stepRunFor,
+  targetAuthProfileDefinitionSchema,
   type AuthoringNode,
+  type BrowserCommand,
+  type BrowserCommandResult,
   type OutcomeContract,
   type RuntimeInvariant,
   type RunSnapshot,
+  type SessionErrorCode,
   type SessionGrant,
   type Step,
 } from '@cairn/shared'
@@ -33,7 +40,7 @@ import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { ExecutionEngine } from './engine.js'
 import { collectAttemptOutcomeResults } from './outcome-collector.js'
 import type { ExecutorOutcome } from './engine-types.js'
-import type { BrowserCommandResult, BrowserPort } from './ports.js'
+import type { BrowserPort } from './ports.js'
 
 describe('collectAttemptOutcomeResults 单元逻辑', () => {
   const stepId = '00000000-0000-4000-8000-000000000001'
@@ -61,10 +68,10 @@ describe('collectAttemptOutcomeResults 单元逻辑', () => {
       targetId: newId(),
       scenarioId: newId(),
       scenarioVersionId: newId(),
+      input: {},
       steps: [baseStep],
       allowedOrigins: ['https://example.com'],
-      executionPolicy: { timeoutMs: 30000, retryLimit: 1 },
-      createdAt: now,
+      createdAt: now.toISOString(),
       digest: 'a'.repeat(64),
       outcomeManifest: {
         entries: [
@@ -90,6 +97,8 @@ describe('collectAttemptOutcomeResults 单元逻辑', () => {
     const outcome: ExecutorOutcome = {
       kind: 'success',
       output: { actual: 'expected_text', passed: true },
+      timedOut: false,
+      aborted: false,
     }
     const res = collectAttemptOutcomeResults({
       snapshot: makeSnapshot(),
@@ -201,6 +210,8 @@ describe('collectAttemptOutcomeResults 单元逻辑', () => {
     const outcome: ExecutorOutcome = {
       kind: 'success',
       output: { ok: true },
+      timedOut: false,
+      aborted: false,
     }
     const res = collectAttemptOutcomeResults({
       snapshot: makeSnapshot(),
@@ -221,9 +232,11 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
   let engine: ExecutionEngine
   let actorId: string
   let targetId: string
+  let authTargetId: string
+  let authAccountId: string
   let workerId: string
   let workerInstanceId: string
-  let browserBehavior: 'pass' | 'fail_assertion' | 'fail_infra' = 'pass'
+  let browserBehavior: 'pass' | 'fail_assertion' | 'fail_infra' | 'fail_navigate_scope' | 'auth_gate_closed' = 'pass'
   let executeCalls = 0
   let surfaceMatches: { role: string; text: string }[] = []
 
@@ -279,6 +292,26 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
   const mockBrowser: BrowserPort = {
     async acquire(snapshot, grant) {
       const sessionGrant = await openLease(grant.runId, grant.fencingToken)
+      if (browserBehavior === 'auth_gate_closed') {
+        // 生产路径：session-claim 登录失败时经 enterRunWaitingForAuth 转入等待，
+        // 顺带为首步补 not_dispatched 的 AUTH_GATE_CLOSED 尝试（OCC-03 事实链）。
+        // test-entry 导出的是原始实现，第一个参数是 handle.db 而不是句柄。
+        const wait = await enterRunWaitingForAuth(handle.db, {
+          grant,
+          sessionId: sessionGrant.sessionId,
+          workerId,
+          workerInstanceId,
+          holdSeconds: 60,
+          leaseTtlSeconds: 90,
+        })
+        if (!wait) throw new Error('未能转入认证等待')
+        return {
+          ok: false,
+          code: 'SESSION_AUTH_UNSUPPORTED' as SessionErrorCode,
+          message: '等待目标系统登录',
+          waitingForAuth: true,
+        }
+      }
       return {
         ok: true,
         grant: sessionGrant,
@@ -286,17 +319,27 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
     },
     async release(grant) {
       await releaseSessionUse(handle.db, {
-        sessionId: grant.sessionId,
         leaseId: grant.leaseId,
         holderWorkerId: workerId,
-        holderInstanceId: workerInstanceId,
+        reason: 'engine_release',
       }).catch(() => undefined)
     },
     async probeErrorSurface() {
       return surfaceMatches
     },
-    async execute(): Promise<BrowserCommandResult> {
+    async execute(_grant, command): Promise<BrowserCommandResult> {
       executeCalls += 1
+      if (browserBehavior === 'fail_navigate_scope' && command.type === 'navigate') {
+        return {
+          ok: false,
+          error: {
+            code: 'NAVIGATE_OUT_OF_SCOPE',
+            category: 'EXECUTOR',
+            retryable: false,
+            safeMessage: '导航超出目标源允许范围',
+          },
+        }
+      }
       if (browserBehavior === 'fail_assertion') {
         return {
           ok: false,
@@ -346,12 +389,91 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
       entryUrl: 'https://example.com',
     })
 
+    authTargetId = newId()
+    authAccountId = newId()
+    await handle.db.insert(targets).values({
+      id: authTargetId,
+      code: `outcome-auth-${SCHEMA.slice(-8)}`,
+      name: '引擎结果轴认证夹具',
+      entryUrl: 'https://example.com/',
+      loginUrl: 'https://example.com/login',
+      authMethod: 'password',
+      captchaMode: 'none',
+      loginFields: {
+        username: { by: 'name', value: 'username' },
+        password: { by: 'name', value: 'password' },
+        submit: { by: 'css', value: 'button[type=submit]' },
+      },
+      currentAuthProfileRevision: 1,
+    })
+    await handle.db.insert(targetAccounts).values({
+      id: authAccountId,
+      targetId: authTargetId,
+      displayName: '结果轴认证账号',
+      username: 'lab',
+      status: 'active',
+      expectedIdentity: 'lab',
+    })
+    await handle.db.insert(targetAuthProfiles).values({
+      id: newId(),
+      targetId: authTargetId,
+      revision: 1,
+      definition: targetAuthProfileDefinitionSchema.parse({
+        verify: {
+          mode: 'http',
+          path: '/auth',
+          success: { status: 200, jsonPath: '$.ok', equals: true },
+          failure: { status: 401 },
+        },
+        identity: { source: 'json', jsonPath: '$.user', normalize: 'trim' },
+        scope: { origins: ['https://example.com'], pathPrefixes: ['/auth'] },
+      }),
+      digest: 'd1'.padEnd(64, 'd'),
+      validation: {
+        recordedAt: '2026-09-17T00:00:00.000Z',
+        actorId,
+        operationId: newId(),
+        steps: {
+          valid_pass: {
+            authState: 'AUTHENTICATED',
+            identityState: 'MATCH',
+            observedIdentity: 'lab',
+            unknownClass: null,
+            evidenceSummary: 'seed',
+            authProfileRevision: 1,
+            diagnosticCode: 'verified',
+          },
+          server_revoked: {
+            authState: 'EXPIRED',
+            identityState: 'UNVERIFIED',
+            observedIdentity: null,
+            unknownClass: null,
+            evidenceSummary: 'seed',
+            authProfileRevision: 1,
+            diagnosticCode: 'verified',
+          },
+          other_account: {
+            authState: 'AUTHENTICATED',
+            identityState: 'MISMATCH',
+            observedIdentity: 'other',
+            unknownClass: null,
+            evidenceSummary: 'seed',
+            authProfileRevision: 1,
+            diagnosticCode: 'verified',
+          },
+        },
+      },
+    })
+
     workerId = `engoutcome-${SCHEMA.slice(-8)}`
     workerInstanceId = newId()
     await registerWorker(handle.db, {
       workerId,
       instanceId: workerInstanceId,
       capacity: 8,
+      // 每个用例经 openLease 留下一个 OPEN 会话；带 targetAccountId 的 Run
+      // 领取受 worker 会话总数预算约束，给足余量避免用例间互相挤占。
+      maxSessions: 32,
       lostAfterSeconds: 60,
       protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
     })
@@ -391,9 +513,10 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
     nodes: AuthoringNode[]
     scenarioOutcomes?: OutcomeContract[]
     runtimeInvariants?: RuntimeInvariant[]
+    targetId?: string
   }) {
     const scenario = await createScenarioWithVersion(handle.db, {
-      targetId,
+      targetId: input.targetId ?? targetId,
       name: input.name,
       steps: [{ id: newId(), name: 'init', type: 'echo', effectType: 'READ_ONLY', input: { value: 'init' } }],
       actor: { id: actorId },
@@ -734,5 +857,286 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
     const detail = await loadRunDetail(handle.db, created.detail.id)
     expect(detail?.outcomeStatus).toBe('FAIL')
     expect(detail?.outcomeResults.some((row) => row.contractId === invariantId && row.verdict === 'FAIL')).toBe(true)
+  })
+
+  /**
+   * 以下用例为 2026-09-29 浏览器段治理方案的 L1 降层承接：
+   * 断言逐条转录自 engine.outcome-c.lab.spec.ts / engine.outcome.lab.spec.ts
+   * 的原 L2 用例（OCC-02 / OCC-03 / OCC-07 / OCA-05），语义先补后删。
+   */
+  function navigateStep(id: string): Step {
+    return {
+      id,
+      name: '打开页面',
+      type: 'navigate',
+      effectType: 'IDEMPOTENT',
+      input: { url: 'https://example.com/' },
+    }
+  }
+
+  function echoStep(id: string, value: string): Step {
+    return { id, name: `回显 ${value}`, type: 'echo', effectType: 'READ_ONLY', input: { value } }
+  }
+
+  function invariantRowOf(detail: Awaited<ReturnType<typeof loadRunDetail>>, contractId: string) {
+    return detail?.outcomeResults.find((item) => item.contractId === contractId)
+  }
+
+  async function executeNodes(input: {
+    name: string
+    nodes: AuthoringNode[]
+    runtimeInvariants?: RuntimeInvariant[]
+    targetId?: string
+    targetAccountId?: string
+  }) {
+    const scenario = await createScenarioWithNodes({
+      name: input.name,
+      nodes: input.nodes,
+      runtimeInvariants: input.runtimeInvariants,
+      targetId: input.targetId,
+    })
+    const created = await createRunWithSnapshot(handle.db, {
+      scenarioId: scenario.id,
+      targetAccountId: input.targetAccountId,
+      actor: { id: actorId },
+    })
+    expect(created.detail.snapshot.runtimeInvariantManifest?.entries.length ?? 0).toBe(
+      input.runtimeInvariants?.length ?? 0,
+    )
+    const grant = await claimThis(created.detail.id)
+    await engine.execute(created.detail.id, { grant })
+    return loadRunDetail(handle.db, created.detail.id)
+  }
+
+  it('OCC-02：navigation_boundary 越界记 FAIL 且 actual 带 errorCode；范围内记 PASS', async () => {
+    browserBehavior = 'fail_navigate_scope'
+    const denyId = newId()
+    const denied = await executeNodes({
+      name: 'occ-02-deny',
+      nodes: [{ kind: 'step', step: navigateStep(newId()) }],
+      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', denyId)],
+    })
+    expect(denied?.status).toBe('FAILED')
+    expect(denied?.stepRuns[0]?.attempts[0]?.error?.code).toBe('NAVIGATE_OUT_OF_SCOPE')
+    expect(denied?.outcomeStatus).toBe('FAIL')
+    expect(invariantRowOf(denied, denyId)).toMatchObject({
+      provenance: 'runtime_invariant',
+      verdict: 'FAIL',
+      actual: { errorCode: 'NAVIGATE_OUT_OF_SCOPE' },
+    })
+
+    browserBehavior = 'pass'
+    const passId = newId()
+    const passed = await executeNodes({
+      name: 'occ-02-pass',
+      nodes: [{ kind: 'step', step: navigateStep(newId()) }],
+      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', passId)],
+    })
+    expect(passed?.status).toBe('SUCCEEDED')
+    expect(passed?.outcomeStatus).toBe('PASS')
+    expect(invariantRowOf(passed, passId)).toMatchObject({
+      provenance: 'runtime_invariant',
+      verdict: 'PASS',
+    })
+  })
+
+  it('OCC-07：已收编守卫 continue 不能取消越界拦截', async () => {
+    browserBehavior = 'fail_navigate_scope'
+    const continueId = newId()
+    const afterId = newId()
+    const detail = await executeNodes({
+      name: 'occ-07-nav-continue',
+      nodes: [
+        { kind: 'step', step: navigateStep(newId()) },
+        { kind: 'step', step: echoStep(afterId, 'skip') },
+      ],
+      runtimeInvariants: [
+        {
+          ...createRuntimeInvariant('navigation_boundary', continueId),
+          onViolation: 'continue',
+        },
+      ],
+    })
+    expect(detail?.status).toBe('FAILED')
+    expect(detail?.stepRuns[0]?.attempts[0]?.error?.code).toBe('NAVIGATE_OUT_OF_SCOPE')
+    expect(stepRunFor(detail?.stepRuns ?? [], afterId)?.attempts ?? []).toHaveLength(0)
+    expect(invariantRowOf(detail, continueId)?.verdict).toBe('FAIL')
+  })
+
+  it('OCC-03：开跑前登录失败进入 WAITING_FOR_AUTH，补窗口并记 SHOULD FAIL / WARN', async () => {
+    browserBehavior = 'auth_gate_closed'
+    const invariantId = newId()
+    const detail = await executeNodes({
+      name: 'occ-03-acquire',
+      targetId: authTargetId,
+      targetAccountId: authAccountId,
+      nodes: [{ kind: 'step', step: navigateStep(newId()) }],
+      runtimeInvariants: [createRuntimeInvariant('auth_validity', invariantId)],
+    })
+    expect(detail?.status).toBe('WAITING_FOR_AUTH')
+    expect(detail?.snapshot.authVerification?.capability).toBe('IDENTITY_VERIFIED')
+    expect(detail?.stepRuns[0]?.attempts[0]?.error?.code).toBe('AUTH_GATE_CLOSED')
+    expect(invariantRowOf(detail, invariantId)?.verdict).toBe('FAIL')
+    expect(detail?.outcomeStatus).toBe('WARN')
+  })
+
+  it('OCA-05：halt 断言失败产出 ASSERT_FAILED 且后续步骤不执行', async () => {
+    browserBehavior = 'fail_assertion'
+    const contractId = newId()
+    const assertId = newId()
+    const afterId = newId()
+    const assertStep: Step = {
+      id: assertId,
+      name: 'halt 断言',
+      type: 'assert',
+      effectType: 'READ_ONLY',
+      input: { expect: { kind: 'text_equals', value: 'ok' } },
+    }
+    const contract: OutcomeContract = {
+      id: contractId,
+      scope: 'step',
+      meaning: '前置条件须成立',
+      severity: 'MUST',
+      onViolation: 'halt',
+      provenance: 'manual',
+      rule: {
+        kind: 'deterministic',
+        target: { framePath: [], candidates: [{ by: 'css', value: 'body' }] },
+        expect: { kind: 'text_equals', value: 'ok' },
+      },
+    }
+    const detail = await executeNodes({
+      name: 'oca-05-halt',
+      nodes: [
+        { kind: 'step', step: assertStep, outcomes: [contract] },
+        { kind: 'step', step: echoStep(afterId, 'should_not_run') },
+      ],
+    })
+    expect(detail?.status).toBe('FAILED')
+    expect(stepRunFor(detail?.stepRuns ?? [], assertId)?.attempts[0]?.error?.code).toBe('ASSERT_FAILED')
+    expect(stepRunFor(detail?.stepRuns ?? [], afterId)?.attempts ?? []).toHaveLength(0)
+  })
+})
+
+describe('collectAttemptOutcomeResults run_duration（二期）', () => {
+  const stepId = '00000000-0000-4000-8000-000000000031'
+  const contractId = '00000000-0000-4000-8000-000000000032'
+  const attemptId = '00000000-0000-4000-8000-000000000033'
+  const now = new Date('2026-09-17T12:00:00.000Z')
+
+  const durationStep: Step = {
+    id: stepId,
+    name: '全程耗时检查',
+    type: 'check_duration',
+    effectType: 'READ_ONLY',
+    input: { runTotal: true, op: 'lte', valueMs: 30_000 },
+  }
+
+  function makeSnapshot(onViolation: 'halt' | 'continue' = 'continue'): RunSnapshot {
+    return {
+      schemaVersion: 1,
+      runId: newId(),
+      targetId: newId(),
+      scenarioId: newId(),
+      scenarioVersionId: newId(),
+      input: {},
+      steps: [durationStep],
+      allowedOrigins: ['https://example.com'],
+      createdAt: now.toISOString(),
+      digest: 'a'.repeat(64),
+      outcomeManifest: {
+        entries: [
+          {
+            contractId,
+            stepId,
+            scope: 'scenario',
+            meaning: '全程耗时不超过 30 秒',
+            severity: 'SHOULD',
+            onViolation,
+            provenance: 'ai_compiled',
+            rule: { kind: 'run_duration', op: 'lte', valueMs: 30_000 },
+          },
+        ],
+      },
+    }
+  }
+
+  it('check_duration 成功 -> verdict PASS，actual 为实测毫秒', () => {
+    const res = collectAttemptOutcomeResults({
+      snapshot: makeSnapshot(),
+      step: durationStep,
+      outcome: {
+        kind: 'success',
+        output: { passed: true, actual: 12_500, expected: { op: 'lte', valueMs: 30_000 } },
+        timedOut: false,
+        aborted: false,
+      },
+      attemptId,
+      now,
+    })
+    expect(res.outcomeResults[0]).toMatchObject({
+      verdict: 'PASS',
+      expected: { op: 'lte', valueMs: 30_000 },
+      actual: 12_500,
+    })
+  })
+
+  it('check_duration 超阈值 ASSERT_FAILED -> verdict FAIL，actual 为实测毫秒且按 continue 继续', () => {
+    const res = collectAttemptOutcomeResults({
+      snapshot: makeSnapshot('continue'),
+      step: durationStep,
+      outcome: {
+        kind: 'failed',
+        error: { code: 'ASSERT_FAILED', category: 'EXECUTOR', retryable: false, safeMessage: '全程耗时 45000ms 超出阈值 (lte 30000ms)' },
+        output: { passed: false, actual: 45_000, expected: { op: 'lte', valueMs: 30_000 } },
+        timedOut: false,
+        aborted: false,
+      },
+      attemptId,
+      now,
+    })
+    expect(res.continueMode).toBe(true)
+    expect(res.outcomeResults[0]).toMatchObject({ verdict: 'FAIL', actual: 45_000 })
+  })
+
+  it('度量缺失 DURATION_UNAVAILABLE -> verdict UNKNOWN 且不击穿 continue 约定', () => {
+    const res = collectAttemptOutcomeResults({
+      snapshot: makeSnapshot('continue'),
+      step: durationStep,
+      outcome: {
+        kind: 'failed',
+        error: { code: 'DURATION_UNAVAILABLE', category: 'EXECUTOR', retryable: false, safeMessage: '未能获取场景全程执行耗时记录，结果无法判定' },
+        output: { passed: false, actual: null, expected: { op: 'lte', valueMs: 30_000 } },
+        timedOut: false,
+        aborted: false,
+      },
+      attemptId,
+      now,
+    })
+    expect(res.continueMode).toBe(true)
+    expect(res.outcomeResults[0]).toMatchObject({
+      verdict: 'UNKNOWN',
+      expected: { op: 'lte', valueMs: 30_000 },
+      actual: null,
+      details: { code: 'DURATION_UNAVAILABLE' },
+    })
+  })
+
+  it('度量缺失但 onViolation: halt 时仍停止运行', () => {
+    const res = collectAttemptOutcomeResults({
+      snapshot: makeSnapshot('halt'),
+      step: durationStep,
+      outcome: {
+        kind: 'failed',
+        error: { code: 'DURATION_UNAVAILABLE', category: 'EXECUTOR', retryable: false, safeMessage: '未能获取场景全程执行耗时记录，结果无法判定' },
+        output: { passed: false, actual: null, expected: { op: 'lte', valueMs: 30_000 } },
+        timedOut: false,
+        aborted: false,
+      },
+      attemptId,
+      now,
+    })
+    expect(res.continueMode).toBe(false)
+    expect(res.outcomeResults[0]).toMatchObject({ verdict: 'UNKNOWN' })
   })
 })

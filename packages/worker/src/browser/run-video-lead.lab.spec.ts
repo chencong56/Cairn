@@ -105,8 +105,7 @@ describe('运行录像前置空白治理验证（方案 B 真实浏览器场景�
       code: `lead-${SCHEMA.slice(-6)}`,
       name: '企业费用报销与材料提报系统',
       entryUrl: `${baseUrl}/file-submission.html`,
-      state: 'ACTIVE',
-      createdByConsoleAccountId: actorId,
+      status: 'active',
     })
     await handle.db.insert(secrets).values({
       id: secretId,

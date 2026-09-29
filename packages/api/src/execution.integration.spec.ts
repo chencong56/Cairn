@@ -145,7 +145,7 @@ describe('执行内核控制面（集成）', { timeout: 30_000 }, () => {
     const target = await createTarget(slug('sec'))
     const account = await targets.createAccount(
       target.id,
-      { displayName: '运维', username: 'ops', password: 'hunter2-secret', status: 'active' },
+      { displayName: '运维', username: 'ops', password: 'hunter2-secret', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
     const scenario = await scenarios.create({ targetId: target.id, name: '带密', steps: [echoStep] }, actor)
@@ -165,7 +165,7 @@ describe('执行内核控制面（集成）', { timeout: 30_000 }, () => {
     const target = await createTarget(slug('auto-acct'))
     const account = await targets.createAccount(
       target.id,
-      { displayName: '运维', username: 'ops', password: 'hunter2-secret', status: 'active' },
+      { displayName: '运维', username: 'ops', password: 'hunter2-secret', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
     const scenario = await scenarios.create({ targetId: target.id, name: '自动绑', steps: [echoStep] }, actor)
@@ -181,12 +181,12 @@ describe('执行内核控制面（集成）', { timeout: 30_000 }, () => {
     const target = await createTarget(slug('multi-acct'))
     await targets.createAccount(
       target.id,
-      { displayName: '一号', username: 'one', password: 'hunter2-one', status: 'active' },
+      { displayName: '一号', username: 'one', password: 'hunter2-one', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
     await targets.createAccount(
       target.id,
-      { displayName: '二号', username: 'two', password: 'hunter2-two', status: 'active' },
+      { displayName: '二号', username: 'two', password: 'hunter2-two', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
     const scenario = await scenarios.create({ targetId: target.id, name: '多账号', steps: [echoStep] }, actor)
@@ -309,7 +309,7 @@ describe('执行内核控制面（集成）', { timeout: 30_000 }, () => {
       { displayName: '会话账号', username: `sess-${newId().slice(0, 8)}`, status: 'active' },
       actor,
     )
-    const sessions = new BrowserSessionsService(handle)
+    const sessions = new BrowserSessionsService(handle, {} as never, {} as never, {} as never)
 
     const created = await requireCreatedSession(handle.db, {
       key: { targetId: target.id, targetAccountId: account.id },

@@ -2,7 +2,9 @@ import {
   FIXTURE_STEP_TYPES,
   SYSTEM_STEP_TYPES,
   evaluateExpression,
+  toStrictNumber,
   type FixtureStepType,
+  type JsonValue,
 } from '@cairn/shared'
 import { executeDelay, executeEcho, executeFail } from './executors.js'
 import type {
@@ -128,6 +130,139 @@ export class FixtureStepExecutor implements StepExecutor {
       }
     }
 
+    if (step.type === 'check_context') {
+      const { key, field, expect } = step.input
+      let val = context[key]
+      if (field && val && typeof val === 'object' && !Array.isArray(val)) {
+        val = (val as Record<string, JsonValue>)[field]
+      }
+
+      let passed = false
+      if (expect.kind === 'non_empty') {
+        passed = val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0)
+      } else if (expect.kind === 'text_contains') {
+        const strVal = typeof val === 'string' ? val : (val === null || val === undefined ? '' : String(val))
+        passed = strVal.includes(expect.value)
+      } else if (expect.kind === 'number_compare') {
+        const numVal = toStrictNumber(val)
+        if (numVal !== null) {
+          if (expect.op === 'eq') passed = numVal === expect.value
+          else if (expect.op === 'neq') passed = numVal !== expect.value
+          else if (expect.op === 'gt') passed = numVal > expect.value
+          else if (expect.op === 'gte') passed = numVal >= expect.value
+          else if (expect.op === 'lt') passed = numVal < expect.value
+          else if (expect.op === 'lte') passed = numVal <= expect.value
+        }
+      }
+
+      const output = {
+        passed,
+        actual: (val ?? null) as JsonValue,
+        expected: expect as unknown as JsonValue,
+      }
+      if (passed) {
+        return { kind: 'success', output }
+      }
+      return {
+        kind: 'failed',
+        output,
+        error: {
+          code: 'ASSERT_FAILED',
+          category: 'EXECUTOR',
+          retryable: false,
+          safeMessage: `上下文变量「${key}${field ? `.${field}` : ''}」断言不成立`,
+        },
+        timedOut: false,
+        aborted: false,
+      }
+    }
+
+    if (step.type === 'check_duration') {
+      const { sourceStepId, op, valueMs, runTotal } = step.input as {
+        sourceStepId?: string
+        op: 'lte' | 'lt'
+        valueMs: number
+        runTotal?: boolean
+      }
+      if (!ctx.loadStepStates) {
+        return durationUnavailable(sourceStepId, op, valueMs, Boolean(runTotal))
+      }
+      const stepStates = await ctx.loadStepStates(runTotal ? null : ctx.scopePath)
+
+      let actualDurationMs: number | null = null
+
+      if (runTotal) {
+        const priorSteps = stepStates.filter((s) => s.stepId !== step.id)
+        if (priorSteps.length > 0) {
+          let earliestStart: number | undefined
+          let latestEnd: number | undefined
+          for (const s of priorSteps) {
+            const firstAttempt = s.attempts && s.attempts.length > 0 ? s.attempts[0] : undefined
+            const lastAttempt = s.attempts && s.attempts.length > 0 ? s.attempts[s.attempts.length - 1] : undefined
+            const start = firstAttempt?.startedAt ?? s.startedAt
+            const end = lastAttempt?.startedAt ? lastAttempt.finishedAt : s.finishedAt
+            if (start) {
+              const startMs = new Date(start).getTime()
+              if (Number.isFinite(startMs)) {
+                earliestStart = earliestStart === undefined ? startMs : Math.min(earliestStart, startMs)
+              }
+            }
+            if (end) {
+              const endMs = new Date(end).getTime()
+              if (Number.isFinite(endMs)) {
+                latestEnd = latestEnd === undefined ? endMs : Math.max(latestEnd, endMs)
+              }
+            }
+          }
+          if (earliestStart !== undefined && latestEnd !== undefined) {
+            actualDurationMs = Math.max(0, latestEnd - earliestStart)
+          }
+        }
+      } else {
+        if (!sourceStepId) {
+          return durationUnavailable(sourceStepId, op, valueMs, false)
+        }
+        const sourceStep = stepStates.find((s) => s.stepId === sourceStepId)
+        const lastAttempt = sourceStep?.attempts[sourceStep.attempts.length - 1]
+        const startedAt = lastAttempt?.startedAt ?? sourceStep?.startedAt
+        const finishedAt = lastAttempt?.startedAt ? lastAttempt.finishedAt : sourceStep?.finishedAt
+        actualDurationMs =
+          startedAt && finishedAt
+            ? Math.max(0, new Date(finishedAt).getTime() - new Date(startedAt).getTime())
+            : null
+      }
+
+      // 取不到耗时是度量缺失，不是业务不达标：不能用 ASSERT_FAILED 判成 FAIL。
+      if (actualDurationMs === null || !Number.isFinite(actualDurationMs)) {
+        return durationUnavailable(sourceStepId, op, valueMs, Boolean(runTotal))
+      }
+      const passed = op === 'lte' ? actualDurationMs <= valueMs : actualDurationMs < valueMs
+
+      const output = {
+        passed,
+        actual: actualDurationMs,
+        expected: { op, valueMs },
+      }
+
+      if (passed) {
+        return { kind: 'success', output }
+      }
+      return {
+        kind: 'failed',
+        output,
+        error: {
+          code: 'ASSERT_FAILED',
+          category: 'EXECUTOR',
+          retryable: false,
+          safeMessage: runTotal
+            ? `全程耗时 ${actualDurationMs}ms 超出阈值 (${op} ${valueMs}ms)`
+            : `步骤耗时 ${actualDurationMs}ms 超出阈值 (${op} ${valueMs}ms)`,
+        },
+        timedOut: false,
+        aborted: false,
+      }
+    }
+
     return {
       kind: 'failed',
       error: {
@@ -139,5 +274,27 @@ export class FixtureStepExecutor implements StepExecutor {
       timedOut: false,
       aborted: false,
     }
+  }
+}
+
+function durationUnavailable(
+  sourceStepId: string | undefined,
+  op: 'lte' | 'lt',
+  valueMs: number,
+  runTotal?: boolean,
+): StepExecutionOutcome {
+  return {
+    kind: 'failed',
+    output: { passed: false, actual: null, expected: { op, valueMs } },
+    error: {
+      code: 'DURATION_UNAVAILABLE',
+      category: 'EXECUTOR',
+      retryable: false,
+      safeMessage: runTotal
+        ? '未能获取场景全程执行耗时记录，结果无法判定'
+        : `未能获取步骤「${sourceStepId}」的执行耗时记录，结果无法判定`,
+    },
+    timedOut: false,
+    aborted: false,
   }
 }

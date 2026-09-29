@@ -567,7 +567,7 @@ describe.each(DRIVERS)('%s 资源生命周期', { timeout: 30_000 }, (driver) =>
     const f = await fixture(driver)
     const account = await f.targets.createAccount(
       f.target.id,
-      { displayName: '口令账号', username: 'secret-user', password: 'pw', status: 'active' },
+      { displayName: '口令账号', username: 'secret-user', password: 'pw', status: 'active', validity: { mode: 'permanent' } },
       f.actor,
     )
     const { targetAccounts, secrets, platformAiSecretBindings } = schemaFor(f.handle.db)

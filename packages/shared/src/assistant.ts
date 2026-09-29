@@ -15,7 +15,10 @@ import {
 } from './step.js'
 import { entityIdSchema, utcInstantSchema } from './wire.js'
 import {
+  acceptanceIntentRequestSchema,
+  acceptanceRequestSchema,
   assistantAuthoringProposalSchema,
+  type AcceptanceIntentRequest,
   type AssistantAuthoringProposal,
 } from './authoring-proposals.js'
 import {
@@ -35,6 +38,7 @@ export const ASSISTANT_HISTORICAL_CAPABILITY_IDS = [
   'run.compare',
   'scenario.explain',
   'scenario.propose-step',
+  'scenario.propose-acceptance',
   'scenario.compose_with_knowledge',
   'platform.guide',
   'scenario.discover',
@@ -45,6 +49,7 @@ export const ASSISTANT_HISTORICAL_CAPABILITY_IDS = [
   'operations.action',
   'in-page.guidance',
   'knowledge.answer',
+  'scenario.audit-acceptance',
 ] as const
 export type AssistantHistoricalCapabilityId = (typeof ASSISTANT_HISTORICAL_CAPABILITY_IDS)[number]
 export const assistantHistoricalCapabilityIdSchema = z.enum(ASSISTANT_HISTORICAL_CAPABILITY_IDS)
@@ -55,6 +60,8 @@ export const ASSISTANT_PUBLISHED_CAPABILITY_IDS = [
   'scenario.explain',
   'scenario.propose-step',
   'scenario.compose_with_knowledge',
+  'scenario.propose-acceptance',
+  'scenario.audit-acceptance',
   'platform.guide',
   'scenario.discover',
   'target.business-records.list',
@@ -390,6 +397,18 @@ export const ASSISTANT_CAPABILITIES: readonly AssistantCapabilityDef[] = [
     label: '场景编排建议',
     requiredPermissions: ['ai:assist', 'workflow:read', 'workflow:write', 'target:read'],
     description: '为已保存草稿提出步骤新增、字段修改、删除与同分支移动等受限编排建议',
+  },
+  {
+    id: 'scenario.propose-acceptance',
+    label: '场景验收建议',
+    requiredPermissions: ['ai:assist', 'workflow:read', 'workflow:write', 'target:read'],
+    description: '基于基线试跑、检查点页面快照与验收意图，生成结构化验收方案（卡片、成功条件、输出声明）',
+  },
+  {
+    id: 'scenario.audit-acceptance',
+    label: '场景验收体检',
+    requiredPermissions: ['ai:assist', 'workflow:read', 'target:read'],
+    description: '对场景验收设计进行静态体检与智能补全建议',
   },
   {
     id: 'scenario.compose_with_knowledge',
@@ -1096,6 +1115,45 @@ export const assistantKnowledgeAnswerResultSchema = z.strictObject({
 })
 export type AssistantKnowledgeAnswerResult = z.infer<typeof assistantKnowledgeAnswerResultSchema>
 
+export const acceptanceAuditReportFindingSchema = z.strictObject({
+  id: z.string().min(1).max(64),
+  source: z.enum(['compiler', 'audit']),
+  code: z.string().min(1).max(64),
+  severity: z.enum(['warning', 'info']),
+  message: z.string().min(1).max(512),
+  stepId: entityIdSchema.optional(),
+  stepName: z.string().max(128).optional(),
+  rationale: z.string().max(512).optional(),
+})
+export type AcceptanceAuditReportFinding = z.infer<typeof acceptanceAuditReportFindingSchema>
+
+export const acceptanceAuditSuggestedIntentSchema = z.strictObject({
+  id: z.string().min(1).max(64),
+  intent: acceptanceIntentRequestSchema,
+  label: z.string().min(1).max(128),
+  rationale: z.string().min(1).max(512),
+  needsTarget: z.boolean(),
+  needsBaseline: z.boolean().optional(),
+  source: z.enum(['deterministic', 'model']),
+})
+export type AcceptanceAuditSuggestedIntent = z.infer<typeof acceptanceAuditSuggestedIntentSchema>
+
+export const assistantAcceptanceAuditReportSchema = z.strictObject({
+  kind: z.literal('acceptance_audit_report'),
+  scenarioId: entityIdSchema,
+  findings: z.array(acceptanceAuditReportFindingSchema),
+  suggestedIntents: z.array(acceptanceAuditSuggestedIntentSchema),
+  coverage: z.strictObject({
+    browserStepCoverage: z.number().min(0).max(1),
+    outputMetricCoverage: z.number().min(0).max(1),
+    browserStepsCount: z.number().int().nonnegative(),
+    coveredBrowserStepsCount: z.number().int().nonnegative(),
+    outputsCount: z.number().int().nonnegative(),
+    coveredOutputsCount: z.number().int().nonnegative(),
+  }),
+})
+export type AssistantAcceptanceAuditReport = z.infer<typeof assistantAcceptanceAuditReportSchema>
+
 export const assistantResultSchema = z.discriminatedUnion('kind', [
   assistantDiagnosisSchema,
   assistantCompareSchema,
@@ -1111,6 +1169,7 @@ export const assistantResultSchema = z.discriminatedUnion('kind', [
   assistantInaccessibleSchema,
   assistantInPageGuidanceSchema,
   assistantKnowledgeAnswerResultSchema,
+  assistantAcceptanceAuditReportSchema,
 ])
 export type AssistantResult = z.infer<typeof assistantResultSchema>
 export type { TargetFormProposal }
@@ -1228,6 +1287,8 @@ export const createAssistantTurnBodySchema = z.strictObject({
   expectedRevision: z.number().int().nonnegative().optional(),
   cancelCurrentTask: z.boolean().optional(),
   capabilityHint: assistantCapabilityIdSchema.optional(),
+  /** 验收面板的结构化意图；带上时应同时指定 capabilityHint = scenario.propose-acceptance。 */
+  acceptance: acceptanceRequestSchema.optional(),
 })
 export type CreateAssistantTurnBody = z.infer<typeof createAssistantTurnBodySchema>
 
@@ -1308,7 +1369,7 @@ export function availableAssistantCapabilities(granted: readonly string[]): Assi
             ? ['baseRunId', 'targetRunId']
           : capability.id === 'scenario.compose_with_knowledge'
             ? ['scenarioId', 'draftRevision']
-          : capability.id === 'scenario.explain' || capability.id === 'scenario.propose-step'
+          : capability.id === 'scenario.explain' || capability.id === 'scenario.propose-step' || capability.id === 'scenario.propose-acceptance' || capability.id === 'scenario.audit-acceptance'
             ? ['scenarioId']
             : [],
     })

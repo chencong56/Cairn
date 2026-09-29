@@ -8,7 +8,7 @@ import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core'
 import { Test } from '@nestjs/testing'
 import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DomainError } from '@cairn/db'
+import { DomainError, getWorkerDetail, listWorkers } from '@cairn/db'
 import { PERMISSIONS } from '@cairn/shared'
 import { AllExceptionsFilter } from '../common/all-exceptions.filter'
 import type { RequestAccount } from '../common/request-account'
@@ -26,8 +26,6 @@ vi.mock('@cairn/db', async (importOriginal) => {
     getWorkerDetail: vi.fn(),
   }
 })
-
-const { listWorkers, getWorkerDetail } = await import('@cairn/db')
 
 const INSTANCE = '11111111-1111-4111-8111-111111111111'
 const AS_OF = '2026-09-14T00:00:00.000Z'
@@ -64,6 +62,9 @@ function summary(canSeeEndpoint: boolean) {
     routeAvailability: 'eligible' as const,
     routeReason: null,
     endpointSource: 'database' as const,
+    listenHost: null,
+    listenPort: null,
+    hostname: null,
     internalEndpoint: canSeeEndpoint
       ? { baseUrl: 'http://127.0.0.1:8091', host: '127.0.0.1', port: 8091, protocol: 'http' as const }
       : null,

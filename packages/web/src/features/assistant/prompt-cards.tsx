@@ -60,6 +60,22 @@ const PROMPT_CATEGORIES: PromptCategory[] = [
         capabilityHint: 'scenario.explain',
         icon: Sparkles,
       },
+      {
+        id: 'auth-acceptance-duration',
+        title: '验收页面耗时',
+        description: '配置步骤执行耗时上限判定与指标',
+        question: '为当前步骤配置耗时验收条件',
+        capabilityHint: 'scenario.propose-acceptance',
+        icon: Sparkles,
+      },
+      {
+        id: 'auth-acceptance-table',
+        title: '验收列表非空',
+        description: '自动计算列表数据量并判定非空',
+        question: '为当前页面配置列表非空验收条件',
+        capabilityHint: 'scenario.propose-acceptance',
+        icon: Sparkles,
+      },
     ],
   },
   {
@@ -162,9 +178,10 @@ export function PromptCards({
   const categoryTabsId = useId()
   const normalizedPageContext = normalizeAssistantPageContext(pageContext)
 
-  const availableIds = capabilities
-    ? new Set(capabilities.items.filter((item) => item.available).map((item) => item.id))
-    : null
+  const availableIds = useMemo(
+    () => (capabilities ? new Set(capabilities.items.filter((item) => item.available).map((item) => item.id)) : null),
+    [capabilities],
+  )
 
   // 1. 解析当前场景推荐 (Context Recommended)
   const recommendedChips = useMemo(() => {

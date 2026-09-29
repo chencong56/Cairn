@@ -119,6 +119,7 @@ export const trialRunBodySchema = z.strictObject({
   mapConsumption: mapConsumptionOverrideSchema.optional(),
   idempotencyKey: idempotencyKeySchema.optional(),
   debugMode: debugModeSchema.optional(),
+  captureStructure: z.boolean().optional(),
   pauseBeforeStepId: entityIdSchema.optional(),
 })
 export type TrialRunBody = z.infer<typeof trialRunBodySchema>

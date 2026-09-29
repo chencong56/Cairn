@@ -44,9 +44,9 @@ describe('AI 基座离线评测引擎 (Eval Runner)', () => {
       expect(redactionSample).toBeDefined()
       expect(redactionSample.metadata.holdout).toBe(true)
 
-      const doc: ScenarioDocument = {
+      const doc = {
         schemaVersion: 1,
-        inputs: {},
+        inputs: [],
         steps: [
           {
             id: 'step-fill-password',
@@ -59,7 +59,7 @@ describe('AI 基座离线评测引擎 (Eval Runner)', () => {
             },
           },
         ],
-      }
+      } as unknown as ScenarioDocument
 
       const slice = buildAuthoringSlice(doc, 'step-fill-password')
       const firstStep = slice.slicedDocument.steps[0]!

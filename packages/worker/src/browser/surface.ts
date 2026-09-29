@@ -33,7 +33,7 @@ import {
   waitOnPage,
 } from './runtime'
 import { candidateTries, errorForOutcome, pickResolvedCandidate } from './resolver'
-import { safeDownloadFileName, sanitizeAriaSnapshot } from '@cairn/shared'
+import { isPageLevelAssertExpect, safeDownloadFileName, sanitizeAriaSnapshot } from '@cairn/shared'
 import { matchAriaSnapshot } from './aria-match.js'
 
 export type SurfacePage = Page
@@ -106,9 +106,11 @@ async function readRememberedTarget(page: Page, locator: Locator,
         expected.kind === 'number_compare' ? Number(sample.text.replace(/[^\d.-]/g, '')) : sample.text
       const passed = expected.kind === 'exists' ? true : expected.kind === 'visible' ? sample.visible :
         expected.kind === 'text_equals' ? actual === expected.value : expected.kind === 'text_contains' ? sample.text.includes(expected.value) :
+        expected.kind === 'text_absent' ? !sample.text.includes(expected.value) :
         typeof actual === 'number' && Number.isFinite(actual) && compareNumber(actual, expected.op, expected.value)
       const output = { passed, expected: expected.kind === 'exists' ? 1 : expected.kind === 'visible' ? true :
-        expected.kind === 'number_compare' ? { op: expected.op, value: expected.value } : expected.value,
+        expected.kind === 'number_compare' ? { op: expected.op, value: expected.value } :
+        expected.kind === 'text_absent' ? `not_contains:${expected.value}` : expected.value,
         actual: typeof actual === 'number' && !Number.isFinite(actual) ? sample.text : actual }
       return passed ? { ok: true, output } : { ok: false, output,
         error: { code: 'ASSERT_FAILED', category: 'EXECUTOR', retryable: false, safeMessage: '断言不成立' } }
@@ -170,7 +172,7 @@ export async function executeOnPage(
       return { ok: true, output: {} }
     }
 
-    if (command.type === 'assert' && !command.target && command.expect.kind !== 'aria_snapshot') {
+    if (command.type === 'assert' && !command.target && !isPageLevelAssertExpect(command.expect)) {
       return {
         ok: false,
         error: {
@@ -316,9 +318,11 @@ export async function executeOnPage(
     const target = 'target' in command ? command.target : undefined
     let locatedLocator: Locator
 
-    if (!target) {
-      if (command.type === 'assert' && command.expect.kind === 'aria_snapshot') {
+    let pageLevel = false
+    if (!target || (target.candidates.length === 0 && command.type === 'assert' && isPageLevelAssertExpect(command.expect))) {
+      if (command.type === 'assert' && isPageLevelAssertExpect(command.expect)) {
         locatedLocator = page.locator('body')
+        pageLevel = true
       } else {
         return {
           ok: false,
@@ -376,7 +380,10 @@ export async function executeOnPage(
     if (command.type === 'extract') {
       if (command.many) {
         const count = await locatedLocator.count()
-        if (count > command.many.maxItems) {
+        const settled = count > command.many.maxItems
+          ? undefined
+          : await readListSettled(locatedLocator, command.as, command.attribute, signal)
+        if (count > command.many.maxItems || (settled && settled.length > command.many.maxItems)) {
           return {
             ok: false,
             error: {
@@ -389,20 +396,20 @@ export async function executeOnPage(
             diagnostics,
           }
         }
-        if (command.many.minItems !== undefined && count < command.many.minItems) {
+        const value = settled ?? []
+        if (command.many.minItems !== undefined && value.length < command.many.minItems) {
           return {
             ok: false,
             error: {
               code: 'EXTRACT_TOO_FEW',
               category: 'EXECUTOR',
               retryable: false,
-              safeMessage: `提取匹配项少于下限 ${command.many.minItems}（实际匹配 ${count} 项）`,
+              safeMessage: `提取匹配项少于下限 ${command.many.minItems}（实际匹配 ${value.length} 项）`,
             },
             output: {},
             diagnostics,
           }
         }
-        const value = await readLocatorMany(locatedLocator, command.as, command.attribute)
         return { ok: true, output: { value, count: value.length }, diagnostics }
       }
       const value = await readLocator(locatedLocator, command.as, command.attribute)
@@ -519,6 +526,7 @@ export async function executeOnPage(
       command.timeoutMs,
       signal,
       (evidence?.sensitiveSelectors?.length ?? 0) > 0,
+      pageLevel,
     )
     if (!assertion.passed) {
       if (assertion.error?.code === 'ASSERT_TEMPLATE_INVALID') {
@@ -693,6 +701,7 @@ async function evaluateAssert(
   timeoutMs?: number,
   signal?: AbortSignal,
   hasSensitiveSelectors?: boolean,
+  pageLevel = false,
 ): Promise<{
   passed: boolean
   expected: JsonValue
@@ -741,12 +750,37 @@ async function evaluateAssert(
     const visible = await isLocatorVisible(locator)
     return { passed: visible, expected: true, actual: visible }
   }
+  if (pageLevel && expect.kind === 'text_absent') {
+    // 整页正文可能很长且含业务数据，结果里只留命中处附近的片段。
+    const bodyText = await readLocator(locator, 'text')
+    const index = bodyText.indexOf(expect.value)
+    return {
+      passed: index < 0,
+      expected: `not_contains:${expect.value}`,
+      actual: index < 0 ? '未出现' : bodyText.slice(Math.max(0, index - 60), index + expect.value.length + 60),
+    }
+  }
+  if (pageLevel && expect.kind === 'text_contains') {
+    // 整页「出现某段文字」常见于提交后的提示，给页面一个短暂的渲染窗口；「不出现」保持即时判定。
+    const deadline = Date.now() + Math.min(timeoutMs ?? PAGE_TEXT_WAIT_MS, PAGE_TEXT_WAIT_MS)
+    let bodyText = await readLocator(locator, 'text')
+    while (!bodyText.includes(expect.value) && Date.now() < deadline) {
+      signal?.throwIfAborted()
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      bodyText = await readLocator(locator, 'text')
+    }
+    const passed = bodyText.includes(expect.value)
+    return { passed, expected: expect.value, actual: passed ? expect.value : '未出现' }
+  }
   const text = await readLocator(locator, 'text')
   if (expect.kind === 'text_equals') {
     return { passed: text === expect.value, expected: expect.value, actual: text }
   }
   if (expect.kind === 'text_contains') {
     return { passed: text.includes(expect.value), expected: expect.value, actual: text }
+  }
+  if (expect.kind === 'text_absent') {
+    return { passed: !text.includes(expect.value), expected: `not_contains:${expect.value}`, actual: text }
   }
   const actual = Number(text.replace(/[^\d.-]/g, ''))
   if (!Number.isFinite(actual)) {
@@ -773,6 +807,34 @@ function generateLineDiff(expected: string, actual: string): string {
   }
   return lines.join('\n')
 }
+
+const PAGE_TEXT_WAIT_MS = 5_000
+const LIST_SETTLE_MS = 5_000
+const LIST_SETTLE_POLL_MS = 400
+
+/**
+ * 列表常是异步加载：先出骨架行（文字全空）再换成数据。连续两次读取一致且不全空才算稳定；
+ * 到时限仍按最后一次读取返回，不因此改成失败。
+ */
+async function readListSettled(
+  locator: Locator,
+  as: 'text' | 'value' | 'attribute',
+  attribute: string | undefined,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const deadline = Date.now() + LIST_SETTLE_MS
+  let previous: string[] | undefined
+  for (;;) {
+    signal?.throwIfAborted()
+    const values = await readLocatorMany(locator, as, attribute)
+    const allBlank = values.length > 0 && values.every((item) => item.trim() === '')
+    const stable = previous !== undefined && previous.length === values.length && previous.every((item, index) => item === values[index])
+    if ((stable && !allBlank) || Date.now() >= deadline) return values
+    previous = values
+    await new Promise((resolve) => setTimeout(resolve, LIST_SETTLE_POLL_MS))
+  }
+}
+
 
 function compareNumber(actual: number, op: 'eq' | 'gt' | 'gte' | 'lt' | 'lte', expected: number): boolean {
   if (op === 'eq') return actual === expected

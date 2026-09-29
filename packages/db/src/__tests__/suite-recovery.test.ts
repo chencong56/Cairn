@@ -1,6 +1,6 @@
 import { eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL, type SuiteDocument } from '@cairn/shared'
+import { SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL, type SuiteDocumentInput } from '@cairn/shared'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -25,7 +25,7 @@ describe.each(DRIVERS)('%s 集合取消、证据收敛与输入快照', (driver)
     const scenario = await createScenarioWithVersion(handle.db, { targetId, name: '集合成员', actor: actor(), inputs: inputRequired ? [{ key: 'shared', label: '共享输入' }] : [], steps: [
       { id: newId(), name: '检查输入', type: 'echo', effectType: 'READ_ONLY', input: inputRequired ? { from: 'shared' } : { value: 'ok' } },
     ] })
-    const document: SuiteDocument = { schemaVersion: 1, groups: [], sharedInput: inputRequired ? { shared: '共享输入' } : {}, failurePolicy: 'continue', autoGenerateFinalReport: false, executionMode: 'sequential',
+    const document: SuiteDocumentInput = { schemaVersion: 1, groups: [], sharedInput: inputRequired ? { shared: '共享输入' } : {}, failurePolicy: 'continue', autoGenerateFinalReport: false, executionMode: 'sequential',
       members: ['one', 'two'].map((memberId, ordinal) => ({ memberId, ordinal, scenarioId: scenario.id, scenarioVersionId: scenario.published!.versionId, input: {} })) }
     const made = await createSuite(handle.db, { targetId, name: '集合验收', document }, actor())
     await publishSuite(handle.db, made.id, { expectedRevision: made.draft.revision, idempotencyKey: newId() }, actor())
@@ -41,7 +41,7 @@ describe.each(DRIVERS)('%s 集合取消、证据收敛与输入快照', (driver)
     expect(cancelled.items[1]!.admission).toBe('SKIPPED')
     const review = await start(await suite())
     const { runs } = schemaFor(handle.db)
-    await handle.db.update(runs).set({ status: 'NEEDS_REVIEW' }).where(eq(runs.id, review.items[0]!.childRunId))
+    await handle.db.update(runs).set({ status: 'NEEDS_REVIEW' }).where(eq(runs.id, review.items[0]!.childRunId!))
     const blocked = await cancelSuiteRun(handle.db, review.id, actor())
     expect(blocked.status).toBe('NEEDS_REVIEW')
     expect(blocked.items[0]!.runStatus).toBe('NEEDS_REVIEW')
@@ -50,7 +50,7 @@ describe.each(DRIVERS)('%s 集合取消、证据收敛与输入快照', (driver)
 
   it('已有执行租约时发出取消请求，不提前宣称执行已结束', async () => {
     const observation = await start(await suite())
-    const childId = observation.items[0]!.childRunId
+    const childId = observation.items[0]!.childRunId!
     const { runs } = schemaFor(handle.db)
     const excluded = await handle.db.select({ id: runs.id }).from(runs).where(ne(runs.id, childId))
     const worker = { workerId: `suite-${newId()}`, instanceId: newId() }
@@ -94,7 +94,7 @@ describe.each(DRIVERS)('%s 集合取消、证据收敛与输入快照', (driver)
   it('跨时钟的负耗时显示为未知，不阻断汇总和后续放行', async () => {
     const observation = await start(await suite())
     const { runs } = schemaFor(handle.db)
-    await handle.db.update(runs).set({ status: 'SUCCEEDED', startedAt: new Date(), finishedAt: new Date(Date.now() - 1000) }).where(eq(runs.id, observation.items[0]!.childRunId))
+    await handle.db.update(runs).set({ status: 'SUCCEEDED', startedAt: new Date(), finishedAt: new Date(Date.now() - 1000) }).where(eq(runs.id, observation.items[0]!.childRunId!))
     const advanced = await advanceSuiteRun(handle.db, observation.id)
     expect(advanced.childDurationMs).toBeNull()
     expect(advanced.items[1]!.admission).toBe('ACTIVE')

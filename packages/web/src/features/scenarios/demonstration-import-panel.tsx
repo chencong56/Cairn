@@ -255,7 +255,13 @@ export function DemonstrationImportPanel(props: RecordingImportPanelProps) {
           ? '已替换所选步骤，原有引用与成功条件已保留'
           : placement.kind === 'replace_sequence'
           ? '已将步骤替换为确定性序列，成功条件已转移至末步'
-          : '已回填到当前草稿'
+          : '已回填到当前草稿',
+        props.onOpenAcceptance
+          ? {
+              description: '录制只记住了怎么走，还没有检查点与报告指标。',
+              action: { label: '补全验收（推荐）', onClick: props.onOpenAcceptance },
+            }
+          : undefined,
       )
     } catch (e) {
       setError(e instanceof Error ? e.message : '回填失败')

@@ -10,7 +10,9 @@ import {
   suiteListQuerySchema,
   suiteListResponseSchema,
   type CreateSuiteBody,
+  type CreateSuiteInput,
   type SaveSuiteDraftBody,
+  type SaveSuiteDraftInput,
   type SuiteDetailDto,
   type SuiteDocument,
   type SuiteListQuery,
@@ -225,7 +227,7 @@ export async function listSuites(db: Db, query: Partial<SuiteListQuery> = {}, ac
   })
 }
 
-export async function createSuite(db: Db, input: CreateSuiteBody, actor: AuditActor): Promise<SuiteDetailDto> {
+export async function createSuite(db: Db, input: CreateSuiteInput, actor: AuditActor): Promise<SuiteDetailDto> {
   const body = createSuiteBodySchema.parse(input)
   await assertTargetPermission(db, actor.id, body.targetId, 'suite:write')
   const document = body.document ?? EMPTY_SUITE_DOCUMENT
@@ -269,7 +271,7 @@ export async function createSuite(db: Db, input: CreateSuiteBody, actor: AuditAc
 export async function saveSuiteDraft(
   db: Db,
   suiteId: string,
-  input: SaveSuiteDraftBody,
+  input: SaveSuiteDraftInput,
   actor: AuditActor,
 ): Promise<SuiteDetailDto> {
   const body = saveSuiteDraftBodySchema.parse(input)

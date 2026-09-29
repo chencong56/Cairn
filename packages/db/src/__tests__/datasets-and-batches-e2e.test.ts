@@ -115,7 +115,6 @@ describe.each(DRIVERS)('%s 端到端验证：Excel 数据集导入与批处理�
       targetId,
       name: '员工入职批量申报场景',
       createdByConsoleAccountId: accountId,
-      publishedVersionId: scenarioVersionId,
     })
 
     const testSteps = [

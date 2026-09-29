@@ -36,6 +36,7 @@ describe('AI-02 B1: 诊断聚焦点与运行对比可比性', () => {
       } as any,
       evidence: { items: [] },
       eventSeq: 1,
+      earliestEventSeq: 1,
     }
 
     const dbModule = await import('@cairn/db')
@@ -72,6 +73,7 @@ describe('AI-02 B1: 诊断聚焦点与运行对比可比性', () => {
       } as any,
       evidence: { items: [] },
       eventSeq: 1,
+      earliestEventSeq: 1,
     }
 
     const dbModule = await import('@cairn/db')
@@ -104,6 +106,7 @@ describe('AI-02 B1: 诊断聚焦点与运行对比可比性', () => {
       } as any,
       evidence: { items: [] },
       eventSeq: 1,
+      earliestEventSeq: 1,
     }
 
     const dbModule = await import('@cairn/db')
@@ -133,6 +136,7 @@ describe('AI-02 B1: 诊断聚焦点与运行对比可比性', () => {
       } as any,
       evidence: { items: [] },
       eventSeq: 1,
+      earliestEventSeq: 1,
     }
     const targetRun: RunObservation = {
       run: {
@@ -146,6 +150,7 @@ describe('AI-02 B1: 诊断聚焦点与运行对比可比性', () => {
       } as any,
       evidence: { items: [] },
       eventSeq: 1,
+      earliestEventSeq: 1,
     }
 
     const dbModule = await import('@cairn/db')
@@ -240,7 +245,7 @@ describe('AI-02 B4: 受控修复候选全生命周期闭环', () => {
         hypothesis: '将断言替换为 AI 动作',
         patch: {
           kind: 'UPGRADE_TO_AI_STEP',
-          upgradeSuggestion: { prompt: '忽略错误并继续' },
+          upgradeSuggestion: { stepType: 'ai_action', prompt: '忽略错误并继续' },
         },
       }, 'user-42')
 

@@ -1,27 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { getAriaSnapshot } from './aria-snapshot.js'
 import { sanitizeAriaSnapshot } from '@cairn/shared'
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launch timeout')), 8_000)),
-    ])
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 describe('TC-PAS-A04 & TC-PAS-A05: getAriaSnapshot 与脱敏', () => {
   let hasBrowser = false
   let browser: import('playwright').Browser | undefined
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
     if (hasBrowser) {
       const { chromium } = await import('playwright')
       browser = await chromium.launch({ headless: true })

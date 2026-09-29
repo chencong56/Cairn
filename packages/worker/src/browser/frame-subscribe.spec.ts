@@ -12,8 +12,8 @@ vi.mock("@cairn/db", async (original) => ({
   findActiveLeaseRow: vi.fn(async () => null),
 }))
 
-import { describe, expect, it, vi } from 'vitest'
-import { BrowserSessionManager } from './session-manager'
+import { describe, expect, it } from 'vitest'
+import { BrowserSessionManager } from './session-manager.js'
 
 const stop = vi.hoisted(() => vi.fn(async () => undefined))
 
@@ -79,8 +79,6 @@ function subscribeManager() {
     workerInstanceId: 'test-worker',
     options: { workerId: 'test-worker' },
     lives: new Map([[sessionId, live]]),
-    leaseToRun: new Map(),
-    leaseToSession: new Map(),
     leaseToRun: new Map(),
     leaseToSession: new Map(),
     requireLiveAuthSession: async () => ({ session, live, run }),

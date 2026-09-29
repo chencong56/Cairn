@@ -3,9 +3,9 @@ import { defineConfig } from 'vitest/config'
 import { LIVE_SPEC_FILES } from './src/testing/test-groups.mjs'
 
 /**
- * 阶段清单、靶场走查、外部站点与在线模型。
- * 不纳入 test / test:db / test:browser 默认必过路径，只通过 pnpm test:live 手动运行。
- * 其中不少用例仍会连 PostgreSQL 并启动 Chromium，所以沿用模板库，并且串行。
+ * 会离开本机的巡检：公网站点，或在线模型。
+ * 本地 setContent、127.0.0.1 和被拦截的保留域名不属于这里。
+ * 不纳入 test / test:db / test:browser，只通过 pnpm test:live 手动运行。
  */
 export default defineConfig({
   test: {

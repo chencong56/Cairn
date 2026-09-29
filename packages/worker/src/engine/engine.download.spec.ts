@@ -39,8 +39,7 @@ describe('BrowserStepExecutor - Download Step', () => {
       name: 'Download Test Target',
       entryUrl: 'https://example.com',
       loginUrl: 'https://example.com/login',
-      state: 'ACTIVE',
-      createdByConsoleAccountId: actorId,
+      status: 'active',
     })
   })
 
@@ -58,14 +57,16 @@ describe('BrowserStepExecutor - Download Step', () => {
       sessionId: '00000000-0000-4000-8000-000000000004',
       leaseId: '00000000-0000-4000-8000-000000000005',
       generation: 1,
-      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      sessionFencingToken: 1,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
     }
 
     const grant: RunGrant = {
       runId,
       leaseId: '00000000-0000-4000-8000-000000000005',
-      workerId: 'worker-1',
-      leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      fencingToken: 1,
+      holderWorkerId: 'worker-1',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
     }
 
     const snapshot: RunSnapshot = {
@@ -82,7 +83,7 @@ describe('BrowserStepExecutor - Download Step', () => {
       input: step.input,
       context: {},
       signal: new AbortController().signal,
-      clock: { now: () => 1000 },
+      clock: { now: () => 1000, sleep: async () => {} },
       sessionGrant,
       grant,
       snapshot,
@@ -290,7 +291,7 @@ describe('BrowserStepExecutor - Download Step', () => {
 
     const outcome = await executor.execute(ctx)
     expect(outcome.kind).toBe('failed')
-    expect(outcome.timedOut).toBe(true)
+    expect((outcome as any).timedOut).toBe(true)
     if (outcome.kind === 'failed') {
       expect(outcome.error.code).toBe('DOWNLOAD_TIMEOUT')
     }

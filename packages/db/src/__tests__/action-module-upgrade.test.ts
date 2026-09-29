@@ -29,7 +29,7 @@ describe('AM-C: 升级、发布状态、提炼与删除保护', { timeout: 30_00
     const target = await targets.createTarget({
       loginFields: null, authMethod: 'manual', captchaMode: 'none', status: 'active',
       name: 'AM-C 目标',
-      code: `AMC_${newId().slice(0, 8)}`,
+      code: `amc-${newId().slice(0, 8)}`,
       entryUrl: 'https://example.com',
     }, account)
     return { db, account, target }
@@ -177,7 +177,7 @@ describe('AM-C: 升级、发布状态、提炼与删除保护', { timeout: 30_00
     const gone = await new api.TargetsStore(db, () => Buffer.from('fixture')).createTarget({
       loginFields: null, authMethod: 'manual', captchaMode: 'none', status: 'active',
       name: '将删除',
-      code: `GONE_${newId().slice(0, 8)}`,
+      code: `gone-${newId().slice(0, 8)}`,
       entryUrl: 'https://gone.example',
     }, account)
     const hidden = await userScenario(db, account.id, gone.id, '已删目标场景', invocationDoc(module.id, v1.id))

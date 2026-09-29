@@ -1,0 +1,231 @@
+/**
+ * 分层验证分析模块 (L1 / L2 / L3)
+ *
+ * 依据 docs/spec/2026-09-28-test-pipeline-acceleration-and-clean-baseline.md
+ * 计算变更文件影响半径、是否触发全量升级条件，以及 L3 专项领域提示。
+ */
+
+export const ALLOWED_EDGES = {
+  '@cairn/shared': [],
+  '@cairn/authoring': ['@cairn/shared'],
+  '@cairn/storage': ['@cairn/shared'],
+  '@cairn/secret': ['@cairn/shared'],
+  '@cairn/db': ['@cairn/shared', '@cairn/authoring'],
+  '@cairn/map': ['@cairn/shared', '@cairn/authoring'],
+  '@cairn/api': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage'],
+  '@cairn/worker': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage'],
+  '@cairn/web': ['@cairn/shared', '@cairn/authoring'],
+  '@cairn/extension-playwright-crx': ['@cairn/shared', '@cairn/authoring'],
+}
+
+/**
+ * 计算某个包或一组包的所有下游依赖（直接与间接引用方）
+ */
+export function getDownstreamPackages(packages) {
+  const result = new Set()
+  const queue = [...packages]
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+    for (const [pkg, deps] of Object.entries(ALLOWED_EDGES)) {
+      if (deps.includes(current) && !result.has(pkg)) {
+        result.add(pkg)
+        queue.push(pkg)
+      }
+    }
+  }
+
+  return [...result].sort()
+}
+
+/**
+ * 将相对路径映射到仓内包名
+ */
+export function mapPathToPackage(filePath) {
+  const normalized = filePath.replace(/\\/g, '/')
+  if (normalized.startsWith('packages/shared/')) return '@cairn/shared'
+  if (normalized.startsWith('packages/authoring/')) return '@cairn/authoring'
+  if (normalized.startsWith('packages/storage/')) return '@cairn/storage'
+  if (normalized.startsWith('packages/secret/')) return '@cairn/secret'
+  if (normalized.startsWith('packages/db/')) return '@cairn/db'
+  if (normalized.startsWith('packages/map/')) return '@cairn/map'
+  if (normalized.startsWith('packages/api/')) return '@cairn/api'
+  if (normalized.startsWith('packages/worker/')) return '@cairn/worker'
+  if (normalized.startsWith('packages/web/')) return '@cairn/web'
+  if (normalized.startsWith('packages/extension/')) return '@cairn/extension-playwright-crx'
+  if (normalized.startsWith('vendor/page-agent/')) return '@cairn/worker'
+  return null
+}
+
+/**
+ * 判断是否属于纯文档或说明元数据文件
+ */
+export function isDocumentationOrMeta(filePath) {
+  const normalized = filePath.replace(/\\/g, '/')
+  if (
+    normalized.startsWith('docs/') ||
+    normalized.endsWith('.md') ||
+    normalized === '.gitignore' ||
+    normalized === '.npmrc' ||
+    normalized === '.nvmrc' ||
+    normalized === 'LICENSE' ||
+    normalized.startsWith('deploy/') ||
+    normalized.startsWith('tmp/')
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * 分析变更文件清单，得出验证决策
+ *
+ * @param {string[]} files 变更文件相对路径列表
+ * @returns {object} 验证决策结果
+ */
+export function analyzeVerificationScope(files) {
+  const normalizedFiles = files.map((f) => f.replace(/\\/g, '/')).filter(Boolean)
+
+  if (normalizedFiles.length === 0) {
+    return {
+      isFull: false,
+      isDocsOnly: true,
+      reasons: ['未检测到任何变更文件'],
+      changedPackages: [],
+      targetPackages: [],
+      l3Suggestions: [],
+    }
+  }
+
+  const reasons = []
+  const l3Suggestions = new Set()
+  const changedPackagesSet = new Set()
+  let hasCodeChanges = false
+
+  for (const file of normalizedFiles) {
+    // 1. 检查根目录配置、构建与工程脚本
+    if (
+      file.startsWith('tools/') ||
+      file.startsWith('scripts/') ||
+      file.startsWith('tests/') ||
+      file.startsWith('.github/') ||
+      file.endsWith('package.json') ||
+      file.includes('tsconfig') ||
+      file.includes('vitest') ||
+      file.endsWith('turbo.json') ||
+      file.includes('pnpm-')
+    ) {
+      reasons.push(`改动根目录工具、构建配置或 CI 工作流: ${file}`)
+      hasCodeChanges = true
+      continue
+    }
+
+    // 2. 检查包内路径
+    const pkg = mapPathToPackage(file)
+    if (pkg) {
+      changedPackagesSet.add(pkg)
+      hasCodeChanges = true
+
+      // 检查 shared 契约导出
+      if (pkg === '@cairn/shared' && file.startsWith('packages/shared/src/')) {
+        reasons.push(`改动 packages/shared 导出契约或核心: ${file}`)
+      }
+
+      // 检查 db 迁移与 schema 定义
+      if (
+        pkg === '@cairn/db' &&
+        (file.startsWith('packages/db/migrations/') || file.startsWith('packages/db/src/schema/'))
+      ) {
+        reasons.push(`改动数据库迁移或 Schema 定义: ${file}`)
+      }
+
+      // 检查运行生命周期、会话、租约核心
+      if (
+        (pkg === '@cairn/worker' &&
+          (file.startsWith('packages/worker/src/engine/') ||
+            file.startsWith('packages/worker/src/runtime/') ||
+            file.includes('/browser/session') ||
+            file.includes('/browser/runtime'))) ||
+        (pkg === '@cairn/db' && file.startsWith('packages/db/src/sessions/'))
+      ) {
+        reasons.push(`改动运行生命周期、会话或租约核心: ${file}`)
+        l3Suggestions.add('pnpm test:reliability')
+      }
+
+      // 专项 L3 领域探针识别
+      if (file.includes('reliability')) {
+        l3Suggestions.add('pnpm test:reliability')
+      }
+      if (file.includes('action-module')) {
+        l3Suggestions.add('pnpm test:action-modules-e2e')
+      }
+      if (file.includes('omf') || file.includes('demonstration')) {
+        l3Suggestions.add('pnpm test:omf-e2e')
+      }
+      if (file.includes('lease') || file.includes('occupancy')) {
+        l3Suggestions.add('pnpm test:rf06')
+      }
+      continue
+    }
+
+    // 3. 检查文档与元数据
+    if (isDocumentationOrMeta(file)) {
+      continue
+    }
+
+    // 4. 未识别路径一律安全升级
+    reasons.push(`未识别路径 [${file}]，安全升级全量`)
+    hasCodeChanges = true
+  }
+
+  // 纯文档变更判定
+  if (!hasCodeChanges) {
+    const hasSpecChange = normalizedFiles.some((f) => f.startsWith('docs/spec/'))
+    return {
+      isFull: false,
+      isDocsOnly: true,
+      reasons: ['仅涉及文档或辅助元数据改动，无需执行代码验证'],
+      changedPackages: [],
+      targetPackages: [],
+      l3Suggestions: hasSpecChange ? ['pnpm check:specs'] : [],
+    }
+  }
+
+  const isFull = reasons.length > 0
+  const changedPackages = [...changedPackagesSet].sort()
+  const downstream = getDownstreamPackages(changedPackages)
+  const targetPackages = [...new Set([...changedPackages, ...downstream])].sort()
+
+  const turboFilters = targetPackages.map((p) => `--filter=${p}`).join(' ')
+  const turboCommand = targetPackages.length > 0 ? `turbo run typecheck lint test ${turboFilters}` : null
+  const fullCommand = 'pnpm check && pnpm lint && pnpm typecheck && pnpm test'
+
+  return {
+    isFull,
+    isDocsOnly: false,
+    reasons,
+    changedPackages,
+    targetPackages,
+    l3Suggestions: [...l3Suggestions].sort(),
+    turboCommand,
+    fullCommand,
+  }
+}
+
+/**
+ * 评估本地 origin/main 或对比分支的时效性
+ * @param {number} commitTimestampSeconds - git commit timestamp (秒)
+ * @param {number} nowMs - 当前毫秒时间戳
+ * @param {number} thresholdHours - 告警阈值小时数 (默认 24)
+ */
+export function evaluateRemoteFreshness(commitTimestampSeconds, nowMs = Date.now(), thresholdHours = 24) {
+  if (!commitTimestampSeconds || Number.isNaN(commitTimestampSeconds)) {
+    return { isStale: false, ageHours: 0 }
+  }
+  const ageMs = nowMs - commitTimestampSeconds * 1000
+  const ageHours = Math.max(0, Math.round(ageMs / (1000 * 60 * 60)))
+  return {
+    isStale: ageHours >= thresholdHours,
+    ageHours,
+  }
+}

@@ -196,6 +196,7 @@ export type AssembleRunSnapshotInput = {
   serviceDelivery?: ServiceDeliveryPolicy
   pauseBeforeStepId?: string
   validationSubject?: ValidationSubject
+  captureStructure?: boolean
 }
 
 export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapshot & { digest: string } {
@@ -279,6 +280,7 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
     ...(input.serviceDelivery ? { serviceDelivery: input.serviceDelivery } : {}),
     ...(input.pauseBeforeStepId ? { pauseBeforeStepId: input.pauseBeforeStepId } : {}),
     ...(input.validationSubject ? { validationSubject: input.validationSubject } : {}),
+    ...(input.captureStructure ? { captureStructure: true } : {}),
     input: input.input,
     createdAt: input.createdAt.toISOString(),
     ...(input.deadlineAt ? { deadlineAt: input.deadlineAt.toISOString() } : {}),

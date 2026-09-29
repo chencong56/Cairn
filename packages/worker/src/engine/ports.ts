@@ -23,6 +23,13 @@ import type {
   ErrorSurfaceNode,
   JsonValue,
   Step,
+  ExploreGuardOptions,
+  ExploreGuardController,
+  IngestSliceResult,
+  MapIngestStep,
+  MapIngestCursor,
+  MapIngestPageSnapshot,
+  TargetAccessPolicy,
 } from '@cairn/shared'
 
 /**
@@ -80,6 +87,11 @@ export type BrowserPort = {
     evidence: BrowserCommandEvidence,
     signal?: AbortSignal,
   ): Promise<ScreenshotPointer | undefined>
+  /** 调试运行自动采集页面无障碍树结构快照 */
+  captureStructureSnapshot?(
+    grant: SessionGrant,
+    signal?: AbortSignal,
+  ): Promise<{ snapshot: string; truncated: boolean; url?: string; title?: string } | undefined>
   probeErrorSurface?(grant: SessionGrant, signal?: AbortSignal): Promise<ErrorSurfaceNode[]>
   bindResolvedFromPoint?(
     grant: SessionGrant,
@@ -110,19 +122,19 @@ export type BrowserPort = {
   ): Promise<unknown>
   installExploreGuard?(
     grant: SessionGrant,
-    options: import('../browser/explore-network-guard.js').ExploreGuardOptions,
-  ): Promise<import('../browser/explore-network-guard.js').ExploreGuardController>
+    options: ExploreGuardOptions,
+  ): Promise<ExploreGuardController>
   ingestMapSlice?(
     grant: SessionGrant,
     input: {
-      step: import('@cairn/shared').MapIngestStep['input']
+      step: MapIngestStep['input']
       targetId: string
       targetAccountId: string
-      accessPolicy: import('@cairn/shared').TargetAccessPolicy
+      accessPolicy: TargetAccessPolicy
       signal: AbortSignal
-      onProgress: (cursor: import('@cairn/shared').MapIngestCursor, page?: import('@cairn/shared').MapIngestPageSnapshot) => Promise<void>
+      onProgress: (cursor: MapIngestCursor, page?: MapIngestPageSnapshot) => Promise<void>
     },
-  ): Promise<import('../browser/map-ingest-collector.js').IngestSliceResult>
+  ): Promise<IngestSliceResult>
 }
 
 export type AiLocateInput = {

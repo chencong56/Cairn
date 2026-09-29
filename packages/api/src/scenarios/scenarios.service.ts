@@ -204,6 +204,7 @@ export class ScenariosService {
         idempotencyKey: body.idempotencyKey,
         debugMode: body.debugMode,
         pauseBeforeStepId: body.pauseBeforeStepId,
+        captureStructure: body.captureStructure,
         actor: { id: actor.id },
         executableTypes: types,
         hangWaitMs: config.CAIRN_BROWSER_AI_HANG_WAIT_MS,

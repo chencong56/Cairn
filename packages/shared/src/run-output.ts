@@ -3,16 +3,43 @@ import { entityIdSchema, jsonValueSchema, type JsonValue } from './wire.js'
 import { contextKeySchema, type Step } from './step.js'
 import { outputFieldNameSchema } from './output-schema.js'
 
-export const scenarioMetricDeclSchema = z.strictObject({
-  key: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/, 'metric key 须小写字母开头，只含小写字母数字下划线'),
-  name: z.string().trim().min(1).max(64),
-  /** 映射的上下文变量名（支持通过 outputKey 写入的 context 变量） */
-  fromContextKey: contextKeySchema,
-  /** 如果 context 变量是对象，可通过 fromField 提取内部子属性 */
-  fromField: outputFieldNameSchema.optional(),
-  /** 指标单位（如 "件", "ms", "¥", "%"） */
-  unit: z.string().trim().max(16).optional(),
-})
+export const scenarioMetricDeclSchema = z
+  .strictObject({
+    key: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/, 'metric key 须小写字母开头，只含小写字母数字下划线'),
+    name: z.string().trim().min(1).max(64),
+    /** 映射的上下文变量名（支持通过 outputKey 写入的 context 变量） */
+    fromContextKey: contextKeySchema.optional(),
+    /** 如果 context 变量是对象，可通过 fromField 提取内部子属性 */
+    fromField: outputFieldNameSchema.optional(),
+    /** 映射的步骤耗时来源（单位 ms） */
+    fromStepDuration: z
+      .strictObject({
+        stepId: entityIdSchema,
+      })
+      .optional(),
+    fromRunDuration: z.literal(true).optional(),
+    /** 指标单位（如 "件", "ms", "¥", "%"） */
+    unit: z.string().trim().max(16).optional(),
+  })
+  .superRefine((val, ctx) => {
+    const hasContext = val.fromContextKey !== undefined
+    const hasDuration = val.fromStepDuration !== undefined
+    const hasRunDuration = val.fromRunDuration === true
+    const count = (hasContext ? 1 : 0) + (hasDuration ? 1 : 0) + (hasRunDuration ? 1 : 0)
+    if (count !== 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'scenarioMetricDecl 必须且只能提供 fromContextKey、fromStepDuration 或 fromRunDuration 之一',
+      })
+    }
+    if (val.fromField !== undefined && !hasContext) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fromField'],
+        message: 'fromField 仅与 fromContextKey 同时出现',
+      })
+    }
+  })
 export type ScenarioMetricDecl = z.infer<typeof scenarioMetricDeclSchema>
 
 export const scenarioDataRowFieldDeclSchema = z.strictObject({
@@ -106,9 +133,16 @@ export type AssembleStepRunItem = {
   name?: string | null
   status?: string
   outcomeStatus?: string
+  startedAt?: Date | string | null
+  completedAt?: Date | string | null
+  finishedAt?: Date | string | null
+  iterationIndex?: number | null
   attempts?: readonly {
     status?: string
     error?: { safeMessage?: string; message?: string; code?: string } | null
+    startedAt?: Date | string | null
+    completedAt?: Date | string | null
+    finishedAt?: Date | string | null
   }[]
 }
 
@@ -125,6 +159,7 @@ export type AssembleRunOutputInput = {
   outcomeStatus?: string | null
   error?: { safeMessage?: string; message?: string; code?: string } | null
   now?: Date | string
+  runStartedAt?: Date | string | null
 }
 
 function truncateString(str: string, maxLen: number): string {
@@ -253,12 +288,9 @@ export function assembleRunOutput(input: AssembleRunOutputInput): RunOutput {
 
   for (const res of outcomeResults) {
     if (res.verdict === 'FAIL' || res.verdict === 'WARN') {
+      // 与结果轴聚合同口径：只有必须成立（MUST）的条件不通过才是异常；应当成立 / 仅记录的不通过记警告。
       const severity: FindingSeverity =
-        res.verdict === 'FAIL'
-          ? res.severity === 'FATAL'
-            ? 'FATAL'
-            : 'HIGH'
-          : 'WARN'
+        res.verdict === 'FAIL' && (res.severity === undefined || res.severity === 'MUST') ? 'HIGH' : 'WARN'
       const title = (res.meaning || '业务检查未符合预期').slice(0, 128)
       let detail: string | undefined = undefined
       if (res.details) {
@@ -305,14 +337,73 @@ export function assembleRunOutput(input: AssembleRunOutputInput): RunOutput {
   const metrics: Record<string, MetricValue> = {}
   if (outputsDecl?.metrics && outputsDecl.metrics.length > 0) {
     for (const decl of outputsDecl.metrics) {
-      let val = context[decl.fromContextKey]
-      if (decl.fromField && val && typeof val === 'object' && !Array.isArray(val)) {
-        val = (val as Record<string, JsonValue>)[decl.fromField]
-      }
-      if (typeof val === 'number' || typeof val === 'boolean') {
-        metrics[decl.key] = val
-      } else if (typeof val === 'string') {
-        metrics[decl.key] = truncateString(val, 128)
+      if (decl.fromContextKey) {
+        let val = context[decl.fromContextKey]
+        if (decl.fromField && val && typeof val === 'object' && !Array.isArray(val)) {
+          val = (val as Record<string, JsonValue>)[decl.fromField]
+        }
+        if (typeof val === 'number' || typeof val === 'boolean') {
+          metrics[decl.key] = val
+        } else if (typeof val === 'string') {
+          metrics[decl.key] = truncateString(val, 128)
+        }
+      } else if (decl.fromStepDuration) {
+        const targetStepId = decl.fromStepDuration.stepId
+        const matched = stepRuns.filter((sr) => sr.stepId === targetStepId)
+        if (matched.length > 0) {
+          const targetSr = matched[matched.length - 1]!
+          const lastAttempt =
+            targetSr.attempts && targetSr.attempts.length > 0
+              ? targetSr.attempts[targetSr.attempts.length - 1]
+              : undefined
+          const start = lastAttempt?.startedAt ?? targetSr.startedAt
+          const end =
+            lastAttempt?.finishedAt ??
+            lastAttempt?.completedAt ??
+            targetSr.finishedAt ??
+            targetSr.completedAt
+          if (start && end) {
+            const durationMs = Math.max(0, new Date(end).getTime() - new Date(start).getTime())
+            metrics[decl.key] = durationMs
+          }
+        }
+      } else if (decl.fromRunDuration) {
+        let earliestStart: number | undefined
+        let latestEnd: number | undefined
+        for (const sr of stepRuns) {
+          // 起点取各步首次尝试：与执行期条件同口径，保证结算期恒 ≥ 执行期（重试耗时计入全程）。
+          const firstAttempt =
+            sr.attempts && sr.attempts.length > 0 ? sr.attempts[0] : undefined
+          const lastAttempt =
+            sr.attempts && sr.attempts.length > 0 ? sr.attempts[sr.attempts.length - 1] : undefined
+          const start = firstAttempt?.startedAt ?? sr.startedAt
+          const end =
+            lastAttempt?.finishedAt ??
+            lastAttempt?.completedAt ??
+            sr.finishedAt ??
+            sr.completedAt
+          if (start) {
+            const startMs = new Date(start).getTime()
+            if (Number.isFinite(startMs)) {
+              earliestStart = earliestStart === undefined ? startMs : Math.min(earliestStart, startMs)
+            }
+          }
+          if (end) {
+            const endMs = new Date(end).getTime()
+            if (Number.isFinite(endMs)) {
+              latestEnd = latestEnd === undefined ? endMs : Math.max(latestEnd, endMs)
+            }
+          }
+        }
+        if (earliestStart !== undefined && latestEnd !== undefined) {
+          metrics[decl.key] = Math.max(0, latestEnd - earliestStart)
+        } else if (input.runStartedAt) {
+          const runStartMs = new Date(input.runStartedAt).getTime()
+          const endMs = input.now ? new Date(input.now).getTime() : Date.now()
+          if (Number.isFinite(runStartMs) && Number.isFinite(endMs)) {
+            metrics[decl.key] = Math.max(0, endMs - runStartMs)
+          }
+        }
       }
     }
   } else {

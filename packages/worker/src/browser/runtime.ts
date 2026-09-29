@@ -85,7 +85,7 @@ export function currentOccupancyGrant(): SessionGrant | undefined {
   return occupancy.getStore()
 }
 
-export function takeOccupancyRejects(): Array<{ action: string; at: string }> {
+export function takeOccupancyRejects(): Array<{ action: string; at: string; expiresAt?: string }> {
   return occupancyRejects.splice(0)
 }
 

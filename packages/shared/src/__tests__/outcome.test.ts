@@ -21,6 +21,33 @@ const validContractId = '00000000-0000-4000-8000-000000000101'
 const validStepId = '00000000-0000-4000-8000-000000000102'
 
 describe('OCA-01 契约 Schema', () => {
+  it('步骤耗时条件只能挂在具体步骤上，场景级拒绝', () => {
+    const base = {
+      id: validContractId,
+      meaning: '页面 3 秒内打开',
+      severity: 'SHOULD',
+      onViolation: 'continue',
+      provenance: 'ai_compiled',
+      rule: { kind: 'step_duration', op: 'lte', valueMs: 3000 },
+    }
+    expect(outcomeContractSchema.safeParse({ ...base, scope: 'step' }).success).toBe(true)
+    expect(outcomeContractSchema.safeParse({ ...base, scope: 'scenario' }).success).toBe(false)
+  })
+
+  it('运行耗时条件只能挂在场景级且不允许 halt', () => {
+    const base = {
+      id: validContractId,
+      meaning: '全流程 30 秒内完成',
+      severity: 'MUST',
+      onViolation: 'continue',
+      provenance: 'ai_compiled',
+      rule: { kind: 'run_duration', op: 'lte', valueMs: 30000 },
+    }
+    expect(outcomeContractSchema.safeParse({ ...base, scope: 'scenario' }).success).toBe(true)
+    expect(outcomeContractSchema.safeParse({ ...base, scope: 'step' }).success).toBe(false)
+    expect(outcomeContractSchema.safeParse({ ...base, scope: 'scenario', onViolation: 'halt' }).success).toBe(false)
+  })
+
   it('正确解析合法的确定性与 AI 契约正例', () => {
     const deterministicContract = {
       id: validContractId,

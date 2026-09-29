@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import type { DebugCheckpoint, DebugOverlay, Step } from '@cairn/shared'
+import { CONTROL_FLOW_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, type DebugCheckpoint, type DebugOverlay, type Step } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import {
   claimRun,
@@ -155,7 +155,7 @@ describe.each(DRIVERS)('%s 编写调试与 HOLDING 状态', { timeout: 30_000 },
 
     const workerId = `w-${newId()}`
     const instanceId = newId()
-    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60 })
+    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, CONTROL_FLOW_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL] })
     const grant = await claimRun(handle, { workerId, instanceId, leaseTtlSeconds: 60 })
     expect(grant).not.toBeNull()
     expect(grant!.runId).toBe(trial.detail.id)
@@ -229,7 +229,7 @@ describe.each(DRIVERS)('%s 编写调试与 HOLDING 状态', { timeout: 30_000 },
 
     const workerId = `w-${newId()}`
     const instanceId = newId()
-    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60 })
+    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, CONTROL_FLOW_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL] })
     const grant = await claimRun(handle, { workerId, instanceId, leaseTtlSeconds: 60 })
     expect(grant).not.toBeNull()
     const stepRunId = trial.detail.stepRuns[0]!.id
@@ -316,7 +316,7 @@ describe.each(DRIVERS)('%s 编写调试与 HOLDING 状态', { timeout: 30_000 },
 
     const workerId = `w-${newId()}`
     const instanceId = newId()
-    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60 })
+    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, CONTROL_FLOW_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL] })
     const grant = await claimRun(handle, { workerId, instanceId, leaseTtlSeconds: 60 })
     expect(grant).not.toBeNull()
 
@@ -368,7 +368,7 @@ describe.each(DRIVERS)('%s 编写调试与 HOLDING 状态', { timeout: 30_000 },
 
     const workerId = `w-${newId()}`
     const instanceId = newId()
-    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60 })
+    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, CONTROL_FLOW_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL] })
     const grant = await claimRun(handle, { workerId, instanceId, leaseTtlSeconds: 60 })
     expect(grant).not.toBeNull()
 
@@ -418,7 +418,7 @@ describe.each(DRIVERS)('%s 编写调试与 HOLDING 状态', { timeout: 30_000 },
     const trial = await createTrialRunFromDraft(handle.db, scenario.id, { revision: 2, actor })
     const workerId = `w-${newId()}`
     const instanceId = newId()
-    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60 })
+    await registerWorker(handle.db, { workerId, instanceId, capacity: 1, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, CONTROL_FLOW_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL] })
     const grant = await claimRun(handle, { workerId, instanceId, leaseTtlSeconds: 60 })
     const stepRunId = trial.detail.stepRuns[0]!.id
     const att1 = await startAttempt(handle.db, {
@@ -480,5 +480,31 @@ describe.each(DRIVERS)('%s 编写调试与 HOLDING 状态', { timeout: 30_000 },
       pauseBeforeStepId: secondStep.id,
     })
     expect(trial.detail.snapshot.pauseBeforeStepId).toBe(secondStep.id)
+  })
+
+  it('结构采集只允许逐步挂起的调试试跑，并在快照中冻结', async () => {
+    const actor = { id: actorId, email: 'author@example.com' }
+    const scenario = await createScenarioWithVersion(handle.db, {
+      targetId,
+      name: `structure-${newId().slice(0, 8)}`,
+      actor,
+      steps: [echoStep],
+    })
+    await saveScenarioDraft(handle.db, scenario.id, {
+      revision: 1,
+      actor,
+      document: { schemaVersion: 1, inputs: [], steps: [echoStep] },
+    })
+    await expect(
+      createTrialRunFromDraft(handle.db, scenario.id, { revision: 2, actor, debugMode: 'runThrough', captureStructure: true }),
+    ).rejects.toMatchObject({ code: 'CAPTURE_STRUCTURE_NOT_ALLOWED' })
+
+    const trial = await createTrialRunFromDraft(handle.db, scenario.id, {
+      revision: 2,
+      actor,
+      debugMode: 'holdAfterEach',
+      captureStructure: true,
+    })
+    expect(trial.detail.snapshot.captureStructure).toBe(true)
   })
 })

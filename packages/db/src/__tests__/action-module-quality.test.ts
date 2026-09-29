@@ -31,7 +31,7 @@ describe('AM-E: 模块调用结果投影与统计', { timeout: 30_000 }, () => {
     const target = await targets.createTarget({
       loginFields: null, authMethod: 'manual', captchaMode: 'none', status: 'active',
       name: 'AM-E 目标',
-      code: `AME_${newId().slice(0, 8)}`,
+      code: `ame-${newId().slice(0, 8)}`,
       entryUrl: 'https://example.com',
     }, account)
     return { db, account, target }

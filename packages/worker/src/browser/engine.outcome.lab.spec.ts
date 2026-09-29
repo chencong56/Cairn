@@ -1,12 +1,14 @@
 /**
- * Engine × 真浏览器 Outcome 结果轴全生命周期联调验证。
+ * Engine × 真浏览器 Outcome 结果轴联调验证。
  * 强制要求真实 Chromium（Playwright）运行，CI 与本地一视同仁。
  *
  * 验证目标：
  * 1. 真实浏览器确定性断言成功（PASS）：执行轴与结果轴均为 PASS；
- * 2. 真实浏览器断言不成立 + continue 模式（OCA-06）：执行轴 SUCCEEDED、结果轴 FAIL，后续步骤照常执行；
- * 3. 真实浏览器断言不成立 + halt 模式（OCA-05）：执行轴与结果轴均为 FAILED，后续步骤被截断；
- * 4. 真实浏览器目标定位失败（TARGET_NOT_FOUND）：结果轴记 UNKNOWN（OCA-08），不被判为业务断言失败。
+ * 2. 真实浏览器目标定位失败（TARGET_NOT_FOUND）：结果轴记 UNKNOWN（OCA-08），不被判为业务断言失败。
+ *
+ * 断言不成立 × continue / halt（OCA-05 / OCA-06）的引擎语义已于 2026-09-29
+ * 降层至 L1（src/engine/engine.outcome.spec.ts），真浏览器层只保留上述
+ * 「非真浏览器不可」的差异切片。
  */
 import { createServer } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -18,12 +20,10 @@ import {
   consoleAccounts,
   createRunWithSnapshot,
   createScenarioWithVersion,
-  eq,
   getRun,
   newId,
   openIsolatedDb,
   registerWorker,
-  scenarioVersions,
   secrets,
   targetAccounts,
   targets,
@@ -34,8 +34,6 @@ import {
   LOCAL_SECRET_PROVIDER,
   OUTCOME_MANIFEST_PROTOCOL,
   stepRunFor,
-  type OutcomeContract,
-  type ScenarioAuthoringDocumentV2,
   type Step,
 } from '@cairn/shared'
 import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
@@ -288,261 +286,12 @@ describe('ExecutionEngine × 真浏览器 Outcome 结果轴联调', { timeout: 1
 
     // 事实表 outcome_results 验证
     expect(detail.outcomeResults).toHaveLength(1)
-    const [result] = detail.outcomeResults
+    const result = detail.outcomeResults[0]!
     expect(result.verdict).toBe('PASS')
     expect(result.actual).toBe('ONLINE')
     expect(result.meaning).toBe('断言状态徽标为 ONLINE')
     expect(result.provenance).toBe('legacy_assert')
     expect(result.onViolation).toBe('halt')
-  })
-
-  it('真浏览器下断言不成立 + continue 模式（OCA-06 核心巡检语义）：执行轴完成且无错、结果轴 FAIL、后续步骤照常执行', async () => {
-    const stepNavId = newId()
-    const stepAssertId = newId()
-    const stepClickId = newId()
-    const stepAssertAfterId = newId()
-
-    const contract1Id = newId()
-    const contract2Id = newId()
-
-    const steps: Step[] = [
-      {
-        id: stepNavId,
-        name: '打开页面',
-        type: 'navigate',
-        effectType: 'IDEMPOTENT',
-        input: { url: `${baseUrl}/` },
-      },
-      {
-        id: stepAssertId,
-        name: '巡检检查：预期徽标为 MAINTENANCE（实际为 ONLINE，不成立）',
-        type: 'assert',
-        effectType: 'READ_ONLY',
-        input: {
-          target: {
-            framePath: [],
-            candidates: [{ by: 'css', value: '#status-badge' }],
-          },
-          expect: { kind: 'text_equals', value: 'MAINTENANCE' },
-        },
-      },
-      {
-        id: stepClickId,
-        name: '点击操作按钮（必须继续执行）',
-        type: 'click',
-        effectType: 'READ_ONLY',
-        input: {
-          target: {
-            framePath: [],
-            candidates: [{ by: 'css', value: '#action-btn' }],
-          },
-        },
-      },
-      {
-        id: stepAssertAfterId,
-        name: '断言动作结果更新为 DONE',
-        type: 'assert',
-        effectType: 'READ_ONLY',
-        input: {
-          target: {
-            framePath: [],
-            candidates: [{ by: 'css', value: '#action-result' }],
-          },
-          expect: { kind: 'text_equals', value: 'DONE' },
-        },
-      },
-    ]
-
-    const scenario = await createScenarioWithVersion(handle.db, {
-      targetId,
-      name: `continue-lab-${newId()}`,
-      steps,
-      actor: { id: actorId },
-    })
-
-    // 挂载显式 authoringDocument，将 stepAssert 配置为 onViolation: 'continue'
-    const authoringDocument: ScenarioAuthoringDocumentV2 = {
-      schemaVersion: 2,
-      inputs: [],
-      nodes: [
-        { kind: 'step', step: steps[0]! },
-        {
-          kind: 'step',
-          step: steps[1]!,
-          outcomes: [
-            {
-              id: contract1Id,
-              scope: 'step',
-              meaning: '系统维护状态检查（巡检项，允许继续）',
-              severity: 'MUST',
-              onViolation: 'continue',
-              provenance: 'manual',
-              rule: {
-                kind: 'deterministic',
-                target: { framePath: [], candidates: [{ by: 'css', value: '#status-badge' }] },
-                expect: { kind: 'text_equals', value: 'MAINTENANCE' },
-              },
-            },
-          ],
-        },
-        { kind: 'step', step: steps[2]! },
-        {
-          kind: 'step',
-          step: steps[3]!,
-          outcomes: [
-            {
-              id: contract2Id,
-              scope: 'step',
-              meaning: '操作后状态必须为 DONE',
-              severity: 'MUST',
-              onViolation: 'halt',
-              provenance: 'manual',
-              rule: {
-                kind: 'deterministic',
-                target: { framePath: [], candidates: [{ by: 'css', value: '#action-result' }] },
-                expect: { kind: 'text_equals', value: 'DONE' },
-              },
-            },
-          ],
-        },
-      ],
-    }
-
-    await handle.db
-      .update(scenarioVersions)
-      .set({ authoringDocument })
-      .where(eq(scenarioVersions.id, scenario.latestVersionId))
-
-    const created = await createRunWithSnapshot(handle.db, {
-      scenarioId: scenario.id,
-      targetAccountId: accountId,
-      actor: { id: actorId },
-    })
-
-    const grant = await claimThis(created.detail.id)
-    const engine = new ExecutionEngine(handle, createBrowserPort(manager))
-    await engine.execute(created.detail.id, { grant })
-
-    const detail = await getRun(handle.db, created.detail.id)
-
-    // 核心双轴解耦断言：
-    // 1. 执行轴完成：SUCCEEDED（业务巡检跑完全程，即使断言失败也不报错终止）
-    expect(detail.status).toBe('SUCCEEDED')
-    // 2. 结果轴失败：FAIL（MUST 契约判定不成立）
-    expect(detail.outcomeStatus).toBe('FAIL')
-
-    // 步骤级验证：所有 4 个步骤全部在真浏览器中执行成功！
-    expect(detail.stepRuns).toHaveLength(4)
-    expect(detail.stepRuns.every((s) => s.status === 'SUCCEEDED')).toBe(true)
-
-    const continueStepRun = stepRunFor(detail.stepRuns, stepAssertId)!
-    // continue 模式下 Attempt 与 StepRun 均记为 SUCCEEDED，error 为 null
-    expect(continueStepRun.status).toBe('SUCCEEDED')
-    expect(continueStepRun.outcomeStatus).toBe('FAIL')
-    expect(continueStepRun.attempts[0]?.status).toBe('SUCCEEDED')
-    expect(continueStepRun.attempts[0]?.error).toBeNull()
-
-    const clickStepRun = stepRunFor(detail.stepRuns, stepClickId)!
-    expect(clickStepRun.status).toBe('SUCCEEDED')
-
-    const afterStepRun = stepRunFor(detail.stepRuns, stepAssertAfterId)!
-    expect(afterStepRun.status).toBe('SUCCEEDED')
-    expect(afterStepRun.outcomeStatus).toBe('PASS')
-
-    // outcome_results 持久化事实
-    expect(detail.outcomeResults).toHaveLength(2)
-    const [result1, result2] = detail.outcomeResults
-    expect(result1.contractId).toBe(contract1Id)
-    expect(result1.verdict).toBe('FAIL')
-    expect(result1.actual).toBe('ONLINE') // 真实从页面 DOM 读取出的实际值
-    expect(result1.onViolation).toBe('continue')
-
-    expect(result2.contractId).toBe(contract2Id)
-    expect(result2.verdict).toBe('PASS')
-    expect(result2.actual).toBe('DONE') // 真实点击后 DOM 变化的结果
-    expect(result2.onViolation).toBe('halt')
-  })
-
-  it('真浏览器下断言不成立 + halt 模式（OCA-05 存量断言行为零破坏）：执行轴 FAILED 终止、产出 ASSERT_FAILED 错误码、后续步骤不执行', async () => {
-    const stepNavId = newId()
-    const stepAssertId = newId()
-    const stepClickId = newId()
-
-    const steps: Step[] = [
-      {
-        id: stepNavId,
-        name: '打开页面',
-        type: 'navigate',
-        effectType: 'IDEMPOTENT',
-        input: { url: `${baseUrl}/` },
-      },
-      {
-        id: stepAssertId,
-        name: 'halt 模式：断言状态为 ERROR（实际为 ONLINE，不成立）',
-        type: 'assert',
-        effectType: 'READ_ONLY',
-        input: {
-          target: {
-            framePath: [],
-            candidates: [{ by: 'css', value: '#status-badge' }],
-          },
-          expect: { kind: 'text_equals', value: 'ERROR' },
-        },
-      },
-      {
-        id: stepClickId,
-        name: '后续步骤（halt 下绝不应该被执行）',
-        type: 'click',
-        effectType: 'READ_ONLY',
-        input: {
-          target: {
-            framePath: [],
-            candidates: [{ by: 'css', value: '#action-btn' }],
-          },
-        },
-      },
-    ]
-
-    const scenario = await createScenarioWithVersion(handle.db, {
-      targetId,
-      name: `halt-lab-${newId()}`,
-      steps,
-      actor: { id: actorId },
-    })
-
-    const created = await createRunWithSnapshot(handle.db, {
-      scenarioId: scenario.id,
-      targetAccountId: accountId,
-      actor: { id: actorId },
-    })
-
-    const grant = await claimThis(created.detail.id)
-    const engine = new ExecutionEngine(handle, createBrowserPort(manager))
-    await engine.execute(created.detail.id, { grant })
-
-    const detail = await getRun(handle.db, created.detail.id)
-
-    // halt 模式下执行轴与结果轴均为 FAILED / FAIL
-    expect(detail.status).toBe('FAILED')
-    expect(detail.outcomeStatus).toBe('FAIL')
-
-    // 失败步骤产生 ASSERT_FAILED 错误码，后续步骤被终止
-    const assertStepRun = stepRunFor(detail.stepRuns, stepAssertId)!
-    expect(assertStepRun.status).toBe('FAILED')
-    expect(assertStepRun.outcomeStatus).toBe('FAIL')
-    expect(assertStepRun.attempts[0]?.status).toBe('FAILED')
-    expect(assertStepRun.attempts[0]?.error?.code).toBe('ASSERT_FAILED')
-
-    // 第三步未被执行（无 attempt）
-    const clickStepRun = stepRunFor(detail.stepRuns, stepClickId)
-    expect(clickStepRun?.attempts ?? []).toHaveLength(0)
-
-    // outcome_results 同样持久化记录 FAIL
-    expect(detail.outcomeResults).toHaveLength(1)
-    const [res] = detail.outcomeResults
-    expect(res.verdict).toBe('FAIL')
-    expect(res.actual).toBe('ONLINE')
-    expect(res.onViolation).toBe('halt')
   })
 
   it('真浏览器下元素不存在（TARGET_NOT_FOUND）：判定为 UNKNOWN（OCA-08），不判定为业务断言失败', async () => {
@@ -602,7 +351,7 @@ describe('ExecutionEngine × 真浏览器 Outcome 结果轴联调', { timeout: 1
     expect(assertStepRun.attempts[0]?.error?.code).toBe('TARGET_NOT_FOUND')
 
     expect(detail.outcomeResults).toHaveLength(1)
-    const [res] = detail.outcomeResults
+    const res = detail.outcomeResults[0]!
     expect(res.verdict).toBe('UNKNOWN')
     expect(res.details?.code).toBe('TARGET_NOT_FOUND')
   })

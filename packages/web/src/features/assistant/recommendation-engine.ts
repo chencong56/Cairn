@@ -107,6 +107,13 @@ export function resolveContextRecommendations(params: {
         priority: 110,
       })
       rawChips.push({
+        id: 'studio-step-acceptance',
+        label: '🎯 验收此步骤',
+        question: '为当前选中的步骤生成耗时或结果验收条件。',
+        capabilityHint: 'scenario.propose-acceptance',
+        priority: 105,
+      })
+      rawChips.push({
         id: 'studio-step-explain',
         label: '📖 解释此步骤',
         question: '请解释当前步骤在整套业务流程中的具体作用及上下文依赖。',
@@ -131,6 +138,13 @@ export function resolveContextRecommendations(params: {
       })
     } else {
       // 场景全局 (Studio Global)
+      rawChips.push({
+        id: 'studio-scenario-acceptance',
+        label: '🎯 补全验收建议',
+        question: '结合基线试跑与页面快照，为场景配置耗时、列表非空与成功条件。',
+        capabilityHint: 'scenario.propose-acceptance',
+        priority: 105,
+      })
       rawChips.push({
         id: 'studio-scenario-explain',
         label: '💡 解释场景全貌',

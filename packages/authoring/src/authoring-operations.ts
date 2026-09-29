@@ -6,9 +6,11 @@ import {
   type EffectType,
   type OutcomeContract,
   type ScenarioAuthoringDocumentV2,
+  type ScenarioMetricDecl,
   type Step,
   AUTHORING_ALLOWED_STEP_TYPES,
   AUTHORING_STEP_FIELD_POLICIES,
+  canonicalJson,
   isAuthoringAllowedStepType,
   insertNodeAfter,
   insertNodeAt,
@@ -689,6 +691,60 @@ export function applyAuthoringOperations(
         break
       }
       case 'add_outcome': {
+        if (op.severity !== 'MUST' && op.onViolation === 'halt') {
+          return {
+            ok: false,
+            error: {
+              code: 'INVALID_OUTCOME_VIOLATION',
+              message: 'SHOULD 或 INFO 级别的成功条件不得中断（halt）执行',
+              operationId: op.id,
+            },
+          }
+        }
+        if (!op.stepId) {
+          if (op.rule.kind === 'step_duration') {
+            return {
+              ok: false,
+              error: {
+                code: 'INVALID_OUTCOME_SCOPE',
+                message: '步骤耗时条件不能作为场景级条件',
+                operationId: op.id,
+              },
+            }
+          }
+          if (op.rule.kind === 'run_duration' && op.onViolation === 'halt') {
+            return {
+              ok: false,
+              error: {
+                code: 'INVALID_OUTCOME_VIOLATION',
+                message: '运行耗时条件不允许配置 halt',
+                operationId: op.id,
+              },
+            }
+          }
+          const outcomeId = deterministicStepId('scenario', op.id, 'outcome')
+          const outcomeContract: OutcomeContract = {
+            id: outcomeId,
+            scope: 'scenario',
+            meaning: op.meaning,
+            rule: op.rule,
+            severity: op.severity,
+            onViolation: op.onViolation,
+            provenance: op.provenance ?? 'generalized',
+          }
+          workingDoc.scenarioOutcomes = [...(workingDoc.scenarioOutcomes ?? []), outcomeContract]
+          diffs.push({
+            type: 'outcome_add',
+            contractId: outcomeId,
+            meaning: op.meaning,
+            ruleKind: op.rule.kind,
+            severity: op.severity,
+            onViolation: op.onViolation,
+            scope: 'scenario',
+            detail: op.meaning,
+          })
+          break
+        }
         const item = walkAuthoringNodes(workingDoc).find((entry) => entry.id === op.stepId)
         if (!item || item.node.kind !== 'step') {
           return {
@@ -696,12 +752,12 @@ export function applyAuthoringOperations(
             error: { code: 'STEP_NOT_FOUND', message: `未找到步骤「${op.stepId}」`, operationId: op.id },
           }
         }
-        if (op.severity !== 'MUST' && op.onViolation === 'halt') {
+        if (op.rule.kind === 'run_duration') {
           return {
             ok: false,
             error: {
-              code: 'INVALID_OUTCOME_VIOLATION',
-              message: 'SHOULD 或 INFO 级别的成功条件不得中断（halt）执行',
+              code: 'INVALID_OUTCOME_SCOPE',
+              message: '运行耗时条件只能作为场景级条件，不能挂在具体步骤上',
               operationId: op.id,
             },
           }
@@ -716,7 +772,7 @@ export function applyAuthoringOperations(
           rule: op.rule,
           severity: op.severity,
           onViolation: op.onViolation,
-          provenance: 'generalized',
+          provenance: op.provenance ?? 'generalized',
         }
         stepNode.outcomes = [...(stepNode.outcomes ?? []), outcomeContract]
         diffs.push({
@@ -728,7 +784,62 @@ export function applyAuthoringOperations(
           ruleKind: op.rule.kind,
           severity: op.severity,
           onViolation: op.onViolation,
+          scope: 'step',
           detail: op.meaning,
+        })
+        break
+      }
+      case 'set_outputs': {
+        const prevOutputs = workingDoc.outputs
+        const prevSummary = prevOutputs?.summaryTemplate
+        const nextSummary = op.summaryTemplate !== undefined ? op.summaryTemplate : prevSummary
+
+        const prevMetrics = prevOutputs?.metrics ?? []
+        const replacing = op.mode === 'replace' && op.metrics !== undefined
+        const nextMetrics = replacing ? [] : [...prevMetrics]
+        const metricsAdded: ScenarioMetricDecl[] = []
+        const metricsUpdated: Array<{ key: string; from: ScenarioMetricDecl; to: ScenarioMetricDecl }> = []
+        const metricsRemoved: ScenarioMetricDecl[] = replacing
+          ? prevMetrics.filter((prev) => !op.metrics!.some((m) => m.key === prev.key))
+          : []
+
+        if (op.metrics) {
+          for (const m of op.metrics) {
+            const previous = prevMetrics.find((item) => item.key === m.key)
+            const existingIdx = nextMetrics.findIndex((item) => item.key === m.key)
+            if (existingIdx >= 0) {
+              nextMetrics[existingIdx] = m
+            } else {
+              nextMetrics.push(m)
+            }
+            if (previous) {
+              if (canonicalJson(previous) !== canonicalJson(m)) metricsUpdated.push({ key: m.key, from: previous, to: m })
+            } else if (existingIdx < 0) {
+              metricsAdded.push(m)
+            }
+          }
+        }
+
+        workingDoc.outputs = {
+          ...(prevOutputs ?? { metrics: [], dataRowFields: [] }),
+          ...(nextSummary !== undefined ? { summaryTemplate: nextSummary } : {}),
+          metrics: nextMetrics,
+        }
+
+        diffs.push({
+          type: 'outputs_change',
+          summaryTemplate: { from: prevSummary, to: nextSummary },
+          metricsAdded,
+          metricsUpdated,
+          metricsRemoved,
+          detail: `更新场景输出声明: ${[
+            nextSummary !== prevSummary ? '修改摘要模版' : '',
+            metricsAdded.length > 0 ? `新增指标 ${metricsAdded.map((m) => m.name).join(', ')}` : '',
+            metricsUpdated.length > 0 ? `更新指标 ${metricsUpdated.map((m) => m.to.name).join(', ')}` : '',
+            metricsRemoved.length > 0 ? `移除指标 ${metricsRemoved.map((m) => m.name).join(', ')}` : '',
+          ]
+            .filter(Boolean)
+            .join('; ') || '无字段变更'}`,
         })
         break
       }

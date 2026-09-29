@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import {
   authoringDocumentDigest,
   canAdoptAssistantProposal,
+  authoringOperationLimitsFor,
   canAdoptAuthoringProposal,
   entityIdSchema,
   normalizeAuthoringDocument,
@@ -154,6 +155,7 @@ import { StepPipelineRail } from './components/step-pipeline-rail'
 import { PublishDiffDrawer } from './components/publish-diff-drawer'
 import { ManagedStageScreen } from './components/managed-stage-screen'
 import { StudioInspectorHost } from './components/inspector/studio-inspector-host'
+import { AcceptanceWorkbench } from './acceptance/acceptance-workbench'
 import { ScenarioConfigWorkspace } from './components/inspector/scenario-config-workspace'
 import { DiagnosticList } from './components/inspector/diagnostic-list'
 import { SegmentedStepInspector } from './components/inspector/segmented-step-inspector'
@@ -442,7 +444,12 @@ export function ScenarioDetailPage() {
   const importedStepIds = importedStepsQuery.data ?? []
   const [mobilePane, setMobilePane] = useState<'steps' | 'properties' | 'page'>('steps')
   const [viewPreset, setViewPreset] = useState<StudioViewPreset>('balanced')
-  const [inspectorView, setInspectorView] = useState<'step' | 'scenario'>('step')
+  const [inspectorView, setInspectorView] = useState<'step' | 'scenario' | 'acceptance'>('step')
+  /** 验收面板发起的基线运行与复跑验证，用来区分 Studio 当前跟随的是哪一次。 */
+  const [acceptanceRuns, setAcceptanceRuns] = useState<{ baselineRunId?: string; verifyRunId?: string }>({})
+  /** 场景配置工作区「验收体检」入口触发的外部体检信号。 */
+  const [acceptanceAuditSignal, setAcceptanceAuditSignal] = useState(0)
+  const [trialPurpose, setTrialPurpose] = useState<'trial' | 'baseline' | 'verify'>('trial')
   const [rightTab, setRightTab] = useState<'step' | 'inputs' | 'outputs' | 'outcomes'>('step')
   const rightPanelRef = useRef<HTMLDivElement>(null)
   const [stepNavigation, setStepNavigation] = useState<{ id: string; sequence: number } | null>(null)
@@ -732,7 +739,7 @@ export function ScenarioDetailPage() {
         })
         if (!allowed.ok) return allowed
 
-        const applied = applyAuthoringOperations(v2, proposal.operations)
+        const applied = applyAuthoringOperations(v2, proposal.operations, authoringOperationLimitsFor(proposal))
         if (!applied.ok) {
           return { ok: false, reason: applied.error.message }
         }
@@ -832,6 +839,20 @@ export function ScenarioDetailPage() {
     }, 3000)
     return () => clearTimeout(timer)
   }, [previewStepId, setPreviewStepId])
+
+  useEffect(() => {
+    if (search.action !== 'acceptance') return
+    if (canWrite) {
+      setInspectorView('acceptance')
+      setMobilePane('properties')
+    }
+    void navigate({
+      to: '/scenarios/$scenarioId',
+      params: { scenarioId },
+      search: { editor: search.editor, runId: search.runId, import: search.import },
+      replace: true,
+    })
+  }, [search.action, canWrite, scenarioId, search.editor, search.runId, search.import, navigate])
 
   useEffect(() => {
     if (search.action === 'inspect-step' && search.step_id) {
@@ -1359,6 +1380,53 @@ export function ScenarioDetailPage() {
   }
 
   function renderInspectorHost() {
+    if (effectiveInspectorView === 'acceptance' && document && scenario) {
+      return (
+        <InspectorShield>
+          <AcceptanceWorkbench
+            scenarioId={scenarioId}
+            steps={(() => {
+              const v2 = toAuthoringDocumentV2(document)
+              const backboneIds = new Set(
+                walkAuthoringNodes(v2)
+                  .filter((item) => item.node.kind === 'step' && !item.parentId)
+                  .map((item) => (item.node as { step: Step }).step.id),
+              )
+              return authoringSteps(document).map((step) => ({
+                id: step.id,
+                name: step.name,
+                type: step.type,
+                effectType: step.effectType,
+                outputKey: step.outputKey,
+                isBackbone: backboneIds.has(step.id),
+              }))
+            })()}
+            summaryTemplate={draft.displayOutputs?.summaryTemplate}
+            disabled={disabled}
+            run={trialRun?.scenarioId === scenarioId ? trialRun : undefined}
+            baselineRunId={acceptanceRuns.baselineRunId}
+            verifyRunId={acceptanceRuns.verifyRunId}
+            ensureDraftSaved={ensureDraftSaved}
+            onStartBaseline={({ pauseBeforeStepId }) => {
+              setTrialPurpose('baseline')
+              setTrialPauseBeforeStepId(pauseBeforeStepId)
+              setTrialOpen(true)
+            }}
+            onStartVerification={() => {
+              setTrialPurpose('verify')
+              setTrialPauseBeforeStepId(undefined)
+              setTrialOpen(true)
+            }}
+            onLocateStep={(stepId) => {
+              draft.setSelectedId(stepId)
+              setStepNavigation((current) => ({ id: stepId, sequence: (current?.sequence ?? 0) + 1 }))
+            }}
+            onClose={() => setInspectorView('step')}
+            auditSignal={acceptanceAuditSignal}
+          />
+        </InspectorShield>
+      )
+    }
     return (
       <InspectorShield>
         {effectiveInspectorView === 'scenario' && draft.v2Document ? (
@@ -1401,6 +1469,10 @@ export function ScenarioDetailPage() {
                 setInspectorView('step')
               }
               queueMicrotask(() => focusStudioField(item))
+            }}
+            onOpenAcceptanceAudit={() => {
+              setInspectorView('acceptance')
+              setAcceptanceAuditSignal((current) => current + 1)
             }}
           />
         ) : (
@@ -2035,7 +2107,15 @@ export function ScenarioDetailPage() {
           }}
           onSave={() => void save()}
           onPublish={() => void handleStartPublish()}
-          onStartTrial={() => setTrialOpen(true)}
+          onStartTrial={() => {
+            setTrialPurpose('trial')
+            setTrialOpen(true)
+          }}
+          onOpenAcceptance={canWrite && hasSteps ? () => {
+            setInspectorView((view) => (view === 'acceptance' ? 'step' : 'acceptance'))
+            setMobilePane('properties')
+          } : undefined}
+          isAcceptanceView={effectiveInspectorView === 'acceptance'}
           canCancelTrial={canCancelTrial}
           cancellingTrial={cancellingTrial}
           onCancelTrial={canCancelTrial && trialRun ? () => void handleCancelTrial() : undefined}
@@ -2780,6 +2860,10 @@ export function ScenarioDetailPage() {
       {scenario ? (
         <RecordingImportPanel
           open={importOpen}
+          onOpenAcceptance={canWrite ? () => {
+            setInspectorView('acceptance')
+            setMobilePane('properties')
+          } : undefined}
           scenarioId={scenarioId}
           recordingDraftId={importDraftId ?? null}
           revision={draft.baseline?.revision ?? scenario.draft?.revision ?? 1}
@@ -2813,7 +2897,10 @@ export function ScenarioDetailPage() {
           open
           onOpenChange={(open) => {
             setTrialOpen(open)
-            if (!open) setTrialPauseBeforeStepId(undefined)
+            if (!open) {
+              setTrialPauseBeforeStepId(undefined)
+              setTrialPurpose('trial')
+            }
           }}
           scenarioId={scenario.id}
           targetId={scenario.targetId}
@@ -2821,8 +2908,12 @@ export function ScenarioDetailPage() {
           inputs={document?.inputs ?? []}
           needsAccount={document ? documentUsesBrowser(document) : false}
           pauseBeforeStepId={trialPauseBeforeStepId}
+          purpose={trialPurpose}
           onCreated={(run) => {
             setTrialPauseBeforeStepId(undefined)
+            if (trialPurpose === 'baseline') setAcceptanceRuns({ baselineRunId: run.id })
+            if (trialPurpose === 'verify') setAcceptanceRuns((runs) => ({ ...runs, verifyRunId: run.id }))
+            setTrialPurpose('trial')
             attachRun(run)
           }}
           onConflict={markConflict}

@@ -37,7 +37,7 @@ describe('Action Module Cases & Regression (AMR-04, 05, 06, 10)', { timeout: 30_
         captchaMode: 'none',
         status: 'active',
         name: 'AMC 目标',
-        code: `AMC_${newId().slice(0, 8)}`,
+        code: `amc-${newId().slice(0, 8)}`,
         entryUrl: 'https://example.com',
       },
       account,
@@ -159,7 +159,7 @@ describe('Action Module Cases & Regression (AMR-04, 05, 06, 10)', { timeout: 30_
     const nextReview = makeReview(account, nextInputs, expectedOutputs)
 
     const updated = await api.updateModuleTestCase(db, mod.id, created.id, {
-      revision: created.revision,
+      baseRevision: created.revision,
       inputs: nextInputs,
       sampleReview: nextReview,
       actor: account,
@@ -170,7 +170,7 @@ describe('Action Module Cases & Regression (AMR-04, 05, 06, 10)', { timeout: 30_
     // 5. OCC 冲突校验 (旧 revision 应失败)
     await expect(
       api.updateModuleTestCase(db, mod.id, created.id, {
-        revision: 1, // 旧 revision
+        baseRevision: 1, // 旧 revision
         name: '冲突改名',
         actor: account,
       }),
@@ -349,10 +349,7 @@ describe('Action Module Cases & Regression (AMR-04, 05, 06, 10)', { timeout: 30_
     await expect(
       api.createModuleTestBatch(db, mod.id, {
         caseIds: fake21Cases,
-        confirmedBy: {
-          confirmedTargetEnvironment: 'test',
-          confirmedIsolationMode: 'sample_only',
-        },
+        confirmedEnv: true,
         actor: account,
       }),
     ).rejects.toThrow('批量回归每次最多执行 20 条用例')
@@ -360,10 +357,7 @@ describe('Action Module Cases & Regression (AMR-04, 05, 06, 10)', { timeout: 30_
     // 发起正常 2 例批量
     const batch = await api.createModuleTestBatch(db, mod.id, {
       caseIds,
-      confirmedBy: {
-        confirmedTargetEnvironment: 'staging',
-        confirmedIsolationMode: 'sandbox_account',
-      },
+      confirmedEnv: true,
       actor: account,
     })
 

@@ -31,13 +31,13 @@ describe('AM-D: 编写期模块映射', { timeout: 30_000 }, () => {
     const target = await targets.createTarget({
       loginFields: null, authMethod: 'manual', captchaMode: 'none', status: 'active',
       name: 'AM-D 目标',
-      code: `AMD_${newId().slice(0, 8)}`,
+      code: `amd-${newId().slice(0, 8)}`,
       entryUrl: 'https://example.com',
     }, account)
     const other = await targets.createTarget({
       loginFields: null, authMethod: 'manual', captchaMode: 'none', status: 'active',
       name: 'AM-D 其他目标',
-      code: `AMD2_${newId().slice(0, 8)}`,
+      code: `amd2-${newId().slice(0, 8)}`,
       entryUrl: 'https://other.example.com',
     }, account)
     return { db, account, target, other }

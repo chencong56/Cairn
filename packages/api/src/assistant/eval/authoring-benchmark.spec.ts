@@ -29,7 +29,7 @@ import { getScenario } from '@cairn/db'
 import { handleScenarioProposeStep } from '../handlers/propose-step.handler.js'
 import type { AssistantCapabilityHandlerContext } from '../registry.js'
 
-function buildBenchmarkScenario(overrides: Partial<ScenarioAuthoringDocumentV2> = {}): ScenarioDetailDto {
+function buildBenchmarkScenario(overrides: Partial<ScenarioAuthoringDocumentV2> = {}): ScenarioDetailDto & { authoringDocument?: ScenarioAuthoringDocumentV2 } {
   const v2Doc: ScenarioAuthoringDocumentV2 = {
     authoringSchemaVersion: 2,
     schemaVersion: 1,
@@ -421,7 +421,7 @@ describe('识途助手场景编排正反例评测基准 (Authoring Benchmark P01
 
     it('P09: 业务用户调整特定条件分支动作 — “如果订单状态是成功的话，里面的处理动作帮我改成业务发票归档”', async () => {
       const scenarioWithBranch = buildBenchmarkScenario()
-      scenarioWithBranch.authoringDocument.nodes.push({
+      scenarioWithBranch.authoringDocument!.nodes.push({
         kind: 'block',
         blockId: '00000000-0000-4000-8000-000000000001',
         name: '条件分支',
@@ -490,7 +490,7 @@ describe('识途助手场景编排正反例评测基准 (Authoring Benchmark P01
 
     it('P10: 业务用户切换至新版测试地址 — “把最前面打开的订单页面换成新版地址 https://fixture.example.test/orders/v2”', async () => {
       const scenarioWithModule = buildBenchmarkScenario()
-      scenarioWithModule.authoringDocument.nodes.push({
+      scenarioWithModule.authoringDocument!.nodes.push({
         kind: 'module',
         invocationId: '00000000-0000-4000-8000-000000000004',
         moduleId: '00000000-0000-4000-8000-000000000005',
@@ -548,14 +548,17 @@ describe('识途助手场景编排正反例评测基准 (Authoring Benchmark P01
 
     it('N02: 业务用户指代两个重名步骤 — “在等待查询结果后面帮我加个校验” → 助手发现同名引导消歧', async () => {
       const scenarioWithDuplicates = buildBenchmarkScenario()
-      scenarioWithDuplicates.authoringDocument.nodes.push({
+      scenarioWithDuplicates.authoringDocument!.nodes.push({
         kind: 'step',
         step: {
           id: 'dup-click-step-02',
           name: '等待查询结果', // 重名
           type: 'wait',
           effectType: 'READ_ONLY',
-          input: { kind: 'element_visible' },
+          input: {
+            kind: 'visible',
+            target: { semantic: '结果容器', framePath: [], candidates: [{ by: 'css', value: '#result' }] },
+          },
         },
       })
       vi.mocked(getScenario).mockResolvedValue(scenarioWithDuplicates)
@@ -648,7 +651,7 @@ describe('识途助手场景编排正反例评测基准 (Authoring Benchmark P01
     it('N06: 业务用户误删后续步骤依赖的关键数据 — “第一步抓客户信息的步骤不要了，直接删掉” → 预检拦截并告知后序依赖', async () => {
       // 保证 step 3 明确引用 customerId
       const scenario = buildBenchmarkScenario()
-      const fillStep = scenario.authoringDocument.nodes.find(
+      const fillStep = scenario.authoringDocument!.nodes.find(
         (n: any) => n.step?.id === '33333333-3333-4333-8333-333333333333',
       )
       if (fillStep) (fillStep as any).step.input.from = 'customerId'

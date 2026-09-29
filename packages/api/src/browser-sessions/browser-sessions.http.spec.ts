@@ -102,6 +102,11 @@ function mockService() {
       summary: { systems: 0, readyAccounts: 0, problemAccounts: 0, unpreparedAccounts: 0 },
       asOf: '2026-09-16T00:00:00.000Z',
     })),
+    closeManagedPage: vi.fn(async () => ({
+      closed: true,
+      pageId: 'page-123',
+      activePageId: 'page-base',
+    })),
   }
 }
 

@@ -17,6 +17,7 @@ import {
   sha256Hex,
   quoteTargetSystemId,
   unpackAssistantResultEnvelope,
+  authoringOperationLimitsFor,
   canAdoptAuthoringProposal,
   compareCompileDiagnostics,
   normalizeAuthoringDocument,
@@ -445,7 +446,11 @@ export class AssistantService implements OnModuleInit {
 
     if (draft && operations.length > 0) {
       const draftDoc = normalizeAuthoringDocument(draft.document)
-      const applied = applyAuthoringOperations(draftDoc, operations)
+      const applied = applyAuthoringOperations(
+        draftDoc,
+        operations,
+        result.kind === 'authoring_proposal' ? authoringOperationLimitsFor(result) : undefined,
+      )
       if (applied.ok) {
         let baselineDiagnostics: CompileDiagnostic[] = []
         try {

@@ -24,7 +24,7 @@ it('导航销毁探针的执行上下文只表示本次未知，不能关闭健�
     // Keep a real protocol evaluation in flight so navigation deterministically
     // destroys its execution context; the browser produces the actual error.
     const spy = vi.spyOn(page, 'evaluate').mockImplementationOnce(() => evaluate(async () => {
-      await (window as unknown as { __healthProbeStarted: () => Promise<void> }).__healthProbeStarted()
+      await (globalThis as unknown as { __healthProbeStarted: () => Promise<void> }).__healthProbeStarted()
       await new Promise(() => {})
     }))
     const health = probeHealth(handle)

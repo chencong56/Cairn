@@ -24,7 +24,7 @@ import { getMapAssetDetail, getScenario, getTargetKnowledgeContext } from '@cair
 import { handleScenarioProposeStep } from './propose-step.handler.js'
 import type { AssistantCapabilityHandlerContext } from '../registry.js'
 
-function sampleScenarioV2(overrides: Partial<ScenarioDetailDto> = {}): ScenarioDetailDto {
+function sampleScenarioV2(overrides: Partial<ScenarioDetailDto> = {}): ScenarioDetailDto & { authoringDocument?: ScenarioAuthoringDocumentV2 } {
   const v2Doc: ScenarioAuthoringDocumentV2 = {
     authoringSchemaVersion: 2,
     schemaVersion: 1,
@@ -420,14 +420,14 @@ describe('propose-step.handler 场景编排结构化提议', () => {
   it('目标步骤重名产生歧义时触发 Clarify (N02)', async () => {
     const scenario = sampleScenarioV2()
     // 添加同名步骤
-    scenario.authoringDocument.nodes.push({
+    scenario.authoringDocument!.nodes.push({
       kind: 'step',
       step: {
         id: '55555555-5555-4555-8555-555555555555',
         name: '点击搜索按钮',
         type: 'click',
         effectType: 'IDEMPOTENT',
-        input: { target: { semantic: '搜索按钮 2' } },
+        input: { target: { semantic: '搜索按钮 2', framePath: [], candidates: [{ by: 'css', value: '#search-btn-2' }] } },
       },
     })
     vi.mocked(getScenario).mockResolvedValue(scenario)
@@ -529,9 +529,9 @@ describe('propose-step.handler 场景编排结构化提议', () => {
     expect(result.kind).toBe('authoring_proposal')
     if (result.kind === 'authoring_proposal') {
       expect(result.operations).toHaveLength(1)
-      expect(result.operations[0].kind).toBe('insert_step')
+      expect(result.operations[0]!.kind).toBe('insert_step')
       expect(result.diffs.length).toBeGreaterThan(0)
-      expect(result.diffs[0].type).toBe('add')
+      expect(result.diffs[0]!.type).toBe('add')
       expect(result.executable).toBe(true)
       expect(result.validation.compiler).toBe('passed')
       expect(result.candidateDigest).toBeDefined()

@@ -356,15 +356,8 @@ describe('登录态快照与击剑存储 (session-snapshots.test)', { timeout: 6
       instanceId: otherWorker.instanceId,
       maxSessions: 10,
       scheduling: {
-        maxExecutionWorkers: 5,
-        targetConcurrencyLimit: 2,
-        claimScanLimit: 10,
-        workerRunCapacityBuffer: 1,
         profileAffinityWaitSeconds: 60,
-        maintenanceLeaseTtlSeconds: 30,
-        autoLoginBudgetPerHour: 10,
-        autoLoginCooldownSeconds: 60,
-        unattendedAuthTimeoutSeconds: 120,
+        operationQueueTimeoutSeconds: 300,
       },
     })
     expect(dedicatedEligibility.eligible).toBe(false)
@@ -383,15 +376,8 @@ describe('登录态快照与击剑存储 (session-snapshots.test)', { timeout: 6
       instanceId: otherWorker.instanceId,
       maxSessions: 10,
       scheduling: {
-        maxExecutionWorkers: 5,
-        targetConcurrencyLimit: 2,
-        claimScanLimit: 10,
-        workerRunCapacityBuffer: 1,
         profileAffinityWaitSeconds: 60,
-        maintenanceLeaseTtlSeconds: 30,
-        autoLoginBudgetPerHour: 10,
-        autoLoginCooldownSeconds: 60,
-        unattendedAuthTimeoutSeconds: 120,
+        operationQueueTimeoutSeconds: 300,
       },
     })
     expect(sharedEligibility.eligible).toBe(true)

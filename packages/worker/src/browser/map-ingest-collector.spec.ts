@@ -366,7 +366,7 @@ describe('Ant 弹出子菜单只读采集', () => {
         expect.objectContaining({ category: 'input', name: '状态', options: ['已启用', '已停用'] }),
       ]))
       expect(await page.getByRole('button', { name: '展开更多筛选' }).getAttribute('aria-expanded')).toBe('false')
-      expect(await page.evaluate(() => (window as any).dangerClicks ?? 0)).toBe(0)
+      expect(await page.evaluate(() => (globalThis as any).dangerClicks ?? 0)).toBe(0)
     } finally { await browser.close() }
   }, 20_000)
 
@@ -401,7 +401,7 @@ describe('Ant 弹出子菜单只读采集', () => {
       })
       expect(result.nodes.some(node => node.code === 'dialog_dismissed')).toBe(true)
       expect(snapshots[0]).toMatchObject({ completeness: 'partial', reasons: ['dialog_dismissed'] })
-      expect(await page.evaluate(() => (window as any).secondClicks ?? 0)).toBe(0)
+      expect(await page.evaluate(() => (globalThis as any).secondClicks ?? 0)).toBe(0)
     } finally { await browser.close() }
   }, 20_000)
 
@@ -484,7 +484,7 @@ describe('Ant 弹出子菜单只读采集', () => {
         'https://app.example/tokens', 'https://app.example/tokens/keys',
       ])
       expect(contentVisits).toBe(0)
-      expect(await page.evaluate(() => (window as any).sidebarClicks ?? 0)).toBe(0)
+      expect(await page.evaluate(() => (globalThis as any).sidebarClicks ?? 0)).toBe(0)
     } finally { await browser.close() }
   }, 20_000)
 })

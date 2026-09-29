@@ -64,8 +64,12 @@ export async function settleRunOutput(
     name: sr.name,
     status: sr.status,
     outcomeStatus: sr.outcomeStatus,
+    startedAt: sr.startedAt ? new Date(sr.startedAt).toISOString() : undefined,
+    finishedAt: sr.finishedAt ? new Date(sr.finishedAt).toISOString() : undefined,
     attempts: (attemptsByStepRunId.get(sr.id) ?? []).map((a) => ({
       status: a.status,
+      startedAt: a.startedAt ? new Date(a.startedAt).toISOString() : undefined,
+      finishedAt: a.finishedAt ? new Date(a.finishedAt).toISOString() : undefined,
       error: a.error as any,
     })),
   }))
@@ -92,6 +96,7 @@ export async function settleRunOutput(
     outcomeStatus: row.outcomeStatus,
     error,
     now: row.finishedAt ?? new Date(),
+    runStartedAt: row.startedAt,
   })
 
   await underlyingDb.transaction(async (tx) => {

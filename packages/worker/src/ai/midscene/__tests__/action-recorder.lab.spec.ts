@@ -123,8 +123,8 @@ describe('AP-0 动作事实：真实 Chromium + Midscene（假模型）', { time
       // 点检命中逻辑坐标：重定向到 button 并绑定 role 候选（dpr=2 也不能落到 <html> 上）
       expect(prepared!.binding.status).toBe('bound')
       expect(prepared!.binding.redirected).toBe(true)
-      expect(prepared!.binding.candidates[0]?.by).toBe('role')
-      expect(prepared!.binding.candidates[0]?.name).toBe('提交订单')
+      expect(prepared!.binding.candidates?.[0]?.by).toBe('role')
+      expect(prepared!.binding.candidates?.[0]?.name).toBe('提交订单')
       // completed 带动作后页面观察；写请求窗口随动作收尾闭合
       expect(completed!.pageAfter).toBeDefined()
       expect(completed!.writeSignalPaths).toEqual([])
@@ -171,7 +171,7 @@ describe('AP-0 动作事实：真实 Chromium + Midscene（假模型）', { time
     appendSpy.mockClear()
     const boom = Object.assign(new Error('element detached'), { code: 'ACTION_DETACHED' })
     const wrapped = (formalAgentModule.wrapActionSpace as typeof import('../formal-agent.js').wrapActionSpace)(
-      [{ name: 'Tap', call: async () => { throw boom } }],
+      [{ name: 'Tap', call: async (_param?: unknown) => { throw boom } }],
       new ActionGate(),
       false,
       recorder,

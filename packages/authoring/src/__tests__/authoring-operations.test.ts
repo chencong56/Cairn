@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  authoringOperationLimitsFor,
   type AuthoringOperation,
   type ScenarioAuthoringDocumentV2,
   normalizeAuthoringDocument,
   authoringDocumentDigest,
 } from '@cairn/shared'
 import { applyAuthoringOperations } from '../authoring-operations.js'
+import { deterministicStepId } from '../expand.js'
 
 describe('applyAuthoringOperations (原子应用与纯函数受限编辑)', () => {
   const baseDoc: ScenarioAuthoringDocumentV2 = normalizeAuthoringDocument({
@@ -387,5 +389,212 @@ describe('applyAuthoringOperations (原子应用与纯函数受限编辑)', () =
     const postDigest = await authoringDocumentDigest(baseDoc)
     expect(postDigest).toBe(originalDigest)
     expect(baseDoc.nodes[0]?.kind === 'step' && baseDoc.nodes[0].step.name).toBe('打开订单列表')
+  })
+
+  it('支持 set_outputs 操作更新场景摘要模板与指标声明，并生成 outputs_change 差异', () => {
+    const setOutputsOp: AuthoringOperation = {
+      kind: 'set_outputs',
+      id: 'op_outputs_1',
+      mode: 'replace',
+      summaryTemplate: '订单巡检完成，在售商品 ${item_count} 件',
+      metrics: [
+        {
+          key: 'item_count',
+          name: '商品数量',
+          fromContextKey: 'item_count',
+        },
+        {
+          key: 'page_duration',
+          name: '页面加载耗时',
+          fromStepDuration: { stepId: '01912345-0000-7000-8000-000000000011' },
+          unit: 'ms',
+        },
+      ],
+    }
+
+    const res = applyAuthoringOperations(baseDoc, [setOutputsOp])
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect(res.document.outputs?.summaryTemplate).toBe('订单巡检完成，在售商品 ${item_count} 件')
+      expect(res.document.outputs?.metrics).toHaveLength(2)
+      expect(res.document.outputs?.metrics?.[1]?.fromStepDuration?.stepId).toBe('01912345-0000-7000-8000-000000000011')
+      expect(res.diffs).toHaveLength(1)
+      const firstDiff = res.diffs[0]
+      expect(firstDiff?.type).toBe('outputs_change')
+      if (firstDiff && firstDiff.type === 'outputs_change') {
+        expect(firstDiff.summaryTemplate?.to).toBe('订单巡检完成，在售商品 ${item_count} 件')
+        expect(firstDiff.metricsAdded).toHaveLength(2)
+      }
+    }
+  })
+
+  it('set_outputs 的 replace 会移除未再声明的指标，merge 保留原有指标', () => {
+    const seed = applyAuthoringOperations(baseDoc, [
+      {
+        kind: 'set_outputs',
+        id: 'op_seed',
+        mode: 'merge',
+        metrics: [
+          { key: 'old_metric', name: '旧指标', fromContextKey: 'old_metric' },
+          { key: 'item_count', name: '商品数量', fromContextKey: 'item_count' },
+        ],
+      },
+    ])
+    expect(seed.ok).toBe(true)
+    if (!seed.ok) return
+
+    const merged = applyAuthoringOperations(seed.document, [
+      { kind: 'set_outputs', id: 'op_merge', mode: 'merge', metrics: [{ key: 'item_count', name: '商品件数', fromContextKey: 'item_count' }] },
+    ])
+    expect(merged.ok).toBe(true)
+    if (merged.ok) {
+      expect(merged.document.outputs?.metrics.map((m) => m.key)).toEqual(['old_metric', 'item_count'])
+      const diff = merged.diffs[0]
+      expect(diff?.type === 'outputs_change' && diff.metricsUpdated?.map((m) => m.key)).toEqual(['item_count'])
+    }
+
+    const replaced = applyAuthoringOperations(seed.document, [
+      { kind: 'set_outputs', id: 'op_replace', mode: 'replace', metrics: [{ key: 'item_count', name: '商品数量', fromContextKey: 'item_count' }] },
+    ])
+    expect(replaced.ok).toBe(true)
+    if (replaced.ok) {
+      expect(replaced.document.outputs?.metrics.map((m) => m.key)).toEqual(['item_count'])
+      const diff = replaced.diffs[0]
+      expect(diff?.type === 'outputs_change' && diff.metricsRemoved?.map((m) => m.key)).toEqual(['old_metric'])
+      expect(diff?.type === 'outputs_change' && diff.metricsUpdated).toEqual([])
+    }
+  })
+
+  it('验收提案的成功条件记为 ai_compiled，并按验收上限放行多卡操作', () => {
+    const firstStep = baseDoc.nodes[0]
+    if (!firstStep || firstStep.kind !== 'step') throw new Error('fixture')
+    const ops: AuthoringOperation[] = Array.from({ length: 6 }, (_, i) => ({
+      kind: 'add_outcome',
+      id: `op_outcome_${i}`,
+      stepId: firstStep.step.id,
+      meaning: `条件 ${i}`,
+      rule: { kind: 'step_duration', op: 'lte', valueMs: 3000 + i },
+      severity: 'SHOULD',
+      onViolation: 'continue',
+      provenance: 'ai_compiled',
+    }))
+    expect(applyAuthoringOperations(baseDoc, ops).ok).toBe(false)
+    const res = applyAuthoringOperations(baseDoc, ops, authoringOperationLimitsFor({ source: 'acceptance' }))
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      const node = res.document.nodes[0]
+      expect(node?.kind === 'step' && node.outcomes?.every((o) => o.provenance === 'ai_compiled')).toBe(true)
+    }
+  })
+
+  it('支持插入 compute 计算步骤并挂载上下文输出', () => {
+    const computeOp: AuthoringOperation = {
+      kind: 'insert_step',
+      id: 'op_insert_compute',
+      step: {
+        id: '01912345-0000-7000-8000-000000000099',
+        name: '计算订单总数',
+        type: 'compute',
+        effectType: 'READ_ONLY',
+        outputKey: 'item_count',
+        input: {
+          expression: {
+            kind: 'call',
+            fn: 'length',
+            args: [{ kind: 'ref', key: 'items' }],
+          },
+        },
+      },
+      anchorStepId: '01912345-0000-7000-8000-000000000011',
+    }
+
+    const res = applyAuthoringOperations(baseDoc, [computeOp])
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      const inserted = res.document.nodes.find((n) => n.kind === 'step' && n.step.id === '01912345-0000-7000-8000-000000000099')
+      expect(inserted).toBeDefined()
+      if (inserted && inserted.kind === 'step') {
+        expect(inserted.step.type).toBe('compute')
+        expect(inserted.step.outputKey).toBe('item_count')
+      }
+    }
+  })
+
+  it('通过 options 放宽单轮上限到 24 项操作与 12 项插入', () => {
+    const ops: AuthoringOperation[] = Array.from({ length: 6 }, (_, i) => ({
+      kind: 'insert_step' as const,
+      id: `op_insert_${i}`,
+      step: {
+        id: `01912345-0000-7000-8000-0000000001${i.toString().padStart(2, '0')}`,
+        name: `步骤 ${i}`,
+        type: 'navigate' as const,
+        effectType: 'READ_ONLY' as const,
+        input: { url: `https://example.com/${i}` },
+      },
+    }))
+
+    // 默认 4/2 会被拒绝
+    const defaultRes = applyAuthoringOperations(baseDoc, ops)
+    expect(defaultRes.ok).toBe(false)
+
+    // 传入放宽参数后成功
+    const relaxedRes = applyAuthoringOperations(baseDoc, ops, { maxOperations: 24, maxInserts: 12 })
+    expect(relaxedRes.ok).toBe(true)
+  })
+})
+
+describe('applyAuthoringOperations 场景级 add_outcome（二期）', () => {
+  it('stepId 缺省时写入 scenarioOutcomes，确定性 ID 使用 scenario 前缀', () => {
+    const res = applyAuthoringOperations(baseDoc, [
+      {
+        kind: 'add_outcome',
+        id: 'op-sc-outcome',
+        meaning: '全程耗时不超过 30 秒',
+        rule: { kind: 'run_duration', op: 'lte', valueMs: 30_000 },
+        severity: 'SHOULD',
+        onViolation: 'continue',
+        provenance: 'ai_compiled',
+      },
+    ])
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    const contract = res.document.scenarioOutcomes?.[0]
+    expect(contract).toBeDefined()
+    expect(contract?.id).toBe(deterministicStepId('scenario', 'op-sc-outcome', 'outcome'))
+    expect(contract?.scope).toBe('scenario')
+    expect(contract?.rule).toEqual({ kind: 'run_duration', op: 'lte', valueMs: 30_000 })
+    // 草稿节点不受影响
+    expect(res.document.nodes).toHaveLength(baseDoc.nodes.length)
+    // diff 记录场景级 outcome_add（无 stepId）
+    const diff = res.diffs[0]
+    expect(diff?.type === 'outcome_add' && diff.stepId === undefined && diff.scope === 'scenario').toBe(true)
+  })
+
+  it('step_duration 不允许挂场景级；run_duration 场景级不允许 halt', () => {
+    const stepDuration = applyAuthoringOperations(baseDoc, [
+      {
+        kind: 'add_outcome',
+        id: 'op-bad-1',
+        meaning: '步骤耗时挂场景级',
+        rule: { kind: 'step_duration', op: 'lte', valueMs: 3_000 },
+        severity: 'SHOULD',
+        onViolation: 'continue',
+        provenance: 'ai_compiled',
+      },
+    ])
+    expect(stepDuration.ok).toBe(false)
+
+    const halt = applyAuthoringOperations(baseDoc, [
+      {
+        kind: 'add_outcome',
+        id: 'op-bad-2',
+        meaning: '全程耗时挂 halt',
+        rule: { kind: 'run_duration', op: 'lte', valueMs: 3_000 },
+        severity: 'MUST',
+        onViolation: 'halt',
+        provenance: 'ai_compiled',
+      },
+    ])
+    expect(halt.ok).toBe(false)
   })
 })

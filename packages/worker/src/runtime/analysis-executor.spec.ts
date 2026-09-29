@@ -29,13 +29,17 @@ describe('analyst execution', () => {
   it('独立模型配置发起有界调用，保存实际用量、模型和来源', async () => {
     mocks.prepare.mockResolvedValue(structuredClone(prepared))
     mocks.secret.mockResolvedValue({ id: 'secret', ciphertext: 'cipher', modelOrigin: 'https://model.example' })
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ model: 'actual-model', usage: { prompt_tokens: 20, completion_tokens: 10 }, choices: [{ message: { content: JSON.stringify({ candidates: [{ kind: 'experience', title: '观察', summary: '结论', sourceIndexes: [0] }] }) } }] }), { status: 200 }))
+    const fetcher = vi.fn(async (_url?: any, _init?: any) => new Response(JSON.stringify({ model: 'actual-model', usage: { prompt_tokens: 20, completion_tokens: 10 }, choices: [{ message: { content: JSON.stringify({ candidates: [{ kind: 'experience', title: '观察', summary: '结论', sourceIndexes: [0] }] }) } }] }), { status: 200 }))
     vi.stubGlobal('fetch', fetcher)
     await executeAnalysisJob({} as DbHandle, { ...job, budget: { ...job.budget, useAi: true } }, 'worker', { decrypt: () => 'test-key' } as never)
     expect(fetcher).toHaveBeenCalledOnce()
     const sent = JSON.parse(String(fetcher.mock.calls[0]![1].body)) as Record<string, unknown>
-    expect(sent).toMatchObject({ model: 'test-model', temperature: 0, response_format: { type: 'json_object' } })
-    expect(sent).not.toHaveProperty('thinking')
+    expect(sent).toMatchObject({
+      model: 'test-model',
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      thinking: { type: 'disabled' },
+    })
     expect(sent).not.toHaveProperty('enable_thinking')
     expect(fetcher.mock.calls[0]![1]).toMatchObject({ redirect: 'error' })
     expect(mocks.submit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ modelUsage: expect.objectContaining({ model: 'actual-model', invoked: true, inputTokens: 20, outputTokens: 10 }), candidates: [expect.objectContaining({ sources: [expect.objectContaining({ runId: 'run' })] })] }))
@@ -47,7 +51,7 @@ describe('analyst execution', () => {
       ai: { ...prepared.ai, provider: 'qwen', model: 'qwen-plus' },
     })
     mocks.secret.mockResolvedValue({ id: 'secret', ciphertext: 'cipher', modelOrigin: 'https://model.example' })
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+    const fetcher = vi.fn(async (_url?: any, _init?: any) => new Response(JSON.stringify({
       choices: [{ message: { content: JSON.stringify({ candidates: [] }) } }],
     }), { status: 200 }))
     vi.stubGlobal('fetch', fetcher)

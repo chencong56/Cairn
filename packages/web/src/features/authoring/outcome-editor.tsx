@@ -31,6 +31,7 @@ const EXPECT_OPTIONS: { kind: AssertExpect['kind']; label: string }[] = [
   { kind: 'visible', label: '对象可见' },
   { kind: 'text_equals', label: '文本相符' },
   { kind: 'text_contains', label: '文本包含' },
+  { kind: 'text_absent', label: '文本不出现' },
   { kind: 'aria_snapshot', label: '快照匹配' },
 ]
 
@@ -140,7 +141,7 @@ function OutcomeCard({
   const [advanced, setAdvanced] = useState(false)
   const expect = ruleExpect(contract)
   const target = ruleTarget(contract)
-  const haltBlocked = contract.severity === 'SHOULD' || contract.severity === 'INFO'
+  const haltBlocked = contract.severity !== 'MUST' || contract.rule.kind === 'run_duration'
 
   function patchRule(next: { target?: TargetDescriptor; expect?: AssertExpect }) {
     if (contract.rule.kind !== 'deterministic') return
@@ -179,182 +180,193 @@ function OutcomeCard({
           onChange={(event) => onChange({ ...contract, meaning: event.target.value })}
         />
       </div>
-      <div className='grid gap-3 sm:grid-cols-2'>
-        <div className='space-y-2'>
-          <Label>期望</Label>
-          <Select
-            value={expect.kind}
-            disabled={disabled}
-            onValueChange={(kind) => {
-              const nextKind = kind as AssertExpect['kind']
-              if (nextKind === 'text_equals' || nextKind === 'text_contains') {
-                patchRule({
-                  expect: {
-                    kind: nextKind,
-                    value: expect.kind === 'text_equals' || expect.kind === 'text_contains' ? expect.value : '',
-                  },
-                })
-                return
-              }
-              if (nextKind === 'aria_snapshot') {
-                patchRule({
-                  expect: {
-                    kind: 'aria_snapshot',
-                    template: expect.kind === 'aria_snapshot' ? expect.template : '',
-                  },
-                })
-                return
-              }
-              if (nextKind === 'number_compare') {
-                patchRule({ expect: { kind: 'number_compare', op: 'eq', value: 0 } })
-                return
-              }
-              patchRule({ expect: { kind: nextKind } })
-            }}
-          >
-            <SelectTrigger className='w-full' aria-label={`成功条件 ${index + 1} 期望`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {EXPECT_OPTIONS.map((item) => (
-                <SelectItem key={item.kind} value={item.kind}>
-                  {item.label}
-                </SelectItem>
-              ))}
-              {advanced ? (
-                <SelectItem value='number_compare'>数值比较</SelectItem>
-              ) : null}
-            </SelectContent>
-          </Select>
-        </div>
-        {expect.kind === 'aria_snapshot' ? (
-          <div className='col-span-full space-y-2'>
-            <div className='flex items-center justify-between'>
-              <div className='flex items-center gap-1.5'>
-                <Label htmlFor={`outcome-aria-${contract.id}`}>Aria 快照模板 (YAML)</Label>
-                <FieldHelp label='Aria 快照模板'>
-                  支持角色、无障碍名称与正则匹配（如 <code>- button /确认/</code>）。顶层必须以 <code>-</code> 开头。
-                </FieldHelp>
-              </div>
-              <span className='text-label text-muted-foreground'>
-                {expect.template.length} / 16384 字符
-              </span>
+      {contract.rule.kind === 'context' ||
+      contract.rule.kind === 'step_duration' ||
+      contract.rule.kind === 'run_duration' ? (
+        <NonPageRuleFields contract={contract} index={index} disabled={disabled} onChange={onChange} onRemove={onRemove} />
+      ) : (
+        <>
+          <div className='grid gap-3 sm:grid-cols-2'>
+            <div className='space-y-2'>
+              <Label>期望</Label>
+              <Select
+                value={expect.kind}
+                disabled={disabled}
+                onValueChange={(kind) => {
+                  const nextKind = kind as AssertExpect['kind']
+                  if (nextKind === 'text_equals' || nextKind === 'text_contains' || nextKind === 'text_absent') {
+                    patchRule({
+                      expect: {
+                        kind: nextKind,
+                        value:
+                          expect.kind === 'text_equals' || expect.kind === 'text_contains' || expect.kind === 'text_absent'
+                            ? expect.value
+                            : '',
+                      },
+                    })
+                    return
+                  }
+                  if (nextKind === 'aria_snapshot') {
+                    patchRule({
+                      expect: {
+                        kind: 'aria_snapshot',
+                        template: expect.kind === 'aria_snapshot' ? expect.template : '',
+                      },
+                    })
+                    return
+                  }
+                  if (nextKind === 'number_compare') {
+                    patchRule({ expect: { kind: 'number_compare', op: 'eq', value: 0 } })
+                    return
+                  }
+                  patchRule({ expect: { kind: nextKind } })
+                }}
+              >
+                <SelectTrigger className='w-full' aria-label={`成功条件 ${index + 1} 期望`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EXPECT_OPTIONS.map((item) => (
+                    <SelectItem key={item.kind} value={item.kind}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                  {advanced ? (
+                    <SelectItem value='number_compare'>数值比较</SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
             </div>
-            <Textarea
-              id={`outcome-aria-${contract.id}`}
-              value={expect.template}
-              disabled={disabled}
-              placeholder={'- heading "标题"\n- button "确认"'}
-              rows={4}
-              className='font-mono text-label leading-relaxed'
-              onChange={(event) =>
-                patchRule({
-                  expect: { kind: 'aria_snapshot', template: event.target.value.slice(0, 16384) },
-                })
-              }
-            />
+            {expect.kind === 'aria_snapshot' ? (
+              <div className='col-span-full space-y-2'>
+                <div className='flex items-center justify-between'>
+                  <div className='flex items-center gap-1.5'>
+                    <Label htmlFor={`outcome-aria-${contract.id}`}>Aria 快照模板 (YAML)</Label>
+                    <FieldHelp label='Aria 快照模板'>
+                      支持角色、无障碍名称与正则匹配（如 <code>- button /确认/</code>）。顶层必须以 <code>-</code> 开头。
+                    </FieldHelp>
+                  </div>
+                  <span className='text-label text-muted-foreground'>
+                    {expect.template.length} / 16384 字符
+                  </span>
+                </div>
+                <Textarea
+                  id={`outcome-aria-${contract.id}`}
+                  value={expect.template}
+                  disabled={disabled}
+                  placeholder={'- heading "标题"\n- button "确认"'}
+                  rows={4}
+                  className='font-mono text-label leading-relaxed'
+                  onChange={(event) =>
+                    patchRule({
+                      expect: { kind: 'aria_snapshot', template: event.target.value.slice(0, 16384) },
+                    })
+                  }
+                />
+              </div>
+            ) : null}
+            {expect.kind === 'text_equals' || expect.kind === 'text_contains' || expect.kind === 'text_absent' ? (
+              <div className='space-y-2'>
+                <Label htmlFor={`outcome-text-${contract.id}`}>
+                  {expect.kind === 'text_equals' ? '期望文本' : expect.kind === 'text_absent' ? '不应出现的文本' : '应包含的文本'}
+                </Label>
+                <Input
+                  id={`outcome-text-${contract.id}`}
+                  value={expect.value}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    patchRule({ expect: { kind: expect.kind, value: event.target.value } })
+                  }
+                />
+              </div>
+            ) : null}
+            {expect.kind === 'number_compare' ? (
+              <div className='grid grid-cols-2 gap-2'>
+                <Select
+                  value={expect.op}
+                  disabled={disabled}
+                  onValueChange={(op) =>
+                    patchRule({
+                      expect: { ...expect, op: op as typeof expect.op },
+                    })
+                  }
+                >
+                  <SelectTrigger aria-label={`成功条件 ${index + 1} 比较`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='eq'>等于</SelectItem>
+                    <SelectItem value='gt'>大于</SelectItem>
+                    <SelectItem value='gte'>不小于</SelectItem>
+                    <SelectItem value='lt'>小于</SelectItem>
+                    <SelectItem value='lte'>不大于</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  type='number'
+                  value={expect.value}
+                  disabled={disabled}
+                  aria-label={`成功条件 ${index + 1} 期望数值`}
+                  onChange={(event) =>
+                    patchRule({
+                      expect: { ...expect, value: Number(event.target.value) },
+                    })
+                  }
+                />
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        {expect.kind === 'text_equals' || expect.kind === 'text_contains' ? (
-          <div className='space-y-2'>
-            <Label htmlFor={`outcome-text-${contract.id}`}>
-              {expect.kind === 'text_equals' ? '期望文本' : '应包含的文本'}
-            </Label>
-            <Input
-              id={`outcome-text-${contract.id}`}
-              value={expect.value}
+          <div className='flex flex-wrap gap-2'>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
               disabled={disabled}
-              onChange={(event) =>
-                patchRule({ expect: { kind: expect.kind, value: event.target.value } })
-              }
-            />
-          </div>
-        ) : null}
-        {expect.kind === 'number_compare' ? (
-          <div className='grid grid-cols-2 gap-2'>
-            <Select
-              value={expect.op}
-              disabled={disabled}
-              onValueChange={(op) =>
-                patchRule({
-                  expect: { ...expect, op: op as typeof expect.op },
-                })
-              }
+              onClick={() => observe.setPickMode(true, { scope: contract.scope, contractId: contract.id })}
             >
-              <SelectTrigger aria-label={`成功条件 ${index + 1} 比较`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='eq'>等于</SelectItem>
-                <SelectItem value='gt'>大于</SelectItem>
-                <SelectItem value='gte'>不小于</SelectItem>
-                <SelectItem value='lt'>小于</SelectItem>
-                <SelectItem value='lte'>不大于</SelectItem>
-              </SelectContent>
-            </Select>
-            <Input
-              type='number'
-              value={expect.value}
-              disabled={disabled}
-              aria-label={`成功条件 ${index + 1} 期望数值`}
-              onChange={(event) =>
-                patchRule({
-                  expect: { ...expect, value: Number(event.target.value) },
-                })
-              }
-            />
+              从页面选择
+            </Button>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              disabled={disabled || !(observe.lastPicked || observe.highlight?.target)}
+              onClick={applyPickedTarget}
+            >
+              使用刚点到的对象
+            </Button>
+            {!target ? (
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                disabled={disabled}
+                onClick={() => patchRule({ target: defaultTarget(contract.meaning.trim() || '校验目标') })}
+              >
+                直接填写对象
+              </Button>
+            ) : null}
+            <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
+              移除
+            </Button>
           </div>
-        ) : null}
-      </div>
-      <div className='flex flex-wrap gap-2'>
-        <Button
-          type='button'
-          size='sm'
-          variant='outline'
-          disabled={disabled}
-          onClick={() => observe.setPickMode(true, { scope: contract.scope, contractId: contract.id })}
-        >
-          从页面选择
-        </Button>
-        <Button
-          type='button'
-          size='sm'
-          variant='outline'
-          disabled={disabled || !(observe.lastPicked || observe.highlight?.target)}
-          onClick={applyPickedTarget}
-        >
-          使用刚点到的对象
-        </Button>
-        {!target ? (
-          <Button
-            type='button'
-            size='sm'
-            variant='outline'
-            disabled={disabled}
-            onClick={() => patchRule({ target: defaultTarget(contract.meaning.trim() || '校验目标') })}
-          >
-            直接填写对象
-          </Button>
-        ) : null}
-        <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
-          移除
-        </Button>
-      </div>
-      <p className='text-label text-muted-foreground'>
-        {expectKindLabel(expect.kind)}
-        {target?.candidates[0]?.value ? ` · 已选择「${target.candidates[0].value}」` : ' · 尚未选择页面对象'}
-      </p>
-      {target ? (
-        <div className='pt-2 border-t border-border-divider/50'>
-          <TargetFields
-            target={target}
-            disabled={disabled}
-            optional
-            ruleOnly
-            onChange={(next) => patchRule({ target: next })}
-          />
-        </div>
-      ) : null}
+          <p className='text-label text-muted-foreground'>
+            {expectKindLabel(expect.kind)}
+            {target?.candidates[0]?.value ? ` · 已选择「${target.candidates[0].value}」` : ' · 尚未选择页面对象'}
+          </p>
+          {target ? (
+            <div className='pt-2 border-t border-border-divider/50'>
+              <TargetFields
+                target={target}
+                disabled={disabled}
+                optional
+                ruleOnly
+                onChange={(next) => patchRule({ target: next })}
+              />
+            </div>
+          ) : null}
+        </>
+      )}
       <Collapsible open={advanced} onOpenChange={setAdvanced}>
         <CollapsibleTrigger asChild>
           <Button type='button' size='sm' variant='ghost' className='gap-1'>
@@ -419,6 +431,195 @@ function OutcomeCard({
           </div>
         </CollapsibleContent>
       </Collapsible>
+    </div>
+  )
+}
+
+const CONTEXT_COMPARE_OPTIONS = [
+  { op: 'gt', label: '大于' },
+  { op: 'gte', label: '不小于' },
+  { op: 'eq', label: '等于' },
+  { op: 'neq', label: '不等于' },
+  { op: 'lt', label: '小于' },
+  { op: 'lte', label: '不大于' },
+] as const
+
+/** 上下文变量与步骤耗时条件不看页面对象，单独编辑，避免被当成「对象存在」静默丢改动。 */
+function NonPageRuleFields({
+  contract,
+  index,
+  disabled,
+  onChange,
+  onRemove,
+}: {
+  contract: OutcomeContract
+  index: number
+  disabled?: boolean
+  onChange: (next: OutcomeContract) => void
+  onRemove: () => void
+}) {
+  const rule = contract.rule
+  if (rule.kind === 'run_duration') {
+    return (
+      <div className='space-y-2'>
+        <div className='grid gap-3 sm:grid-cols-2'>
+          <div className='space-y-2'>
+            <Label>比较方式</Label>
+            <Select
+              value={rule.op}
+              disabled={disabled}
+              onValueChange={(op) => onChange({ ...contract, rule: { ...rule, op: op as 'lte' | 'lt' } })}
+            >
+              <SelectTrigger aria-label={`成功条件 ${index + 1} 全程耗时比较`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='lte'>不超过</SelectItem>
+                <SelectItem value='lt'>小于</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor={`outcome-run-duration-${contract.id}`}>全程耗时上限（毫秒）</Label>
+            <Input
+              id={`outcome-run-duration-${contract.id}`}
+              type='number'
+              min={0}
+              value={rule.valueMs}
+              disabled={disabled}
+              aria-label={`成功条件 ${index + 1} 全程耗时上限`}
+              onChange={(event) => {
+                const valueMs = Math.max(0, Math.trunc(Number(event.target.value) || 0))
+                onChange({ ...contract, rule: { ...rule, valueMs } })
+              }}
+            />
+          </div>
+        </div>
+        <p className='text-label text-muted-foreground'>
+          从首个已执行步骤开始到最后一个业务步骤完成计（不含收尾检查步骤）；取不到耗时时结果为「无法判定」，不会中止运行。
+        </p>
+        <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
+          移除
+        </Button>
+      </div>
+    )
+  }
+  if (rule.kind === 'step_duration') {
+    return (
+      <div className='space-y-2'>
+        <div className='grid gap-3 sm:grid-cols-2'>
+          <div className='space-y-2'>
+            <Label htmlFor={`outcome-duration-${contract.id}`}>本步骤耗时上限（毫秒）</Label>
+            <Input
+              id={`outcome-duration-${contract.id}`}
+              type='number'
+              min={0}
+              value={rule.valueMs}
+              disabled={disabled}
+              aria-label={`成功条件 ${index + 1} 耗时上限`}
+              onChange={(event) => {
+                const valueMs = Math.max(0, Math.trunc(Number(event.target.value) || 0))
+                onChange({ ...contract, rule: { ...rule, valueMs } })
+              }}
+            />
+          </div>
+        </div>
+        <p className='text-label text-muted-foreground'>
+          按本步骤最后一次尝试的起止时间计（含页面等待）；取不到耗时时结果为「无法判定」。
+        </p>
+        <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
+          移除
+        </Button>
+      </div>
+    )
+  }
+  if (rule.kind !== 'context') return null
+  const expect = rule.expect
+  return (
+    <div className='space-y-2'>
+      <div className='grid gap-3 sm:grid-cols-2'>
+        <div className='space-y-2'>
+          <Label htmlFor={`outcome-context-key-${contract.id}`}>上下文变量</Label>
+          <Input
+            id={`outcome-context-key-${contract.id}`}
+            value={rule.field ? `${rule.key}.${rule.field}` : rule.key}
+            disabled
+            aria-label={`成功条件 ${index + 1} 上下文变量`}
+          />
+        </div>
+        <div className='space-y-2'>
+          <Label>期望</Label>
+          <Select
+            value={expect.kind}
+            disabled={disabled}
+            onValueChange={(kind) => {
+              const next =
+                kind === 'non_empty'
+                  ? ({ kind: 'non_empty' } as const)
+                  : kind === 'text_contains'
+                    ? ({ kind: 'text_contains', value: expect.kind === 'text_contains' ? expect.value : '' } as const)
+                    : ({ kind: 'number_compare', op: 'gt', value: 0 } as const)
+              onChange({ ...contract, rule: { ...rule, expect: next } })
+            }}
+          >
+            <SelectTrigger className='w-full' aria-label={`成功条件 ${index + 1} 期望`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='non_empty'>有值（非空）</SelectItem>
+              <SelectItem value='number_compare'>数值比较</SelectItem>
+              <SelectItem value='text_contains'>文本包含</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {expect.kind === 'number_compare' ? (
+          <div className='grid grid-cols-2 gap-2 sm:col-span-2'>
+            <Select
+              value={expect.op}
+              disabled={disabled}
+              onValueChange={(op) =>
+                onChange({ ...contract, rule: { ...rule, expect: { ...expect, op: op as typeof expect.op } } })
+              }
+            >
+              <SelectTrigger aria-label={`成功条件 ${index + 1} 比较`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CONTEXT_COMPARE_OPTIONS.map((item) => (
+                  <SelectItem key={item.op} value={item.op}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              type='number'
+              value={expect.value}
+              disabled={disabled}
+              aria-label={`成功条件 ${index + 1} 期望数值`}
+              onChange={(event) =>
+                onChange({ ...contract, rule: { ...rule, expect: { ...expect, value: Number(event.target.value) || 0 } } })
+              }
+            />
+          </div>
+        ) : null}
+        {expect.kind === 'text_contains' ? (
+          <div className='space-y-2 sm:col-span-2'>
+            <Label htmlFor={`outcome-context-text-${contract.id}`}>应包含的文本</Label>
+            <Input
+              id={`outcome-context-text-${contract.id}`}
+              value={expect.value}
+              disabled={disabled}
+              onChange={(event) =>
+                onChange({ ...contract, rule: { ...rule, expect: { kind: 'text_contains', value: event.target.value } } })
+              }
+            />
+          </div>
+        ) : null}
+      </div>
+      <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
+        移除
+      </Button>
     </div>
   )
 }

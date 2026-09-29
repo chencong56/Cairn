@@ -189,7 +189,12 @@ function ProposalDiffViewer({
   canRollback?: boolean
 }) {
   const isV2 = proposal.kind === 'authoring_proposal'
-  const reason = isV2 ? '已按要求生成受限编排候选' : proposal.reason
+  const isAcceptance = isV2 && (proposal as AssistantAuthoringProposal).source === 'acceptance'
+  const reason = isAcceptance
+    ? '已生成场景验收卡片与规则建议'
+    : isV2
+      ? '已按要求生成受限编排候选'
+      : proposal.reason
   const diagnostics = isV2 ? (proposal.diagnostics ?? []) : []
   const mapSourceWarnings = diagnostics.filter((item) => item.code.startsWith('MAP_SOURCE_'))
   const firstInsert = isV2 ? proposal.operations.find((op) => op.kind === 'insert_step') : null
@@ -197,9 +202,18 @@ function ProposalDiffViewer({
   const stepId = isV2
     ? firstInsert?.step.id ?? firstWithStepId?.stepId
     : proposal.stepId
-  const stepName = isV2
-    ? (firstInsert?.step.name ?? proposal.diffs.find((d) => d.stepName)?.stepName)
+  const diffWithStepName = isV2
+    ? proposal.diffs.find((d): d is Extract<(typeof proposal.diffs)[number], { stepName: string }> => 'stepName' in d && typeof d.stepName === 'string' && d.stepName.length > 0)
     : null
+  const stepName = isV2
+    ? (firstInsert?.step.name ?? diffWithStepName?.stepName ?? null)
+    : null
+
+  const cards = isV2 ? (proposal as AssistantAuthoringProposal).cards : undefined
+  // 验收提案里需要页面对象的卡必须先在基线页上实测命中，只能在 Studio「补全验收」里逐卡采纳。
+  const needsLiveTest = Boolean(
+    isAcceptance && cards?.some((card) => !card.blockedReason && card.target && card.testResult !== 'NOT_REQUIRED' && card.testResult !== 'FOUND'),
+  )
 
   return (
     <div className='space-y-3 rounded-lg border border-border-default bg-surface-card p-3.5 shadow-2xs'>
@@ -215,6 +229,37 @@ function ProposalDiffViewer({
           </p>
         ) : null}
       </div>
+
+      {cards && cards.length > 0 ? (
+        <div className='space-y-2 rounded-md border border-border-default bg-surface-subtle p-3'>
+          <div className='border-b border-border-divider pb-1 text-label font-medium text-text-secondary'>
+            验收方案卡片 ({cards.length} 张)
+          </div>
+          <div className='space-y-2'>
+            {cards.map((card) => (
+              <div key={card.id} className='rounded border border-border-divider bg-surface-card p-2.5 text-small space-y-1.5'>
+                <div className='flex items-center justify-between gap-2'>
+                  <span className='font-medium text-text-primary'>{card.meaning}</span>
+                  <span className={cn(
+                    'px-1.5 py-0.5 rounded text-xs font-mono',
+                    card.severity === 'MUST'
+                      ? 'bg-status-error-background text-status-error-foreground'
+                      : 'bg-status-warning-background text-status-warning-foreground'
+                  )}>
+                    {card.severity === 'MUST' ? 'MUST 异常' : 'SHOULD 警告'}
+                  </span>
+                </div>
+                <div className='flex items-center gap-2 text-xs text-text-muted'>
+                  <span>意图: {card.intentKind}</span>
+                  <span>·</span>
+                  <span>实测: {card.testResult}</span>
+                  {card.config?.stepName ? <span>· 步骤: {card.config.stepName}</span> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className='space-y-2 rounded-md border border-border-default bg-surface-subtle p-3'>
         <div className='border-b border-border-divider pb-1 text-label font-medium text-text-secondary'>
@@ -268,6 +313,35 @@ function ProposalDiffViewer({
                       ↕ 移动节点：{name}（从第 {diff.fromIndex + 1} 位移至第 {diff.toIndex + 1} 位）
                     </div>
                     {diff.detail ? <div className='text-label text-text-muted'>{diff.detail}</div> : null}
+                  </div>
+                )
+              }
+              if (diff.type === 'outcome_add') {
+                return (
+                  <div key={idx} className='space-y-1 rounded border border-border-divider bg-surface-card p-2'>
+                    <div className='font-sans text-label font-medium text-status-success-foreground'>
+                      + 成功条件：{diff.ruleKind}（{diff.severity} · {diff.onViolation}）
+                    </div>
+                    {diff.meaning ? <div className='text-label text-text-muted'>{diff.meaning}</div> : null}
+                  </div>
+                )
+              }
+              if (diff.type === 'outputs_change') {
+                return (
+                  <div key={idx} className='space-y-1 rounded border border-border-divider bg-surface-card p-2'>
+                    <div className='font-sans text-label font-medium text-status-info-foreground'>
+                      ⚙ 场景输出指标变更
+                    </div>
+                    {diff.metricsAdded && diff.metricsAdded.length > 0 ? (
+                      <div className='text-label text-status-success-foreground'>
+                        + 新增指标：{diff.metricsAdded.map((m) => m.name).join('、')}
+                      </div>
+                    ) : null}
+                    {diff.summaryTemplate ? (
+                      <div className='text-label text-text-muted'>
+                        模板：{diff.summaryTemplate.to ?? '默认模板'}
+                      </div>
+                    ) : null}
                   </div>
                 )
               }
@@ -381,17 +455,23 @@ function ProposalDiffViewer({
             ) : null}
           </div>
         ) : (
-          <Button
-            type='button'
-            disabled={!onAdopt || adopting}
-            loading={adopting}
-            size='sm'
-            className='gap-1.5 text-label font-medium'
-            onClick={() => onAdopt?.(proposal)}
-          >
-            <Sparkles className='size-3.5' aria-hidden='true' />
-            采纳到本地草稿
-          </Button>
+          needsLiveTest ? (
+            <p className='text-label text-text-muted'>
+              含需要在页面上实测的检查，请在 Studio 工具栏「补全验收」里实测后逐项采纳。
+            </p>
+          ) : (
+            <Button
+              type='button'
+              disabled={!onAdopt || adopting}
+              loading={adopting}
+              size='sm'
+              className='gap-1.5 text-label font-medium'
+              onClick={() => onAdopt?.(proposal)}
+            >
+              <Sparkles className='size-3.5' aria-hidden='true' />
+              采纳到本地草稿
+            </Button>
+          )
         )}
       </div>
     </div>

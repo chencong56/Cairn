@@ -12,7 +12,9 @@ import {
   type ModuleContent,
   type ModuleTestCase,
   type ModuleTestBatch,
+  type RunDetailDto,
   type RunModuleTestCaseBody,
+  type RunModuleTestCaseInput,
   type ScenarioAuthoringDocumentV2,
   type UpdateModuleTestCaseBody,
 } from '@cairn/shared'
@@ -457,8 +459,8 @@ export async function runModuleTestCase(
   db: Db,
   moduleId: string,
   caseId: string,
-  input: RunModuleTestCaseBody & { actor: ExecutionActor },
-): Promise<{ executionId: string; runId: string; caseId: string; status: string }> {
+  input: RunModuleTestCaseInput & { actor: ExecutionActor },
+): Promise<{ execution: ModuleCaseExecution; run: RunDetailDto }> {
   const {
     actionModules,
     actionModuleVersions,
@@ -487,7 +489,8 @@ export async function runModuleTestCase(
     let moduleDraftRevision: number | undefined
     let moduleVersionId: string | undefined
 
-    if (input.mode === 'published') {
+    const mode = input.mode ?? 'draft'
+    if (mode === 'published') {
       const [latest] = await tx
         .select()
         .from(actionModuleVersions)
@@ -567,7 +570,7 @@ export async function runModuleTestCase(
       versionId: moduleVersionId,
       draftRevision: moduleDraftRevision,
       versionNo: 1,
-      publicationStatus: (input.mode === 'published' ? 'published' : 'draft') as any,
+      publicationStatus: (mode === 'published' ? 'published' : 'draft') as any,
       content,
       contentDigest,
       contractDigest: currentContractDigest,
@@ -966,7 +969,7 @@ export async function createModuleTestBatch(
         mode: 'draft',
         actor: input.actor,
       })
-      executionIds.push(res.executionId)
+      executionIds.push(res.execution.id)
     }
 
     const batchId = newId()

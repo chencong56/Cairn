@@ -26,7 +26,7 @@ import {
   FACTORY_RESOLUTION_DEFAULT,
   type ResolutionPolicy,
 } from './resolution-policy.js'
-import type { LocatorRoute } from './locator-plan.js'
+import type { LocatorPlan, LocatorRoute } from './locator-plan.js'
 import {
   AI_STEP_TYPES,
   aiAtomicActionInputSchema,
@@ -301,7 +301,7 @@ export function runNeedsAiExecute(input: {
 }
 
 export function resolveAiExecutionFromPlatform(
-  steps: readonly { id?: string; type: string; policy?: { timeoutMs?: number; retryLimit?: number; resolution?: ResolutionPolicy } }[],
+  steps: readonly { id?: string; type: string; disabled?: boolean; policy?: { timeoutMs?: number; retryLimit?: number; resolution?: ResolutionPolicy; locatorPlan?: LocatorPlan } }[],
   document: PlatformConfigDocument,
   extras: {
     revision: number

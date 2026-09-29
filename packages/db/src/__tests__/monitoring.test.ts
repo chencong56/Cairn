@@ -554,7 +554,7 @@ describe.each(DRIVERS)('%s 监控只读聚合', { timeout: 60_000 }, (driver) =>
     expect(mismatch.schemaConsistency).toBe('mismatch')
     await handle.raw("DELETE FROM _migrations WHERE prefix = 'zzzz'")
 
-    const stats = expose(handle).poolStats()
+    const stats = expose(handle).poolStats!()
     if (driver === 'postgres') {
       expect(stats).toEqual({
         totalCount: expect.any(Number),

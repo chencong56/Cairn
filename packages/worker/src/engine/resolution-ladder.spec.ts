@@ -57,12 +57,12 @@ function ctx(step: Step, policy: 'deterministic_only' | 'prefer_deterministic' |
     input: {},
     context: {},
     signal: new AbortController().signal,
-    clock: { now: () => Date.now() },
+    clock: { now: () => Date.now(), sleep: async () => {} },
     sessionGrant: {
       leaseId: '00000000-0000-4000-8000-0000000000e2',
       sessionId: '00000000-0000-4000-8000-0000000000e3',
-      fencingToken: 1,
-      holderWorkerId: 'w1',
+      generation: 1,
+      sessionFencingToken: 1,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     },
     evidencePolicy: { screenshot: 'on_failure', trace: 'off' },
@@ -85,8 +85,8 @@ function ctx(step: Step, policy: 'deterministic_only' | 'prefer_deterministic' |
         maxOutputTokens: 1024,
         hangWaitMs: 20_000,
       },
-    } as StepExecutionContext['snapshot'],
-  } as StepExecutionContext
+    } as unknown as StepExecutionContext['snapshot'],
+  } as unknown as StepExecutionContext
 }
 
 function ctxV2(step: Step, order: Array<'rule' | 'text_ai' | 'vision_ai'>): StepExecutionContext {
@@ -107,7 +107,7 @@ function missing(): BrowserCommandResult {
   return {
     ok: false,
     error: { code: 'TARGET_NOT_FOUND', category: 'EXECUTOR', retryable: true, safeMessage: '未找到' },
-    diagnostics: { outcome: 'TARGET_NOT_FOUND', candidatesTried: [] },
+    diagnostics: { outcome: 'NOT_FOUND', candidatesTried: [] },
   }
 }
 
@@ -127,7 +127,7 @@ describe('解析阶梯', () => {
   it('v2 仅文本按候选直接绑定，且不请求视觉', async () => {
     const step = clickStep({ policy: { locatorPlan: { v: 2, order: ['text_ai'] } } })
     const execute = vi.fn(async () => found())
-    const locate = vi.fn(async () => ({ ok: true, route: 'text' as const, candidate: { by: 'text' as const, value: '查询' }, center: [10, 20] as [number, number], callNs: [1] }))
+    const locate = vi.fn(async (..._args: any[]) => ({ ok: true, route: 'text' as const, candidate: { by: 'text' as const, value: '查询' }, center: [10, 20] as [number, number], callNs: [1] }))
     const bindResolvedFromCandidate = vi.fn(async () => ({ ok: true, texts: ['查询'], tagName: 'BUTTON' }))
     const bindResolvedFromPoint = vi.fn()
     const outcome = await runResolutionLadder({
@@ -160,7 +160,7 @@ describe('解析阶梯', () => {
 
   it('v2 视觉优先未命中后仅回退规则及地图', async () => {
     const step = clickStep()
-    const locate = vi.fn(async () => ({ ok: false, route: 'vision' as const, outcomeClass: 'miss' as const, callNs: [1], error: { code: 'AI_NOT_FOUND', category: 'EXECUTOR' as const, retryable: false, safeMessage: '未找到' } }))
+    const locate = vi.fn(async (..._args: any[]) => ({ ok: false, route: 'vision' as const, outcomeClass: 'miss' as const, callNs: [1], error: { code: 'AI_NOT_FOUND', category: 'EXECUTOR' as const, retryable: false, safeMessage: '未找到' } }))
     const execute = vi.fn(async () => missing())
     const afterBaseline = vi.fn(async () => ({ kind: 'unchanged' as const }))
     const outcome = await runResolutionLadder({

@@ -203,10 +203,18 @@ describe.each(DRIVERS)('%s 解析决策事实', { timeout: 60_000 }, (driver) =>
     expect(initial.resolutionPolicy).toBeNull()
     expect(initial.effectiveResolution?.preference).toBe('prefer_deterministic')
     expect(initial.effectiveResolution?.ceiling).toBe('deterministic_only')
+    const actor = {
+      id: actorId,
+      displayName: 'resolution-decisions',
+      email: `res-${actorId}@example.com`,
+      status: 'active' as const,
+      roles: [],
+      permissions: ['target:read', 'target:write'],
+    }
     const updated = await store.updateResolutionPolicy(
       targetId,
       { preference: 'prefer_ai', ceiling: 'deterministic_only' },
-      { id: actorId },
+      actor,
     )
     expect(updated.resolutionPolicy).toEqual({
       preference: 'prefer_ai',
@@ -219,7 +227,7 @@ describe.each(DRIVERS)('%s 解析决策事实', { timeout: 60_000 }, (driver) =>
     const cleared = await store.updateResolutionPolicy(
       targetId,
       { preference: null, ceiling: null },
-      { id: actorId },
+      actor,
     )
     expect(cleared.resolutionPolicy).toBeNull()
   })

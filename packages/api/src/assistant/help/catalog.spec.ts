@@ -21,10 +21,10 @@ describe('Help Catalog & Retrieval (P0-B / CQ-06)', () => {
     const snippets = retrieveHelpSnippets('如何配置重试策略？')
     expect(snippets.length).toBeGreaterThan(0)
     expect(snippets.length).toBeLessThanOrEqual(3)
-    expect(snippets[0].id).toBe('help:studio-retry')
-    expect(snippets[0].title).toContain('重试')
-    expect(snippets[0].pageRoute).toBe('/scenarios')
-    expect(snippets[0].content.length).toBeLessThanOrEqual(500)
+    expect(snippets[0]!.id).toBe('help:studio-retry')
+    expect(snippets[0]!.title).toContain('重试')
+    expect(snippets[0]!.pageRoute).toBe('/scenarios')
+    expect(snippets[0]!.content.length).toBeLessThanOrEqual(500)
   })
 
   it('retrieves the published save and trial rule for an ordinary unsaved-draft question', () => {
@@ -38,14 +38,14 @@ describe('Help Catalog & Retrieval (P0-B / CQ-06)', () => {
   it('retrieves relevant snippets for session lease query', () => {
     const snippets = retrieveHelpSnippets('受管会话的租约规则是什么？')
     expect(snippets.length).toBeGreaterThan(0)
-    expect(snippets[0].id).toBe('help:session-lease')
-    expect(snippets[0].content).toContain('租约')
+    expect(snippets[0]!.id).toBe('help:session-lease')
+    expect(snippets[0]!.content).toContain('租约')
   })
 
   it('enforces topK and maxChars constraints', () => {
     const snippets = retrieveHelpSnippets('运行 状态 诊断', { topK: 1, maxChars: 50 })
     expect(snippets.length).toBe(1)
-    expect(snippets[0].content.length).toBeLessThanOrEqual(53) // 50 + '...'
+    expect(snippets[0]!.content.length).toBeLessThanOrEqual(53) // 50 + '...'
   })
 
   it('filters out snippets when actor lacks required permissions', () => {

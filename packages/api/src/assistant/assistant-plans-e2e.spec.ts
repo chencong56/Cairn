@@ -220,9 +220,9 @@ describe('方案 A、B、C 全链路端到端集成测试 (Plans A+B+C E2E Verif
       sourceFilename: 'mfg_erp.xlsx',
       rowCount: 3,
       columnsMeta: [
-        { key: 'code', name: '厂家编号', type: 'string' },
-        { key: 'name', name: '厂家名称', type: 'string' },
-        { key: 'status', name: '状态', type: 'string' },
+        { key: 'code', name: '厂家编号', type: 'string', sampleValues: [] },
+        { key: 'name', name: '厂家名称', type: 'string', sampleValues: [] },
+        { key: 'status', name: '状态', type: 'string', sampleValues: [] },
       ],
       createdByAccountId: userA.id,
       createdAt: now,
@@ -235,27 +235,24 @@ describe('方案 A、B、C 全链路端到端集成测试 (Plans A+B+C E2E Verif
         datasetId: datasetAId,
         rowIndex: 0,
         rowData: { code: 'MFG-100', name: '富士康工业互联', status: 'active', secret_key: 'confidential' },
-        validationStatus: 'valid',
+        validStatus: 'valid',
         createdAt: now,
-        updatedAt: now,
       },
       {
         id: newId(),
         datasetId: datasetAId,
         rowIndex: 1,
         rowData: { code: 'MFG-200', name: '立讯精密', status: 'active', secret_key: 'confidential' },
-        validationStatus: 'valid',
+        validStatus: 'valid',
         createdAt: now,
-        updatedAt: now,
       },
       {
         id: newId(),
         datasetId: datasetAId,
         rowIndex: 2,
         rowData: { code: 'MFG-300', name: '比亚迪半导体', status: 'pending', secret_key: 'confidential' },
-        validationStatus: 'valid',
+        validStatus: 'valid',
         createdAt: now,
-        updatedAt: now,
       },
     ])
 
@@ -312,7 +309,7 @@ describe('方案 A、B、C 全链路端到端集成测试 (Plans A+B+C E2E Verif
       revision: 1,
       baseUrl: 'http://127.0.0.1:9999',
       model: 'test-model',
-      provider: 'openai',
+      provider: 'deepseek',
       thinkingMode: 'off',
       apiKey: 'test-key',
       requestTimeoutMs: 10000,
@@ -469,11 +466,10 @@ describe('方案 A、B、C 全链路端到端集成测试 (Plans A+B+C E2E Verif
         payload: { code: r.rowData.code, name: r.rowData.name, status: r.rowData.status },
       }))
 
-      await commitBusinessSourceBatch(db, candidate!.id, recordsToCommit, candidate!.fencingToken)
+      await commitBusinessSourceBatch(db, candidate!.id, recordsToCommit)
       await finishBusinessSourceBuild(db, candidate!.id, {
         status: 'ready',
         summary: { totalRows: 3, validCount: 3, rejectedCount: 0, issues: [] },
-        fencingToken: candidate!.fencingToken,
       })
 
       // 再次查询候选快照：状态已跃迁为 ready，对账全量通过
@@ -549,7 +545,7 @@ describe('方案 A、B、C 全链路端到端集成测试 (Plans A+B+C E2E Verif
       // 验证底层持久化了方案 A 的 AssistantResultEnvelope (v2)
       const { assistantTurns } = schemaFor(db.db)
       const [rawRow] = await db.db.select().from(assistantTurns).where(eq(assistantTurns.id, turnId))
-      expect(rawRow.result).toMatchObject({
+      expect(rawRow!.result).toMatchObject({
         version: 2,
         result: expect.objectContaining({ kind: 'discovery' }),
       })
@@ -793,8 +789,8 @@ describe('方案 A、B、C 全链路端到端集成测试 (Plans A+B+C E2E Verif
       const result = resTurn.result
       expect(result?.kind).toBe('discovery')
       if (result?.kind === 'discovery') {
-        expect(result.candidates.some((c) => c.name === '厂家入库对账审批场景')).toBe(true)
-        expect(result.candidates[0].targetName).toBe('系统-甲 (ERP)')
+        expect(result.candidates.some((c: any) => c.name === '厂家入库对账审批场景')).toBe(true)
+        expect(result.candidates[0]!.targetName).toBe('系统-甲 (ERP)')
       }
     })
 

@@ -8,6 +8,7 @@ import {
   Edit2,
   Play,
   Save,
+  ListChecks,
   Settings,
   Zap,
   CheckCircle2,
@@ -73,6 +74,9 @@ export type StudioToolbarProps = {
   onToggleStatus: () => void
   onOpenRemove: () => void
   onOpenSettings?: () => void
+  /** 打开右栏「补全验收」。 */
+  onOpenAcceptance?: () => void
+  isAcceptanceView?: boolean
   onLeave: (e: React.MouseEvent) => void
 }
 
@@ -113,6 +117,8 @@ export function StudioToolbar({
   onToggleStatus,
   onOpenRemove,
   onOpenSettings,
+  onOpenAcceptance,
+  isAcceptanceView,
   onLeave,
 }: StudioToolbarProps) {
   const headerRef = useRef<HTMLElement>(null)
@@ -290,7 +296,7 @@ export function StudioToolbar({
         {/* 紧凑上下文胶囊：目标系统、版本、草稿、状态 */}
         {scenario && showPill ? (
           <div className='flex items-center gap-2 rounded-full border border-border-default bg-surface-subtle px-2.5 py-1 text-label whitespace-nowrap shrink overflow-hidden min-w-0'>
-            <div className='flex items-center gap-1 min-w-0'>
+            <div className='flex items-center gap-1 min-w-0 overflow-hidden'>
               {showDetailedPill ? (
                 <span className='text-muted-foreground shrink-0'>目标系统</span>
               ) : null}
@@ -357,6 +363,24 @@ export function StudioToolbar({
                 </Link>
               </Button>
             </>
+          ) : null}
+
+          {onOpenAcceptance ? (
+            <Button
+              size={containerWidth >= 1280 ? 'sm' : 'icon'}
+              variant={isAcceptanceView ? 'secondary' : 'outline'}
+              className={cn(
+                containerWidth < 1280 && 'size-8',
+                isAcceptanceView && 'border-primary/40 bg-primary/10 text-primary font-medium shadow-xs',
+              )}
+              onClick={onOpenAcceptance}
+              title='按目标补全检查与报告指标'
+              aria-label='补全验收'
+              data-testid='toolbar-acceptance'
+            >
+              <ListChecks className={cn('size-3.5', containerWidth >= 1280 && 'mr-1')} />
+              {containerWidth >= 1280 ? '补全验收' : null}
+            </Button>
           ) : null}
 
           {/* 场景配置全局入口（稳定可见，断点优先保障） */}

@@ -14,7 +14,7 @@ const ids = {
 
 function request(overrides?: Partial<Parameters<ReturnType<typeof createPassiveMapObservationPort>['capture']>[0]>) {
   return {
-    grant: { runId: ids.run, fencingToken: 1, holderWorkerId: 'w', expiresAt: new Date().toISOString() },
+    grant: { runId: ids.run, leaseId: ids.lease, fencingToken: 1, holderWorkerId: 'w', expiresAt: new Date().toISOString() },
     sessionGrant: {
       sessionId: ids.lease,
       leaseId: ids.lease,

@@ -683,6 +683,57 @@ export async function listRunEvidence(db: Db, runId: string, actorId?: string) {
   })
 }
 
+export type RunStructureSnapshot = {
+  evidenceId: string
+  stepRunId: string | null
+  attemptId: string | null
+  stepId: string | null
+  snapshot: string
+  truncated: boolean
+  url?: string
+  title?: string
+  createdAt: Date
+}
+
+/**
+ * 基线调试运行里采集的页面结构快照（log / role=structure），按采集时间升序。
+ * 同一步多次采集（重试、检查点点查）都返回，调用方取所需的一份。
+ */
+export async function listRunStructureSnapshots(db: Db, runId: string, actorId?: string): Promise<RunStructureSnapshot[]> {
+  const { evidences, stepRuns } = schemaFor(db)
+  await getRun(db, runId, actorId)
+  const rows = await db
+    .select({
+      id: evidences.id,
+      stepRunId: evidences.stepRunId,
+      attemptId: evidences.attemptId,
+      payload: evidences.payload,
+      createdAt: evidences.createdAt,
+      stepId: stepRuns.stepId,
+    })
+    .from(evidences)
+    .leftJoin(stepRuns, eq(stepRuns.id, evidences.stepRunId))
+    .where(and(eq(evidences.runId, runId), eq(evidences.type, 'log')))
+    .orderBy(asc(evidences.createdAt), asc(evidences.id))
+  const items: RunStructureSnapshot[] = []
+  for (const row of rows) {
+    const payload = row.payload as Record<string, unknown> | null
+    if (!payload || payload.role !== 'structure' || typeof payload.snapshot !== 'string') continue
+    items.push({
+      evidenceId: row.id,
+      stepRunId: row.stepRunId ?? null,
+      attemptId: row.attemptId ?? null,
+      stepId: row.stepId ?? null,
+      snapshot: payload.snapshot,
+      truncated: payload.truncated === true,
+      ...(typeof payload.url === 'string' ? { url: payload.url } : {}),
+      ...(typeof payload.title === 'string' ? { title: payload.title } : {}),
+      createdAt: row.createdAt,
+    })
+  }
+  return items
+}
+
 export async function computeRunPlacement(
   db: Db,
   run: {
@@ -869,6 +920,7 @@ export async function loadRunDetail(db: Db, runId: string, actorId?: string): Pr
           status: row.status,
           outcomeStatus: row.outcomeStatus,
           now: row.finishedAt ?? row.updatedAt,
+          runStartedAt: row.startedAt,
         })
       : null)
 
@@ -988,6 +1040,8 @@ export type CreateRunWithSnapshotInput = CreateRunBody & {
   serviceDelivery?: ServiceDeliveryPolicy
   pauseBeforeStepId?: string
   validationSubject?: ValidationSubject
+  /** 基线调试运行：每个浏览器步骤结束时自动采集页面结构快照。仅试跑且非 runThrough 时生效。 */
+  captureStructure?: boolean
 }
 
 export async function writeRunWithSnapshot(
@@ -1010,6 +1064,9 @@ export async function writeRunWithSnapshot(
     throw badRequest('DEBUG_MODE_NOT_ALLOWED', '正式运行只能使用 runThrough 模式')
   }
   const debugMode: DebugMode = isTrial ? (input.debugMode ?? 'holdOnFailure') : 'runThrough'
+  if (input.captureStructure && (!isTrial || debugMode === 'runThrough')) {
+    throw badRequest('CAPTURE_STRUCTURE_NOT_ALLOWED', '页面结构采集只用于逐步挂起的调试试跑')
+  }
 
   if (scenario.status === 'disabled')
     throw conflict('SCENARIO_DISABLED', '场景已停用，不能创建新运行')
@@ -1241,6 +1298,7 @@ export async function writeRunWithSnapshot(
           serviceDelivery: input.serviceDelivery,
           pauseBeforeStepId: input.pauseBeforeStepId,
           validationSubject: input.validationSubject,
+          captureStructure: input.captureStructure,
         })
       } catch (error) {
         if (error instanceof AssembleRunSnapshotError) throw badRequest(error.code, error.message)
@@ -1382,6 +1440,7 @@ export async function createTrialRunFromDraft(
     hangWaitMs?: number
     debugMode?: DebugMode
     pauseBeforeStepId?: string
+    captureStructure?: boolean
   },
 ): Promise<{ detail: RunDetailDto; created: boolean }> {
   try {
@@ -1413,6 +1472,7 @@ export async function createTrialRunFromDraft(
         allowTrialVersion: true,
         debugMode: input.debugMode,
         pauseBeforeStepId: input.pauseBeforeStepId,
+        captureStructure: input.captureStructure,
       })
     })
   } catch (error) {
@@ -1623,6 +1683,13 @@ export type FinishAttemptInput = {
   mapFacts?: MapFactBatchItem[]
   /** 本次 Attempt 产生的结果轴评价项（若有），与 Attempt 同事务持久化 */
   outcomeResults?: OutcomeResultInsertItem[]
+  /** 调试运行自动采集的页面结构快照，作为 log/structure 证据落库 */
+  structureSnapshot?: {
+    snapshot: string
+    truncated: boolean
+    url?: string
+    title?: string
+  }
 }
 
 /**
@@ -1775,6 +1842,28 @@ export async function finishAttemptTx(
       status: 'available',
       schemaVersion: 1,
       payload: redactJson(resolverDiagnosticsSchema.parse(input.diagnostics), secrets),
+      createdAt: now,
+    })
+    recorded.push({ evidenceId, type: 'log', status: 'available' })
+  }
+
+  if (!cancelled && input.structureSnapshot) {
+    const evidenceId = newId()
+    await tx.insert(evidences).values({
+      id: evidenceId,
+      runId: input.runId,
+      stepRunId: attempt.stepRunId,
+      attemptId: input.attemptId,
+      type: 'log',
+      status: 'available',
+      schemaVersion: 1,
+      payload: {
+        role: 'structure',
+        snapshot: input.structureSnapshot.snapshot,
+        truncated: input.structureSnapshot.truncated,
+        ...(input.structureSnapshot.url ? { url: input.structureSnapshot.url } : {}),
+        ...(input.structureSnapshot.title ? { title: input.structureSnapshot.title } : {}),
+      },
       createdAt: now,
     })
     recorded.push({ evidenceId, type: 'log', status: 'available' })
@@ -2838,15 +2927,51 @@ export type RunStepState = {
   scopePath?: string
   status: StepRunStatus
   skipReason?: StepSkipReason | null
+  startedAt?: Date | null
+  finishedAt?: Date | null
   attempts: Array<{
     id: string
     attemptNo: number
     status: AttemptDto['status']
+    startedAt?: Date | null
+    finishedAt?: Date | null
     error: ExecutionError | null
   }>
 }
 
-export async function loadRunStepStates(db: Db, runId: string, scopePath?: string): Promise<RunStepState[]> {
+export async function insertLogEvidence(
+  db: Db,
+  input: {
+    evidenceId?: string
+    runId: string
+    stepRunId?: string | null
+    attemptId?: string | null
+    payload: JsonValue
+    createdAt?: Date
+  },
+): Promise<string> {
+  const { evidences } = schemaFor(db)
+  const id = input.evidenceId ?? newId()
+  await db.insert(evidences).values({
+    id,
+    runId: input.runId,
+    stepRunId: input.stepRunId ?? null,
+    attemptId: input.attemptId ?? null,
+    type: 'log',
+    status: 'available',
+    schemaVersion: 1,
+    payload: input.payload,
+    createdAt: input.createdAt ?? new Date(),
+  })
+  return id
+}
+
+/** scopePath 传 null 取整个 Run 全部 scope 的账本（场景级全程口径）；缺省按根 scope 精确匹配。 */
+export async function loadRunStepStates(
+  db: Db,
+  runId: string,
+  scopePath?: string | null,
+): Promise<RunStepState[]> {
   const { stepRuns, attempts } = schemaFor(db)
   const stepRows = await db
     .select({
@@ -2856,12 +2981,14 @@ export async function loadRunStepStates(db: Db, runId: string, scopePath?: strin
       scopePath: stepRuns.scopePath,
       status: stepRuns.status,
       skipReason: stepRuns.skipReason,
+      startedAt: stepRuns.startedAt,
+      finishedAt: stepRuns.finishedAt,
     })
     .from(stepRuns)
     .where(
-      scopePath !== undefined
-        ? and(eq(stepRuns.runId, runId), eq(stepRuns.scopePath, scopePath))
-        : and(eq(stepRuns.runId, runId), eq(stepRuns.scopePath, ''))
+      scopePath === null
+        ? eq(stepRuns.runId, runId)
+        : and(eq(stepRuns.runId, runId), eq(stepRuns.scopePath, scopePath ?? '')),
     )
     .orderBy(asc(stepRuns.ordinal))
 
@@ -2873,6 +3000,8 @@ export async function loadRunStepStates(db: Db, runId: string, scopePath?: strin
       stepRunId: attempts.stepRunId,
       attemptNo: attempts.attemptNo,
       status: attempts.status,
+      startedAt: attempts.startedAt,
+      finishedAt: attempts.finishedAt,
       error: attempts.error,
     })
     .from(attempts)
@@ -2901,10 +3030,14 @@ export async function loadRunStepStates(db: Db, runId: string, scopePath?: strin
     scopePath: step.scopePath || undefined,
     status: step.status as StepRunStatus,
     skipReason: (step.skipReason as StepSkipReason | null) ?? undefined,
+    startedAt: step.startedAt,
+    finishedAt: step.finishedAt,
     attempts: (attemptsByStepRunId.get(step.id) ?? []).map((a) => ({
       id: a.id,
       attemptNo: a.attemptNo,
       status: a.status as AttemptDto['status'],
+      startedAt: a.startedAt,
+      finishedAt: a.finishedAt,
       error: (a.error as ExecutionError | null) ?? null,
     })),
   }))

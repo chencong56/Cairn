@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { BUSINESS_SOURCE_CURSOR_EXPIRED } from '@cairn/shared'
+import { BUSINESS_SOURCE_CURSOR_EXPIRED, type JsonValue } from '@cairn/shared'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import { DRIVERS, grantAdminScope, openContractDb } from './contract-fixture.js'
@@ -52,7 +52,7 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
     return id
   }
 
-  async function freshDataset(targetId: string, rows: Array<Record<string, unknown>>): Promise<string> {
+  async function freshDataset(targetId: string, rows: Array<Record<string, JsonValue>>): Promise<string> {
     const { datasets, datasetRows } = schemaFor(handle.db)
     const datasetId = newId()
     const now = new Date()
@@ -65,9 +65,9 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
       sourceFilename: 'manufacturers.xlsx',
       rowCount: rows.length,
       columnsMeta: [
-        { key: 'code', name: '厂家编号', type: 'string' },
-        { key: 'name', name: '厂家名称', type: 'string' },
-        { key: 'status', name: '状态', type: 'string' },
+        { key: 'code', name: '厂家编号', type: 'string', sampleValues: [] },
+        { key: 'name', name: '厂家名称', type: 'string', sampleValues: [] },
+        { key: 'status', name: '状态', type: 'string', sampleValues: [] },
       ],
       createdByAccountId: actorId,
       createdAt: now,
@@ -114,10 +114,10 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
     })
 
     expect(preview.previewRows).toHaveLength(3)
-    expect(preview.previewRows[0].isValid).toBe(true)
-    expect(preview.previewRows[0].recordKey).toBe('M-001')
-    expect(preview.previewRows[2].isValid).toBe(false)
-    expect(preview.previewRows[2].rejectReason).toContain('为空')
+    expect(preview.previewRows[0]!.isValid).toBe(true)
+    expect(preview.previewRows[0]!.recordKey).toBe('M-001')
+    expect(preview.previewRows[2]!.isValid).toBe(false)
+    expect(preview.previewRows[2]!.rejectReason).toContain('为空')
     expect(preview.validationDigest.sampleValidCount).toBe(2)
     expect(preview.validationDigest.sampleRejectedCount).toBe(1)
 
@@ -181,7 +181,7 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
     expect(created.bindingRevision).toBe(1)
 
     // 未批准前查询返回 unknown
-    const unapprovedList = await listBusinessRecords(handle.db, targetId, { entityType: 'manufacturer' })
+    const unapprovedList = await listBusinessRecords(handle.db, targetId, { entityType: 'manufacturer', limit: 10 })
     expect(unapprovedList.items).toHaveLength(0)
     expect(unapprovedList.coverage.status).toBe('unknown')
 
@@ -281,7 +281,7 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
       limit: 2,
     })
     expect(page1.items).toHaveLength(2)
-    expect(page1.items[0].displayName).toBe('第一电子厂')
+    expect(page1.items[0]!.displayName).toBe('第一电子厂')
     expect(page1.nextCursor).toBeDefined()
     expect(page1.snapshotId).toBe(created.candidateId)
 
@@ -292,16 +292,17 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
       limit: 2,
     })
     expect(page2.items).toHaveLength(1)
-    expect(page2.items[0].displayName).toBe('第三机电')
+    expect(page2.items[0]!.displayName).toBe('第三机电')
     expect(page2.nextCursor).toBeUndefined()
 
     // 搜索过滤
     const searchRes = await listBusinessRecords(handle.db, targetId, {
       entityType: 'manufacturer',
       search: '第二',
+      limit: 10,
     })
     expect(searchRes.items).toHaveLength(1)
-    expect(searchRes.items[0].recordKey).toBe('FAC-2')
+    expect(searchRes.items[0]!.recordKey).toBe('FAC-2')
 
     // 7. 替换快照使旧游标失效测试
     const datasetIdV2 = await freshDataset(targetId, [
@@ -314,6 +315,7 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
         datasetId: datasetIdV2,
         entityType: 'manufacturer',
         mappingConfig,
+        completenessBasis: '快照完整扫描',
       },
       actorId,
     )
@@ -336,6 +338,7 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
       await listBusinessRecords(handle.db, targetId, {
         entityType: 'manufacturer',
         cursor: page1.nextCursor,
+        limit: 10,
       })
       expect.unreachable('应抛出游标过期异常')
     } catch (err: any) {
@@ -356,7 +359,7 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
     expect(revokedSource?.status).toBe('revoked')
     expect(revokedSource?.currentSnapshotId).toBeNull()
 
-    const listAfterRevoke = await listBusinessRecords(handle.db, targetId, { entityType: 'manufacturer' })
+    const listAfterRevoke = await listBusinessRecords(handle.db, targetId, { entityType: 'manufacturer', limit: 10 })
     expect(listAfterRevoke.items).toHaveLength(0)
     expect(listAfterRevoke.coverage.status).toBe('unknown')
   })
@@ -374,6 +377,7 @@ describe.each(DRIVERS)('%s 目标业务数据源绑定、校验与查询闭环',
         datasetId,
         entityType: 'manufacturer',
         mappingConfig: { keyColumn: 'code', displayNameColumn: 'name', fieldWhitelist: ['code', 'name'] },
+        completenessBasis: '快照完整扫描',
       },
       actorId,
     )

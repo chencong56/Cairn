@@ -4,21 +4,51 @@
  * - PURE：不启动 Chromium、不连 PostgreSQL。`test:fast` 并行跑。
  * - DB：真实 PostgreSQL，浏览器端口是假的。模板库克隆不能并发，所以串行，
  *   但不跟 Chromium 挤在同一条队列里。`test:db`，并计入 `pnpm test`。
- * - BROWSER：假端口骗不过去的真 Chromium 门禁（会话租约、引擎接缝、隔离、文件、写入闸、页面操作契约）。
- *   必须串行。`test:browser` 只跑这一组，并计入 `pnpm test`。
- * - LIVE：阶段清单、靶场走查、外部站点与在线模型。功能一变就跟着夹具页过期，
- *   不进 `test` / `test:browser`，只通过 `test:live` 手动巡检。
+ * - BROWSER：启动 Chromium，但页面来自 setContent、127.0.0.1 或被路由拦截的保留域名。
+ *   结果确定，必须串行，并计入 `pnpm test`。
+ * - LIVE：会访问公网站点或在线模型。不进 `test` / `test:browser`，只通过 `test:live` 手动巡检。
  */
 
 export const BROWSER_SPEC_FILES: readonly string[] = [
+  'src/ai/demonstration.lab.spec.ts',
+  'src/ai/midscene/__tests__/action-recorder.lab.spec.ts',
   'src/ai/midscene/managed-page.lab.spec.ts',
   'src/ai/midscene/page-write-gate.spec.ts',
+  'src/ai/page-agent/inpage-binding.spec.ts',
+  'src/browser/aria-match.spec.ts',
+  'src/browser/aria-snapshot.spec.ts',
+  'src/browser/captcha/__tests__/captcha-integration.spec.ts',
   'src/browser/engine.lab.spec.ts',
+  'src/browser/engine.outcome-c.lab.spec.ts',
+  'src/browser/engine.outcome.lab.spec.ts',
+  'src/browser/explore-network-guard.spec.ts',
   'src/browser/file-submission.lab.spec.ts',
   'src/browser/host-isolation.lab.spec.ts',
+  'src/browser/landing-settle.lab.spec.ts',
+  'src/browser/managed-browser.lab.spec.ts',
+  'src/browser/managed-helpers.spec.ts',
+  'src/browser/map-consumption.lab.spec.ts',
+  'src/browser/map-ingest-collector.spec.ts',
   'src/browser/profiles.isolation.lab.spec.ts',
+  'src/browser/resolved-handle.lab.spec.ts',
+  'src/browser/reverse-locator-probe.lab.spec.ts',
+  'src/browser/reverse-locator.spec.ts',
+  'src/browser/run-video-lead.lab.spec.ts',
+  'src/browser/runtime.hmi.spec.ts',
+  'src/browser/runtime.health.spec.ts',
+  'src/browser/runtime.navigation.spec.ts',
+  'src/browser/runtime.screenshot.spec.ts',
+  'src/browser/screencast.spec.ts',
+  'src/browser/screenshot-quality.lab.spec.ts',
+  'src/browser/session-auth-driven.integration.spec.ts',
+  'src/browser/session-auth.page.spec.ts',
   'src/browser/session-manager.integration.spec.ts',
+  'src/browser/surface.aria-assert.spec.ts',
+  'src/browser/surface.business-flows.lab.spec.ts',
+  'src/browser/surface.dynamic-lab.spec.ts',
   'src/browser/surface.lab.spec.ts',
+  'src/browser/target-scope.spec.ts',
+  'src/runtime/e2e-report-simulation.spec.ts',
 ]
 
 export const DB_SPEC_FILES: readonly string[] = [
@@ -107,6 +137,7 @@ export const PURE_SPEC_FILES: readonly string[] = [
   'src/engine/error-surface.spec.ts',
   'src/engine/resolution-ladder.spec.ts',
   'src/engine/step-executor-registry.spec.ts',
+  'src/engine/fixture-executor.checks.spec.ts',
   'src/internal/http-server.spec.ts',
   'src/map/consumption.service.spec.ts',
   'src/map/projection.service.spec.ts',
@@ -133,37 +164,6 @@ export const PURE_SPEC_FILES: readonly string[] = [
 
 export const LIVE_SPEC_FILES: readonly string[] = [
   'src/ai/aria-tree-probe.lab.spec.ts',
-  'src/ai/demonstration.lab.spec.ts',
-  'src/ai/midscene/__tests__/action-recorder.lab.spec.ts',
-  'src/ai/page-agent/inpage-binding.spec.ts',
-  'src/browser/aria-match.spec.ts',
-  'src/browser/aria-snapshot.spec.ts',
-  'src/browser/captcha/__tests__/captcha-integration.spec.ts',
   'src/browser/captcha/__tests__/captcha-live-target.spec.ts',
   'src/browser/engine.dpm.spec.ts',
-  'src/browser/engine.outcome-c.lab.spec.ts',
-  'src/browser/engine.outcome.lab.spec.ts',
-  'src/browser/explore-network-guard.spec.ts',
-  'src/browser/landing-settle.lab.spec.ts',
-  'src/browser/managed-browser.lab.spec.ts',
-  'src/browser/managed-helpers.spec.ts',
-  'src/browser/map-consumption.lab.spec.ts',
-  'src/browser/map-ingest-collector.spec.ts',
-  'src/browser/resolved-handle.lab.spec.ts',
-  'src/browser/reverse-locator-probe.lab.spec.ts',
-  'src/browser/reverse-locator.spec.ts',
-  'src/browser/run-video-lead.lab.spec.ts',
-  'src/browser/runtime.hmi.spec.ts',
-  'src/browser/runtime.health.spec.ts',
-  'src/browser/runtime.navigation.spec.ts',
-  'src/browser/runtime.screenshot.spec.ts',
-  'src/browser/screencast.spec.ts',
-  'src/browser/screenshot-quality.lab.spec.ts',
-  'src/browser/session-auth-driven.integration.spec.ts',
-  'src/browser/session-auth.page.spec.ts',
-  'src/browser/surface.aria-assert.spec.ts',
-  'src/browser/surface.business-flows.lab.spec.ts',
-  'src/browser/surface.dynamic-lab.spec.ts',
-  'src/browser/target-scope.spec.ts',
-  'src/runtime/e2e-report-simulation.spec.ts',
 ]

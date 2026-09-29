@@ -166,6 +166,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
       {
         scenarioId: f.scenario.id,
         scenarioVersionId: f.scenarioVersionId,
+        input: {},
         idempotencyKey: 'idemp-deliv-1',
       },
       'req-deliv-1',
@@ -230,7 +231,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
 
     const [finishedRun] = await f.handle.db.select({ finishedAt: runs.finishedAt }).from(runs).where(eq(runs.id, run.detail.id))
     const [webhook] = await f.handle.db.select({ enabledAt: schemaFor(f.handle.db).serviceWebhooks.enabledAt }).from(schemaFor(f.handle.db).serviceWebhooks)
-    expect(finishedRun.finishedAt!.getTime()).toBeGreaterThanOrEqual(webhook.enabledAt!.getTime())
+    expect(finishedRun!.finishedAt!.getTime()).toBeGreaterThanOrEqual(webhook!.enabledAt!.getTime())
 
     // 3. 结算 run output
     await api.settleRunOutput(f.db, run.detail.id)
@@ -238,10 +239,10 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     // 4. 调用 openAPI GET /open/v1/runs/:id (publicRun with results = true)
     const published = await api.getServiceRun(f.db, f.principal, run.detail.id)
     expect(published.runOutput).toBeDefined()
-    expect(published.runOutput?.status).toBe('NORMAL')
+    expect(published.runOutput?.status).toBe('UNDETERMINED')
     expect(published.runOutput?.metrics).toEqual({ item_count: 42 })
     expect(published.runOutput?.dataRow).toEqual({ status_col: 'NORMAL' })
-    expect(published.runOutput?.summary).toBe('巡检完成，在售商品 42')
+    expect(published.runOutput?.summary).toBe('流程执行完成，但业务结果未评价。')
 
     // 验证逐步未发布的 output 依然为 null（不泄露）
     expect(published.stepRuns[0]?.attempts[0]?.output).toBeNull()
@@ -259,9 +260,10 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     const finishedDelivery = deliveries.items.find((d) => d.eventType === 'run.completed')
     expect(finishedDelivery).toBeDefined()
     expect(finishedDelivery?.payload.data.runOutput).toBeDefined()
+    expect(finishedDelivery?.payload.data.runOutput?.status).toBe('UNDETERMINED')
     expect(finishedDelivery?.payload.data.runOutput?.metrics).toEqual({ item_count: 42 })
     expect(finishedDelivery?.payload.data.runOutput?.dataRow).toEqual({ status_col: 'NORMAL' })
-    expect(finishedDelivery?.payload.data.runOutput?.summary).toBe('巡检完成，在售商品 42')
+    expect(finishedDelivery?.payload.data.runOutput?.summary).toBe('流程执行完成，但业务结果未评价。')
     // 逐步 output 未对外发布，故 outputs 数组为空
     expect(finishedDelivery?.payload.data.outputs).toEqual([])
   })
@@ -276,7 +278,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     const run = await api.createServiceRun(
       f.db,
       f.principal,
-      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, idempotencyKey: 'idemp-shot-1' },
+      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, input: {}, idempotencyKey: 'idemp-shot-1' },
       'req-shot-1',
     )
     const worker = await seedWorker(f.handle)
@@ -392,7 +394,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     const runA = await api.createServiceRun(
       f.db,
       f.principal,
-      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, idempotencyKey: 'idemp-fail-safe' },
+      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, input: {}, idempotencyKey: 'idemp-fail-safe' },
       'req-fail-safe',
     )
     const worker = await seedWorker(f.handle)
@@ -409,7 +411,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
       runId: runA.detail.id,
       attemptId: attemptA!.attemptId,
       attemptStatus: 'FAILED',
-      error: { code: 'ELEMENT_NOT_FOUND', safeMessage: '未找到元素' },
+      error: { code: 'ELEMENT_NOT_FOUND', category: 'EXECUTOR', retryable: false, safeMessage: '未找到元素' },
       stepRunStatus: 'FAILED',
       runStatus: 'FAILED',
       grant: grantA,
@@ -444,7 +446,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     const runB = await api.createServiceRun(
       f.db,
       f.principal,
-      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, idempotencyKey: 'idemp-fail-auth' },
+      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, input: {}, idempotencyKey: 'idemp-fail-auth' },
       'req-fail-auth',
     )
     const grantB = await forceGrantForRun(f.handle, runB.detail.id, worker.workerId)
@@ -459,7 +461,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
       runId: runB.detail.id,
       attemptId: attemptB!.attemptId,
       attemptStatus: 'FAILED',
-      error: { code: 'AUTH_GATE_CLOSED', safeMessage: '登录会话已失效' },
+      error: { code: 'AUTH_GATE_CLOSED', category: 'EXECUTOR', retryable: false, safeMessage: '登录会话已失效' },
       stepRunStatus: 'FAILED',
       runStatus: 'FAILED',
       grant: grantB,
@@ -493,7 +495,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     const runC = await api.createServiceRun(
       f.db,
       f.principal,
-      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, idempotencyKey: 'idemp-fail-secret' },
+      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, input: {}, idempotencyKey: 'idemp-fail-secret' },
       'req-fail-secret',
     )
     const grantC = await forceGrantForRun(f.handle, runC.detail.id, worker.workerId)
@@ -509,7 +511,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
       runId: runC.detail.id,
       attemptId: attemptC!.attemptId,
       attemptStatus: 'FAILED',
-      error: { code: 'INPUT_MISMATCH', safeMessage: '密码错误' },
+      error: { code: 'INPUT_MISMATCH', category: 'VALIDATION', retryable: false, safeMessage: '密码错误' },
       stepRunStatus: 'FAILED',
       runStatus: 'FAILED',
       grant: grantC,
@@ -543,7 +545,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     const runD = await api.createServiceRun(
       f.db,
       f.principal,
-      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, idempotencyKey: 'idemp-recovered' },
+      { scenarioId: f.scenario.id, scenarioVersionId: f.scenarioVersionId, input: {}, idempotencyKey: 'idemp-recovered' },
       'req-recovered',
     )
     const grantD = await forceGrantForRun(f.handle, runD.detail.id, worker.workerId)
@@ -558,7 +560,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
       runId: runD.detail.id,
       attemptId: attemptD1!.attemptId,
       attemptStatus: 'FAILED',
-      error: { code: 'TIMEOUT', safeMessage: '重试前超时' },
+      error: { code: 'TIMEOUT', category: 'TIMEOUT', retryable: true, safeMessage: '重试前超时' },
       stepRunStatus: 'PENDING',
       runStatus: 'RUNNING',
       grant: grantD,
@@ -648,7 +650,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     const runB = await api.createServiceRun(
       fA.db,
       principalB,
-      { scenarioId: fA.scenario.id, scenarioVersionId: fA.scenarioVersionId, idempotencyKey: 'idemp-b-1' },
+      { scenarioId: fA.scenario.id, scenarioVersionId: fA.scenarioVersionId, input: {}, idempotencyKey: 'idemp-b-1' },
       'req-b-1',
     )
     const worker = await seedWorker(fA.handle)
@@ -707,7 +709,7 @@ describe.each(DRIVERS)('%s 服务自动化调用交付与证据策略分级测�
     const runA = await api.createServiceRun(
       fA.db,
       fA.principal,
-      { scenarioId: fA.scenario.id, scenarioVersionId: fA.scenarioVersionId, idempotencyKey: 'idemp-a-iso' },
+      { scenarioId: fA.scenario.id, scenarioVersionId: fA.scenarioVersionId, input: {}, idempotencyKey: 'idemp-a-iso' },
       'req-a-iso',
     )
     await expect(api.getServiceRun(fA.db, principalB, runA.detail.id)).rejects.toThrow()

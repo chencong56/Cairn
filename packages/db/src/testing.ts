@@ -172,6 +172,23 @@ export async function setupTestTemplateDatabase(): Promise<void> {
     throw error
   }
   await pool.end()
+
+  const adminPost = new Pool({
+    host: env.CAIRN_DB_HOST,
+    port: env.CAIRN_DB_PORT,
+    database: env.CAIRN_DB_NAME,
+    user: env.CAIRN_DB_USER,
+    password: env.CAIRN_DB_PASSWORD,
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+  })
+  try {
+    await adminPost.query(`ALTER DATABASE "${name}" WITH is_template = true`)
+  } catch {
+    // 忽略缺少特权等特定环境告警
+  } finally {
+    await adminPost.end()
+  }
+
   // 每次测试调用独占模板，子进程继承名称；并行套件不得删除彼此的库。
   process.env.CAIRN_TEST_TEMPLATE_DB = name
 }
@@ -183,6 +200,21 @@ export async function teardownTestTemplateDatabase(): Promise<void> {
   const name = templateDatabase()
   if (!name) return
   const env = await requireReachableDb()
+  const admin = new Pool({
+    host: env.CAIRN_DB_HOST,
+    port: env.CAIRN_DB_PORT,
+    database: env.CAIRN_DB_NAME,
+    user: env.CAIRN_DB_USER,
+    password: env.CAIRN_DB_PASSWORD,
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+  })
+  try {
+    await admin.query(`ALTER DATABASE "${name}" WITH is_template = false`)
+  } catch {
+    // 忽略
+  } finally {
+    await admin.end()
+  }
   await dropIsolatedDatabase(env, name)
   delete process.env.CAIRN_TEST_TEMPLATE_DB
 }
@@ -221,9 +253,21 @@ export async function openIsolatedDb(
       try {
         await admin.query(`CREATE DATABASE "${name}" TEMPLATE "${template}"`)
         createdFromTemplate = true
-      } catch {
-        // 若模板库正被占用或临时不可用，降级为常规新建
-        await admin.query(`CREATE DATABASE "${name}"`)
+      } catch (firstErr) {
+        // 并发竞态自愈：偶发残留连接占用时，剔除模板库上的残留空闲连接并重试一次
+        try {
+          await admin.query(
+            `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
+            [template],
+          )
+          await admin.query(`CREATE DATABASE "${name}" TEMPLATE "${template}"`)
+          createdFromTemplate = true
+        } catch (secondErr) {
+          console.warn(
+            `[openIsolatedDb] ⚠️ 模板库克隆失败，降级为全量迁移! 耗时将显著增加: ${(secondErr as Error).message}`,
+          )
+          await admin.query(`CREATE DATABASE "${name}"`)
+        }
       }
     } else {
       await admin.query(`CREATE DATABASE "${name}"`)

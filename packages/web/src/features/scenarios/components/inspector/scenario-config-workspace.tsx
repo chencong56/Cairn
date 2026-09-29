@@ -48,6 +48,8 @@ export interface ScenarioConfigWorkspaceProps {
   onUpdateRuntimeInvariants: (invariants: RuntimeInvariant[]) => void
   onUpdateDocument: (document: ScenarioAuthoringDocumentV2) => void
   onSelectDiagnostic?: (item: CompileDiagnostic) => void
+  /** 打开「补全验收」面板并立即执行验收体检。 */
+  onOpenAcceptanceAudit?: () => void
 }
 
 export type ScenarioPartitionKey = 'inputs' | 'outcomes' | 'outputs' | 'stability' | 'settings'
@@ -72,6 +74,7 @@ export function ScenarioConfigWorkspace({
   onUpdateRuntimeInvariants,
   onUpdateDocument,
   onSelectDiagnostic,
+  onOpenAcceptanceAudit,
 }: ScenarioConfigWorkspaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [activeTab, setActiveTab] = useState<ScenarioPartitionKey>('inputs')
@@ -366,6 +369,15 @@ export function ScenarioConfigWorkspace({
                 disabled={disabled}
                 onChange={onUpdateScenarioOutcomes}
               />
+
+              {onOpenAcceptanceAudit ? (
+                <div className='flex items-center justify-between gap-2 rounded-md border border-dashed border-border-divider bg-surface-subtle px-3 py-2 text-caption text-muted-foreground'>
+                  <span>不确定验收够不够？做一次验收体检，找缺口并一键补全。</span>
+                  <Button type='button' size='sm' variant='outline' className='h-7 shrink-0 text-xs' disabled={disabled} onClick={onOpenAcceptanceAudit}>
+                    验收体检
+                  </Button>
+                </div>
+              ) : null}
 
               <div className='pt-2 border-t border-border-divider/60'>
                 <RuntimeInvariantEditor

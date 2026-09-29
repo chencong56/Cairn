@@ -1,8 +1,10 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 import {
+  assetReliabilityQuerySchema,
   type AssetReliabilityItemDto,
   type AssetReliabilityListResponse,
   type AssetReliabilityQuery,
+  type AssetReliabilityQueryInput,
   type FeatureWindowDto,
   type IncidentSeverity,
   type IncidentStatus,
@@ -130,11 +132,12 @@ export async function getReliabilityOverview(
 
 export async function listAssetReliabilityItems(
   db: Db,
-  query: AssetReliabilityQuery,
+  query: AssetReliabilityQueryInput = {},
   actorId?: string,
 ): Promise<AssetReliabilityListResponse> {
+  const parsed = assetReliabilityQuerySchema.parse(query)
   const { scenarios, actionModules, targets, featureWindows, reliabilityIncidents } = schemaFor(db)
-  const limit = Math.min(query.limit ?? 20, 100)
+  const limit = Math.min(parsed.limit, 100)
   const grants = actorId ? await loadAccountGrants(db, actorId) : undefined
   const scope = grants
     ? intersectTargetScopes(scopeFromGrants(grants, 'target:read'), scopeFromGrants(grants, 'reliability:read'))
@@ -144,7 +147,7 @@ export async function listAssetReliabilityItems(
   const targetRows = await db
     .select({ id: targets.id, name: targets.name })
     .from(targets)
-    .where(and(query.targetId ? eq(targets.id, query.targetId) : undefined, scope && targetScopeFilter(targets.id, scope)))
+    .where(and(parsed.targetId ? eq(targets.id, parsed.targetId) : undefined, scope && targetScopeFilter(targets.id, scope)))
 
   const targetMap = new Map<string, string>()
   for (const t of targetRows) {
@@ -160,16 +163,16 @@ export async function listAssetReliabilityItems(
     targetName: string
   }[] = []
 
-  if (!query.assetType || query.assetType === 'scenario') {
+  if (!parsed.assetType || parsed.assetType === 'scenario') {
     const sRows = await db
       .select({ id: scenarios.id, name: scenarios.name, targetId: scenarios.targetId })
       .from(scenarios)
       .where(
         and(
           sql`${scenarios.deletedAt} IS NULL`,
-          query.targetId ? eq(scenarios.targetId, query.targetId) : undefined,
+          parsed.targetId ? eq(scenarios.targetId, parsed.targetId) : undefined,
           scope && targetScopeFilter(scenarios.targetId, scope),
-          query.search ? sql`${scenarios.name} LIKE ${'%' + query.search + '%'}` : sql`1=1`,
+          parsed.search ? sql`${scenarios.name} LIKE ${'%' + parsed.search + '%'}` : sql`1=1`,
         ),
       )
 
@@ -193,17 +196,17 @@ export async function listAssetReliabilityItems(
     targetName: string
   }[] = []
 
-  if (!query.assetType || query.assetType === 'action_module') {
+  if (!parsed.assetType || parsed.assetType === 'action_module') {
     const mRows = await db
       .select({ id: actionModules.id, name: actionModules.name, key: actionModules.key, targetId: actionModules.targetId })
       .from(actionModules)
       .where(
         and(
           sql`${actionModules.deletedAt} IS NULL`,
-          query.targetId ? eq(actionModules.targetId, query.targetId) : undefined,
+          parsed.targetId ? eq(actionModules.targetId, parsed.targetId) : undefined,
           scope && targetScopeFilter(actionModules.targetId, scope),
-          query.search
-            ? sql`(${actionModules.name} LIKE ${'%' + query.search + '%'} OR ${actionModules.key} LIKE ${'%' + query.search + '%'})`
+          parsed.search
+            ? sql`(${actionModules.name} LIKE ${'%' + parsed.search + '%'} OR ${actionModules.key} LIKE ${'%' + parsed.search + '%'})`
             : sql`1=1`,
         ),
       )
@@ -236,7 +239,7 @@ export async function listAssetReliabilityItems(
     .from(reliabilityIncidents)
     .where(
       and(
-        query.targetId ? eq(reliabilityIncidents.targetId, query.targetId) : undefined,
+        parsed.targetId ? eq(reliabilityIncidents.targetId, parsed.targetId) : undefined,
         scope && targetScopeFilter(reliabilityIncidents.targetId, scope),
         sql`${reliabilityIncidents.status} NOT IN ('RESOLVED', 'DISMISSED')`,
       ),
@@ -246,7 +249,7 @@ export async function listAssetReliabilityItems(
   const recentWindows = await db
     .select()
     .from(featureWindows)
-    .where(and(query.targetId ? eq(featureWindows.targetId, query.targetId) : undefined, scope && targetScopeFilter(featureWindows.targetId, scope)))
+    .where(and(parsed.targetId ? eq(featureWindows.targetId, parsed.targetId) : undefined, scope && targetScopeFilter(featureWindows.targetId, scope)))
     .orderBy(desc(featureWindows.windowEnd))
     .limit(200)
 
@@ -306,8 +309,8 @@ export async function listAssetReliabilityItems(
     }
   })
 
-  if (query.status) {
-    combined = combined.filter((item) => item.status === query.status)
+  if (parsed.status) {
+    combined = combined.filter((item) => item.status === parsed.status)
   }
 
   combined.sort((a, b) => {
@@ -321,8 +324,8 @@ export async function listAssetReliabilityItems(
 
   const total = combined.length
   let startIndex = 0
-  if (query.cursor) {
-    const idx = combined.findIndex((c) => c.assetId === query.cursor)
+  if (parsed.cursor) {
+    const idx = combined.findIndex((c) => c.assetId === parsed.cursor)
     if (idx >= 0) {
       startIndex = idx + 1
     }

@@ -26,9 +26,8 @@ describe.each(DRIVERS)('%s reliability assets and signals domain operations', (d
 
     await handle.db.insert(t.consoleAccounts).values({
       id: consoleAccountId,
-      username: `admin-${consoleAccountId.slice(0, 8)}`,
+      email: `admin-${consoleAccountId.slice(0, 8)}@example.com`,
       displayName: '管理员',
-      passwordHash: 'hash',
       status: 'active',
     })
 
@@ -142,8 +141,8 @@ describe.each(DRIVERS)('%s reliability assets and signals domain operations', (d
     expect(res.items.length).toBe(2)
     expect(res.total).toBe(3)
     expect(res.nextCursor).toBeDefined()
-    expect(res.items[0].kind).toBe('resolution_fallback')
-    expect(res.items[0].groupingKey).toBe(groupingKey)
+    expect(res.items[0]!.kind).toBe('resolution_fallback')
+    expect(res.items[0]!.groupingKey).toBe(groupingKey)
   })
 
   it('listIncidentSignals throws 404 for unknown incident', async () => {
@@ -202,9 +201,8 @@ describe.each(DRIVERS)('%s reliability assets and signals domain operations', (d
       const actorId = newId()
       await handle.db.insert(t.consoleAccounts).values({
         id: actorId,
-        username: `viewer-${actorId.slice(0, 8)}`,
         displayName: '受限查看者',
-        passwordHash: 'hash',
+        email: `viewer-${actorId}@example.com`,
         status: 'active',
       })
       for (const [permission, mode] of [

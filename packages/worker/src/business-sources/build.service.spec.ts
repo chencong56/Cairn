@@ -68,7 +68,7 @@ describe('BusinessSourceBuildService', () => {
 
     // Verify projection records committed
     expect(commitBusinessSourceBatch).toHaveBeenCalledTimes(1)
-    const committedRecords = commitBusinessSourceBatch.mock.calls[0][2]
+    const committedRecords = commitBusinessSourceBatch.mock.calls[0]![2]
     expect(committedRecords).toHaveLength(2)
     expect(committedRecords[0].recordKey).toBe('MFG-1')
     expect(committedRecords[0].displayName).toBe('Alpha Tech')

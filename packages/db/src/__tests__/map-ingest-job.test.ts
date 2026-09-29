@@ -196,7 +196,7 @@ describe('统一地图采集作业', { timeout: 60_000 }, () => {
       stepRunId: stepRun!.id, attemptId,
       cursor: { entryIndex: 0, queue: [], visitedPageKeys: ['page:tokens'],
         entryPageCounts: { [entry.entryId]: 1 }, elapsedSeconds: 5,
-        completedEntries: [], processedNodes: 1 },
+        completedEntries: [], attemptedNodeKeys: [], processedNodes: 1 },
       page: { jobId: created.job.jobId, entryId: entry.entryId, targetId, targetAccountId: accountId,
         pageKey: 'page:tokens', viewStateKey: 'view:page:tokens:default',
         presentationStateKey: 'pres:view:page:tokens:default:1234567890abcdef', arrivalMethod: 'goto',
@@ -221,7 +221,7 @@ describe('统一地图采集作业', { timeout: 60_000 }, () => {
         entryIndex: 0, queue: [{ entryId: entry.entryId, kind: 'explicit_url', label: 'API 令牌',
           url: 'https://shop.example/tokens', depth: 0, menuPath: ['API 令牌'] }],
         visitedPageKeys: ['page:tokens'], entryPageCounts: { [entry.entryId]: 1 }, elapsedSeconds: 20,
-        completedEntries: [], processedNodes: 1,
+        completedEntries: [], attemptedNodeKeys: [], processedNodes: 1,
       },
       nodes: [], blockedPostPaths: [],
       inferredReadPostPaths: [{ path: 'https://shop.example/api/orders/list', count: 2 }],
@@ -242,7 +242,7 @@ describe('统一地图采集作业', { timeout: 60_000 }, () => {
       grant: nextGrant, jobId: created.job.jobId, runId: nextRun!.id,
       cursor: { entryIndex: 1, queue: [], visitedPageKeys: ['page:tokens'],
         entryPageCounts: { [entry.entryId]: 1 }, elapsedSeconds: 30,
-        completedEntries: [entry.entryId], processedNodes: 2 },
+        completedEntries: [entry.entryId], attemptedNodeKeys: [], processedNodes: 2 },
       nodes: [{ label: 'API 令牌', code: 'collected', pageKey: 'page:tokens' }],
       blockedPostPaths: [],
       inferredReadPostPaths: [{ path: 'https://shop.example/api/orders/list', count: 1 }],
@@ -309,7 +309,7 @@ describe('统一地图采集作业', { timeout: 60_000 }, () => {
     await handle.db.update(runLeases).set({ expiresAt: new Date(Date.now() - 1000) })
       .where(eq(runLeases.id, grant.leaseId))
     const cursor = { entryIndex: 0, queue: [], visitedPageKeys: [], entryPageCounts: {},
-      elapsedSeconds: 5, completedEntries: [], processedNodes: 1 }
+      elapsedSeconds: 5, completedEntries: [], attemptedNodeKeys: [], processedNodes: 1 }
 
     await expect(commitMapIngestProgress(handle.db, {
       grant, jobId: created.job.jobId, runId, stepRunId: step!.id, attemptId: newId(), cursor,
@@ -320,6 +320,6 @@ describe('统一地图采集作业', { timeout: 60_000 }, () => {
     })).rejects.toMatchObject({ code: 'MAP_FACT_STALE_OWNER' })
     const job = await getMapJob(handle.db, created.job.jobId)
     expect(job.ingestSummary).toBeNull()
-    expect(job.ingestCursor).toBeUndefined()
+    expect(job.ingestProgress).toMatchObject({ totalEntries: 1, completedEntries: 0, pagesCollected: 0 })
   })
 })

@@ -33,6 +33,7 @@ import {
   type PageRef,
   type RunGrant,
   type TargetObservation,
+  type StructureObservation,
   type RunSnapshot,
   type SessionErrorCode,
   type SessionEventType,
@@ -86,8 +87,9 @@ import { SECRET_PROVIDER } from '../tokens.js'
 import { collectSurfaceExploration, type SurfaceExplorationResult } from './explore-candidate-collector.js'
 import { installExploreGuard, type ExploreGuardController, type ExploreGuardOptions } from './explore-network-guard.js'
 import { collectMapIngestSlice, type IngestSliceResult } from './map-ingest-collector.js'
-import type { MapIngestCursor, MapIngestPageSnapshot, MapIngestStep, TargetAccessPolicy } from '@cairn/shared'
-import type { TargetStateRule } from '@cairn/shared'
+import type { MapIngestCursor, MapIngestPageSnapshot, MapIngestStep, TargetAccessPolicy, TargetStateRule } from '@cairn/shared'
+import { MAX_STRUCTURE_SNAPSHOT_CHARS } from '@cairn/shared'
+import { getAriaSnapshot } from './aria-snapshot.js'
 export { SECRET_PROVIDER }
 export { SessionLeaseError, type BrowserSessionManagerOptions, type SessionAcquireResult } from './session-live.js'
 
@@ -101,6 +103,8 @@ function isUnusablePageUrl(url: string): boolean {
     return true
   }
 }
+
+const STRUCTURE_SETTLE_MS = 3_000
 
 @Injectable()
 export class BrowserSessionManager {
@@ -329,6 +333,34 @@ export class BrowserSessionManager {
 
   async probeErrorSurface(grant: SessionGrant, _signal?: AbortSignal): Promise<{ role: string; text: string }[]> {
     return probeErrorSurface.call(this, grant, _signal)
+  }
+
+  async captureStructureSnapshot(
+    grant: SessionGrant,
+    signal?: AbortSignal,
+  ): Promise<{ snapshot: string; truncated: boolean; url?: string; title?: string } | undefined> {
+    try {
+      const page = this.pageForGrant(grant)
+      if (!page) return undefined
+      // 动作刚结束时异步数据常未到齐；给页面一个短暂的空闲窗口，只影响调试基线运行。
+      await page.waitForLoadState('networkidle', { timeout: STRUCTURE_SETTLE_MS }).catch(() => undefined)
+      signal?.throwIfAborted()
+      const url = page.url()
+      const title = await page.title().catch(() => undefined)
+      const res = await getAriaSnapshot(page, {
+        timeoutMs: 3000,
+        maxLength: MAX_STRUCTURE_SNAPSHOT_CHARS,
+        signal,
+      })
+      return {
+        snapshot: res.text,
+        truncated: res.truncated,
+        url,
+        title,
+      }
+    } catch {
+      return undefined
+    }
   }
 
   async collectExploration(
@@ -826,7 +858,7 @@ export class BrowserSessionManager {
     return describeHoldPage.call(this, runId)
   }
 
-  async observeRun(input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation> {
+  async observeRun(input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation> {
     return observeRun.call(this, input)
   }
 

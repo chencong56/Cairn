@@ -81,6 +81,27 @@ describe('CFA-12: readLocatorMany 与确定性提取全部匹配', () => {
     expect(result.output).toEqual({ value: ['A', 'B', 'C'], count: 3 })
   })
 
+  it('异步列表先出骨架行：等到文字到齐且稳定后再返回', async () => {
+    const page = createMockPage(['', ''])
+    const reads = [['', ''], ['A', 'B'], ['A', 'B']]
+    let call = 0
+    const mockLocator = (page as unknown as { locator: () => { all: ReturnType<typeof vi.fn> } }).locator()
+    mockLocator.all.mockImplementation(async () => {
+      const texts = reads[Math.min(call++, reads.length - 1)]!
+      return texts.map((text) => ({ innerText: vi.fn().mockResolvedValue(text) }))
+    })
+    const command: BrowserCommand = {
+      type: 'extract',
+      target: { framePath: [], candidates: [{ by: 'css', value: '.row' }] },
+      as: 'text',
+      many: { maxItems: 10 },
+    }
+    const result = await executeOnPage(page, command)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('failed')
+    expect(result.output).toEqual({ value: ['A', 'B'], count: 2 })
+  })
+
   it('匹配数超过 maxItems 报 EXTRACT_TOO_MANY', async () => {
     const page = createMockPage(['A', 'B', 'C'])
     const command: BrowserCommand = {

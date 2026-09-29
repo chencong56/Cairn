@@ -14,6 +14,10 @@ describe('隔离库在文件内复用', { timeout: 60_000 }, () => {
     return handle
   }
 
+  function dbName(h: { env: unknown }): string | undefined {
+    return (h.env as { CAIRN_DB_NAME?: string })?.CAIRN_DB_NAME
+  }
+
   it('连续打开是同一个库，但看不见上一条写入，系统权限回到种子', async () => {
     const first = await open('postgres')
     const id = newId()
@@ -22,11 +26,11 @@ describe('隔离库在文件内复用', { timeout: 60_000 }, () => {
       [id, `reuse-${id.slice(0, 8)}`],
     )
     await first.raw(`DELETE FROM cairn.console_role_permissions WHERE permission = 'session:view'`)
-    const name = first.env.CAIRN_DB_NAME
+    const name = dbName(first)
     await first.close()
 
     const second = await open('postgres')
-    expect(second.env.CAIRN_DB_NAME).toBe(name)
+    expect(dbName(second)).toBe(name)
     expect(await second.raw(`SELECT id FROM cairn.targets WHERE id = $1`, [id])).toHaveLength(0)
     const permissions = await second.raw(
       `SELECT count(*)::int AS n FROM cairn.console_role_permissions WHERE permission = 'session:view'`,
@@ -39,7 +43,7 @@ describe('隔离库在文件内复用', { timeout: 60_000 }, () => {
   it('同时打开的两个库互不可见', async () => {
     const first = await open('postgres')
     const second = await open('postgres')
-    expect(second.env.CAIRN_DB_NAME).not.toBe(first.env.CAIRN_DB_NAME)
+    expect(dbName(second)).not.toBe(dbName(first))
     const id = newId()
     await first.raw(
       `INSERT INTO cairn.targets (id, code, name, entry_url) VALUES ($1, $2, '甲', 'https://example.com')`,
@@ -59,11 +63,11 @@ describe('隔离库在文件内复用', { timeout: 60_000 }, () => {
       `INSERT INTO cairn.targets (id, code, name, entry_url) VALUES ($1, $2, '纯净', 'https://example.com')`,
       [id, `reuse-p-${id.slice(0, 8)}`],
     )
-    const name = pristine.env.CAIRN_DB_NAME
+    const name = dbName(pristine)
     await pristine.close()
 
     const again = await open('postgres', undefined, { pristine: true })
-    expect(again.env.CAIRN_DB_NAME).toBe(name)
+    expect(dbName(again)).toBe(name)
     expect(await again.raw(`SELECT id FROM cairn.targets WHERE id = $1`, [id])).toHaveLength(0)
     const config = await again.raw(`SELECT count(*)::int AS n FROM cairn.platform_config`)
     expect(Number(config[0]!.n)).toBe(0)

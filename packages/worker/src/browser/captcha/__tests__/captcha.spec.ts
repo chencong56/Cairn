@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 import {
   generateSliderTrajectory,
@@ -16,7 +15,7 @@ import {
 } from '../index.js'
 import { BUILTIN_CAPTCHA_FINGERPRINTS } from '@cairn/shared'
 
-const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')
+const fixturesDir = path.join(__dirname, 'fixtures')
 
 describe('Authentication Runtime Captcha Solvers (Phase 1)', () => {
   describe('Trajectory Planner', () => {

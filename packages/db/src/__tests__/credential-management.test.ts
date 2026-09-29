@@ -20,7 +20,7 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
     const admin = await rbac.createAccount({ email: 'admin-fixture', displayName: '管理员', password: 'test-password', roleIds: [adminRole.id] }, null)
     const targets = new api.TargetsStore(db, (_id, value) => Buffer.from(value))
     const makeTarget = (code: string) => targets.createTarget({ code, name: code, entryUrl: 'https://example.com', loginFields: null, authMethod: 'password', captchaMode: 'none', status: 'active' }, admin)
-    const target = await makeTarget('T1')
+    const target = await makeTarget('t1')
     const makeAccount = (targetId = target.id, username = '001alice') => targets.createAccount(targetId, { displayName: username, username, password: ' old password ', usage: 'business', status: 'active', validity: { mode: 'days', amount: 60, timeZone: 'UTC', startedAt: '2026-01-31T08:00:00.000Z' } }, admin)
     const account = await makeAccount()
     return { db, native, tables, rbac, roles, admin, targets, target, account, makeTarget, makeAccount }
@@ -130,7 +130,7 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
   })
   it('角色各自范围不交叉扩权；来源入口、导入、使用关系与批次失权收敛', async () => {
     const { db, rbac, admin, targets, target, account, makeTarget, makeAccount } = await setup()
-    const other = await makeTarget('T2'); const b = await makeAccount(other.id, '001alice')
+    const other = await makeTarget('t2'); const b = await makeAccount(other.id, '001alice')
     const read = await rbac.createRole({ key: 'read_all', name: '全目标只读', permissions: ['target:read', 'credential:read'] }, admin)
     const write = await rbac.createRole({ key: 'write_some', name: '局部维护', permissions: ['credential:read', 'credential:write', 'credential:import', 'credential:delete', 'target:read'] }, admin)
     const operator = await rbac.createAccount({ email: 'operator', displayName: '维护员', password: 'test-password', roleIds: [read.id, write.id], targetScopes: [{ roleId: read.id, mode: 'all', targetIds: [] }, { roleId: write.id, mode: 'selected', targetIds: [target.id] }] }, admin)
@@ -142,10 +142,10 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
     await expect(targets.updateAccount(other.id, b.id, { password: 'nope', validity: { mode: 'permanent' } }, operator)).rejects.toMatchObject({ code: 'TARGET_NOT_FOUND' })
     await expect(targets.updateAccount(target.id, account.id, { displayName: '不允许修改身份' }, operator)).rejects.toMatchObject({ code: 'TARGET_NOT_FOUND' })
     await targets.updateAccount(target.id, account.id, { validity: { mode: 'permanent' } }, operator)
-    const resolved = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, targetCode: 'T1', username: '001alice' }, { row: 3, targetCode: 'T2', username: '001alice' }] }, operator)
+    const resolved = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, targetCode: 't1', username: '001alice' }, { row: 3, targetCode: 't2', username: '001alice' }] }, operator)
     expect(resolved.rows[0]?.item?.id).toBe(account.id)
     expect(resolved.rows[1]?.item).toBeNull()
-    expect(resolved.rows[1]?.error).not.toContain('T2')
+    expect(resolved.rows[1]?.error).not.toContain('t2')
     expect((await api.listCredentialUsages(db, account.id, operator)).items.map(i => i.resource)).toEqual(['target_account'])
     const batch = await api.createCredentialBatch(db, { source: 'excel', kind: 'password_replace', idempotencyKey: newId(), items: [{ itemId: newId(), credentialId: account.id, expectedRevision: resolved.rows[0]!.item!.revision }] }, operator)
     await rbac.assignAccountRoles(operator.id, { roleIds: [read.id, write.id], targetScopes: [{ roleId: read.id, mode: 'none', targetIds: [] }, { roleId: write.id, mode: 'none', targetIds: [] }] }, admin)
@@ -160,8 +160,8 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
   })
   it('匹配严格校验技术标识与业务键、重复全部拒绝且不改变密码', async () => {
     const { db, admin, account, target, makeTarget, makeAccount } = await setup()
-    const t2 = await makeTarget('T2'); const b = await makeAccount(t2.id, '001alice')
-    const rows = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, credentialId: account.id, targetCode: 'T2', username: '001alice' }, { row: 3, credentialId: b.id, targetId: target.id }, { row: 4, targetCode: 'T1', username: '001alice' }, { row: 5, targetAccountId: account.id, targetId: target.id }] }, admin)
+    const t2 = await makeTarget('t2'); const b = await makeAccount(t2.id, '001alice')
+    const rows = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, credentialId: account.id, targetCode: 't2', username: '001alice' }, { row: 3, credentialId: b.id, targetId: target.id }, { row: 4, targetCode: 't1', username: '001alice' }, { row: 5, targetAccountId: account.id, targetId: target.id }] }, admin)
     expect(rows.rows.every(r => r.error)).toBe(true)
     expect(rows.rows.slice(0, 2).every(r => r.item === null)).toBe(true)
     const current = await api.getCredential(db, account.id, admin)
@@ -170,11 +170,11 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
   })
   it('会话列表与 SSE 按同一目标授权过滤，撤权后既有订阅也不再返回事件', async () => {
     const { db, rbac, admin, targets, target, account, makeTarget, makeAccount } = await setup()
-    const other = await makeTarget('T2'); const otherAccount = await makeAccount(other.id)
+    const other = await makeTarget('t2'); const otherAccount = await makeAccount(other.id)
     const role = await rbac.createRole({ key: 'session_reader', name: '会话查看', permissions: ['target:read', 'session:read'] }, admin)
     const reader = await rbac.createAccount({ email: 'session-reader', displayName: '会话查看者', password: 'test-password', roleIds: [role.id], targetScopes: [{ roleId: role.id, mode: 'selected', targetIds: [target.id] }] }, admin)
     expect((await targets.listTargets({ search: '001alice' }, reader)).items.map(i => i.id)).toEqual([target.id])
-    expect((await targets.listTargets({ search: 'T2' }, reader)).items).toHaveLength(0)
+    expect((await targets.listTargets({ search: 't2' }, reader)).items).toHaveLength(0)
     for (const key of [{ targetId: target.id, targetAccountId: account.id }, { targetId: other.id, targetAccountId: otherAccount.id }]) await api.appendSessionEvent(db, { key, type: 'auth.unknown' })
     expect((await api.listAccountSessionOverview(db, {}, reader.id)).items.map(i => i.targetId)).toEqual([target.id])
     expect((await api.listSessionEventsAfter(db, {}, reader.id)).map(i => i.targetId)).toEqual([target.id])
@@ -213,7 +213,7 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
     item = await api.getCredential(db, account.id, admin)
     await api.clearCredential(db, item.id, { expectedRevision: item.revision }, admin, true)
     expect((await api.listCredentials(db, {}, admin)).items).toHaveLength(0)
-    expect((await api.listCredentialHistory(db, item.id, {}, admin)).items.length).toBeGreaterThan(0)
+    expect((await api.listCredentialHistory(db, item.id, { limit: 20 }, admin)).items.length).toBeGreaterThan(0)
     await targets.updateAccount(target.id, account.id, { displayName: '仍在的账号' }, admin)
     expect((await api.listCredentials(db, {}, admin)).items).toHaveLength(0)
     await targets.updateAccount(target.id, account.id, { password: 'restored', validity: { mode: 'permanent' } }, admin)
@@ -233,7 +233,7 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
     expect(page.stats.visible).toBe(211)
     expect(page.stats.unknown).toBe(210)
     const firstIds = new Set(page.items.map(i => i.id)); const last = ids.find(id => !firstIds.has(id))!
-    const match = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, credentialId: last, targetCode: 'T1', username: `bulk-${ids.indexOf(last)}` }] }, admin)
+    const match = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, credentialId: last, targetCode: 't1', username: `bulk-${ids.indexOf(last)}` }] }, admin)
     expect(match.rows[0]?.item?.id).toBe(last)
     const all = [...page.items]
     while (page.nextCursor) { page = await api.listCredentials(db, { limit: 100, cursor: page.nextCursor }, admin); all.push(...page.items) }

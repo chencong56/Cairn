@@ -20,6 +20,7 @@ import {
   schemaFor,
   setChangeHintPublisher,
 } from '../test-entry.js'
+import type { ChangeHintDraft } from '../observe/hint.js'
 import { newId } from '../id.js'
 
 const echoStep: Step = {
@@ -203,7 +204,7 @@ describe.each(DRIVERS)('%s 运行观察账本', { timeout: 30_000 }, (driver) =>
 
   it('回滚不留事件也不发提示', async () => {
     const created = await seedRun()
-    const published: Array<{ runId: string; eventSeq: number }> = []
+    const published: ChangeHintDraft[] = []
     setChangeHintPublisher((hint) => {
       published.push(hint)
     })

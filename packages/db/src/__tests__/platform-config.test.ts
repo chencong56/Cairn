@@ -239,7 +239,7 @@ describe.each(DRIVERS)('%s 平台配置仓储', (driver) => {
         ...FACTORY_PLATFORM_CONFIG,
         evidence: {
           ...FACTORY_PLATFORM_CONFIG.evidence,
-          retainDays: { screenshot: 60, trace: 28, debugTrace: 7 },
+          retainDays: { ...FACTORY_PLATFORM_CONFIG.evidence.retainDays, screenshot: 60, trace: 28, debugTrace: 7 },
         },
       },
     })
@@ -534,7 +534,7 @@ describe.each(DRIVERS)('%s 平台配置仓储', (driver) => {
           ...stored,
           schemaVersion: 4,
           sessionAuth,
-        },
+        } as any,
       })
       .where(eq(platformConfig.id, PLATFORM_CONFIG_SINGLETON_ID))
     const live = await api.readLiveSessionAuth(db)

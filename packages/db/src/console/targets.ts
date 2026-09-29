@@ -79,7 +79,9 @@ import {
   type TargetResolutionPolicyPatch,
   type CleanupStatus,
   type CleanupStatusResponse,
+  createTargetAccountBodySchema,
   type CreateTargetAccountBody,
+  type CreateTargetAccountInput,
   createTargetBodySchema,
   type CreateTargetBody,
   type CreateTargetInput,
@@ -92,9 +94,11 @@ import {
   type TargetDto,
   type TargetListQuery,
   type TargetListResponse,
-  type TargetLoginFields,
+  updateTargetBodySchema,
   type UpdateTargetAccountBody,
   type UpdateTargetBody,
+  type UpdateTargetInput,
+  type TargetLoginFields,
   type SessionSnapshotSummaryDto,
 } from '@cairn/shared'
 import type { PersistenceActor as RequestAccount } from './actor.js'
@@ -422,33 +426,34 @@ export class TargetsStore {
 
   async updateTarget(
     id: string,
-    body: UpdateTargetBody,
+    body: UpdateTargetInput,
     actor: RequestAccount,
   ): Promise<TargetDto> {
     const { targets } = schemaFor(this.db)
     const current = await this.loadTarget(id)
+    const parsed = updateTargetBodySchema.parse(body)
     const now = new Date()
     const loginOnly =
-      body.loginFields !== undefined &&
-      body.name === undefined &&
-      body.entryUrl === undefined &&
-      body.loginUrl === undefined &&
-      body.authMethod === undefined &&
-      body.captchaMode === undefined &&
-      body.status === undefined &&
-      body.iconKey === undefined &&
-      body.accentKey === undefined &&
-      body.loginLeaveTimeoutMs === undefined &&
-      body.landingSettleMode === undefined &&
-      body.landingSettleTimeoutMs === undefined &&
-      body.sensitiveSelectors === undefined
+      parsed.loginFields !== undefined &&
+      parsed.name === undefined &&
+      parsed.entryUrl === undefined &&
+      parsed.loginUrl === undefined &&
+      parsed.authMethod === undefined &&
+      parsed.captchaMode === undefined &&
+      parsed.status === undefined &&
+      parsed.iconKey === undefined &&
+      parsed.accentKey === undefined &&
+      parsed.loginLeaveTimeoutMs === undefined &&
+      parsed.landingSettleMode === undefined &&
+      parsed.landingSettleTimeoutMs === undefined &&
+      parsed.sensitiveSelectors === undefined
     const authSurfaceTouched =
-      body.loginFields !== undefined ||
-      body.loginUrl !== undefined ||
-      body.entryUrl !== undefined ||
-      body.authMethod !== undefined ||
-      body.captchaMode !== undefined ||
-      body.captcha !== undefined
+      parsed.loginFields !== undefined ||
+      parsed.loginUrl !== undefined ||
+      parsed.entryUrl !== undefined ||
+      parsed.authMethod !== undefined ||
+      parsed.captchaMode !== undefined ||
+      parsed.captcha !== undefined
     try {
       await this.db.transaction(async (tx) => {
         await lockConsoleAuthorization(tx, actor.id)
@@ -456,32 +461,32 @@ export class TargetsStore {
         await tx
           .update(targets)
           .set({
-            name: body.name ?? current.name,
-            entryUrl: body.entryUrl ?? current.entryUrl,
-            loginUrl: body.loginUrl === undefined ? current.loginUrl : body.loginUrl,
-            authMethod: body.authMethod ?? current.authMethod,
-            captchaMode: body.captchaMode ?? current.captchaMode,
-            status: body.status ?? current.status,
-            iconKey: body.iconKey ?? current.iconKey,
-            accentKey: body.accentKey ?? current.accentKey,
-            loginFields: body.loginFields === undefined ? current.loginFields : body.loginFields,
+            name: parsed.name ?? current.name,
+            entryUrl: parsed.entryUrl ?? current.entryUrl,
+            loginUrl: parsed.loginUrl === undefined ? current.loginUrl : parsed.loginUrl,
+            authMethod: parsed.authMethod ?? current.authMethod,
+            captchaMode: parsed.captchaMode ?? current.captchaMode,
+            status: parsed.status ?? current.status,
+            iconKey: parsed.iconKey ?? current.iconKey,
+            accentKey: parsed.accentKey ?? current.accentKey,
+            loginFields: parsed.loginFields === undefined ? current.loginFields : parsed.loginFields,
             loginLeaveTimeoutMs:
-              body.loginLeaveTimeoutMs === undefined
+              parsed.loginLeaveTimeoutMs === undefined
                 ? current.loginLeaveTimeoutMs
-                : body.loginLeaveTimeoutMs,
+                : parsed.loginLeaveTimeoutMs,
             landingSettleMode:
-              body.landingSettleMode === undefined
+              parsed.landingSettleMode === undefined
                 ? current.landingSettleMode
-                : body.landingSettleMode,
+                : parsed.landingSettleMode,
             landingSettleTimeoutMs:
-              body.landingSettleTimeoutMs === undefined
+              parsed.landingSettleTimeoutMs === undefined
                 ? current.landingSettleTimeoutMs
-                : body.landingSettleTimeoutMs,
-            captcha: body.captcha === undefined ? current.captcha : body.captcha,
+                : parsed.landingSettleTimeoutMs,
+            captcha: parsed.captcha === undefined ? current.captcha : parsed.captcha,
             sensitiveSelectors:
-              body.sensitiveSelectors === undefined
+              parsed.sensitiveSelectors === undefined
                 ? current.sensitiveSelectors
-                : body.sensitiveSelectors,
+                : parsed.sensitiveSelectors,
             updatedAt: now,
           })
           .where(eq(targets.id, id))
@@ -502,9 +507,9 @@ export class TargetsStore {
           id,
           loginOnly
             ? '更新了登录框定位'
-            : body.iconKey !== undefined || body.accentKey !== undefined
-              ? `${body.name ?? current.name}（${current.code}），外观 ${body.iconKey ?? current.iconKey}/${body.accentKey ?? current.accentKey}`
-              : `${body.name ?? current.name}（${current.code}）`,
+            : parsed.iconKey !== undefined || parsed.accentKey !== undefined
+              ? `${parsed.name ?? current.name}（${current.code}），外观 ${parsed.iconKey ?? current.iconKey}/${parsed.accentKey ?? current.accentKey}`
+              : `${parsed.name ?? current.name}（${current.code}）`,
         )
       })
     } catch (error) {
@@ -975,26 +980,27 @@ export class TargetsStore {
 
   async createAccount(
     targetId: string,
-    body: CreateTargetAccountBody,
+    body: CreateTargetAccountInput,
     actor: RequestAccount,
   ): Promise<TargetAccountDto> {
     await this.loadTarget(targetId)
+    const parsed = createTargetAccountBodySchema.parse(body)
     const now = new Date()
     let id = ''
     try {
       await this.db.transaction(async (tx) => {
         await lockConsoleAuthorization(tx, actor.id)
         await assertTargetPermission(tx, actor.id, targetId, 'target:write')
-        if (body.password || body.totpSecret || body.validity || body.ownerConsoleAccountId) {
+        if (parsed.password || parsed.totpSecret || parsed.validity || parsed.ownerConsoleAccountId) {
           await assertTargetPermission(tx, actor.id, targetId, 'credential:read')
           await assertTargetPermission(tx, actor.id, targetId, 'credential:write')
         }
-        id = await this.insertAccount(tx, targetId, body, actor, now)
+        id = await this.insertAccount(tx, targetId, parsed, actor, now)
       })
     } catch (error) {
       await rethrowUnique(this.db, error, 'account', {
         targetId,
-        username: body.username,
+        username: parsed.username,
       })
     }
     return this.getAccount(targetId, id)

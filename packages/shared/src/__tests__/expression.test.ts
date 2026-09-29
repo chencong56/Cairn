@@ -317,4 +317,31 @@ describe('复查修复：受限正则与运行期上限', () => {
     expect(operand.length).toBeLessThan(300)
     expect(operand).toContain('共 1000 字')
   })
+
+  it('支持 diff 函数求两数之差与结合 abs 计算绝对差', () => {
+    const diffExpr: Expr = {
+      kind: 'call',
+      fn: 'diff',
+      args: [{ kind: 'ref', key: 'a' }, { kind: 'ref', key: 'b' }],
+    }
+    const res = evaluateExpression(diffExpr, { a: 100, b: 30 })
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect(res.value).toBe(70)
+    }
+
+    const absDiffExpr: Expr = {
+      kind: 'call',
+      fn: 'abs',
+      args: [diffExpr],
+    }
+    const absRes = evaluateExpression(absDiffExpr, { a: 30, b: 100 })
+    expect(absRes.ok).toBe(true)
+    if (absRes.ok) {
+      expect(absRes.value).toBe(70)
+    }
+
+    const shape = inferExpressionShape(diffExpr, {})
+    expect(shape).toEqual({ kind: 'scalar', type: 'number' })
+  })
 })

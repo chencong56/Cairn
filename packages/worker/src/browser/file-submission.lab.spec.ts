@@ -94,8 +94,7 @@ describe('浏览器文件上传/下载与Target夹具全链路业务系统验证
       code: `file-submission-${SCHEMA.slice(-6)}`,
       name: '企业费用报销与材料提报系统',
       entryUrl: `${lab.url}/file-submission.html`,
-      state: 'ACTIVE',
-      createdByConsoleAccountId: actorId,
+      status: 'active',
     })
 
     await handle.db.insert(secrets).values({

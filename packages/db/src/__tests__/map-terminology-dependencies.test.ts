@@ -59,7 +59,6 @@ describe.each(DRIVERS)('%s 知识来源关系型依赖索引与读时校验', { 
       targetId,
       mode: 'run_incremental',
       status: 'SUCCEEDED',
-      profileRef: 'default',
       sourceScope: { includeFailures: true },
       strategyVersion: 'analysis-strategy@1',
       budget: { maxItems: 50, useAi: false },
@@ -103,9 +102,9 @@ describe.each(DRIVERS)('%s 知识来源关系型依赖索引与读时校验', { 
     // 1. 验证关系型依赖索引表已自动写入
     const deps = await listTermSourceDependencies(handle.db, targetId, term.termId, 1)
     expect(deps.length).toBe(1)
-    expect(deps[0].sourceKind).toBe('analysis_candidate')
-    expect(deps[0].sourceId).toBe(candidateId)
-    expect(deps[0].termRevision).toBe(1)
+    expect(deps[0]!.sourceKind).toBe('analysis_candidate')
+    expect(deps[0]!.sourceId).toBe(candidateId)
+    expect(deps[0]!.termRevision).toBe(1)
 
     // 2. 验证反向定位能力
     const reverseTerms = await findTermsBySource(
@@ -115,7 +114,7 @@ describe.each(DRIVERS)('%s 知识来源关系型依赖索引与读时校验', { 
       candidateId,
     )
     expect(reverseTerms.length).toBe(1)
-    expect(reverseTerms[0].termId).toBe(term.termId)
+    expect(reverseTerms[0]!.termId).toBe(term.termId)
 
     // 3. 验证读时新鲜度检查（权限和来源存在）
     const freshCheck = await checkTermSourcesFreshness(handle.db, targetId, term.termId, {
@@ -173,6 +172,6 @@ describe.each(DRIVERS)('%s 知识来源关系型依赖索引与读时校验', { 
     expect(updated.revision).toBe(2)
     const depsR2 = await listTermSourceDependencies(handle.db, targetId, term.termId, 2)
     expect(depsR2.length).toBe(1)
-    expect(depsR2[0].sourceId).toBe(candidateId2)
+    expect(depsR2[0]!.sourceId).toBe(candidateId2)
   })
 })

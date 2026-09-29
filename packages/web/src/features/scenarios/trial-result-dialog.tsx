@@ -217,19 +217,17 @@ export function TrialResultDialog({
               {/* 左侧：高清大尺寸录像区 7 列 */}
               <div className='lg:col-span-7 space-y-4 min-w-0'>
                 {video ? (
-                  <div className='rounded-lg border border-border-card bg-card p-4 shadow-sm'>
-                    <RunVideoSection
-                      run={run}
-                      items={evidence?.items ?? []}
-                      seekRequest={seekRequest}
-                      onSelectStep={(stepRunId) => {
-                        const sr = run.stepRuns.find((s) => s.id === stepRunId)
-                        if (sr) {
-                          onSelectDraftStep(sr.stepId)
-                        }
-                      }}
-                    />
-                  </div>
+                  <RunVideoSection
+                    run={run}
+                    items={evidence?.items ?? []}
+                    seekRequest={seekRequest}
+                    onSelectStep={(stepRunId) => {
+                      const sr = run.stepRuns.find((s) => s.id === stepRunId)
+                      if (sr) {
+                        onSelectDraftStep(sr.stepId)
+                      }
+                    }}
+                  />
                 ) : (
                   <div className='rounded-lg border border-dashed border-border-default bg-muted/20 p-8 text-center text-muted-foreground space-y-1.5'>
                     <p className='text-body font-medium'>本次试跑未产生独立执行录像</p>

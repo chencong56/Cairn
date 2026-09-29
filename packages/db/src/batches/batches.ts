@@ -16,7 +16,9 @@ import {
   type BatchItemStatus,
   type BatchPacing,
   type BatchStatus,
+  createBatchBodySchema,
   type CreateBatchBody,
+  type CreateBatchInput,
   type DataBinding,
   type ScenarioInputDecl,
 } from '@cairn/shared'
@@ -174,9 +176,10 @@ async function assertBatchScenarioPermission(
 
 export async function createBatch(
   db: Db,
-  input: CreateBatchBody,
+  rawInput: CreateBatchInput,
   actorId: string,
 ): Promise<BatchDetail> {
+  const input = createBatchBodySchema.parse(rawInput)
   return atomic(db, async (tx) => {
     const { scenarios, scenarioVersions, datasets, datasetRows, batches, batchItems } =
       schemaFor(tx)

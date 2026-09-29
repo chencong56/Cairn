@@ -3,13 +3,21 @@ import { entityIdSchema, utcInstantSchema, jsonValueSchema, timeoutMsSchema } fr
 import {
   outcomeContractSchema,
   outcomeRuleSchema,
+  outcomeScopeSchema,
   outcomeSeveritySchema,
   outcomeOnViolationSchema,
   type OutcomeContract,
+  type OutcomeScope,
   type OutcomeSeverity,
   type OutcomeOnViolation,
 } from './outcome.js'
-import { scenarioOutputDeclSchema, type ScenarioOutputDecl } from './run-output.js'
+import {
+  scenarioMetricDeclSchema,
+  scenarioOutputDeclSchema,
+  type ScenarioMetricDecl,
+  type ScenarioOutputDecl,
+} from './run-output.js'
+import { targetDescriptorSchema, type TargetDescriptor } from './target-descriptor.js'
 import {
   contextKeySchema,
   effectTypeSchema,
@@ -43,6 +51,7 @@ export const AUTHORING_ALLOWED_STEP_TYPES = [
   'ai_action',
   'ai_extract',
   'ai_assert',
+  'compute',
 ] as const
 export type AuthoringAllowedStepType = (typeof AUTHORING_ALLOWED_STEP_TYPES)[number]
 export const authoringAllowedStepTypeSchema = z.enum(AUTHORING_ALLOWED_STEP_TYPES)
@@ -102,6 +111,10 @@ export const AUTHORING_STEP_FIELD_POLICIES: Record<
     allowedInputKeys: ['instruction'],
     allowsOutputKey: false,
   },
+  compute: {
+    allowedInputKeys: ['expression'],
+    allowsOutputKey: true,
+  },
 }
 
 export const authoringInsertStepOperationSchema = z.strictObject({
@@ -155,13 +168,24 @@ export type AuthoringSetStepPolicyOperation = z.infer<typeof authoringSetStepPol
 export const authoringAddOutcomeOperationSchema = z.strictObject({
   kind: z.literal('add_outcome'),
   id: z.string().min(1).max(128),
-  stepId: entityIdSchema,
+  stepId: entityIdSchema.optional(),
   meaning: z.string().min(1).max(512),
   rule: outcomeRuleSchema,
   severity: outcomeSeveritySchema.default('SHOULD'),
   onViolation: outcomeOnViolationSchema.default('continue'),
+  /** 验收提案生成的条件记为 ai_compiled；缺省沿用 generalized。 */
+  provenance: z.enum(['generalized', 'ai_compiled']).optional(),
 })
 export type AuthoringAddOutcomeOperation = z.infer<typeof authoringAddOutcomeOperationSchema>
+
+export const authoringSetOutputsOperationSchema = z.strictObject({
+  kind: z.literal('set_outputs'),
+  id: z.string().min(1).max(128),
+  summaryTemplate: z.string().trim().max(500).optional(),
+  metrics: z.array(scenarioMetricDeclSchema).max(20).optional(),
+  mode: z.enum(['merge', 'replace']).default('merge'),
+})
+export type AuthoringSetOutputsOperation = z.infer<typeof authoringSetOutputsOperationSchema>
 
 export const authoringOperationSchema = z.discriminatedUnion('kind', [
   authoringInsertStepOperationSchema,
@@ -170,6 +194,7 @@ export const authoringOperationSchema = z.discriminatedUnion('kind', [
   authoringMoveStepOperationSchema,
   authoringSetStepPolicyOperationSchema,
   authoringAddOutcomeOperationSchema,
+  authoringSetOutputsOperationSchema,
 ])
 export type AuthoringOperation = z.infer<typeof authoringOperationSchema>
 
@@ -226,16 +251,40 @@ export type AuthoringDiffMove = z.infer<typeof authoringDiffMoveSchema>
 
 export const authoringDiffOutcomeAddSchema = z.strictObject({
   type: z.literal('outcome_add'),
-  stepId: entityIdSchema,
-  stepName: z.string().min(1).max(128),
+  stepId: entityIdSchema.optional(),
+  stepName: z.string().min(1).max(128).optional(),
   contractId: entityIdSchema,
   meaning: z.string().min(1).max(512),
-  ruleKind: z.enum(['deterministic', 'ai']),
+  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration']),
   severity: outcomeSeveritySchema,
   onViolation: outcomeOnViolationSchema,
+  scope: outcomeScopeSchema.optional(),
   detail: z.string().max(512).optional(),
 })
 export type AuthoringDiffOutcomeAdd = z.infer<typeof authoringDiffOutcomeAddSchema>
+
+export const authoringDiffOutputsChangeSchema = z.strictObject({
+  type: z.literal('outputs_change'),
+  summaryTemplate: z
+    .strictObject({
+      from: z.string().optional(),
+      to: z.string().optional(),
+    })
+    .optional(),
+  metricsAdded: z.array(scenarioMetricDeclSchema).optional(),
+  metricsRemoved: z.array(scenarioMetricDeclSchema).optional(),
+  metricsUpdated: z
+    .array(
+      z.strictObject({
+        key: z.string(),
+        from: scenarioMetricDeclSchema,
+        to: scenarioMetricDeclSchema,
+      }),
+    )
+    .optional(),
+  detail: z.string().max(512).optional(),
+})
+export type AuthoringDiffOutputsChange = z.infer<typeof authoringDiffOutputsChangeSchema>
 
 export const authoringDiffSchema = z.discriminatedUnion('type', [
   authoringDiffAddSchema,
@@ -243,6 +292,7 @@ export const authoringDiffSchema = z.discriminatedUnion('type', [
   authoringDiffModifySchema,
   authoringDiffMoveSchema,
   authoringDiffOutcomeAddSchema,
+  authoringDiffOutputsChangeSchema,
 ])
 export type AuthoringDiff = z.infer<typeof authoringDiffSchema>
 
@@ -252,27 +302,236 @@ export const authoringIntentCoverageItemSchema = z.strictObject({
 })
 export type AuthoringIntentCoverageItem = z.infer<typeof authoringIntentCoverageItemSchema>
 
-export const assistantAuthoringProposalSchema = z.strictObject({
-  kind: z.literal('authoring_proposal'),
-  proposalId: entityIdSchema,
-  scenarioId: entityIdSchema,
-  base: z.strictObject({
-    draftRevision: z.number().int().nonnegative(),
-    documentDigest: digestHexSchema,
-    dependencyFingerprint: z.string().min(1).max(128),
+/** 单轮编排操作上限：通用助手按「一次加一两步」设计；验收提案一次可含多张卡，单独放宽。 */
+export const AUTHORING_OPERATION_LIMITS = {
+  step: { maxOperations: 4, maxInserts: 2 },
+  acceptance: { maxOperations: 24, maxInserts: 12 },
+} as const
+
+export function authoringOperationLimitsFor(proposal: { source?: 'step' | 'acceptance' }): {
+  maxOperations: number
+  maxInserts: number
+} {
+  return AUTHORING_OPERATION_LIMITS[proposal.source === 'acceptance' ? 'acceptance' : 'step']
+}
+
+export const ACCEPTANCE_INTENT_KINDS = [
+  'page_reachable',
+  'page_duration',
+  'table_non_empty',
+  'number_range',
+  'text_present_or_absent',
+  'extract_to_report',
+  'scenario_duration',
+  'value_consistency',
+] as const
+export type AcceptanceIntentKind = (typeof ACCEPTANCE_INTENT_KINDS)[number]
+export const acceptanceIntentKindSchema = z.enum(ACCEPTANCE_INTENT_KINDS)
+
+/** 需要页面对象定位的意图：没有人工点选时，必须有基线页面结构供模型定位。 */
+export const ACCEPTANCE_TARGET_INTENTS = [
+  'page_reachable',
+  'table_non_empty',
+  'number_range',
+  'extract_to_report',
+] as const satisfies readonly AcceptanceIntentKind[]
+
+export function acceptanceIntentNeedsTarget(kind: AcceptanceIntentKind): boolean {
+  return (ACCEPTANCE_TARGET_INTENTS as readonly string[]).includes(kind)
+}
+
+export const MAX_ACCEPTANCE_INTENTS = 6
+
+const acceptanceSeveritySchema = z.enum(['MUST', 'SHOULD'])
+const acceptanceMetricNameSchema = z.string().trim().min(1).max(64)
+
+const acceptanceIntentBase = {
+  /** 客户端生成的意图键，回显在卡片上，便于把卡片对回意图。 */
+  key: z.string().min(1).max(64),
+  severity: acceptanceSeveritySchema.default('MUST'),
+}
+
+const acceptanceStepIntentBase = {
+  ...acceptanceIntentBase,
+  /** 在哪一步完成后的页面上检查；耗时意图为被计时的步骤。 */
+  stepId: entityIdSchema,
+}
+
+/**
+ * 一张意图卡的结构化请求。`target` 只来自人工点选；缺省时由模型按基线页面结构定位。
+ */
+export const acceptanceIntentRequestSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ ...acceptanceStepIntentBase, kind: z.literal('page_reachable'), target: targetDescriptorSchema.optional() }),
+  z.strictObject({
+    ...acceptanceStepIntentBase,
+    kind: z.literal('page_duration'),
+    maxMs: z.number().int().min(100).max(600_000),
   }),
-  operations: z.array(authoringOperationSchema).min(1).max(4),
-  candidateDigest: digestHexSchema,
-  intentCoverage: z.array(authoringIntentCoverageItemSchema),
-  diffs: z.array(authoringDiffSchema),
-  diagnostics: z.array(compileDiagnosticSchema),
-  executable: z.boolean(),
-  validation: z.strictObject({
-    schema: z.literal('passed'),
-    expansion: z.literal('passed'),
-    compiler: z.enum(['passed', 'baseline_errors']),
+  z.strictObject({
+    ...acceptanceStepIntentBase,
+    kind: z.literal('table_non_empty'),
+    target: targetDescriptorSchema.optional(),
+    metricName: acceptanceMetricNameSchema.optional(),
   }),
+  z.strictObject({
+    ...acceptanceStepIntentBase,
+    kind: z.literal('number_range'),
+    target: targetDescriptorSchema.optional(),
+    op: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']),
+    value: z.number().finite(),
+    metricName: acceptanceMetricNameSchema.optional(),
+  }),
+  z.strictObject({
+    ...acceptanceStepIntentBase,
+    kind: z.literal('text_present_or_absent'),
+    text: z.string().trim().min(1).max(256),
+    absent: z.boolean(),
+  }),
+  z.strictObject({
+    ...acceptanceStepIntentBase,
+    kind: z.literal('extract_to_report'),
+    target: targetDescriptorSchema.optional(),
+    metricName: acceptanceMetricNameSchema,
+    unit: z.string().trim().max(16).optional(),
+  }),
+  z.strictObject({
+    ...acceptanceIntentBase,
+    kind: z.literal('scenario_duration'),
+    maxMs: z.number().int().min(100).max(600_000),
+  }),
+  z.strictObject({
+    ...acceptanceIntentBase,
+    kind: z.literal('value_consistency'),
+    stepIdA: entityIdSchema,
+    stepIdB: entityIdSchema,
+    tolerance: z.number().finite().nonnegative().optional(),
+    metricName: acceptanceMetricNameSchema.optional(),
+  }),
+])
+export type AcceptanceIntentRequest = z.infer<typeof acceptanceIntentRequestSchema>
+
+export const acceptanceRequestSchema = z
+  .strictObject({
+    /** 基线调试运行；带结构采集，助手据此定位。 */
+    baselineRunId: entityIdSchema.optional(),
+    intents: z.array(acceptanceIntentRequestSchema).max(MAX_ACCEPTANCE_INTENTS).default([]),
+    description: z.string().trim().max(500).optional(),
+  })
+  .superRefine((val, ctx) => {
+    const hasIntents = val.intents.length > 0
+    const hasDescription = val.description !== undefined && val.description.trim().length > 0
+    if (!hasIntents && !hasDescription) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '验收请求必须提供 intents 列表或 description 描述之一',
+      })
+    }
+  })
+export type AcceptanceRequest = z.infer<typeof acceptanceRequestSchema>
+
+export const ACCEPTANCE_CARD_TEST_RESULTS = [
+  'FOUND',
+  'AMBIGUOUS',
+  'NOT_FOUND',
+  'SURFACE_LOST',
+  'UNTESTED',
+  /** 不涉及页面对象（如耗时），无需实测。 */
+  'NOT_REQUIRED',
+] as const
+export type AcceptanceCardTestResult = (typeof ACCEPTANCE_CARD_TEST_RESULTS)[number]
+export const acceptanceCardTestResultSchema = z.enum(ACCEPTANCE_CARD_TEST_RESULTS)
+
+export const ACCEPTANCE_CARD_BLOCK_REASONS = [
+  'STEP_NOT_FOUND',
+  'STEP_NOT_EDITABLE',
+  'NO_BASELINE_EVIDENCE',
+  'NEEDS_MANUAL_PICK',
+  'MODEL_NO_TARGET',
+  'MODEL_TARGET_UNGROUNDED',
+  'VALUE_SOURCE_MISSING',
+] as const
+export type AcceptanceCardBlockReason = (typeof ACCEPTANCE_CARD_BLOCK_REASONS)[number]
+
+export const acceptanceProposalCardSchema = z.strictObject({
+  id: z.string().min(1).max(128),
+  /** 对应请求里的意图键。 */
+  intentKey: z.string().min(1).max(64).optional(),
+  intentKind: acceptanceIntentKindSchema,
+  meaning: z.string().min(1).max(512),
+  stepId: entityIdSchema.optional(),
+  /** 依据的基线页面结构证据。 */
+  evidenceId: entityIdSchema.optional(),
+  testResult: acceptanceCardTestResultSchema.default('UNTESTED'),
+  target: targetDescriptorSchema.optional(),
+  /** 定位来源：人工点选、模型按基线结构、或由文字直接构成。 */
+  targetSource: z.enum(['manual', 'model', 'literal']).optional(),
+  /** 列表类目标允许匹配多项，实测「多项匹配」也算通过。 */
+  expectsMany: z.boolean().optional(),
+  severity: outcomeSeveritySchema.default('SHOULD'),
+  onViolation: outcomeOnViolationSchema.default('continue'),
+  operationIds: z.array(z.string().min(1).max(128)),
+  provenance: z.enum(['ai_compiled', 'manual']).default('ai_compiled'),
+  /** 不能采纳的原因；有原因时 operationIds 为空。 */
+  blockedReason: z.enum(ACCEPTANCE_CARD_BLOCK_REASONS).optional(),
+  blockedMessage: z.string().max(512).optional(),
+  /** 拼进报告结论模板的片段，如「今日订单 ${acc_rows_x} 条」。 */
+  summarySnippet: z.string().max(200).optional(),
+  /** 模型给出的定位理由，供用户判断。 */
+  rationale: z.string().max(512).optional(),
+  config: z
+    .strictObject({
+      ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration']),
+      metric: scenarioMetricDeclSchema.optional(),
+      summaryTemplateSnippet: z.string().optional(),
+      stepName: z.string().optional(),
+    })
+    .optional(),
 })
+export type AcceptanceProposalCard = z.infer<typeof acceptanceProposalCardSchema>
+
+export const proposalUnsupportedItemSchema = z.strictObject({
+  excerpt: z.string().trim().min(1).max(200),
+  reason: z.string().trim().min(1).max(256),
+})
+export type ProposalUnsupportedItem = z.infer<typeof proposalUnsupportedItemSchema>
+
+export const assistantAuthoringProposalSchema = z
+  .strictObject({
+    kind: z.literal('authoring_proposal'),
+    proposalId: entityIdSchema,
+    scenarioId: entityIdSchema,
+    base: z.strictObject({
+      draftRevision: z.number().int().nonnegative(),
+      documentDigest: digestHexSchema,
+      dependencyFingerprint: z.string().min(1).max(128),
+    }),
+    operations: z.array(authoringOperationSchema).min(1).max(24),
+    candidateDigest: digestHexSchema,
+    intentCoverage: z.array(authoringIntentCoverageItemSchema),
+    diffs: z.array(authoringDiffSchema),
+    diagnostics: z.array(compileDiagnosticSchema),
+    executable: z.boolean(),
+    validation: z.strictObject({
+      schema: z.literal('passed'),
+      expansion: z.literal('passed'),
+      compiler: z.enum(['passed', 'baseline_errors']),
+    }),
+    source: z.enum(['step', 'acceptance']).optional().default('step'),
+    cards: z.array(acceptanceProposalCardSchema).optional(),
+    unsupported: z.array(proposalUnsupportedItemSchema).optional(),
+    /** 自由描述拆解出的意图（仅 acceptance 来源填充），供面板回填为可编辑意图卡。 */
+    parsedIntents: z.array(acceptanceIntentRequestSchema).optional(),
+  })
+  .superRefine((val, ctx) => {
+    const limits = authoringOperationLimitsFor(val)
+    if (val.operations.length > limits.maxOperations) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['operations'],
+        message: `该类助手提案每轮最多支持 ${limits.maxOperations} 项操作`,
+      })
+    }
+  })
 export type AssistantAuthoringProposal = z.infer<typeof assistantAuthoringProposalSchema>
 
 

@@ -27,6 +27,9 @@ export interface StepExecutionContext {
   readonly evidencePolicy: EvidencePolicyResolution
   readonly grant: import('@cairn/shared').RunGrant
   readonly snapshot: import('@cairn/shared').RunSnapshot
+  readonly scopePath?: string
+  /** scopePath 传 null 表示取整个 Run 全部 scope 的账本（场景级全程口径）；缺省按当前 scope。 */
+  readonly loadStepStates?: (scopePath?: string | null) => Promise<import('@cairn/db').RunStepState[]>
 }
 
 export type StepExecutionOutcome =

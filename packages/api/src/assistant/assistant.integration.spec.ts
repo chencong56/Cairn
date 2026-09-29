@@ -127,7 +127,7 @@ describe('助手权限先行（真实仓储）', { timeout: 30_000 }, () => {
       revision: 1,
       baseUrl: 'http://127.0.0.1:9999',
       model: 'test-model',
-      provider: 'openai',
+      provider: 'deepseek',
       thinkingMode: 'off',
       apiKey: 'test-key',
       requestTimeoutMs: 10000,

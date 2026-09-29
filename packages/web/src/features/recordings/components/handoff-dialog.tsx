@@ -75,6 +75,15 @@ export function RecordingHandoffDialog({
   draftRevision,
 }: Props) {
   const navigate = useNavigate()
+  /** 回填只补齐了操作逻辑；引导去 Studio 补检查点与报告指标。 */
+  const acceptanceToastAction = (scenarioId: string) => ({
+    description: '录制只记住了怎么走，还没有检查点与报告指标。',
+    action: {
+      label: '补全验收',
+      onClick: () =>
+        void navigate({ to: '/scenarios/$scenarioId', params: { scenarioId }, search: { action: 'acceptance' } }),
+    },
+  })
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'existing' | 'new'>('existing')
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>('')
@@ -220,7 +229,8 @@ export function RecordingHandoffDialog({
         })
         directAttempt.current = null
         toast.success(
-          `已成功将 ${result.receipt.insertedStepIds.length} 个步骤回填至「${targetScenario?.name ?? '目标场景'}」`
+          `已成功将 ${result.receipt.insertedStepIds.length} 个步骤回填至「${targetScenario?.name ?? '目标场景'}」`,
+          acceptanceToastAction(effectiveScenarioId),
         )
       } else {
         // 普通脚本录制回填
@@ -262,7 +272,8 @@ export function RecordingHandoffDialog({
         })
         directAttempt.current = null
         toast.success(
-          `已成功将 ${result.receipt.insertedStepIds.length} 个步骤追加至「${targetScenario?.name ?? '目标场景'}」`
+          `已成功将 ${result.receipt.insertedStepIds.length} 个步骤追加至「${targetScenario?.name ?? '目标场景'}」`,
+          acceptanceToastAction(effectiveScenarioId),
         )
       }
       onOpenChange(false)
@@ -287,7 +298,7 @@ export function RecordingHandoffDialog({
         name: newScenarioName.trim(),
         expectedRevision: draftQuery.data?.revision ?? draftRevision ?? 1,
       })
-      toast.success(`新场景「${res.scenario.name}」已由录制草稿创建并完成回填`)
+      toast.success(`新场景「${res.scenario.name}」已由录制草稿创建并完成回填`, acceptanceToastAction(res.scenario.id))
       onOpenChange(false)
       void navigate({
         to: '/scenarios/$scenarioId',

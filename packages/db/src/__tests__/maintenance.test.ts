@@ -740,8 +740,6 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
       reusePolicy: 'NEW_PAGE',
       idleTtlSeconds: 600,
       maxLifetimeSeconds: 3600,
-      generation: 1,
-      fencingToken: 1,
     })
     await setSessionStatus(handle.db, {
       sessionId: session.id,

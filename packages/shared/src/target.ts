@@ -269,6 +269,7 @@ export const createTargetAccountBodySchema = z
     }
   })
 export type CreateTargetAccountBody = z.infer<typeof createTargetAccountBodySchema>
+export type CreateTargetAccountInput = z.input<typeof createTargetAccountBodySchema>
 
 export const createTargetBodySchema = z
   .strictObject({
@@ -335,6 +336,7 @@ export const updateTargetBodySchema = z
     { message: '至少提供一个要修改的字段' },
   )
 export type UpdateTargetBody = z.infer<typeof updateTargetBodySchema>
+export type UpdateTargetInput = z.input<typeof updateTargetBodySchema>
 
 export const updateTargetAccountBodySchema = z
   .strictObject({

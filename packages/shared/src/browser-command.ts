@@ -66,7 +66,7 @@ export type ExtractMany = z.infer<typeof extractManySchema>
 export const EXTRACT_AS = ['text', 'value', 'attribute'] as const
 export type ExtractAs = (typeof EXTRACT_AS)[number]
 
-export const ASSERT_KINDS = ['exists', 'visible', 'text_equals', 'text_contains', 'number_compare', 'aria_snapshot'] as const
+export const ASSERT_KINDS = ['exists', 'visible', 'text_equals', 'text_contains', 'text_absent', 'number_compare', 'aria_snapshot'] as const
 export type AssertKind = (typeof ASSERT_KINDS)[number]
 
 export const NUMBER_COMPARE_OPS = ['eq', 'gt', 'gte', 'lt', 'lte'] as const
@@ -77,6 +77,7 @@ export const assertExpectSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('visible') }),
   z.strictObject({ kind: z.literal('text_equals'), value: z.string().max(2048) }),
   z.strictObject({ kind: z.literal('text_contains'), value: z.string().min(1).max(2048) }),
+  z.strictObject({ kind: z.literal('text_absent'), value: z.string().min(1).max(2048) }),
   z.strictObject({
     kind: z.literal('number_compare'),
     op: z.enum(NUMBER_COMPARE_OPS),
@@ -88,6 +89,11 @@ export const assertExpectSchema = z.discriminatedUnion('kind', [
   }),
 ])
 export type AssertExpect = z.infer<typeof assertExpectSchema>
+
+/** 不带页面对象、按整页判定的断言：快照匹配、整页出现 / 不出现某段文字。编译与执行共用这一口径。 */
+export function isPageLevelAssertExpect(expect: Pick<AssertExpect, 'kind'>): boolean {
+  return expect.kind === 'aria_snapshot' || expect.kind === 'text_absent' || expect.kind === 'text_contains'
+}
 
 /**
  * 纯文本脱敏处理：离开 Worker 内存的快照文本一律脱敏

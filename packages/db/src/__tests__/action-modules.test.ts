@@ -46,7 +46,7 @@ describe('AM-A: 动作模块数据库持久化 (A3)', { timeout: 30_000 }, () =>
       {
         loginFields: null, authMethod: 'manual', captchaMode: 'none', status: 'active',
         name: '测试目标1',
-        code: `T1_${newId().slice(0, 8)}`,
+        code: `t1-${newId().slice(0, 8)}`,
         entryUrl: 'https://example.com/app',
       },
       account,
@@ -56,7 +56,7 @@ describe('AM-A: 动作模块数据库持久化 (A3)', { timeout: 30_000 }, () =>
       {
         loginFields: null, authMethod: 'manual', captchaMode: 'none', status: 'active',
         name: '测试目标2',
-        code: `T2_${newId().slice(0, 8)}`,
+        code: `t2-${newId().slice(0, 8)}`,
         entryUrl: 'https://example.com/app2',
       },
       account,

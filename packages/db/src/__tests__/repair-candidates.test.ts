@@ -39,7 +39,7 @@ describe.each(DRIVERS)('%s Repair Candidates Repository (Integration)', (driver)
 
   const sampleDoc: ScenarioDocument = {
     schemaVersion: 1,
-    title: 'Repair Scenario Doc',
+    inputs: [],
     steps: [
       {
         id: stepId,
@@ -266,7 +266,6 @@ describe.each(DRIVERS)('%s Repair Candidates Repository (Integration)', (driver)
     // 1. First observation -> creates candidate
     const cand1 = await (handle.db as any).transaction(async (tx: any) => {
       return createOrUpdateRepairCandidateTx(tx, {
-        candidateId: `rep_d1_${newId().slice(0, 8)}`,
         scenarioId,
         runId: run1Id,
         sourceAttemptId,
@@ -291,7 +290,6 @@ describe.each(DRIVERS)('%s Repair Candidates Repository (Integration)', (driver)
     // 2. Second observation with same dedupeKey -> increments observationCount
     const cand2 = await (handle.db as any).transaction(async (tx: any) => {
       return createOrUpdateRepairCandidateTx(tx, {
-        candidateId: `rep_d2_${newId().slice(0, 8)}`,
         scenarioId,
         runId: run2Id,
         sourceAttemptId,
@@ -326,7 +324,6 @@ describe.each(DRIVERS)('%s Repair Candidates Repository (Integration)', (driver)
     // 4. Third observation after rejection -> increments rejectedObservationCount
     const cand3 = await (handle.db as any).transaction(async (tx: any) => {
       return createOrUpdateRepairCandidateTx(tx, {
-        candidateId: `rep_d3_${newId().slice(0, 8)}`,
         scenarioId,
         runId: run3Id,
         sourceAttemptId,
@@ -352,7 +349,6 @@ describe.each(DRIVERS)('%s Repair Candidates Repository (Integration)', (driver)
     // 5. Reopen candidate -> resets rejectedObservationCount and transitions to proposed
     const reopened = await reopenRepairCandidate(handle.db, cand1.id, {
       actor: accountId,
-      comment: '重新评估后放行',
     })
     expect(reopened.status).toBe('proposed')
     expect(reopened.rejectedObservationCount).toBe(0)
@@ -425,7 +421,7 @@ describe.each(DRIVERS)('%s Repair Candidates Repository (Integration)', (driver)
     const [draft] = await (handle.db as any)
       .select()
       .from(scenarioDrafts)
-      .where(schemaFor((handle.db as any)).scenarioDrafts.scenarioId === scenarioId)
+      .where(eq(schemaFor((handle.db as any)).scenarioDrafts.scenarioId, scenarioId))
       .limit(1)
 
     // Update draft document with modified target

@@ -8,6 +8,7 @@ import {
   verifyInternalHeaders,
 } from '@cairn/shared'
 import { currentInternalForwards } from '../common/process-gauges'
+import { config } from '../config/env.js'
 import { WorkerForwardError, WorkerInternalClient } from './worker-internal.client'
 
 const call = {
@@ -47,7 +48,7 @@ describe('WorkerInternalClient', () => {
         redirect: 'error',
       }),
     )
-    const init = fetchMock.mock.calls[0]![1] as RequestInit
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1]
     expect((init.signal as AbortSignal).aborted).toBe(false)
   })
 
@@ -61,7 +62,6 @@ describe('WorkerInternalClient', () => {
     const parsed = new URL(url)
     expect(parsed.searchParams.get('pageId')).toBe('page-2')
     const headers = init.headers as Record<string, string>
-    const { config } = await import('../config/env')
     const ok = await verifyInternalHeaders(requireInternalSecret(config.CAIRN_INTERNAL_AUTH_SECRET), {
       method: 'GET',
       path: parsed.pathname,
@@ -92,7 +92,7 @@ describe('WorkerInternalClient', () => {
       }),
     )
     const client = new WorkerInternalClient()
-    const error = await client
+    const error: any = await client
       .requestJson({
         ...call,
         method: 'POST',
@@ -153,7 +153,7 @@ describe('WorkerInternalClient', () => {
     const caller = new AbortController()
     const streamed = await client.requestStream({ ...call, method: 'GET', timeout: 'stream', path: '/internal/managed-browser/frames' }, caller.signal)
     await streamed.text()
-    const init = fetchMock.mock.calls[0]![1] as RequestInit & { headersTimeout?: number; bodyTimeout?: number }
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit & { headersTimeout?: number; bodyTimeout?: number }])[1]
     expect(init.signal).toBe(caller.signal)
     expect(init.redirect).toBe('error')
     expect(init.headersTimeout).toBe(10_000)

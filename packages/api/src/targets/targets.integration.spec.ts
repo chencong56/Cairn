@@ -127,7 +127,7 @@ describe('TargetsService（集成，隔离 PostgreSQL）', () => {
     )
     const created = await service.createAccount(
       target.id,
-      { displayName: '甲', username: 'alice', password: 'first-secret', status: 'active' },
+      { displayName: '甲', username: 'alice', password: 'first-secret', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
     expect(created.hasPassword).toBe(true)
@@ -143,7 +143,7 @@ describe('TargetsService（集成，隔离 PostgreSQL）', () => {
     await service.updateAccount(
       target.id,
       created.id,
-      { password: 'second-secret' },
+      { password: 'second-secret', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
     const rotated = await handle.db
@@ -180,7 +180,7 @@ describe('TargetsService（集成，隔离 PostgreSQL）', () => {
     )
     const created = await service.createAccount(
       target.id,
-      { displayName: '丙', username: 'carol', password: 'temp-secret', status: 'active' },
+      { displayName: '丙', username: 'carol', password: 'temp-secret', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
     const [row] = await handle.db
@@ -241,7 +241,7 @@ describe('TargetsService（集成，隔离 PostgreSQL）', () => {
         captchaMode: 'none',
         status: 'active',
         loginFields: { username: { by: 'id', value: 'username' } },
-        account: { displayName: '演示', username: 'demo', password: 'bundle-secret', status: 'active' },
+        account: { displayName: '演示', username: 'demo', password: 'bundle-secret', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       },
       actor,
     )

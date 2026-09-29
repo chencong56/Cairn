@@ -243,10 +243,9 @@ describe('GET /platform-health', () => {
     })
 
     const degradedHintApp = await buildApp(stubDb(async () => true), {
+      ...unusedChangeHint,
       realtime: true,
       ping: async () => false,
-      publish: async () => {},
-      subscribe: async () => () => {},
     })
 
     try {

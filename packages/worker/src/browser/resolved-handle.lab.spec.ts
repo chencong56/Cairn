@@ -4,26 +4,13 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { cssViewportPoint } from './resolved-handle.js'
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launch timeout')), 8_000)),
-    ])
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 describe('点到元素坐标 × dpr=2', { timeout: 60_000 }, () => {
   let hasBrowser = false
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
   })
 
   afterAll(() => undefined)
@@ -43,11 +30,13 @@ describe('点到元素坐标 × dpr=2', { timeout: 60_000 }, () => {
       const screenshotCenter: [number, number] = [cssCenter.x * 2, cssCenter.y * 2]
       const converted = cssViewportPoint(screenshotCenter, 2)
       const hit = await page.evaluate(({ x, y }) => {
-        const el = document.elementFromPoint(x, y) as HTMLElement | null
+        const doc = (globalThis as any).document
+        const el = doc.elementFromPoint(x, y)
         return el?.id ?? el?.tagName ?? null
       }, converted)
       const rawHit = await page.evaluate(({ x, y }) => {
-        const el = document.elementFromPoint(x, y) as HTMLElement | null
+        const doc = (globalThis as any).document
+        const el = doc.elementFromPoint(x, y)
         return el?.id ?? el?.tagName ?? null
       }, { x: screenshotCenter[0], y: screenshotCenter[1] })
       expect(hit).toBe('go')

@@ -11,6 +11,7 @@ import { schemaFor } from '../native.js'
 import { newId } from '../id.js'
 import { forceGrantForRun, seedWorker } from './lease-harness.js'
 import { TargetsStore } from '../console/targets.js'
+import type { PersistenceActor } from '../console/actor.js'
 import { getOrCreatePlatformConfig, updatePlatformConfig } from '../platform-config/store.js'
 import {
   abandonSessionKeepAlive,
@@ -51,12 +52,21 @@ const echoStep: Step = {
 describe.each(DRIVERS)('%s 认证驱动保活', { timeout: 60_000 }, (driver) => {
   let handle: Awaited<ReturnType<typeof openContractDb>>
   let actorId: string
+  let actor: PersistenceActor
   let targetId: string
 
   beforeAll(async () => {
     handle = await openContractDb(driver, `adr_${Date.now().toString(36)}`)
     const { consoleAccounts, targets, consoleRoles, consoleAccountRoles } = schemaFor(handle.db)
     actorId = newId()
+    actor = {
+      id: actorId,
+      displayName: 'adr',
+      email: `adr-${actorId}@example.com`,
+      status: 'active',
+      roles: [{ id: newId(), key: 'admin', name: 'Admin', kind: 'system' }],
+      permissions: ['*'],
+    }
     targetId = newId()
     await handle.db.insert(consoleAccounts).values({
       id: actorId,
@@ -305,7 +315,7 @@ describe.each(DRIVERS)('%s 认证驱动保活', { timeout: 60_000 }, (driver) =>
     const dto = await store.getTarget(targetId)
     expect(dto.sessionPolicy).toEqual({ reclaim: 'IDLE' })
     expect(dto.effectiveSessionPolicy?.reclaim).toBe('IDLE')
-    await store.updateSessionPolicy(targetId, { reclaim: null, idleTtlSeconds: 1200 }, { id: actorId })
+    await store.updateSessionPolicy(targetId, { reclaim: null, idleTtlSeconds: 1200 }, actor)
     const updated = await store.getTarget(targetId)
     expect(updated.sessionPolicy).toEqual({ idleTtlSeconds: 1200 })
     expect(updated.effectiveSessionPolicy?.idleTtlSeconds).toBe(1200)
@@ -408,7 +418,7 @@ describe.each(DRIVERS)('%s 认证驱动保活', { timeout: 60_000 }, (driver) =>
     })
     const prepared = await claimSessionOperation(handle.db, { workerId, instanceId, leaseTtlSeconds: 60 })
     expect(prepared?.session).toBeTruthy()
-    const preparedSession = prepared!.session
+    const preparedSession = prepared!.session!
     await setSessionStatus(handle.db, {
       sessionId: preparedSession.id,
       expectedVersion: preparedSession.version,
@@ -817,7 +827,7 @@ describe.each(DRIVERS)('%s 认证驱动保活', { timeout: 60_000 }, (driver) =>
 
   it('无主动检测时不能把回收模式改成 AUTH_DRIVEN', async () => {
     const store = new TargetsStore(registerFixture(handle), () => Buffer.from('fixture'))
-    await expect(store.updateSessionPolicy(targetId, { reclaim: 'AUTH_DRIVEN' }, { id: actorId })).rejects.toMatchObject({
+    await expect(store.updateSessionPolicy(targetId, { reclaim: 'AUTH_DRIVEN' }, actor)).rejects.toMatchObject({
       code: 'AUTH_PROFILE_REQUIRED',
     })
   })

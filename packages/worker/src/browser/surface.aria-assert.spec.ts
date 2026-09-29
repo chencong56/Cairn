@@ -1,27 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { executeOnPage } from './surface.js'
 import type { BrowserCommand } from '@cairn/shared'
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launch timeout')), 8_000)),
-    ])
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 describe('TC-PAS-A06 & TC-PAS-A07: 确定性 aria_snapshot 断言执行与失败 Diff 证据', () => {
   let hasBrowser = false
   let browser: import('playwright').Browser | undefined
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
     if (hasBrowser) {
       const { chromium } = await import('playwright')
       browser = await chromium.launch({ headless: true })

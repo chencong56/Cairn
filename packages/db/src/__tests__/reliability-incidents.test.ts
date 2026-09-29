@@ -294,9 +294,8 @@ describe.each(DRIVERS)('%s reliability incident triage domain operations', (driv
 
     await handle.db.insert(t.consoleAccounts).values({
       id: actorId,
-      username: `triager-${actorId.slice(0, 8)}`,
+      email: `${actorId}@test.invalid`,
       displayName: '受限分诊员',
-      passwordHash: 'hash',
       status: 'active',
     })
     await handle.db.insert(t.consoleRoles).values({ id: roleId, key: `triager-${roleId}`, name: '受限分诊' })

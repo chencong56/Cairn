@@ -70,6 +70,7 @@ export const createBatchBodySchema = z.strictObject({
   resetPageBetweenItems: z.boolean().default(true),
 })
 export type CreateBatchBody = z.infer<typeof createBatchBodySchema>
+export type CreateBatchInput = z.input<typeof createBatchBodySchema>
 
 export const batchDetailSchema = z.strictObject({
   id: entityIdSchema,

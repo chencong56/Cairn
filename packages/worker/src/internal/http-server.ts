@@ -13,6 +13,7 @@ import {
   observeOperationSchema,
   requireInternalSecret,
   resumeAuthBodySchema,
+  structureObservationSchema,
   targetObservationSchema,
   verifyInternalHeaders,
   verifyNodeHealthHeaders,
@@ -207,11 +208,11 @@ async function handleRequest(
   }
   if (req.method === 'POST' && url.pathname === workerInternalPath('/observe')) {
     const body = observeOperationSchema.parse(raw ? JSON.parse(raw) : {})
-    writeJson(
-      res,
-      200,
-      targetObservationSchema.parse(await ctx.sessions.observeRun({ runId, actorId, op: body })),
-    )
+    const result = await ctx.sessions.observeRun({ runId, actorId, op: body })
+    const parsed = body.op === 'structure'
+      ? structureObservationSchema.parse(result)
+      : targetObservationSchema.parse(result)
+    writeJson(res, 200, parsed)
     return
   }
   if (req.method === 'POST' && url.pathname === workerRunsInternalPath('/debug-resume')) {

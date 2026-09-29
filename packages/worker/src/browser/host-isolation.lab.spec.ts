@@ -9,17 +9,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Browser, BrowserContext, Page } from 'playwright'
 import { installTargetScope, installedScopeAllows } from './target-scope.js'
-
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] })
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 function listen(server: Server): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -45,7 +35,7 @@ describe('Host Context Isolation Lab (§8.2)', { timeout: 120_000 }, () => {
   let cachedRequestCount = 0
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
     if (!hasBrowser) return
 
     tempDir = mkdtempSync(join(tmpdir(), 'cairn-host-lab-'))
@@ -230,7 +220,7 @@ describe('Host Context Isolation Lab (§8.2)', { timeout: 120_000 }, () => {
       // IndexedDB
       await p1.evaluate(async () => {
         return new Promise<void>((resolve, reject) => {
-          const req = indexedDB.open('test_db', 1)
+          const req = (globalThis as any).indexedDB.open('test_db', 1)
           req.onupgradeneeded = () => {
             req.result.createObjectStore('entries', { keyPath: 'id' })
           }
@@ -248,7 +238,7 @@ describe('Host Context Isolation Lab (§8.2)', { timeout: 120_000 }, () => {
 
       const p2DbVal = await p2.evaluate(async () => {
         return new Promise<string | null>((resolve) => {
-          const req = indexedDB.open('test_db', 1)
+          const req = (globalThis as any).indexedDB.open('test_db', 1)
           req.onupgradeneeded = () => {
             req.result.createObjectStore('entries', { keyPath: 'id' })
           }
@@ -270,14 +260,14 @@ describe('Host Context Isolation Lab (§8.2)', { timeout: 120_000 }, () => {
 
       // Cache Storage
       await p1.evaluate(async () => {
-        const cache = await caches.open('v1')
+        const cache = await (globalThis as any).caches.open('v1')
         await cache.put('/data', new Response('cache_alice'))
       })
 
       const p2HasCache = await p2.evaluate(async () => {
-        const has = await caches.has('v1')
+        const has = await (globalThis as any).caches.has('v1')
         if (!has) return null
-        const cache = await caches.open('v1')
+        const cache = await (globalThis as any).caches.open('v1')
         const res = await cache.match('/data')
         return res ? await res.text() : null
       })

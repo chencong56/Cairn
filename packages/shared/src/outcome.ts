@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { assertExpectSchema } from './browser-command.js'
-import { aiInstructionSchema } from './step.js'
+import { aiInstructionSchema, contextExpectSchema, contextKeySchema } from './step.js'
+import { outputFieldNameSchema } from './output-schema.js'
 import { targetDescriptorSchema } from './target-descriptor.js'
 import { entityIdSchema, jsonValueSchema, utcInstantSchema, type JsonValue } from './wire.js'
 import type { StepSkipReason, StepRunStatus } from './run.js'
@@ -101,9 +102,34 @@ export const outcomeAiRuleSchema = z.strictObject({
 })
 export type OutcomeAiRule = z.infer<typeof outcomeAiRuleSchema>
 
+export const outcomeContextRuleSchema = z.strictObject({
+  kind: z.literal('context'),
+  key: contextKeySchema,
+  field: outputFieldNameSchema.optional(),
+  expect: contextExpectSchema,
+})
+export type OutcomeContextRule = z.infer<typeof outcomeContextRuleSchema>
+
+export const outcomeStepDurationRuleSchema = z.strictObject({
+  kind: z.literal('step_duration'),
+  op: z.enum(['lte', 'lt']),
+  valueMs: z.number().int().nonnegative(),
+})
+export type OutcomeStepDurationRule = z.infer<typeof outcomeStepDurationRuleSchema>
+
+export const outcomeRunDurationRuleSchema = z.strictObject({
+  kind: z.literal('run_duration'),
+  op: z.enum(['lte', 'lt']),
+  valueMs: z.number().int().nonnegative(),
+})
+export type OutcomeRunDurationRule = z.infer<typeof outcomeRunDurationRuleSchema>
+
 export const outcomeRuleSchema = z.discriminatedUnion('kind', [
   outcomeDeterministicRuleSchema,
   outcomeAiRuleSchema,
+  outcomeContextRuleSchema,
+  outcomeStepDurationRuleSchema,
+  outcomeRunDurationRuleSchema,
 ])
 export type OutcomeRule = z.infer<typeof outcomeRuleSchema>
 
@@ -118,6 +144,27 @@ export const outcomeContractSchema = z
     rule: outcomeRuleSchema,
   })
   .superRefine((contract, ctx) => {
+    if (contract.rule.kind === 'step_duration' && contract.scope !== 'step') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rule', 'kind'],
+        message: '步骤耗时条件只能挂在具体步骤上，不能作为场景级条件',
+      })
+    }
+    if (contract.rule.kind === 'run_duration' && contract.scope !== 'scenario') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rule', 'kind'],
+        message: '运行耗时条件只能作为场景级条件，不能挂在具体步骤上',
+      })
+    }
+    if (contract.rule.kind === 'run_duration' && contract.onViolation === 'halt') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['onViolation'],
+        message: '运行耗时条件不允许配置 halt，只能配置 continue',
+      })
+    }
     if ((contract.severity === 'SHOULD' || contract.severity === 'INFO') && contract.onViolation === 'halt') {
       ctx.addIssue({
         code: 'custom',

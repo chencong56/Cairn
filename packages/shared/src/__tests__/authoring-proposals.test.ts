@@ -7,6 +7,11 @@ import {
   dataMappingProposalSchema,
   SYNC_PREFLIGHT_MAX_ROWS,
   applyDemonstrationBodySchema,
+  ACCEPTANCE_CARD_BLOCK_REASONS,
+  acceptanceIntentRequestSchema,
+  acceptanceProposalCardSchema,
+  acceptanceRequestSchema,
+  assistantAuthoringProposalSchema,
 } from '../index.js'
 
 describe('Authoring proposals schemas (AI-03 Phase 1)', () => {
@@ -183,5 +188,97 @@ describe('Authoring proposals schemas (AI-03 Phase 1)', () => {
     }
     const parsedMapping = dataMappingProposalSchema.parse(mapping)
     expect(parsedMapping.confidence).toBe(0.95)
+  })
+})
+
+describe('验收意图契约（二期）', () => {
+  it('scenario_duration 意图不需要 stepId，value_consistency 要求 stepIdA/stepIdB', () => {
+    expect(
+      acceptanceIntentRequestSchema.parse({
+        key: 'q1',
+        kind: 'scenario_duration',
+        maxMs: 30_000,
+        severity: 'SHOULD',
+      }),
+    ).toMatchObject({ kind: 'scenario_duration', maxMs: 30_000 })
+
+    expect(
+      acceptanceIntentRequestSchema.parse({
+        key: 'q2',
+        kind: 'value_consistency',
+        stepIdA: '11111111-1111-4111-8111-111111111111',
+        stepIdB: '22222222-2222-4222-8222-222222222222',
+        severity: 'MUST',
+        tolerance: 5,
+        metricName: '余额对账差额',
+      }),
+    ).toMatchObject({ kind: 'value_consistency', tolerance: 5 })
+
+    // value_consistency 缺少比对步骤应被拒绝
+    expect(
+      acceptanceIntentRequestSchema.safeParse({
+        key: 'q3',
+        kind: 'value_consistency',
+        severity: 'MUST',
+      }).success,
+    ).toBe(false)
+  })
+
+  it('acceptanceRequestSchema 允许仅 description（≤500），但 intents 与 description 至少其一', () => {
+    expect(
+      acceptanceRequestSchema.parse({
+        description: '订单列表必须有数据，全程不超过 1 分钟',
+      }),
+    ).toMatchObject({ description: '订单列表必须有数据，全程不超过 1 分钟' })
+
+    expect(acceptanceRequestSchema.safeParse({ description: '' }).success).toBe(false)
+    expect(acceptanceRequestSchema.safeParse({ description: 'x'.repeat(501) }).success).toBe(false)
+  })
+
+  it('方案卡 stepId 可选且 ruleKind 支持 run_duration；VALUE_SOURCE_MISSING 在拦下原因枚举中', () => {
+    expect(ACCEPTANCE_CARD_BLOCK_REASONS).toContain('VALUE_SOURCE_MISSING')
+    const card = acceptanceProposalCardSchema.parse({
+      id: 'card-1',
+      intentKind: 'scenario_duration',
+      meaning: '全程耗时不超过 30秒',
+      severity: 'MUST',
+      operationIds: ['op-1'],
+      config: { ruleKind: 'run_duration' },
+    })
+    expect(card.stepId).toBeUndefined()
+  })
+
+  it('提案可携带 parsedIntents 回填与 unsupported', () => {
+    const base = {
+      kind: 'authoring_proposal' as const,
+      proposalId: '11111111-1111-4111-8111-111111111111',
+      scenarioId: '22222222-2222-4222-8222-222222222222',
+      base: {
+        draftRevision: 1,
+        documentDigest: 'a'.repeat(64),
+        dependencyFingerprint: 'sc:1',
+      },
+      operations: [
+        {
+          kind: 'set_outputs' as const,
+          id: 'op-1',
+          metrics: [{ key: 'run_ms', name: '全程耗时', fromRunDuration: true }],
+        },
+      ],
+      candidateDigest: 'b'.repeat(64),
+      intentCoverage: [],
+      diffs: [],
+      diagnostics: [],
+      executable: true,
+      validation: { schema: 'passed' as const, expansion: 'passed' as const, compiler: 'passed' as const },
+      source: 'acceptance' as const,
+      unsupported: [{ excerpt: '发飞书消息', reason: '暂不支持发送通知' }],
+      parsedIntents: [
+        { key: 'q1', kind: 'scenario_duration', maxMs: 60_000, severity: 'SHOULD' },
+      ],
+    }
+    expect(assistantAuthoringProposalSchema.parse(base)).toMatchObject({
+      parsedIntents: [{ kind: 'scenario_duration' }],
+    })
   })
 })

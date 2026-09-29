@@ -168,6 +168,7 @@ export const suiteDocumentSchema = z
     }
   })
 export type SuiteDocument = z.infer<typeof suiteDocumentSchema>
+export type SuiteDocumentInput = z.input<typeof suiteDocumentSchema>
 
 export function allSuiteMembers(document: SuiteDocument): SuiteMember[] {
   if (document.stages && document.stages.length > 0) {
@@ -475,6 +476,7 @@ export const createSuiteBodySchema = z.strictObject({
   document: suiteDocumentSchema.optional(),
 })
 export type CreateSuiteBody = z.infer<typeof createSuiteBodySchema>
+export type CreateSuiteInput = z.input<typeof createSuiteBodySchema>
 
 export const saveSuiteDraftBodySchema = z.strictObject({
   expectedRevision: z.number().int().positive(),
@@ -483,6 +485,7 @@ export const saveSuiteDraftBodySchema = z.strictObject({
   document: suiteDocumentSchema,
 })
 export type SaveSuiteDraftBody = z.infer<typeof saveSuiteDraftBodySchema>
+export type SaveSuiteDraftInput = z.input<typeof saveSuiteDraftBodySchema>
 
 export const publishSuiteBodySchema = z.strictObject({
   expectedRevision: z.number().int().positive(),

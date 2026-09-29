@@ -130,11 +130,12 @@ describe('规则化表面采集', () => {
     const matches = (node: Record<string, unknown>, selector: string) => {
       const tag = String(node.tagName ?? '')
       const cls = String(node.className ?? '')
-      const role = typeof node.getAttribute === 'function' ? node.getAttribute('role') : null
+      const getAttr = typeof node.getAttribute === 'function' ? (name: string) => (node.getAttribute as (k: string) => unknown)(name) : () => null
+      const role = getAttr('role')
       if (selector === 'nav') return tag === 'NAV'
       if (selector.startsWith('[role="')) return role === selector.slice(7, -2)
       if (selector.startsWith('[class*="')) return cls.includes(selector.slice(9, -2))
-      if (selector === 'a[href]') return tag === 'A' && Boolean(node.getAttribute?.('href'))
+      if (selector === 'a[href]') return tag === 'A' && Boolean(getAttr('href'))
       if (selector === 'button') return tag === 'BUTTON'
       if (selector === 'h1' || selector === 'h2' || selector === 'h3') return tag === selector.toUpperCase()
       if (selector === 'header' || selector === 'main' || selector === 'aside' || selector === 'footer' || selector === 'form') {

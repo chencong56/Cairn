@@ -40,26 +40,28 @@ describe('角色成员关联 (RbacStore role accounts)', { timeout: 30_000 }, ()
       password: 'password123',
       status: 'active',
       roleIds: [adminRole!.id],
-    })
+    }, null)
     const admin2 = await rbac.createAccount({
       displayName: 'Admin Two',
       email: 'admin2@cairn.dev',
       password: 'password123',
       status: 'active',
       roleIds: [adminRole!.id],
-    })
+    }, null)
     const normalUser = await rbac.createAccount({
       displayName: 'Normal User',
       email: 'user@cairn.dev',
       password: 'password123',
       status: 'active',
       roleIds: [operatorRole!.id],
-    })
+    }, null)
 
     const actor = {
       id: admin1.id,
       displayName: admin1.displayName,
       email: admin1.email,
+      status: 'active' as const,
+      roles: [],
       permissions: [...PERMISSIONS],
     }
 
@@ -86,7 +88,7 @@ describe('角色成员关联 (RbacStore role accounts)', { timeout: 30_000 }, ()
 
     const searchRes = await rbac.listRoleAccounts(operatorRole!.id, { search: 'Admin Two' })
     expect(searchRes.items).toHaveLength(1)
-    expect(searchRes.items[0].displayName).toBe('Admin Two')
+    expect(searchRes.items[0]!.displayName).toBe('Admin Two')
 
     // 4. 从 operator 角色移出 admin2
     const removeOp = await rbac.removeRoleAccounts(

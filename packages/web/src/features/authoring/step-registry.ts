@@ -50,6 +50,8 @@ export const STEP_TYPE_LABELS: Record<ExecutableStepType, string> = {
   ai_extract: 'AI 提取',
   ai_assert: 'AI 判断',
   verify_context: '核验上下文',
+  check_context: '上下文检查',
+  check_duration: '耗时检查',
   map_ingest: '地图采集',
   loop: '循环头',
 }
@@ -76,6 +78,8 @@ export const STEP_TYPE_HINTS: Record<ExecutableStepType, string> = {
   ai_extract: '先尝试 Aria 文本分析（需启用），未命中可回退视觉模型；需要视觉模型就绪',
   ai_assert: '先尝试 Aria 文本判断（需启用），未命中可回退视觉模型；需要视觉模型就绪',
   verify_context: '系统步骤：核验执行上下文',
+  check_context: '系统步骤：核验执行上下文变量',
+  check_duration: '系统步骤：核验步骤执行耗时',
   map_ingest: '系统步骤：采集目标系统的知识地图',
 }
 

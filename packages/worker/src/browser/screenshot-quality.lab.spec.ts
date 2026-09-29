@@ -5,6 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { pageLooksLoading, waitForVisibleContent, waitWhileLoading } from './screenshot-quality.js'
+import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 /** 带顶栏文字 + 整页加载遮罩的壳层，遮罩 300ms 后自行移除，模拟真实 SPA 首屏。 */
 const SHELL_WITH_DELAYED_CONTENT = `<!doctype html><html><body style="margin:0">
@@ -17,25 +18,11 @@ const SHELL_WITH_DELAYED_CONTENT = `<!doctype html><html><body style="margin:0">
   <script>setTimeout(() => document.getElementById('mask').remove(), 300)</script>
 </body></html>`
 
-async function chromiumAvailable(): Promise<boolean> {
-  try {
-    const { chromium } = await import('playwright')
-    const browser = await Promise.race([
-      chromium.launch({ headless: true }),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launch timeout')), 8_000)),
-    ])
-    await browser.close()
-    return true
-  } catch {
-    return false
-  }
-}
-
 describe('pageLooksLoading × 真实 Chromium', { timeout: 60_000 }, () => {
   let hasBrowser = false
 
   beforeAll(async () => {
-    hasBrowser = await chromiumAvailable()
+    hasBrowser = await isChromiumAvailableCached()
   })
 
   afterAll(() => undefined)

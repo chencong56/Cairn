@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import {
   classifyLoginSubmitText,
   decodeOcrOutput,
@@ -15,7 +14,7 @@ import {
   slideMatch,
 } from '../index.js'
 
-const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures')
+const fixturesDir = path.join(__dirname, 'fixtures')
 
 describe('ddddocr charset range', () => {
   it('maps official integer presets to digits and letters', () => {

@@ -29,6 +29,8 @@ describe('OC-A: 编写展开与契约派生 (expand-outcome)', () => {
           'ai_assert',
           'ai_action',
           'echo',
+          'check_context',
+          'check_duration',
         ],
       },
     }
@@ -462,5 +464,164 @@ describe('OC-A: 编写展开与契约派生 (expand-outcome)', () => {
       authoringDocument: doc,
     })
     expect(derivedAtRunCreation?.entries.map((entry) => entry.stepId)).toEqual([enabledAssert.id])
+  })
+
+  it('OCA-EXP-08: context 规则派生 check_context 检查步骤并绑定 sourceStepId', () => {
+    const contextContract: OutcomeContract = {
+      id: '20000000-0000-4000-8000-000000000010',
+      scope: 'step',
+      meaning: '订单行数必须大于 0',
+      severity: 'MUST',
+      onViolation: 'halt',
+      provenance: 'ai_compiled',
+      rule: {
+        kind: 'context',
+        key: 'order_count',
+        expect: { kind: 'number_compare', op: 'gt', value: 0 },
+      },
+    }
+
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
+      schemaVersion: 1,
+      inputs: [],
+      nodes: [
+        { kind: 'step', step: navigateStep },
+        { kind: 'step', step: clickStep, outcomes: [contextContract] },
+      ],
+    }
+
+    const expanded = expandAuthoringDocument(doc, makeContext())
+    expect(expanded.diagnostics.filter((item) => item.severity === 'error')).toEqual([])
+    const derivedId = deterministicStepId(clickStep.id, contextContract.id)
+    const derived = expanded.definition?.steps.find((step) => step.id === derivedId)
+    expect(derived).toBeDefined()
+    expect(derived?.type).toBe('check_context')
+    expect(derived?.effectType).toBe('READ_ONLY')
+    expect(derived?.input).toEqual({
+      key: 'order_count',
+      expect: { kind: 'number_compare', op: 'gt', value: 0 },
+    })
+
+    const entry = expanded.outcomeManifest?.entries.find((e) => e.contractId === contextContract.id)
+    expect(entry).toBeDefined()
+    expect(entry?.stepId).toBe(derivedId)
+    expect(entry?.sourceStepId).toBe(clickStep.id)
+  })
+
+  it('OCA-EXP-09: step_duration 规则派生 check_duration 检查步骤并记录耗时阈值与 sourceStepId', () => {
+    const durationContract: OutcomeContract = {
+      id: '20000000-0000-4000-8000-000000000020',
+      scope: 'step',
+      meaning: '页面加载耗时必须在 3 秒内',
+      severity: 'MUST',
+      onViolation: 'halt',
+      provenance: 'ai_compiled',
+      rule: {
+        kind: 'step_duration',
+        op: 'lte',
+        valueMs: 3000,
+      },
+    }
+
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
+      schemaVersion: 1,
+      inputs: [],
+      nodes: [
+        { kind: 'step', step: navigateStep, outcomes: [durationContract] },
+      ],
+    }
+
+    const expanded = expandAuthoringDocument(doc, makeContext())
+    expect(expanded.diagnostics.filter((item) => item.severity === 'error')).toEqual([])
+    const derivedId = deterministicStepId(navigateStep.id, durationContract.id)
+    const derived = expanded.definition?.steps.find((step) => step.id === derivedId)
+    expect(derived).toBeDefined()
+    expect(derived?.type).toBe('check_duration')
+    expect(derived?.effectType).toBe('READ_ONLY')
+    expect(derived?.input).toEqual({
+      sourceStepId: navigateStep.id,
+      op: 'lte',
+      valueMs: 3000,
+    })
+
+    const entry = expanded.outcomeManifest?.entries.find((e) => e.contractId === durationContract.id)
+    expect(entry).toBeDefined()
+    expect(entry?.stepId).toBe(derivedId)
+    expect(entry?.sourceStepId).toBe(navigateStep.id)
+  })
+
+  it('OCA-EXP-10: 挂在 assert 步骤上的 context 条件也派生独立检查步骤，不沿用宿主断言结果', () => {
+    const assertStep: Step = {
+      id: '10000000-0000-4000-8000-000000000004',
+      name: '检查列表标题',
+      type: 'assert',
+      effectType: 'READ_ONLY',
+      input: {
+        target: { framePath: [], candidates: [{ by: 'css', value: 'h1' }] },
+        expect: { kind: 'visible' },
+      },
+    }
+    const contextContract: OutcomeContract = {
+      id: '20000000-0000-4000-8000-000000000030',
+      scope: 'step',
+      meaning: '订单行数大于 0',
+      severity: 'MUST',
+      onViolation: 'continue',
+      provenance: 'ai_compiled',
+      rule: { kind: 'context', key: 'order_count', expect: { kind: 'number_compare', op: 'gt', value: 0 } },
+    }
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
+      schemaVersion: 1,
+      inputs: [],
+      nodes: [
+        { kind: 'step', step: navigateStep },
+        { kind: 'step', step: assertStep, outcomes: [contextContract] },
+      ],
+    }
+
+    const expanded = expandAuthoringDocument(doc, makeContext())
+    const derivedId = deterministicStepId(assertStep.id, contextContract.id)
+    expect(expanded.definition?.steps.find((step) => step.id === derivedId)?.type).toBe('check_context')
+    const entry = expanded.outcomeManifest?.entries.find((e) => e.contractId === contextContract.id)
+    expect(entry?.stepId).toBe(derivedId)
+    expect(entry?.sourceStepId).toBe(assertStep.id)
+
+    const manifest = deriveOutcomeManifest({ authoringDocument: doc })
+    expect(manifest?.entries.find((e) => e.contractId === contextContract.id)?.stepId).toBe(derivedId)
+  })
+})
+
+describe('OCA-EXP（二期）：run_duration 场景级派生', () => {
+  it('run_duration 契约派生 check_duration{runTotal:true} 检查步骤', () => {
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
+      schemaVersion: 1,
+      inputs: [],
+      nodes: [
+        { kind: 'step', step: navigateStep },
+        { kind: 'step', step: clickStep },
+      ],
+      scenarioOutcomes: [
+        {
+          id: '20000000-0000-4000-8000-000000000030',
+          scope: 'scenario',
+          meaning: '全程耗时不超过 30 秒',
+          severity: 'SHOULD',
+          onViolation: 'continue',
+          provenance: 'ai_compiled',
+          rule: { kind: 'run_duration', op: 'lte', valueMs: 30_000 },
+        },
+      ],
+    }
+
+    const result = expandAuthoringDocument(doc, makeContext())
+    expect(result.ok).toBe(true)
+    const lastStep = result.definition?.steps.at(-1)!
+    expect(lastStep.id).toBe(deterministicStepId('scenario', '20000000-0000-4000-8000-000000000030'))
+    expect(lastStep.type).toBe('check_duration')
+    expect(lastStep.input).toMatchObject({ runTotal: true, op: 'lte', valueMs: 30_000 })
   })
 })

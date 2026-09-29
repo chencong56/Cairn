@@ -93,6 +93,7 @@ export const runModuleTestCaseBodySchema = z.strictObject({
   idempotencyKey: z.string().min(1).max(128).optional(),
 })
 export type RunModuleTestCaseBody = z.infer<typeof runModuleTestCaseBodySchema>
+export type RunModuleTestCaseInput = z.input<typeof runModuleTestCaseBodySchema>
 
 // ---------------------------------------------------------------------------
 // Module Case Execution (不可变执行快照)

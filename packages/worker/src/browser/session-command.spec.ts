@@ -26,7 +26,7 @@ describe('adoptPage 录像切换可等待', () => {
     const ctx = {
       retargetVideoForLease: retarget,
     }
-    const entry = adoptPage.call(ctx, live, 'run-1', page as never, 'popup', 'lease-1')
+    const entry = adoptPage.call(ctx as any, live, 'run-1', page as never, 'popup', 'lease-1')
     expect(entry.retarget).toBeDefined()
     await entry.retarget
     expect(retarget).toHaveBeenCalled()
@@ -55,15 +55,15 @@ describe('closeRunPage 保留 last page', () => {
       lives: new Map([['sess', live]]),
       adoptPage,
     }
-    await closeRunPage.call(ctx, 'lease-1')
+    await closeRunPage.call(ctx as any, 'lease-1')
     expect(first.closed).toBe(false)
     expect(live.lastPage).toBe(first)
     expect(live.runPages.has('lease-1')).toBe(false)
-    expect([...live.pages.values()].some((entry) => entry.runId === 'sess' && entry.page === first)).toBe(true)
+    expect([...live.pages.values()].some((entry) => entry.runId === 'sess' && entry.page === (first as any))).toBe(true)
 
     live.runPages.set('lease-2', second as never)
     live.runPageIds.add('lease-2')
-    await closeRunPage.call(ctx, 'lease-2')
+    await closeRunPage.call(ctx as any, 'lease-2')
     expect(first.closed).toBe(true)
     expect(second.closed).toBe(false)
     expect(live.lastPage).toBe(second)
@@ -81,7 +81,7 @@ describe('closeRunPage 保留 last page', () => {
       lives: new Map([['sess', live]]),
       adoptPage,
     }
-    await closeRunPage.call(ctx, 'lease-1')
+    await closeRunPage.call(ctx as any, 'lease-1')
     expect(blank.closed).toBe(true)
     expect(base.closed).toBe(false)
     expect(live.lastPage).toBeUndefined()
@@ -102,9 +102,9 @@ describe('closeManagedPage', () => {
       ensureRunPage,
       adoptPage,
     }
-    const baseEntry = ensureRunPage.call(ctx, live, 'sess-1')
+    const baseEntry = ensureRunPage.call(ctx as any, live, 'sess-1')
     await expect(
-      closeManagedPage.call(ctx, { ownerId: 'sess-1', pageId: baseEntry.pageId }),
+      closeManagedPage.call(ctx as any, { ownerId: 'sess-1', pageId: baseEntry.pageId }),
     ).rejects.toThrow('会话底页用于维持登录状态，不可单独关闭')
     expect(base.closed).toBe(false)
   })
@@ -123,9 +123,9 @@ describe('closeManagedPage', () => {
       ensureRunPage,
       adoptPage,
     }
-    const runEntry = adoptPage.call(ctx, live, 'run-1', runPage as never, 'run')
+    const runEntry = adoptPage.call(ctx as any, live, 'run-1', runPage as never, 'run')
     await expect(
-      closeManagedPage.call(ctx, { ownerId: 'run-1', pageId: runEntry.pageId }),
+      closeManagedPage.call(ctx as any, { ownerId: 'run-1', pageId: runEntry.pageId }),
     ).rejects.toThrow('任务正在当前页面上执行，不可关闭')
     expect(runPage.closed).toBe(false)
   })
@@ -146,10 +146,10 @@ describe('closeManagedPage', () => {
       adoptPage,
     }
     // adopt base 和 last
-    const baseEntry = adoptPage.call(ctx, live, 'sess-1', base as never, 'base')
-    const lastEntry = adoptPage.call(ctx, live, 'sess-1', last as never, 'run')
+    const baseEntry = adoptPage.call(ctx as any, live, 'sess-1', base as never, 'base')
+    const lastEntry = adoptPage.call(ctx as any, live, 'sess-1', last as never, 'run')
 
-    const result = await closeManagedPage.call(ctx, { ownerId: 'sess-1', pageId: lastEntry.pageId })
+    const result = await closeManagedPage.call(ctx as any, { ownerId: 'sess-1', pageId: lastEntry.pageId })
     expect(result.closed).toBe(true)
     expect(last.closed).toBe(true)
     expect(live.pages.has(lastEntry.pageId)).toBe(false)

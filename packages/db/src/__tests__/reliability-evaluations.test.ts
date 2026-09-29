@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import type { DbHandle } from '../client.js'
@@ -185,11 +186,11 @@ describe.each(DRIVERS)('%s reliability evaluations and checkpoint domain operati
     const [updated] = await handle.db
       .select()
       .from(t.reliabilityIncidents)
-      .where(schemaFor(handle.db).reliabilityIncidents.id.eq ? (t.reliabilityIncidents.id as any).eq(inserted.id) : undefined as any)
+      .where(eq(t.reliabilityIncidents.id, inserted!.id))
 
     // Query by id directly
     const rows = await handle.db.select().from(t.reliabilityIncidents)
-    const reconciled = rows.find((r) => r.id === inserted.id)
+    const reconciled = rows.find((r) => r.id === inserted!.id)
     expect(reconciled?.status).toBe('ACTION_REQUIRED')
     expect(reconciled?.actionRequiredReason).toBe('insufficient_observation_samples')
   })

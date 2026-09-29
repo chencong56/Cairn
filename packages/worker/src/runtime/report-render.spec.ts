@@ -8,7 +8,7 @@ import type { ObjectStore } from '@cairn/storage'
 import { cleanupReportWorkspaces, copyBoundedObject, renderReportHtml, writeReportZip } from './report-render'
 import { crc32 } from './report-layout'
 import { reportLines } from './report-content'
-import type { ReportDocument } from '@cairn/shared'
+import type { JsonValue, ReportDocument } from '@cairn/shared'
 
 const document = {
   stage: 'final' as const,
@@ -56,7 +56,7 @@ describe('报告渲染与交付（自包含 HTML 双模板）', () => {
   })
 
   it('场景集巡检模板：正确呈现 0-100 健康分大卡、并发节约率、跨模块对照大表与聚合异常', async () => {
-    const suiteDocument = {
+    const suiteDocument: ReportDocument = {
       ...document,
       title: '核心业务晨检 2026-09-26 巡检报告',
       source: {
@@ -220,9 +220,9 @@ describe('报告渲染与交付（自包含 HTML 双模板）', () => {
         { name: '告警步骤', status: 'SUCCEEDED', outcomeStatus: 'WARN', attempts: [] },
       ],
     }
-    const compact = {
+    const compact: ReportDocument = {
       ...document,
-      source: run,
+      source: run as unknown as Record<string, JsonValue>,
       sections: [
         {
           id: 'result',

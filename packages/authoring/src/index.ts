@@ -79,4 +79,5 @@ export {
   detectMisfireCleansingCandidates,
   type TargetAuthCleansingContext,
 } from './cleansing-predicates.js'
+export { auditAcceptance } from './audit.js'
 

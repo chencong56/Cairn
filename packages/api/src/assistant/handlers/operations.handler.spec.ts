@@ -40,7 +40,7 @@ describe('AI-04 D2: Operations Assistant Handler Tests', () => {
       const result = await handleOperationsDiagnose(ctx)
       expect(result.kind).toBe('diagnosis')
       if (result.kind === 'diagnosis') {
-        expect(result.observations.length).toBeGreaterThan(0)
+        expect((result as any).observations.length).toBeGreaterThan(0)
         expect(result.hypotheses.some((h) => h.citations.includes('monitoring:queue_backlog:slot_utilization_high'))).toBe(true)
         expect((result as any).operationsDiagnosis.suggestedActions[0].actionKey).toBe('schedule.pause')
       }
@@ -55,8 +55,8 @@ describe('AI-04 D2: Operations Assistant Handler Tests', () => {
       const result = await handleOperationsDiagnose(ctx)
       expect(result.kind).toBe('diagnosis')
       if (result.kind === 'diagnosis') {
-        expect(result.observations.some((o) => o.includes('WAITING_FOR_AUTH'))).toBe(true)
-        expect(result.missingChecks.some((c) => c.includes('TOTP'))).toBe(true)
+        expect((result as any).observations.some((o: string) => o.includes('WAITING_FOR_AUTH'))).toBe(true)
+        expect((result as any).missingChecks.some((c: string) => c.includes('TOTP'))).toBe(true)
       }
     })
   })

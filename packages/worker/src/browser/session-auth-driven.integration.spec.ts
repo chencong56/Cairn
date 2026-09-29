@@ -129,7 +129,6 @@ function cookieHandle(baseUrl: string, jar: { cookie: string }, profileDir: stri
         },
       },
     },
-    basePage: page,
   } as unknown as BrowserHandle
 }
 
@@ -479,8 +478,8 @@ describe('认证驱动保活全链路', { timeout: 120_000 }, () => {
     const idlePage = signalPage(`${baseUrl}/`)
     manager.installLiveHandleForTest(idle.id, {
       ...cookieHandle(baseUrl, { cookie: 'bsm=ok' }, join(profileRoot, 'sl06-idle')),
-      basePage: idlePage,
-    } as BrowserHandle)
+      basePage: idlePage as any,
+    } as unknown as BrowserHandle)
     await manager.attachSessionAuthObserver(idle.id)
     idlePage.address = `${baseUrl}/login`
     idlePage.emit('framenavigated')
@@ -499,8 +498,8 @@ describe('认证驱动保活全链路', { timeout: 120_000 }, () => {
     const execPage = signalPage(`${baseUrl}/`)
     manager.installLiveHandleForTest(exec.id, {
       ...cookieHandle(baseUrl, { cookie: 'bsm=ok' }, join(profileRoot, 'sl06-exec')),
-      basePage: execPage,
-    } as BrowserHandle)
+      basePage: execPage as any,
+    } as unknown as BrowserHandle)
     const scenario = await createScenarioWithVersion(handle.db, {
       targetId,
       name: `r-${newId()}`,
@@ -557,8 +556,8 @@ describe('认证驱动保活全链路', { timeout: 120_000 }, () => {
     const page = signalPage(`${baseUrl}/`)
     manager.installLiveHandleForTest(session.id, {
       ...cookieHandle(baseUrl, { cookie: 'bsm=ok' }, join(profileRoot, 'sl07')),
-      basePage: page,
-    } as BrowserHandle)
+      basePage: page as any,
+    } as unknown as BrowserHandle)
     await manager.attachSessionAuthObserver(session.id)
     const observer = manager.lives.get(session.id)?.authObserver as { inspect?: () => Promise<void> } | undefined
     await observer?.inspect?.()

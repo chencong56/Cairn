@@ -110,7 +110,6 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
   let authTargetId: string
   let authAccountId: string
   let authSecretId: string
-  let authFailAccountId: string
   let workerId: string
   let workerInstanceId: string
   let objectDir: string
@@ -260,23 +259,6 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
       username: 'lab',
       secretProvider: LOCAL_SECRET_PROVIDER,
       secretId: authSecretId,
-      status: 'active',
-      expectedIdentity: 'lab',
-    })
-    authFailAccountId = newId()
-    const authFailSecretId = newId()
-    await handle.db.insert(secrets).values({
-      id: authFailSecretId,
-      provider: LOCAL_SECRET_PROVIDER,
-      ciphertext: secretsProvider.encrypt(authFailSecretId, 'wrong'),
-    })
-    await handle.db.insert(targetAccounts).values({
-      id: authFailAccountId,
-      targetId: authTargetId,
-      displayName: 'lab-auth-fail',
-      username: 'lab-fail',
-      secretProvider: LOCAL_SECRET_PROVIDER,
-      secretId: authFailSecretId,
       status: 'active',
       expectedIdentity: 'lab',
     })
@@ -477,25 +459,7 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
     return detail.outcomeResults.find((item) => item.contractId === contractId)
   }
 
-  it('OCC-02：真浏览器越界导航错误码不变，同时写 navigation_boundary FAIL', async () => {
-    const invariantId = newId()
-    const stepNavId = newId()
-    const detail = await executeScenario({
-      name: `occ-02-fail-${newId()}`,
-      steps: [navigate(stepNavId, 'https://evil.example/')],
-      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', invariantId)],
-    })
-    expect(detail.status).toBe('FAILED')
-    expect(detail.stepRuns[0]?.attempts[0]?.error?.code).toBe('NAVIGATE_OUT_OF_SCOPE')
-    expect(detail.outcomeStatus).toBe('FAIL')
-    expect(invariantRow(detail, invariantId)).toMatchObject({
-      provenance: 'runtime_invariant',
-      verdict: 'FAIL',
-      actual: { errorCode: 'NAVIGATE_OUT_OF_SCOPE' },
-    })
-  })
-
-  it('OCC-02：pathPrefix 外路径同样拦截并记账；范围内停机写 PASS', async () => {
+  it('OCC-02：pathPrefix 外路径同样拦截并记账；范围内停机写 PASS（越界源拦截的记账语义由 L1 engine.outcome.spec 承接）', async () => {
     const current = await getTargetAccessPolicy(handle.db, targetId)
     await updateTargetAccessPolicy(
       handle.db,
@@ -521,7 +485,12 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
     })
     expect(denied.status).toBe('FAILED')
     expect(denied.stepRuns[0]?.attempts[0]?.error?.code).toBe('NAVIGATE_OUT_OF_SCOPE')
-    expect(invariantRow(denied, denyId)?.verdict).toBe('FAIL')
+    expect(denied.outcomeStatus).toBe('FAIL')
+    expect(invariantRow(denied, denyId)).toMatchObject({
+      provenance: 'runtime_invariant',
+      verdict: 'FAIL',
+      actual: { errorCode: 'NAVIGATE_OUT_OF_SCOPE' },
+    })
 
     const passId = newId()
     const passed = await executeScenario({
@@ -537,21 +506,9 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
     })
   })
 
-  it('OCC-03：开跑前登录失败进入 WAITING_FOR_AUTH，补窗口并记 SHOULD FAIL / WARN', async () => {
-    const invariantId = newId()
-    const detail = await executeScenario({
-      name: `occ-03-acquire-${newId()}`,
-      targetId: authTargetId,
-      accountId: authFailAccountId,
-      steps: [navigate(newId(), '/')],
-      runtimeInvariants: [createRuntimeInvariant('auth_validity', invariantId)],
-    })
-    expect(detail.status).toBe('WAITING_FOR_AUTH')
-    expect(detail.snapshot.authVerification?.capability).toBe('IDENTITY_VERIFIED')
-    expect(detail.stepRuns[0]?.attempts[0]?.error?.code).toBe('AUTH_GATE_CLOSED')
-    expect(invariantRow(detail, invariantId)?.verdict).toBe('FAIL')
-    expect(detail.outcomeStatus).toBe('WARN')
-  })
+  // OCC-03「开跑前登录失败 → WAITING_FOR_AUTH + auth_validity SHOULD FAIL / WARN」的
+  // 事实链已于 2026-09-29 降层至 L1（src/engine/engine.outcome.spec.ts，走生产同款
+  // enterRunWaitingForAuth 路径）；真浏览器层保留下面这条运行中认证恢复用例。
 
   it('OCC-03：运行中回到登录页，认证恢复流程不变，默认 SHOULD 记 WARN', async () => {
     const invariantId = newId()
@@ -702,81 +659,7 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
     }
   })
 
-  it('OCC-07：已收编守卫 continue 不能取消越界拦截', async () => {
-    const continueId = newId()
-    const afterId = newId()
-    const detail = await executeScenario({
-      name: `occ-07-nav-continue-${newId()}`,
-      steps: [
-        navigate(newId(), 'https://evil.example/'),
-        {
-          id: afterId,
-          name: '不应因 continue 跑完',
-          type: 'echo',
-          effectType: 'READ_ONLY',
-          input: { value: 'skip' },
-        },
-      ],
-      runtimeInvariants: [
-        {
-          ...createRuntimeInvariant('navigation_boundary', continueId),
-          onViolation: 'continue',
-        },
-      ],
-    })
-    expect(detail.status).toBe('FAILED')
-    expect(detail.stepRuns[0]?.attempts[0]?.error?.code).toBe('NAVIGATE_OUT_OF_SCOPE')
-    expect(stepRunFor(detail.stepRuns, afterId)?.attempts ?? []).toHaveLength(0)
-    expect(invariantRow(detail, continueId)?.verdict).toBe('FAIL')
-  })
-
-  it('OCC-07：error_surface halt 截断后续步；continue 跑完且结果轴 FAIL', async () => {
-    const haltId = newId()
-    const afterHaltId = newId()
-    const halted = await executeScenario({
-      name: `occ-07-halt-${newId()}`,
-      steps: [
-        navigate(newId(), '/error'),
-        click(newId(), '#next'),
-        {
-          id: afterHaltId,
-          name: '不应执行',
-          type: 'echo',
-          effectType: 'READ_ONLY',
-          input: { value: 'skip' },
-        },
-      ],
-      runtimeInvariants: [createRuntimeInvariant('error_surface', haltId)],
-    })
-    expect(halted.status).toBe('FAILED')
-    expect(stepRunFor(halted.stepRuns, afterHaltId)?.attempts ?? []).toHaveLength(0)
-    expect(invariantRow(halted, haltId)?.onViolation).toBe('halt')
-
-    const continueId = newId()
-    const afterContinueId = newId()
-    const continued = await executeScenario({
-      name: `occ-07-continue-${newId()}`,
-      steps: [
-        navigate(newId(), '/error'),
-        click(newId(), '#next'),
-        {
-          id: afterContinueId,
-          name: '应继续',
-          type: 'echo',
-          effectType: 'READ_ONLY',
-          input: { value: 'after' },
-        },
-      ],
-      runtimeInvariants: [
-        {
-          ...createRuntimeInvariant('error_surface', continueId),
-          onViolation: 'continue',
-        },
-      ],
-    })
-    expect(continued.status).toBe('SUCCEEDED')
-    expect(continued.outcomeStatus).toBe('FAIL')
-    expect(stepRunFor(continued.stepRuns, afterContinueId)?.status).toBe('SUCCEEDED')
-    expect(invariantRow(continued, continueId)?.verdict).toBe('FAIL')
-  })
+  // OCC-07 两条（越界 continue 不能取消拦截；error_surface halt/continue 截断语义）
+  // 已于 2026-09-29 降层至 L1（src/engine/engine.outcome.spec.ts）；真页面错误弹窗
+  // 的探测与脱敏差异由上方 OCC-05 / OCC-06 保留。
 })

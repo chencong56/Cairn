@@ -32,6 +32,7 @@ import {
   managedBrowserMetaSchema,
   observeOperationSchema,
   parseWorkerEndpoints,
+  structureObservationSchema,
   targetObservationSchema,
   workerInternalPath,
   workerRunsInternalPath,
@@ -177,12 +178,14 @@ export class BrowserService {
   }
 
   observe(runId: string, body: ObserveOperation, actor: RequestAccount) {
+    const parsed = observeOperationSchema.parse(body)
+    const schema = parsed.op === 'structure' ? structureObservationSchema : targetObservationSchema
     return this.mutate(
       runId,
       actor,
       workerInternalPath('/observe'),
-      JSON.stringify(observeOperationSchema.parse(body)),
-      targetObservationSchema,
+      JSON.stringify(parsed),
+      schema,
       ['run:read', 'session:view', 'workflow:write'],
     )
   }

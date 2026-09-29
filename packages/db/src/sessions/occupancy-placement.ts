@@ -16,7 +16,14 @@ import { getSessionProfile } from './occupancy-profile.js'
 export async function evaluateRunSessionEligibility(
   db: Db,
   input: {
-    run: { id: string; createdAt: Date; targetId: string; targetAccountId: string | null }
+    run: {
+      id: string
+      createdAt: Date
+      targetId: string
+      targetAccountId: string | null
+      isolation?: 'SHARED' | 'DEDICATED' | null
+      sessionPolicy?: unknown
+    }
     workerId: string
     instanceId: string
     maxSessions: number

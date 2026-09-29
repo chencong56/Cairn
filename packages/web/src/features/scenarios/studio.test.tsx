@@ -454,6 +454,7 @@ describe('Scenario Studio', () => {
     if (!candidate.ok) throw new Error(candidate.error.message)
     const proposal: AssistantAuthoringProposal = {
       kind: 'authoring_proposal', proposalId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaae',
+      source: 'step',
       scenarioId: SCENARIO_ID,
       base: { draftRevision: 1, documentDigest: baseDigest, dependencyFingerprint: `${TARGET_ID}:1` },
       operations, candidateDigest: await authoringDocumentDigest(candidate.document),

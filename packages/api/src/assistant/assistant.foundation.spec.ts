@@ -131,6 +131,7 @@ describe('AI 基座与上下文工程基础测试 (AIF-01 ~ AIF-27)', () => {
         if (id === baseRunId) {
           return {
             eventSeq: 1,
+            earliestEventSeq: 1,
             evidence: { items: [] },
             run: {
               id: baseRunId,
@@ -167,6 +168,7 @@ describe('AI 基座与上下文工程基础测试 (AIF-01 ~ AIF-27)', () => {
         } else {
           return {
             eventSeq: 2,
+            earliestEventSeq: 1,
             evidence: { items: [] },
             run: {
               id: targetRunId,
@@ -240,12 +242,12 @@ describe('AI 基座与上下文工程基础测试 (AIF-01 ~ AIF-27)', () => {
 
         expect(pack.facts.some((f) => f.id.includes('step-search'))).toBe(true)
 
-        spy.mockImplementation(async (_db: any, id: string) => {
+        spy.mockImplementation((async (_db: any, id: string) => {
           const observed = await mockLoadObservation(_db, id)
           return id === targetRunId
             ? { ...observed, run: { ...observed.run, scenarioId: 'sc-2', targetId: 'tgt-2' } }
             : observed
-        })
+        }) as any)
         const unrelated = (await assembleRunCompareContext(mockDb, baseRunId, targetRunId, 'test-actor')).pack
         expect(unrelated.comparability?.comparable).toBe(false)
         expect(unrelated.comparability?.incomparableFactors).toEqual(expect.arrayContaining([
@@ -330,9 +332,9 @@ describe('AI 基座与上下文工程基础测试 (AIF-01 ~ AIF-27)', () => {
   })
 
   describe('AIF-11, AIF-16, AIF-17: 草稿切片提取、脱敏与硬限制预检', () => {
-    const document: ScenarioDocument = {
+    const document = {
       schemaVersion: 1,
-      inputs: {},
+      inputs: [],
       steps: [
         {
           id: 'step-open',
@@ -364,7 +366,7 @@ describe('AI 基座与上下文工程基础测试 (AIF-01 ~ AIF-27)', () => {
           input: { selector: '#footer-link' },
         },
       ],
-    }
+    } as unknown as ScenarioDocument
 
     it('AIF-11: 仅提取目标步骤及其直接上游依赖，剔除无关步骤', () => {
       const slice = buildAuthoringSlice(document, 'step-fill-password')

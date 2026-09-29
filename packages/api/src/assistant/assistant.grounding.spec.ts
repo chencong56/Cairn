@@ -136,6 +136,7 @@ describe('Scheme B Grounding Validator and Temporal Freshness', () => {
 
       const result = await handleOperationsDiagnose(mockCtx)
       expect(result.kind).toBe('diagnosis')
+      if (result.kind !== 'diagnosis') throw new Error('Expected diagnosis')
       // Must NOT claim system is normal
       const normalObs = result.facts.find((f) => f.text.includes('基础服务与 Worker 进程运行正常'))
       expect(normalObs).toBeUndefined()
@@ -188,6 +189,7 @@ describe('Scheme B Grounding Validator and Temporal Freshness', () => {
 
       const result = await handleOperationsDiagnose(mockCtx)
       expect(result.kind).toBe('diagnosis')
+      if (result.kind !== 'diagnosis') throw new Error('Expected diagnosis')
       const freshObs = result.facts.find((f) => f.text.includes('基础服务与 Worker 进程运行正常'))
       expect(freshObs).toBeDefined()
       expect(freshObs?.text).toContain('READY 节点数: 2')

@@ -96,7 +96,6 @@ describe.each(DRIVERS)('%s dataset and batch automation domain operations', (dri
       targetId,
       name: '采购下单批处理场景',
       createdByConsoleAccountId: accountId,
-      publishedVersionId: scenarioVersionId,
     })
 
     const testSteps = [
@@ -372,14 +371,12 @@ describe.each(DRIVERS)('%s dataset and batch automation domain operations', (dri
       targetId: otherTargetId,
       name: '其他目标场景',
       createdByConsoleAccountId: accountId,
-      publishedVersionId: otherVersionId,
     })
     await handle.db.insert(t.scenarios).values({
       id: sameTargetScenarioId,
       targetId,
       name: '同目标另一场景',
       createdByConsoleAccountId: accountId,
-      publishedVersionId: sameTargetVersionId,
     })
     const step = {
       id: newId(),

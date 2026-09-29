@@ -31,6 +31,7 @@ export const EXPR_FUNCTIONS = [
   'min',
   'max',
   'sum',
+  'diff',
   // 判空与缺省
   'exists',
   'isEmpty',
@@ -470,6 +471,16 @@ function parseNumberStrict(raw: unknown): number {
   return num
 }
 
+/** 与 toNumber 同口径（全角数字、千分位、首尾货币符号），读不成数字返回 null 而不抛错。 */
+export function toStrictNumber(raw: unknown): number | null {
+  try {
+    const num = parseNumberStrict(raw)
+    return Number.isFinite(num) ? num : null
+  } catch {
+    return null
+  }
+}
+
 function parseNumberLenient(raw: unknown): number | null {
   if (typeof raw === 'number' && !Number.isNaN(raw)) return raw
   if (typeof raw !== 'string') return null
@@ -733,6 +744,11 @@ function evalCall(
       const nums = evaluated.flatMap((v) => (Array.isArray(v) ? v : [v])).map(Number)
       return nums.reduce((acc, n) => acc + (Number.isNaN(n) ? 0 : n), 0)
     }
+    case 'diff': {
+      const a = Number(evaluated[0] ?? 0)
+      const b = Number(evaluated[1] ?? 0)
+      return a - b
+    }
 
     // 判空
     case 'isEmpty': {
@@ -847,6 +863,7 @@ export function inferExpressionShape(
         case 'min':
         case 'max':
         case 'sum':
+        case 'diff':
         case 'length':
           return { kind: 'scalar', type: 'number' }
 

@@ -28,12 +28,12 @@ it('真实表单请求已到达后断线，click 返回也不能判定成功；�
     await page.goto(url)
     await expect(withNavigationOutcome(page, () => page.locator('#drop').click())).rejects.toBeInstanceOf(NavigationOutcomeUnknownError)
     expect(commits).toBeGreaterThanOrEqual(1)
-    expect(page.listenerCount('requestfailed')).toBe(0)
+    expect((page as any).listenerCount('requestfailed')).toBe(0)
     await page.close()
     const healthyPage = await context.newPage()
     await healthyPage.goto(url)
     await expect(withNavigationOutcome(healthyPage, () => healthyPage.locator('#ok').click())).resolves.toBeUndefined()
-    expect(healthyPage.listenerCount('requestfailed')).toBe(0)
+    expect((healthyPage as any).listenerCount('requestfailed')).toBe(0)
   } finally {
     server.closeAllConnections()
     await new Promise<void>(resolve => server.close(() => resolve()))
@@ -51,7 +51,7 @@ it('injectStorageState 只在首次加载时写入一次，站点修改后的值
 
   const context = await browser.newContext()
   try {
-    const { injectStorageState } = await import('./runtime')
+    const { injectStorageState } = await import('./runtime.js')
     await injectStorageState(context, {
       origins: [
         {

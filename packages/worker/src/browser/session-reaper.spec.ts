@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { dropDisposedHandles, reap } from './session-reaper'
+import { dropDisposedHandles, reap } from './session-reaper.js'
+import type { BrowserSessionManager } from './session-manager.js'
 
 vi.mock('@cairn/db', async (load) => ({
   ...(await load<typeof import('@cairn/db')>()),
@@ -11,8 +12,8 @@ vi.mock('@cairn/db', async (load) => ({
   getSessionById: vi.fn(async () => ({ id: 's', status: 'CLOSED', ownerWorkerId: 'other', version: 1, generation: 1 })),
 }))
 
-vi.mock('./runtime', async (load) => {
-  const actual = await load<typeof import('./runtime')>()
+vi.mock('./runtime.js', async (load) => {
+  const actual = await load<typeof import('./runtime.js')>()
   return {
     ...actual,
     probeHealth: vi.fn(async () => 'HEALTHY'),
@@ -50,17 +51,17 @@ describe('sessions.reap 拆分', () => {
 
   it('默认仍扫全局会话租约', async () => {
     const { reapSessionLeases } = await import('@cairn/db')
-    const result = await reap.call(context())
+    const result = await reap.call(context() as unknown as BrowserSessionManager)
     expect(reapSessionLeases).toHaveBeenCalledOnce()
     expect(result.leasesExpired).toBe(3)
   })
 
   it('PS16 本进程 reap 不扫全局租约，已处置句柄仍按库状态收敛', async () => {
     const { reapSessionLeases, getSessionById } = await import('@cairn/db')
-    const { stopSession } = await import('./runtime')
+    const { stopSession } = await import('./runtime.js')
     const ctx = context()
-    ctx.dropDisposedHandles = dropDisposedHandles
-    const result = await reap.call(ctx, { includeGlobalLeases: false })
+    ctx.dropDisposedHandles = dropDisposedHandles as any
+    const result = await reap.call(ctx as unknown as BrowserSessionManager, { includeGlobalLeases: false })
     expect(reapSessionLeases).not.toHaveBeenCalled()
     expect(getSessionById).toHaveBeenCalledWith(ctx.dbHandle, 's')
     expect(stopSession).toHaveBeenCalledOnce()

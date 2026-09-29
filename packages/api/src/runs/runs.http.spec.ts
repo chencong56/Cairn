@@ -10,7 +10,7 @@ import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core'
 import { Test } from '@nestjs/testing'
 import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PERMISSIONS, RUN_ERROR_CODES, runPlacement } from '@cairn/shared'
+import { PERMISSIONS, RUN_ERROR_CODES, runPlacement, type CleanupStatusResponse } from '@cairn/shared'
 import { AllExceptionsFilter } from '../common/all-exceptions.filter'
 import type { RequestAccount } from '../common/request-account'
 import { PermissionsGuard } from '../rbac/permissions.guard'
@@ -75,10 +75,10 @@ const observation = {
 function mockService() {
   return {
     list: vi.fn(async () => ({ items: [detail] })),
-    reportReadScope: vi.fn(async (actorId: string) => actorId === admin.id
+    reportReadScope: vi.fn(async (actorId: string): Promise<{ all: boolean; ids: string[] }> => actorId === admin.id
       ? { all: true, ids: [] }
       : { all: false, ids: [] }),
-    get: vi.fn(async () => detail),
+    get: vi.fn(async (): Promise<typeof detail | null> => detail),
     create: vi.fn(async () => ({ detail, created: true })),
     cancel: vi.fn(async () => ({ ...detail, status: 'CANCELLED' })),
     review: vi.fn(async () => ({ ...detail, status: 'FAILED' })),
@@ -86,7 +86,20 @@ function mockService() {
     evidence: vi.fn(async (): Promise<{ items: unknown[] }> => ({ items: [] })),
     evidenceContent: vi.fn(),
     iterations: vi.fn(async () => ({ iterations: [], total: 0, offset: 0, limit: 50 })),
-    iterationDetail: vi.fn(async () => ({
+    iterationDetail: vi.fn(async (): Promise<{
+      iteration: {
+        id: string
+        runId: string
+        blockId: string
+        headerStepId: string
+        scopePath: string
+        iterationIndex: number
+        status: string
+        startedAt: string
+        finishedAt: string
+      }
+      stepRuns: unknown[]
+    } | null> => ({
       iteration: {
         id: '11111111-2222-3333-4444-555555555555',
         runId: detail.id,
@@ -101,10 +114,10 @@ function mockService() {
       stepRuns: [],
     })),
     previewDelete: vi.fn(async () => ({ previewToken: 'tok', counts: {}, blockers: [] })),
-    delete: vi.fn(async () => ({
+    delete: vi.fn(async (): Promise<CleanupStatusResponse> => ({
       resourceId: detail.id,
       resourceType: 'run' as const,
-      status: 'completed' as const,
+      status: 'completed',
       totalObjects: 0,
       purgedObjects: 0,
       failedObjects: 0,
@@ -112,11 +125,12 @@ function mockService() {
       purgedBytes: 0,
       lastError: null,
       completedAt: '2026-09-10T00:00:00.000Z',
+      unknownByteObjects: 0,
     })),
-    cleanupStatus: vi.fn(async () => ({
+    cleanupStatus: vi.fn(async (): Promise<CleanupStatusResponse> => ({
       resourceId: detail.id,
       resourceType: 'run' as const,
-      status: 'completed' as const,
+      status: 'completed',
       totalObjects: 0,
       purgedObjects: 0,
       failedObjects: 0,
@@ -124,11 +138,12 @@ function mockService() {
       purgedBytes: 0,
       lastError: null,
       completedAt: '2026-09-10T00:00:00.000Z',
+      unknownByteObjects: 0,
     })),
-    retryCleanup: vi.fn(async () => ({
+    retryCleanup: vi.fn(async (): Promise<CleanupStatusResponse> => ({
       resourceId: detail.id,
       resourceType: 'run' as const,
-      status: 'completed' as const,
+      status: 'completed',
       totalObjects: 0,
       purgedObjects: 0,
       failedObjects: 0,
@@ -136,6 +151,7 @@ function mockService() {
       purgedBytes: 0,
       lastError: null,
       completedAt: '2026-09-10T00:00:00.000Z',
+      unknownByteObjects: 0,
     })),
     mapDecisions: vi.fn(async () => ({ items: [] })),
     resolutionDecisions: vi.fn(async () => ({ items: [] })),
@@ -537,6 +553,7 @@ describe('Runs HTTP', () => {
       failedObjects: 0,
       totalBytes: 128,
       purgedBytes: 0,
+      unknownByteObjects: 0,
     })
     const accepted = await request(app.getHttpServer()).post(`/runs/${detail.id}/delete`).expect(202)
     expect(accepted.body.totalObjects).toBe(2)

@@ -40,7 +40,7 @@ describe.each(DRIVERS)('%s 凭据目录', (driver: ContractDriver) => {
         captchaMode: 'none',
         status: 'active',
         name: '凭据目标',
-        code: `C_${newId().slice(0, 8)}`,
+        code: `c-${newId().slice(0, 8)}`,
         entryUrl: 'https://example.com/app',
       },
       actor,
@@ -277,6 +277,7 @@ describe.each(DRIVERS)('%s 凭据目录', (driver: ContractDriver) => {
         password: 'batch-secret',
         status: 'active',
         usage: 'business',
+        validity: { mode: 'days', amount: 90, timeZone: 'UTC', startedAt: '2026-01-01T00:00:00.000Z' },
       },
       actor,
     )

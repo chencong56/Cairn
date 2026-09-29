@@ -14,10 +14,35 @@
 | `check-stack.mjs` | `pnpm check:stack` | 本机 api / worker / web 进程探活；不启动进程，也不进 CI |
 | `use-env.mjs` | `pnpm env:use local\|remote`、`pnpm env:status` | 开发连接画像：`.env.local` / `.env.remote` 与 `.env.example` 键集必须对齐；`.env` 只是当前生效指针 |
 | `probe-demonstration-files.mjs` | `node tools/probe-demonstration-files.mjs` | 本机 Web／API／对象存储的 JSON、YAML 文件导入、图片审查、参数／成功条件回填与单步重教；含 390px 窄屏检查 |
+| `verify-changed.mjs` | `pnpm verify:changed` | 智能分层验证：根据改动影响半径智能选择 L1 局部验证或 L2 全量升级，提示 L3 专项领域测试；支持 `--dry-run` 与 `--files` |
 
 `pnpm check` 含依赖、迁移、数据库可移植、架构不变量、菜单对账，以及规则与探活判定单测；它不挂在 `pnpm test` / `test:*` 前面，单包测试不必先构建全仓。`.github/workflows/ci.yml` 在 push 与 PR 上按顺序执行（install → build → check → lint → typecheck → migrate → test），本机要跑全套就 `pnpm check && pnpm test`。`pnpm check:stack` 探本机正在跑的进程，不进 CI。源码遍历与「测试文件」口径统一在 `lib/source-scan.mjs`，各检查脚本不各写一份。
 
 路由助手元数据不再由脚本按文本检查：`packages/web/src/lib/route-assistant-meta.ts` 给 `staticData.assistant` 加了类型（pageKind / 对象种类取自 shared 契约，由 tsc 校验全部路由），核心路由登记与详情页规则在同目录的 vitest 里，`pnpm check:routes` 单独跑它。
+
+## 分层验证
+
+验证范围由改动影响半径决定，不由任务大小决定。
+
+| 层级 | 时机 | 范围 | 入口命令 |
+| --- | --- | --- | --- |
+| **L0 内循环** | 每轮修改后 | 当前被改文件相关的测试（`vitest related`）及当前包快速检查 | 单包 vitest 命令、`pnpm test:worker:fast` |
+| **L1 交付** | 任务交付前 | 受影响包**及其下游依赖**的 `typecheck`、`lint`、`test`（含测试文件） | `pnpm verify:changed` |
+| **L2 全量** | 触发升级条件时、提交/合并前、CI | 全仓构建、代码检查、类型检查与全量测试 | `pnpm verify:full`（或 `pnpm verify:changed` 自动升级） |
+| **L3 专项 e2e** | 改动命中对应垂直领域时 | 独立领域专项用例 | `test:reliability`、`test:omf-e2e`、`test:action-modules-e2e`、`test:rf06` 等（由 `verify:changed` 自动提示） |
+
+### 升级为全量的条件（L1 → L2）
+满足以下任一项时，`pnpm verify:changed` 自动升级为全量验证：
+1. 改动 `packages/shared` 导出契约或模型核心（`packages/shared/src/**`）；
+2. 改动数据库迁移（`packages/db/migrations/**`）或 Schema 定义（`packages/db/src/schema/**`）；
+3. 改动运行生命周期、会话或租约核心（Worker 的 `engine/`、`runtime/`、浏览器会话，以及 DB 的 `sessions/` 领域操作）；
+4. 改动根目录工具、构建配置或 CI（`tools/**`、`scripts/**`、`package.json`、`tsconfig*.json`、`vitest*.config.*`、`turbo.json`、`pnpm-*.yaml`、`.github/**` 等）；
+5. 包含未在路径映射表中的未知路径（识别不了即跑全量）。
+
+支持参数：
+- `--files <file1,file2>`：多会话并行开发时显式指定本会话文件，避免混入他人改动；
+- `--dry-run`：仅输出判定结论、升级依据与拟执行命令，不实际跑测试；
+- `--full`：强制升级为 L2 全量验证。
 
 ## 本机进程探活
 

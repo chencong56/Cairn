@@ -73,32 +73,32 @@ function frame(overrides: Partial<CapturedFrame> & Pick<CapturedFrame, 'sourceSe
 
 describe('run-video', () => {
   it('会话就绪或转入认证等待时按需起录像，避免前置空白', () => {
-    const claim = readFileSync(resolve(import.meta.dirname, 'session-claim.ts'), 'utf8')
+    const claim = readFileSync(resolve(__dirname, 'session-claim.ts'), 'utf8')
     expect(claim.indexOf('await this.startVideoForLease')).toBeGreaterThan(claim.indexOf('const auth = await this.ensureAuth'))
     expect(claim).toContain('this.rebindVideoForLease(occupancy.leaseId, waitGrant.leaseId)')
     expect(claim).toContain('await this.startVideoForLease(waitGrant.leaseId, session.id, snapshot)')
   })
 
   it('预留与提交运行级录像使用 video:run', () => {
-    const start = readFileSync(resolve(import.meta.dirname, 'run-video.ts'), 'utf8')
+    const start = readFileSync(resolve(__dirname, 'run-video.ts'), 'utf8')
     expect(start).toContain("writeEvidenceArtifactKey({ type: 'video' })")
-    const media = readFileSync(resolve(import.meta.dirname, 'run-video-media.ts'), 'utf8')
+    const media = readFileSync(resolve(__dirname, 'run-video-media.ts'), 'utf8')
     expect(media).toContain("artifactKey: writeEvidenceArtifactKey({ type: 'video' })")
   })
 
   it('封存后先释放占用再编码', () => {
-    const reaper = readFileSync(resolve(import.meta.dirname, 'session-reaper.ts'), 'utf8')
+    const reaper = readFileSync(resolve(__dirname, 'session-reaper.ts'), 'utf8')
     const releaseFn = reaper.slice(reaper.indexOf('export async function release('), reaper.indexOf('export async function close('))
     expect(releaseFn.indexOf('sealVideoForLease')).toBeLessThan(releaseFn.indexOf('releaseSessionUse'))
     expect(releaseFn.indexOf('releaseSessionUse')).toBeLessThan(releaseFn.indexOf('finalizeSealedVideo'))
-    const abandon = readFileSync(resolve(import.meta.dirname, 'session-claim.ts'), 'utf8')
+    const abandon = readFileSync(resolve(__dirname, 'session-claim.ts'), 'utf8')
     const abandonFn = abandon.slice(abandon.indexOf('export async function abandonOccupancy('), abandon.indexOf('export function withHeldOccupancy'))
     expect(abandonFn.indexOf('sealVideoForLease')).toBeLessThan(abandonFn.indexOf('unbindOccupancy'))
     expect(abandonFn.indexOf('releaseSessionUse')).toBeLessThan(abandonFn.indexOf('finalizeSealedVideo'))
   })
 
   it('认领中止丢弃短录像，不提交为 available', () => {
-    const reaper = readFileSync(resolve(import.meta.dirname, 'session-reaper.ts'), 'utf8')
+    const reaper = readFileSync(resolve(__dirname, 'session-reaper.ts'), 'utf8')
     expect(reaper).toContain("commitVideo: reason !== 'acquire_aborted'")
     expect(reaper).toContain('discardSealedVideo')
   })

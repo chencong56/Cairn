@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
+  CONTROL_FLOW_PROTOCOL,
+  LOCATOR_RESOLUTION_PROTOCOL,
   OUTCOME_MANIFEST_PROTOCOL,
   RUNTIME_INVARIANT_MANIFEST_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
@@ -154,10 +156,11 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
       targetId,
       scenarioId: newId(),
       scenarioVersionId: newId(),
+      input: {},
       steps: [echoStep, assertStep],
       allowedOrigins: ['https://example.com'],
-      executionPolicy: { timeoutMs: 30000, retryLimit: 1 },
-      createdAt: new Date('2026-09-17T00:00:00.000Z'),
+      policy: { timeoutMs: 30000, retryLimit: 1 },
+      createdAt: '2026-09-17T00:00:00.000Z',
       digest: '',
     }
     const digestWithout = computeSnapshotDigest(baseSnapshot)
@@ -237,7 +240,14 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
     expect(runCreated.detail.snapshot.outcomeManifest?.entries).toHaveLength(1)
 
     // Worker 1: 未声明 OUTCOME_MANIFEST_PROTOCOL
-    const workerLegacy = await seedWorker(handle, `worker-legacy-${newId()}`)
+    const workerLegacy = { workerId: `worker-legacy-${newId()}`, instanceId: newId() }
+    await registerWorkerWith(handle.db, {
+      workerId: workerLegacy.workerId,
+      instanceId: workerLegacy.instanceId,
+      capacity: 8,
+      protocolCapabilities: [CONTROL_FLOW_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
+      lostAfterSeconds: 60,
+    })
     const grantLegacy = await claimRun(handle, {
       workerId: workerLegacy.workerId,
       instanceId: workerLegacy.instanceId,
@@ -251,7 +261,11 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
       workerId: workerOutcome.workerId,
       instanceId: workerOutcome.instanceId,
       capacity: 8,
-      protocolCapabilities: [OUTCOME_MANIFEST_PROTOCOL],
+      protocolCapabilities: [
+        CONTROL_FLOW_PROTOCOL,
+        LOCATOR_RESOLUTION_PROTOCOL,
+        OUTCOME_MANIFEST_PROTOCOL,
+      ],
       lostAfterSeconds: 60,
     })
     const grantOutcome = await claimRun(handle, {

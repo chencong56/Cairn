@@ -1,9 +1,11 @@
 import {
   type AssistantCapabilityId,
+  type AcceptanceRequest,
   type AssistantPageContext,
   type AssistantResult,
   type CapabilityDescriptor,
   ASSISTANT_PUBLISHED_CAPABILITY_IDS,
+  assistantAcceptanceAuditReportSchema,
   assistantCompareSchema,
   assistantDiagnosisSchema,
   assistantDiscoveryResultSchema,
@@ -14,6 +16,7 @@ import {
   assistantKnowledgeProposalSchema,
   assistantAuthoringProposalSchema,
   assistantProposalSchema,
+  assistantClarifySchema,
   operationsActionProposalSchema,
   targetFormProposalSchema,
 } from '@cairn/shared'
@@ -35,6 +38,7 @@ export interface AssistantCapabilityHandlerContext {
     capabilityHint?: string
     pageContext?: AssistantPageContext
     replyToTurnId?: string
+    acceptance?: AcceptanceRequest
   }
   session: AssistantModelSession | null
   platformConfig: PlatformConfigService
@@ -398,6 +402,99 @@ export class AssistantCapabilityRegistry {
       promptTemplates: {
         v1: '只生成一种受限单步变更：ai_instruction、assert_expectation 或 fill_binding。不要输出 value，不要改定位器。输出对应 JSON。',
         v2: '为已保存草稿提出受限编排提议（insert_step、update_step、remove_step、move_step）。遵循字段策略与单轮硬约束。输出对应 JSON。',
+      },
+    })
+
+    // 4b. scenario.propose-acceptance
+    this.register({
+      descriptor: {
+        id: 'scenario.propose-acceptance',
+        version: '1.0.0',
+        label: '场景验收建议',
+        purpose: '为已保存草稿生成结构化验收方案（卡片、成功条件、输出声明）',
+        notApplicable: ['未保存草稿', '已发布版本'],
+        requiredPermissions: ['ai:assist', 'workflow:read', 'workflow:write', 'target:read'],
+        inputSchemaRef: 'assistantProposeAcceptanceInputSchema',
+        outputSchemaRef: 'assistantAuthoringProposalSchema',
+        contextProfileRef: 'propose:v1',
+        executionMode: 'single_turn',
+        sideEffect: 'draft_change',
+        allowedTools: [],
+        policyRef: 'propose_policy:v1',
+        promptRef: { id: 'propose_acceptance_prompt', version: 'v1' },
+        validatorRefs: ['compiler_validator'],
+        intentMatchers: [
+          { kind: 'keyword', pattern: '验收' },
+          { kind: 'keyword', pattern: '补全验收' },
+          { kind: 'keyword', pattern: '成功条件' },
+          { kind: 'regex', pattern: '(生成|补全|配置|添加).*(验收|断言|成功条件|指标)' },
+        ],
+        slotBindings: [
+          { slot: 'scenarioId', from: 'pageContext', key: 'scenarioId', required: true },
+          { slot: 'baselineRunId', from: 'pageContext', key: 'baselineRunId', required: false },
+          { slot: 'draftRevision', from: 'pageContext', key: 'draftRevision', required: false },
+          { slot: 'intentKind', from: 'pageContext', key: 'intentKind', required: false },
+          { slot: 'stepId', from: 'pageContext', key: 'stepId', required: false },
+        ],
+        requiredContextKeys: ['scenarioId'],
+      },
+      inputSchema: z.strictObject({
+        scenarioId: z.string(),
+        baselineRunId: z.string().optional(),
+        draftRevision: z.number().optional(),
+        intentKind: z.string().optional(),
+        stepId: z.string().optional(),
+        intentParams: z.record(z.string(), z.unknown()).optional(),
+        instruction: z.string().optional(),
+        manualPick: z.record(z.string(), z.unknown()).optional(),
+      }),
+      outputSchema: z.union([assistantAuthoringProposalSchema, assistantClarifySchema]),
+      handler: async (ctx) => {
+        const { handleScenarioProposeAcceptance } = await import('./handlers/propose-acceptance.handler.js')
+        return handleScenarioProposeAcceptance(ctx)
+      },
+      promptTemplates: {
+        v1: '为场景草稿提出验收建议（成功条件规则、输出指标、总结模板）。遵循字段策略与单轮最多24项操作约束。输出对应 JSON。',
+      },
+    })
+
+    // 4c. scenario.audit-acceptance
+    this.register({
+      descriptor: {
+        id: 'scenario.audit-acceptance',
+        version: '1.0.0',
+        label: '场景验收体检',
+        purpose: '检查场景草稿的成功条件与报告完整性，输出结构化发现与建议意图',
+        notApplicable: ['未保存草稿'],
+        requiredPermissions: ['ai:assist', 'workflow:read'],
+        inputSchemaRef: 'assistantAuditAcceptanceInputSchema',
+        outputSchemaRef: 'assistantAcceptanceAuditReportSchema',
+        contextProfileRef: 'audit:v1',
+        executionMode: 'single_turn',
+        sideEffect: 'read_only',
+        allowedTools: [],
+        policyRef: 'audit_policy:v1',
+        promptRef: null,
+        validatorRefs: ['schema_validator'],
+        intentMatchers: [
+          { kind: 'keyword', pattern: '体检' },
+          { kind: 'keyword', pattern: '验收体检' },
+          { kind: 'regex', pattern: '(验收|成功条件|指标).*(体检|检查|漏洞|健全)' },
+        ],
+        slotBindings: [
+          { slot: 'scenarioId', from: 'pageContext', key: 'scenarioId', required: true },
+          { slot: 'draftRevision', from: 'pageContext', key: 'draftRevision', required: false },
+        ],
+        requiredContextKeys: ['scenarioId'],
+      },
+      inputSchema: z.strictObject({
+        scenarioId: z.string(),
+        draftRevision: z.number().optional(),
+      }),
+      outputSchema: assistantAcceptanceAuditReportSchema,
+      handler: async (ctx) => {
+        const { handleScenarioAuditAcceptance } = await import('./handlers/audit-acceptance.handler.js')
+        return handleScenarioAuditAcceptance(ctx)
       },
     })
 

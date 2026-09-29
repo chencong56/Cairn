@@ -70,6 +70,7 @@ describe('Reliability Calculator (RISA01, RISA02, RISA04)', () => {
         ewmaSuccessRate: 0.5,
         p95LatencyMs: 600,
         medianLatencyMs: 400,
+        retryRate: 0,
       }
 
       const breaches = evaluateReliabilityRules(metrics, DEFAULT_RELIABILITY_POLICY)
@@ -88,6 +89,7 @@ describe('Reliability Calculator (RISA01, RISA02, RISA04)', () => {
         ewmaSuccessRate: 0.95,
         p95LatencyMs: 200,
         medianLatencyMs: 100,
+        retryRate: 0.05,
       }
 
       const breaches = evaluateReliabilityRules(metrics, DEFAULT_RELIABILITY_POLICY)

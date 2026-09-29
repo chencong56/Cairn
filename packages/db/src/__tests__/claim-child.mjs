@@ -3,9 +3,16 @@ process.once('message', async ({ env, worker }) => {
   const db = createDb(env)
   try {
     const grants = []
-    for (let i = 0; i < 24; i++) {
+    let emptyStreak = 0
+    for (let i = 0; i < 40; i++) {
       const grant = await claimRun(db, { ...worker, leaseTtlSeconds: 60 })
-      if (!grant) break
+      if (!grant) {
+        emptyStreak += 1
+        if (emptyStreak >= 3) break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        continue
+      }
+      emptyStreak = 0
       grants.push(grant)
     }
     process.send({ grants })
