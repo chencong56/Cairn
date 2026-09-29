@@ -1,0 +1,56 @@
+{
+  "features/monitoring/components/drilldown-tabs.tsx": [
+    {
+      "kind": "motion",
+      "value": "group relative flex flex-col justify-between rounded-lg border p-3.5 text-left transition-all"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground line-clamp-1"
+    },
+    {
+      "kind": "font",
+      "value": "font-mono text-base font-bold tabular-nums text-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs font-normal text-muted-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "inline-flex items-center gap-1 text-[11px] font-medium text-status-success"
+    },
+    {
+      "kind": "font",
+      "value": "inline-flex items-center gap-1 text-[11px] font-medium text-status-warning font-mono"
+    },
+    {
+      "kind": "font",
+      "value": "mt-3 pt-2.5 border-t border-border-divider/60 text-xs"
+    },
+    {
+      "kind": "font",
+      "value": "mt-2.5 flex items-center justify-end text-[11px]"
+    },
+    {
+      "kind": "font",
+      "value": "rounded-full bg-muted/50 px-1.5 py-0.2 text-[10px]"
+    },
+    {
+      "kind": "font",
+      "value": "rounded-full bg-muted/50 px-1.5 py-0.2 text-[10px]"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs font-mono font-medium"
+    },
+    {
+      "kind": "motion",
+      "value": "h-full rounded-full transition-all"
+    }
+  ]
+}

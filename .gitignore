@@ -34,7 +34,11 @@ docs/arch/
 docs/spec/
 docs/reviews/
 docs/plan/
-docs/design/
+# design 目录本机维护，但 check:design 的豁免基线必须随仓库分发（CI/新克隆依赖），单独放行
+docs/design/*
+!docs/design/front/
+docs/design/front/*
+!docs/design/front/design-baseline.json
 # 含明文凭据的部署记录（远端 shsnc-ah3、本机 Podman 等），不入库
 docs/deploy/
 # 联调 / L3 外部目标系统清单：URL、账号、口令，不入库
