@@ -284,9 +284,10 @@ describe('StepPipelineRail', () => {
     // 顶栏不展示多余的试跑指示器，避免挤压右侧操作项
     expect(screen.getByTestId('trial-running-indicator').elements()).toHaveLength(0)
 
-    // 步骤 1：已成功完成，展示成功图标与耗时徽标
-    await expect.element(screen.getByTestId('step-succeeded-icon-step-1')).toBeInTheDocument()
+    // 步骤 1：已成功完成，展示耗时徽标且保留步骤序号（不再重复堆叠右上角成功图标）
     await expect.element(screen.getByTestId('step-status-succeeded-step-1')).toHaveTextContent('成功 · 1.2s')
+    await expect.element(screen.getByTestId('step-rail-number-step-1')).toHaveTextContent('1')
+    expect(screen.container.querySelector('[data-testid="step-succeeded-icon-step-1"]')).toBeNull()
 
     // 步骤 2：正在执行中，展示旋转动效与“执行中”徽标
     await expect.element(screen.getByTestId('step-running-spinner-step-2')).toBeInTheDocument()
@@ -329,9 +330,10 @@ describe('StepPipelineRail', () => {
       </div>,
     )
 
-    // 步骤 1：失败，展示失败图标与失败徽标
-    await expect.element(screen.getByTestId('step-failed-icon-step-1')).toBeInTheDocument()
+    // 步骤 1：失败，展示失败徽标且卡片右上角降噪
     await expect.element(screen.getByTestId('step-status-failed-step-1')).toHaveTextContent('失败 · 800ms')
+    await expect.element(screen.getByTestId('step-rail-number-step-1')).toHaveTextContent('1')
+    expect(screen.container.querySelector('[data-testid="step-failed-icon-step-1"]')).toBeNull()
   })
 
   it('条件块内子步骤执行中时，条件块展示执行中徽标与旋转动画', async () => {
@@ -546,9 +548,9 @@ describe('StepPipelineRail', () => {
       </div>,
     )
 
-    // 动作模块展示成功图标与耗时（从 0s 到 2.5s 即 2.5s）
-    await expect.element(screen1.getByTestId('step-succeeded-icon-mod-inv-1')).toBeInTheDocument()
+    // 动作模块展示成功耗时徽标（从 0s 到 2.5s 即 2.5s）
     await expect.element(screen1.getByTestId('step-status-succeeded-mod-inv-1')).toHaveTextContent('成功 · 2.5s')
+    expect(screen1.container.querySelector('[data-testid="step-succeeded-icon-mod-inv-1"]')).toBeNull()
 
     // 接下来测试断点停在动作模块内部时的挂起状态
     const trialRunHolding = makeRunDetail({
@@ -596,6 +598,83 @@ describe('StepPipelineRail', () => {
 
     // 动作模块卡片展示挂起徽标
     await expect.element(screen2.getByText('挂起')).toBeInTheDocument()
+  })
+
+  it('PipelineHealthPill：零样本冷启动展示未评测，有自愈/衰减时高亮且点击触发 onOpenHealthInspector', async () => {
+    const onOpenHealthInspector = vi.fn()
+
+    // 1. 冷启动零样本：展示未评测中性胶囊，且可点击唤起
+    const screenCold = await render(
+      <div className='h-[600px] w-[320px] flex flex-col'>
+        <StepPipelineRail
+          document={sampleDoc}
+          selectedId={null}
+          canWrite={true}
+          disabled={false}
+          editableTypes={['navigate', 'extract']}
+          locatorHealth={{
+            healthMap: new Map(),
+            overallScore: 100,
+            healthyCount: 0,
+            warningCount: 0,
+            failingCount: 0,
+            candidateCount: 0,
+            candidates: [],
+            isLoading: false,
+            isError: false,
+            adoptCandidate: vi.fn(),
+            rejectCandidate: vi.fn(),
+            batchAdoptAll: vi.fn(),
+          }}
+          onOpenHealthInspector={onOpenHealthInspector}
+          onSelect={vi.fn()}
+          onAddStep={vi.fn()}
+        />
+      </div>,
+    )
+    const coldPill = screenCold.getByTestId('pipeline-health-pill')
+    await expect.element(coldPill).toBeInTheDocument()
+    await expect.element(coldPill).toHaveTextContent('未评测')
+    await coldPill.click()
+    expect(onOpenHealthInspector).toHaveBeenCalledTimes(1)
+    screenCold.unmount()
+
+    // 2. 有自愈候选：展示可自愈并点击唤起
+    const screenHeal = await render(
+      <div className='h-[600px] w-[320px] flex flex-col'>
+        <StepPipelineRail
+          document={sampleDoc}
+          selectedId='step-1'
+          canWrite={true}
+          disabled={false}
+          editableTypes={['navigate', 'extract']}
+          isHealthView={true}
+          locatorHealth={{
+            healthMap: new Map(),
+            overallScore: 70,
+            healthyCount: 1,
+            warningCount: 1,
+            failingCount: 0,
+            candidateCount: 2,
+            candidates: [],
+            isLoading: false,
+            isError: false,
+            adoptCandidate: vi.fn(),
+            rejectCandidate: vi.fn(),
+            batchAdoptAll: vi.fn(),
+          }}
+          onOpenHealthInspector={onOpenHealthInspector}
+          onSelect={vi.fn()}
+          onAddStep={vi.fn()}
+        />
+      </div>,
+    )
+
+    const pill = screenHeal.getByTestId('pipeline-health-pill')
+    await expect.element(pill).toBeInTheDocument()
+    await expect.element(pill).toHaveTextContent('2 步可自愈')
+    await pill.click()
+    expect(onOpenHealthInspector).toHaveBeenCalledTimes(2)
   })
 })
 

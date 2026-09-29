@@ -3,21 +3,9 @@ import { render } from 'vitest-browser-react'
 import { describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ScenarioAuthoringDocumentV2, Step } from '@cairn/shared'
-import { makeRepairCandidate } from '@/test-utils/repair-candidate'
 import { ScenarioConfigWorkspace } from './scenario-config-workspace'
-import * as scenariosApi from '@/lib/scenarios-api'
 
-vi.mock('@/lib/scenarios-api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/scenarios-api')>()
-  return {
-    ...actual,
-    fetchScenarioResolutionStats: vi.fn(),
-  }
-})
-
-const mockFetchStats = vi.mocked(scenariosApi.fetchScenarioResolutionStats)
-
-describe('ScenarioConfigWorkspace - 定位稳定性与自愈分区', () => {
+describe('ScenarioConfigWorkspace - 净化场景配置工作区', () => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -25,7 +13,18 @@ describe('ScenarioConfigWorkspace - 定位稳定性与自愈分区', () => {
   const mockDoc: ScenarioAuthoringDocumentV2 = {
     schemaVersion: 1,
     authoringSchemaVersion: 2,
-    inputs: [],
+    inputs: [
+      {
+        key: 'orderId',
+        label: '订单编号',
+        type: 'string',
+        required: true,
+      },
+    ],
+    outputs: {
+      metrics: [],
+      dataRowFields: [],
+    },
     nodes: [
       {
         kind: 'step',
@@ -40,21 +39,8 @@ describe('ScenarioConfigWorkspace - 定位稳定性与自愈分区', () => {
     ],
   }
 
-  it('展示定位稳定性分区与 100% 稳定徽标', async () => {
-    mockFetchStats.mockResolvedValueOnce({
-      items: [
-        {
-          stepId: 'step-1',
-          scenarioVersionId: 'v1',
-          targetId: 't1',
-          deterministic: 5,
-          map: 0,
-          ai: 0,
-          failed: 0,
-          fallbackRate: 0,
-        },
-      ],
-    })
+  it('仅渲染纯净 4 分区，不包含稳定性分区与 Tab', async () => {
+    const onOpenHealth = vi.fn()
 
     const screen = await render(
       <QueryClientProvider client={queryClient}>
@@ -62,20 +48,7 @@ describe('ScenarioConfigWorkspace - 定位稳定性与自愈分区', () => {
           scenarioId='sc-1'
           targetId='t1'
           document={mockDoc}
-          locatorHealth={{
-            healthMap: new Map(),
-            overallScore: 100,
-            healthyCount: 1,
-            warningCount: 0,
-            failingCount: 0,
-            candidateCount: 0,
-            candidates: [],
-            isLoading: false,
-            isError: false,
-            adoptCandidate: vi.fn(),
-            rejectCandidate: vi.fn(),
-            batchAdoptAll: vi.fn(),
-          }}
+          onOpenHealth={onOpenHealth}
           onReturnToSteps={vi.fn()}
           onUpdateInputs={vi.fn()}
           onUpdateOutputs={vi.fn()}
@@ -86,34 +59,25 @@ describe('ScenarioConfigWorkspace - 定位稳定性与自愈分区', () => {
       </QueryClientProvider>,
     )
 
-    const stabilityTab = screen.getByTestId('scenario-config-tab-stability')
-    await expect.element(stabilityTab).toBeInTheDocument()
-    await expect.element(stabilityTab).toHaveTextContent('定位稳定性')
-    await expect.element(stabilityTab).toHaveTextContent('100%')
+    // 确认四个纯配置 Tab 存在
+    await expect.element(screen.getByTestId('scenario-config-tab-inputs')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('scenario-config-tab-outcomes')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('scenario-config-tab-outputs')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('scenario-config-tab-settings')).toBeInTheDocument()
 
-    const stabilitySection = document.querySelector('[data-partition="stability"]')
-    expect(stabilitySection).not.toBeNull()
-    await expect.element(screen.getByText('全部规则 100% 稳定')).toBeInTheDocument()
+    // 确认已解耦：不存在 stability Tab 与分区
+    expect(document.querySelector('[data-testid="scenario-config-tab-stability"]')).toBeNull()
+    expect(document.querySelector('[data-partition="stability"]')).toBeNull()
+
+    // 确认四个纯分区存在
+    expect(document.querySelector('[data-partition="inputs"]')).not.toBeNull()
+    expect(document.querySelector('[data-partition="outcomes"]')).not.toBeNull()
+    expect(document.querySelector('[data-partition="outputs"]')).not.toBeNull()
+    expect(document.querySelector('[data-partition="settings"]')).not.toBeNull()
   })
 
-  it('存在规则衰减时，展示衰减徽标与一键批量自愈横幅', async () => {
-    mockFetchStats.mockResolvedValueOnce({
-      items: [
-        {
-          stepId: 'step-1',
-          scenarioVersionId: 'v1',
-          targetId: 't1',
-          deterministic: 1,
-          map: 0,
-          ai: 3,
-          failed: 0,
-          fallbackRate: 0.75,
-        },
-      ],
-    })
-
-    const onBatchAdopt = vi.fn()
-    const onSelectStep = vi.fn()
+  it('展示平滑转场引导卡，点击触发 onOpenHealth', async () => {
+    const onOpenHealth = vi.fn()
 
     const screen = await render(
       <QueryClientProvider client={queryClient}>
@@ -121,22 +85,7 @@ describe('ScenarioConfigWorkspace - 定位稳定性与自愈分区', () => {
           scenarioId='sc-1'
           targetId='t1'
           document={mockDoc}
-          locatorHealth={{
-            healthMap: new Map(),
-            overallScore: 25,
-            healthyCount: 0,
-            warningCount: 1,
-            failingCount: 0,
-            candidateCount: 1,
-            candidates: [makeRepairCandidate()],
-            isLoading: false,
-            isError: false,
-            adoptCandidate: vi.fn(),
-            rejectCandidate: vi.fn(),
-            batchAdoptAll: vi.fn(),
-          }}
-          onBatchAdopt={onBatchAdopt}
-          onSelectStep={onSelectStep}
+          onOpenHealth={onOpenHealth}
           onReturnToSteps={vi.fn()}
           onUpdateInputs={vi.fn()}
           onUpdateOutputs={vi.fn()}
@@ -147,15 +96,12 @@ describe('ScenarioConfigWorkspace - 定位稳定性与自愈分区', () => {
       </QueryClientProvider>,
     )
 
-    const stabilityTab = screen.getByTestId('scenario-config-tab-stability')
-    await expect.element(stabilityTab).toHaveTextContent('1 衰减')
+    const transitionCard = screen.getByTestId('scenario-config-health-transition-card')
+    await expect.element(transitionCard).toBeInTheDocument()
+    await expect.element(screen.getByText('定位健康度与规则自愈已独立升级')).toBeInTheDocument()
 
-    const banner = screen.getByTestId('batch-healing-banner')
-    await expect.element(banner).toBeInTheDocument()
-    await expect.element(banner).toHaveTextContent('检测到 1 个步骤有可用的定位自愈建议')
-
-    const batchBtn = screen.getByRole('button', { name: '一键批量自愈' })
-    await batchBtn.click()
-    expect(onBatchAdopt).toHaveBeenCalledOnce()
+    const jumpBtn = screen.getByText('查看场景健康')
+    await jumpBtn.click()
+    expect(onOpenHealth).toHaveBeenCalledTimes(1)
   })
 })

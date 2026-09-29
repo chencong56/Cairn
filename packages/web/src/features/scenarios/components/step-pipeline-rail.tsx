@@ -14,7 +14,6 @@ import {
   Plus,
   Sparkles,
   Split,
-  XCircle,
 } from 'lucide-react'
 import {
   authoringHasControlBlocks,
@@ -58,7 +57,7 @@ import { StepTypeIcon } from '../step-type-icon'
 import { outputConsumersAny } from '../studio-document'
 import { STEP_TYPE_HINTS, unavailableStudioTypes } from '../step-registry'
 import { STEP_SNIPPET_TEMPLATES } from '../snippets/step-snippets'
-import type { StepLocatorHealth } from '../use-scenario-locator-health'
+import type { ScenarioLocatorHealthResult, StepLocatorHealth } from '../use-scenario-locator-health'
 
 import { useResetOnChange } from '@/hooks/use-reset-on-change'
 function formatStepDuration(stepRun?: StepRunDto): string | null {
@@ -93,6 +92,9 @@ export interface StepPipelineRailProps {
   capabilitiesData?: ScenarioCapabilities
   flowgram?: boolean
   locatorHealthMap?: Map<string, StepLocatorHealth>
+  locatorHealth?: ScenarioLocatorHealthResult
+  onOpenHealthInspector?: () => void
+  isHealthView?: boolean
   onToggleFlowgram?: (flowgram: boolean) => void
   onLocateStep?: (id: string) => void
   onSelect: (id: string) => void
@@ -134,6 +136,9 @@ export function StepPipelineRail({
   capabilitiesData,
   flowgram = false,
   locatorHealthMap,
+  locatorHealth,
+  onOpenHealthInspector,
+  isHealthView = false,
   onToggleFlowgram,
   onLocateStep,
   onSelect,
@@ -519,36 +524,106 @@ export function StepPipelineRail({
       </div>
 
       {/* 视图切换与步骤定位次级栏 */}
-      {(onToggleFlowgram || onLocateStep) && (
-        <div className='flex flex-wrap items-center gap-1.5 border-b border-border-divider px-3 py-1.5 shrink-0 bg-surface-header'>
-          {onToggleFlowgram && (
-            <div role='group' aria-label='步骤视图' className='flex gap-1'>
-              <Button
-                size='sm'
-                variant={!flowgram ? 'secondary' : 'ghost'}
-                className='h-7 px-2 text-label'
-                aria-pressed={!flowgram}
-                onClick={() => onToggleFlowgram(false)}
-              >
-                管线
-              </Button>
-              <Button
-                size='sm'
-                variant={flowgram ? 'secondary' : 'ghost'}
-                className='h-7 px-2 text-label'
-                aria-pressed={flowgram}
-                disabled={hasControlBlocks}
-                title={hasControlBlocks ? '含流程控制块的场景暂只支持列表视图' : undefined}
-                onClick={() => {
-                  if (!hasControlBlocks) onToggleFlowgram?.(true)
-                }}
-              >
-                画布
-              </Button>
-            </div>
-          )}
+      {(onToggleFlowgram || onLocateStep || (locatorHealth && onOpenHealthInspector)) && (
+        <div className='flex flex-wrap items-center justify-between gap-1.5 border-b border-border-divider px-3 py-1.5 shrink-0 bg-surface-header'>
+          <div className='flex items-center gap-1.5'>
+            {onToggleFlowgram && (
+              <div role='group' aria-label='步骤视图' className='flex gap-1'>
+                <Button
+                  size='sm'
+                  variant={!flowgram ? 'secondary' : 'ghost'}
+                  className='h-7 px-2 text-label'
+                  aria-pressed={!flowgram}
+                  onClick={() => onToggleFlowgram(false)}
+                >
+                  管线
+                </Button>
+                <Button
+                  size='sm'
+                  variant={flowgram ? 'secondary' : 'ghost'}
+                  className='h-7 px-2 text-label'
+                  aria-pressed={flowgram}
+                  disabled={hasControlBlocks}
+                  title={hasControlBlocks ? '含流程控制块的场景暂只支持列表视图' : undefined}
+                  onClick={() => {
+                    if (!hasControlBlocks) onToggleFlowgram?.(true)
+                  }}
+                >
+                  画布
+                </Button>
+              </div>
+            )}
+
+            {/* 步骤流水线健康胶囊（冷启动显示未评测中性胶囊，有衰减/自愈时高亮，点击唤起体检） */}
+            {locatorHealth && onOpenHealthInspector && (() => {
+              const hasTested =
+                locatorHealth.healthyCount > 0 ||
+                locatorHealth.warningCount > 0 ||
+                locatorHealth.failingCount > 0 ||
+                locatorHealth.candidateCount > 0
+
+              if (!hasTested) {
+                return (
+                  <button
+                    type='button'
+                    data-testid='pipeline-health-pill'
+                    onClick={onOpenHealthInspector}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-caption font-medium border transition-colors cursor-pointer shrink-0',
+                      isHealthView
+                        ? 'border-primary/50 bg-primary/15 text-primary shadow-2xs'
+                        : 'border-border-default/60 bg-surface-subtle/50 text-muted-foreground/80 hover:text-foreground hover:bg-surface-subtle',
+                    )}
+                    title='场景尚未产生运行数据，点击查看健康评测说明'
+                  >
+                    <span className='size-1.5 rounded-full shrink-0 bg-muted-foreground/40' />
+                    <span>未评测</span>
+                  </button>
+                )
+              }
+
+              return (
+                <button
+                  type='button'
+                  data-testid='pipeline-health-pill'
+                  onClick={onOpenHealthInspector}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-caption font-medium border transition-colors cursor-pointer shrink-0',
+                    isHealthView
+                      ? 'border-primary/50 bg-primary/15 text-primary shadow-2xs'
+                      : locatorHealth.candidateCount > 0 || locatorHealth.warningCount > 0
+                        ? 'border-status-warning/40 bg-status-warning/10 text-status-warning-foreground hover:bg-status-warning/20'
+                        : locatorHealth.failingCount > 0
+                          ? 'border-status-error/40 bg-status-error/10 text-status-error-foreground hover:bg-status-error/20'
+                          : 'border-border-default/70 bg-surface-subtle/80 text-muted-foreground hover:text-foreground hover:bg-surface-subtle',
+                  )}
+                  title='查看场景定位稳定性与规则自愈'
+                >
+                  <span
+                    className={cn(
+                      'size-1.5 rounded-full shrink-0',
+                      locatorHealth.candidateCount > 0 || locatorHealth.warningCount > 0
+                        ? 'bg-status-warning'
+                        : locatorHealth.failingCount > 0
+                          ? 'bg-status-error'
+                          : 'bg-status-success',
+                    )}
+                  />
+                  <span>
+                    {locatorHealth.candidateCount > 0
+                      ? `${locatorHealth.candidateCount} 步可自愈`
+                      : locatorHealth.warningCount > 0
+                        ? `${locatorHealth.warningCount} 步需维护`
+                        : locatorHealth.failingCount > 0
+                          ? `${locatorHealth.failingCount} 步失效`
+                          : '100% 稳定'}
+                  </span>
+                </button>
+              )
+            })()}
+          </div>
           {onLocateStep && (
-            <div className='flex min-w-0 flex-1 basis-36 items-center gap-0.5'>
+            <div className='flex min-w-0 flex-1 basis-36 items-center gap-0.5 justify-end'>
               <Button
                 size='icon'
                 variant='ghost'
@@ -758,7 +833,9 @@ export function StepPipelineRail({
                           isBlockRunning
                             ? 'border-primary bg-primary text-primary-foreground font-bold shadow-sm ring-2 ring-primary/40 ring-offset-1 animate-pulse'
                             : isSelected
-                              ? 'border-primary bg-primary text-primary-foreground shadow-control-focus'
+                              ? (isHealthView
+                                  ? 'border-primary/50 bg-primary/10 text-primary'
+                                  : 'border-primary bg-primary text-primary-foreground shadow-control-focus')
                               : 'border-primary/40 bg-primary/5 text-primary',
                         )}
                       >
@@ -804,7 +881,9 @@ export function StepPipelineRail({
                         isBlockRunning
                           ? 'border-primary bg-primary/[0.04] shadow-xs ring-1 ring-primary/30'
                           : isSelected
-                            ? 'border-primary bg-primary/5 shadow-control-focus'
+                            ? (isHealthView
+                                ? 'border-primary/40 bg-primary/5 shadow-2xs'
+                                : 'border-primary bg-primary/5 shadow-control-focus')
                             : isDisabled
                               ? 'border-dashed border-border-default bg-muted/20 opacity-60 hover:opacity-80'
                               : 'border-border-card bg-card hover:bg-primary/5',
@@ -1017,6 +1096,7 @@ export function StepPipelineRail({
 
                   <div className='flex flex-col items-center shrink-0 mt-2'>
                     <span
+                      data-testid={`step-rail-number-${key}`}
                       className={cn(
                         'relative z-10 flex size-5 shrink-0 items-center justify-center rounded-full border text-3xs font-mono font-medium transition-colors',
                         isNodeRunning
@@ -1024,9 +1104,11 @@ export function StepPipelineRail({
                           : isNodeFailed
                             ? 'border-status-error-accent bg-status-error-background text-status-error-foreground font-semibold'
                             : isNodeSucceeded
-                              ? 'border-status-success-accent bg-status-success-background text-status-success-foreground'
+                              ? 'border-status-success-accent bg-status-success-background text-status-success-foreground font-semibold'
                               : isSelected
-                                ? 'border-primary bg-primary text-primary-foreground shadow-control-focus'
+                                ? (isHealthView
+                                    ? 'border-primary/50 bg-primary/10 text-primary'
+                                    : 'border-primary bg-primary text-primary-foreground shadow-control-focus')
                                 : isHolding
                                   ? 'border-status-warning bg-status-warning text-white'
                                   : isDisabled
@@ -1036,10 +1118,6 @@ export function StepPipelineRail({
                     >
                       {isNodeRunning ? (
                         <Loader2 className='size-3 animate-spin text-primary-foreground' />
-                      ) : isNodeFailed ? (
-                        <XCircle className='size-3 text-status-error-foreground' />
-                      ) : isNodeSucceeded ? (
-                        <CheckCircle2 className='size-3 text-status-success-foreground' />
                       ) : (
                         item.displayNumber
                       )}
@@ -1055,15 +1133,13 @@ export function StepPipelineRail({
                             'size-3 shrink-0 transition-colors',
                             isNodeRunning
                               ? 'text-primary animate-pulse'
-                              : isNodeSucceeded
-                                ? 'text-status-success-foreground/70'
-                                : isSelected
-                                  ? 'text-primary/70'
-                                  : isHolding
-                                    ? 'text-status-warning/70'
-                                    : isDisabled
-                                      ? 'text-muted-foreground/20'
-                                      : 'text-muted-foreground/40',
+                              : isSelected
+                                ? 'text-primary/70'
+                                : isHolding
+                                  ? 'text-status-warning/70'
+                                  : isDisabled
+                                    ? 'text-muted-foreground/20'
+                                    : 'text-muted-foreground/40',
                           )}
                         />
                       </div>
@@ -1085,7 +1161,9 @@ export function StepPipelineRail({
                               ? 'border-status-error-accent bg-status-error-background/40 shadow-control-focus'
                               : 'border-status-error-accent/60 bg-status-error-background/30'
                             : isSelected
-                              ? 'border-selection-border bg-selection-background shadow-control-focus'
+                              ? (isHealthView
+                                  ? 'border-primary/40 bg-primary/5 shadow-2xs'
+                                  : 'border-selection-border bg-selection-background shadow-control-focus')
                               : isDisabled
                                 ? 'border-dashed border-border-default bg-muted/20 opacity-60 hover:opacity-80'
                                 : 'border-border-default bg-card hover:bg-action-hover',
@@ -1116,20 +1194,6 @@ export function StepPipelineRail({
                           <Loader2
                             data-testid={`step-running-spinner-${key}`}
                             className='size-3.5 text-primary animate-spin'
-                          />
-                        </span>
-                      ) : isNodeFailed ? (
-                        <span title='试跑失败' className='inline-flex shrink-0'>
-                          <XCircle
-                            data-testid={`step-failed-icon-${key}`}
-                            className='size-3.5 text-status-error-foreground'
-                          />
-                        </span>
-                      ) : isNodeSucceeded ? (
-                        <span title='试跑成功' className='inline-flex shrink-0'>
-                          <CheckCircle2
-                            data-testid={`step-succeeded-icon-${key}`}
-                            className='size-3.5 text-status-success-foreground'
                           />
                         </span>
                       ) : errorCount > 0 ? (
