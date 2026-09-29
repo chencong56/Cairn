@@ -10,7 +10,6 @@ import {
   type WorkerDetailResponse,
   type WorkerListQueryInput,
   type WorkerListResponse,
-  type WorkerNetworkMode,
   type WorkerSessionListQuery,
   type WorkerSlotCounts,
   type WorkerSummary,
@@ -105,7 +104,6 @@ export function summarizeWorker(input: {
   worker: WorkerRecord
   asOf: Date
   counts: WorkerSlotCounts
-  networkMode?: WorkerNetworkMode
   envEndpoint?: string
   canSeeEndpoint: boolean
 }): WorkerSummary {
@@ -116,7 +114,6 @@ export function summarizeWorker(input: {
     lostAfterSeconds: input.worker.lostAfterSeconds,
     internalBaseUrl: input.worker.internalBaseUrl,
     asOf: input.asOf,
-    networkMode: input.networkMode,
     envEndpoint: input.envEndpoint,
   })
   const mismatchState = handleMismatchState({
@@ -272,7 +269,7 @@ async function countForWorkers(
 export async function listWorkers(
   db: Db,
   query: WorkerListQueryInput,
-  options: { envEndpoints?: Record<string, string>; canSeeEndpoint: boolean; networkMode?: WorkerNetworkMode },
+  options: { envEndpoints?: Record<string, string>; canSeeEndpoint: boolean },
 ): Promise<WorkerListResponse> {
   const parsed = workerListQuerySchema.parse(query)
   const { workers } = schemaFor(db)
@@ -324,7 +321,6 @@ export async function listWorkers(
       },
       asOf,
       counts: counts.get(row.id) ?? emptyCounts(),
-      networkMode: options.networkMode,
       envEndpoint: options.envEndpoints?.[row.id],
       canSeeEndpoint: options.canSeeEndpoint,
     }),
@@ -340,7 +336,7 @@ export async function getWorkerDetail(
   db: Db,
   workerId: string,
   query: WorkerSessionListQuery,
-  options: { envEndpoints?: Record<string, string>; canSeeEndpoint: boolean; networkMode?: WorkerNetworkMode },
+  options: { envEndpoints?: Record<string, string>; canSeeEndpoint: boolean },
 ): Promise<WorkerDetailResponse> {
   const parsed = workerSessionListQuerySchema.parse(query)
   const worker = await getWorkerById(db, workerId)
@@ -407,7 +403,6 @@ export async function getWorkerDetail(
       worker,
       asOf,
       counts: counts.get(workerId) ?? emptyCounts(),
-      networkMode: options.networkMode,
       envEndpoint: options.envEndpoints?.[workerId],
       canSeeEndpoint: options.canSeeEndpoint,
     }),

@@ -4,11 +4,6 @@ import { workerStatusSchema } from './run-lease.js'
 import { sessionDtoSchema, sessionStatusSchema } from './session.js'
 import { utcInstantSchema } from './wire.js'
 
-export const WORKER_NETWORK_MODES = ['local', 'distributed'] as const
-/** @deprecated 已废除网络模式；安全强度不分环境，一律由必填密钥与显式配置把关 */
-export type WorkerNetworkMode = (typeof WORKER_NETWORK_MODES)[number]
-export const workerNetworkModeSchema = z.enum(WORKER_NETWORK_MODES)
-
 export const WORKER_ENDPOINT_SOURCES = ['database', 'environment', 'none'] as const
 export type WorkerEndpointSource = (typeof WORKER_ENDPOINT_SOURCES)[number]
 export const workerEndpointSourceSchema = z.enum(WORKER_ENDPOINT_SOURCES)
@@ -44,8 +39,6 @@ export const workerEndpointMapSchema = z.record(z.string().min(1).max(128), z.st
 export type WorkerEndpointMap = z.infer<typeof workerEndpointMapSchema>
 
 export type WorkerEndpointOptions = {
-  /** @deprecated 已废除 */
-  networkMode?: WorkerNetworkMode
 }
 
 export type NormalizedWorkerEndpoint = {
@@ -149,8 +142,6 @@ export function parseWorkerEndpoints(
 export function resolveWorkerAdvertiseUrl(input: {
   advertiseUrl?: string
   internalPort: number
-  /** @deprecated 已废除 */
-  networkMode?: WorkerNetworkMode
 }): string | null {
   if (input.internalPort <= 0) {
     if (input.advertiseUrl) {
@@ -326,8 +317,6 @@ export function evaluateWorkerRegistration(input: {
   lostAfterSeconds?: number | null
   internalBaseUrl: string | null
   asOf: Date
-  /** @deprecated 已废除 */
-  networkMode?: WorkerNetworkMode
   envEndpoint?: string
 }): {
   availability: WorkerRouteAvailability
@@ -411,8 +400,6 @@ export function evaluateWorkerRoute(input: {
   heartbeatExpiresAt: Date | string | null
   internalBaseUrl: string | null
   asOf: Date
-  /** @deprecated 已废除 */
-  networkMode?: WorkerNetworkMode
   envEndpoint?: string
 }): {
   availability: WorkerRouteAvailability

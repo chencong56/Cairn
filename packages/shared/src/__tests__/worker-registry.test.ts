@@ -27,7 +27,6 @@ function registration(overrides: Partial<Parameters<typeof evaluateWorkerRegistr
     lostAfterSeconds: 60,
     internalBaseUrl: null,
     asOf,
-    networkMode: 'local',
     envEndpoint: 'http://127.0.0.1:8091',
     ...overrides,
   })
@@ -42,7 +41,6 @@ function route(overrides: Partial<Parameters<typeof evaluateWorkerRoute>[0]> = {
     heartbeatExpiresAt: freshExpiry,
     internalBaseUrl: null,
     asOf,
-    networkMode: 'local',
     envEndpoint: 'http://127.0.0.1:8091',
     ...overrides,
   })

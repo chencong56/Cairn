@@ -3000,8 +3000,6 @@ export {
   type ManagedBrowserErrorCode,
 } from './managed-browser.js'
 export {
-  WORKER_NETWORK_MODES,
-  workerNetworkModeSchema,
   WORKER_ENDPOINT_SOURCES,
   workerEndpointSourceSchema,
   WORKER_ROUTE_AVAILABILITIES,
@@ -3037,7 +3035,6 @@ export {
   projectWorkerInternalEndpoint,
   canSeeWorkerInternalEndpoint,
   type WorkerSessionItem,
-  type WorkerNetworkMode,
   type WorkerEndpointSource,
   type WorkerRouteAvailability,
   type WorkerRouteReason,
