@@ -4,7 +4,9 @@ import {
   type AuthoringOperation,
   type AuthoringStepNode,
   type EffectType,
+  type JsonValue,
   type OutcomeContract,
+  type OutcomeScope,
   type ScenarioAuthoringDocumentV2,
   type ScenarioMetricDecl,
   type Step,
@@ -786,6 +788,137 @@ export function applyAuthoringOperations(
           onViolation: op.onViolation,
           scope: 'step',
           detail: op.meaning,
+        })
+        break
+      }
+      case 'update_outcome': {
+        let targetContract: OutcomeContract | undefined
+        let targetScope: OutcomeScope = 'scenario'
+        let targetStep: Step | undefined
+
+        if (workingDoc.scenarioOutcomes) {
+          const found = workingDoc.scenarioOutcomes.find((c) => c.id === op.contractId)
+          if (found) {
+            targetContract = found
+            targetScope = 'scenario'
+          }
+        }
+
+        if (!targetContract) {
+          for (const item of walkAuthoringNodes(workingDoc)) {
+            if (item.node.kind === 'step') {
+              const stepNode = item.node as AuthoringStepNode
+              const found = stepNode.outcomes?.find((c) => c.id === op.contractId)
+              if (found) {
+                targetContract = found
+                targetScope = 'step'
+                targetStep = stepNode.step
+                break
+              }
+            }
+          }
+        }
+
+        if (!targetContract) {
+          return {
+            ok: false,
+            error: {
+              code: 'OUTCOME_NOT_FOUND',
+              message: `未找到条件契约「${op.contractId}」`,
+              operationId: op.id,
+            },
+          }
+        }
+
+        // 硬约束：禁止跨 rule.kind 修改
+        if (op.patch.rule && op.patch.rule.kind !== targetContract.rule.kind) {
+          return {
+            ok: false,
+            error: {
+              code: 'INVALID_OUTCOME_RULE_KIND',
+              message: `update_outcome 不允许跨规则类型修改（原规则为 ${targetContract.rule.kind}，尝试改为 ${op.patch.rule.kind}）`,
+              operationId: op.id,
+            },
+          }
+        }
+
+        const nextSeverity = op.patch.severity ?? targetContract.severity
+        const nextOnViolation = op.patch.onViolation ?? targetContract.onViolation
+        const nextRule = op.patch.rule ?? targetContract.rule
+
+        // 校验作用域与违例策略合法性
+        if (nextRule.kind === 'run_duration' && targetScope !== 'scenario') {
+          return {
+            ok: false,
+            error: {
+              code: 'INVALID_OUTCOME_SCOPE',
+              message: '运行耗时条件只能作为场景级条件，不能挂在具体步骤上',
+              operationId: op.id,
+            },
+          }
+        }
+        if (nextRule.kind === 'run_duration' && nextOnViolation === 'halt') {
+          return {
+            ok: false,
+            error: {
+              code: 'INVALID_OUTCOME_VIOLATION',
+              message: '运行耗时条件不允许配置 halt',
+              operationId: op.id,
+            },
+          }
+        }
+        if (nextRule.kind === 'step_duration' && targetScope !== 'step') {
+          return {
+            ok: false,
+            error: {
+              code: 'INVALID_OUTCOME_SCOPE',
+              message: '步骤耗时条件只能挂在具体步骤上',
+              operationId: op.id,
+            },
+          }
+        }
+        if ((nextSeverity === 'SHOULD' || nextSeverity === 'INFO') && nextOnViolation === 'halt') {
+          return {
+            ok: false,
+            error: {
+              code: 'INVALID_OUTCOME_VIOLATION',
+              message: 'SHOULD 或 INFO 级别的条件不允许配置 halt',
+              operationId: op.id,
+            },
+          }
+        }
+
+        const before: Record<string, JsonValue> = {
+          meaning: targetContract.meaning,
+          severity: targetContract.severity,
+          onViolation: targetContract.onViolation,
+          rule: targetContract.rule as unknown as JsonValue,
+        }
+
+        if (op.patch.meaning !== undefined) targetContract.meaning = op.patch.meaning
+        if (op.patch.severity !== undefined) targetContract.severity = op.patch.severity
+        if (op.patch.onViolation !== undefined) targetContract.onViolation = op.patch.onViolation
+        if (op.patch.rule !== undefined) targetContract.rule = op.patch.rule
+
+        const after: Record<string, JsonValue> = {
+          meaning: targetContract.meaning,
+          severity: targetContract.severity,
+          onViolation: targetContract.onViolation,
+          rule: targetContract.rule as unknown as JsonValue,
+        }
+
+        diffs.push({
+          type: 'outcome_update',
+          contractId: targetContract.id,
+          meaning: targetContract.meaning,
+          ruleKind: targetContract.rule.kind,
+          severity: targetContract.severity,
+          onViolation: targetContract.onViolation,
+          scope: targetScope,
+          detail: `更新条件「${targetContract.meaning}」`,
+          ...(targetStep ? { stepId: targetStep.id, stepName: targetStep.name } : {}),
+          before,
+          after,
         })
         break
       }

@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   fetchIncidentImpact: vi.fn(),
   executeBatchUpgrade: vi.fn(),
   fetchUpgradeJob: vi.fn(),
+  fetchAcceptanceCoverage: vi.fn(),
+  triggerAcceptanceSweep: vi.fn(),
   fetchTargets: vi.fn(),
 }))
 
@@ -46,6 +48,8 @@ vi.mock('@/lib/reliability-api', () => ({
   fetchIncidentImpact: mocks.fetchIncidentImpact,
   executeBatchUpgrade: mocks.executeBatchUpgrade,
   fetchUpgradeJob: mocks.fetchUpgradeJob,
+  fetchAcceptanceCoverage: mocks.fetchAcceptanceCoverage,
+  triggerAcceptanceSweep: mocks.triggerAcceptanceSweep,
 }))
 
 vi.mock('@/lib/targets-api', () => ({
@@ -159,6 +163,47 @@ describe('Maintenance Features', () => {
       await expect.element(screen.getByText('94.5%')).toBeInTheDocument()
       await expect.element(screen.getByText('2400ms')).toBeInTheDocument()
       await expect.element(screen.getByText('退化', { exact: true })).toBeInTheDocument()
+    })
+
+    it('renders coverage view when view is coverage', async () => {
+      mocks.search = { view: 'coverage' }
+      mocks.fetchAcceptanceCoverage.mockResolvedValue({
+        platformAverageCoverage: 88.5,
+        unauditedScenarioCount: 1,
+        totalScenarioCount: 10,
+        latestBatch: {
+          id: 'batch-1',
+          scope: 'platform',
+          trigger: 'manual',
+          status: 'completed',
+          scenarioCount: 10,
+          createdAt: '2026-09-29T10:00:00Z',
+          finishedAt: '2026-09-29T10:05:00Z',
+        },
+        scenarios: [
+          {
+            scenarioId: 'sc-1',
+            scenarioName: '登录场景',
+            targetId: 'tgt-1',
+            targetName: '交易前台',
+            hasDraft: true,
+            browserStepCoverage: 100,
+            outputMetricCoverage: 80,
+            findingsCount: 0,
+          },
+        ],
+      })
+      mocks.fetchTargets.mockResolvedValue({ items: [{ id: 'tgt-1', name: '交易前台' }] })
+
+      const screen = await render(
+        <QueryClientProvider client={queryClient}>
+          <MaintenancePage />
+        </QueryClientProvider>,
+      )
+
+      await expect.element(screen.getByText('验收覆盖 (1)')).toBeInTheDocument()
+      await expect.element(screen.getByText('88.5%')).toBeInTheDocument()
+      await expect.element(screen.getByText('登录场景')).toBeInTheDocument()
     })
   })
 

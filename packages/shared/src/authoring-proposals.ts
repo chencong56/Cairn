@@ -178,6 +178,48 @@ export const authoringAddOutcomeOperationSchema = z.strictObject({
 })
 export type AuthoringAddOutcomeOperation = z.infer<typeof authoringAddOutcomeOperationSchema>
 
+export const authoringUpdateOutcomeOperationSchema = z
+  .strictObject({
+    kind: z.literal('update_outcome'),
+    id: z.string().min(1).max(128),
+    contractId: entityIdSchema,
+    patch: z
+      .strictObject({
+        meaning: z.string().trim().min(1).max(512).optional(),
+        severity: outcomeSeveritySchema.optional(),
+        onViolation: outcomeOnViolationSchema.optional(),
+        rule: outcomeRuleSchema.optional(),
+      })
+      .refine(
+        (patch) =>
+          patch.meaning !== undefined ||
+          patch.severity !== undefined ||
+          patch.onViolation !== undefined ||
+          patch.rule !== undefined,
+        { message: 'update_outcome 的 patch 至少需要提供一个修改项' },
+      ),
+  })
+  .superRefine((op, ctx) => {
+    if (op.patch.rule?.kind === 'run_duration' && op.patch.onViolation === 'halt') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['patch', 'onViolation'],
+        message: '运行耗时条件不允许配置 halt',
+      })
+    }
+    if (
+      (op.patch.severity === 'SHOULD' || op.patch.severity === 'INFO') &&
+      op.patch.onViolation === 'halt'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['patch', 'onViolation'],
+        message: 'SHOULD 或 INFO 级别的条件不允许配置 halt',
+      })
+    }
+  })
+export type AuthoringUpdateOutcomeOperation = z.infer<typeof authoringUpdateOutcomeOperationSchema>
+
 export const authoringSetOutputsOperationSchema = z.strictObject({
   kind: z.literal('set_outputs'),
   id: z.string().min(1).max(128),
@@ -194,6 +236,7 @@ export const authoringOperationSchema = z.discriminatedUnion('kind', [
   authoringMoveStepOperationSchema,
   authoringSetStepPolicyOperationSchema,
   authoringAddOutcomeOperationSchema,
+  authoringUpdateOutcomeOperationSchema,
   authoringSetOutputsOperationSchema,
 ])
 export type AuthoringOperation = z.infer<typeof authoringOperationSchema>
@@ -263,6 +306,22 @@ export const authoringDiffOutcomeAddSchema = z.strictObject({
 })
 export type AuthoringDiffOutcomeAdd = z.infer<typeof authoringDiffOutcomeAddSchema>
 
+export const authoringDiffOutcomeUpdateSchema = z.strictObject({
+  type: z.literal('outcome_update'),
+  contractId: entityIdSchema,
+  meaning: z.string().min(1).max(512),
+  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration']),
+  severity: outcomeSeveritySchema,
+  onViolation: outcomeOnViolationSchema,
+  scope: outcomeScopeSchema.optional(),
+  detail: z.string().max(512).optional(),
+  stepId: entityIdSchema.optional(),
+  stepName: z.string().min(1).max(128).optional(),
+  before: z.record(z.string(), jsonValueSchema).optional(),
+  after: z.record(z.string(), jsonValueSchema).optional(),
+})
+export type AuthoringDiffOutcomeUpdate = z.infer<typeof authoringDiffOutcomeUpdateSchema>
+
 export const authoringDiffOutputsChangeSchema = z.strictObject({
   type: z.literal('outputs_change'),
   summaryTemplate: z
@@ -292,6 +351,7 @@ export const authoringDiffSchema = z.discriminatedUnion('type', [
   authoringDiffModifySchema,
   authoringDiffMoveSchema,
   authoringDiffOutcomeAddSchema,
+  authoringDiffOutcomeUpdateSchema,
   authoringDiffOutputsChangeSchema,
 ])
 export type AuthoringDiff = z.infer<typeof authoringDiffSchema>

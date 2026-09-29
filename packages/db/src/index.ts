@@ -1626,3 +1626,15 @@ export const commitBusinessSourceBatch = operation(businessSourcesImpl.commitBus
 export const finishBusinessSourceBuild = operation(businessSourcesImpl.finishBusinessSourceBuild);
 export const cleanupBusinessSourceSnapshots = operation(businessSourcesImpl.cleanupBusinessSourceSnapshots);
 export * from "./business-sources/business-sources.js";
+
+import * as acceptanceImpl from "./acceptance/index.js";
+export const getScenarioAcceptanceHistory = operation(acceptanceImpl.getScenarioAcceptanceHistory);
+export const createSweepBatch = operation(acceptanceImpl.createSweepBatch);
+export const claimSweepBatch = operation(acceptanceImpl.claimSweepBatch);
+export const renewSweepBatchLease = operation(acceptanceImpl.renewSweepBatchLease);
+export const finishSweepBatch = operation(acceptanceImpl.finishSweepBatch);
+export const insertCoverageSnapshots = operation(acceptanceImpl.insertCoverageSnapshots);
+export const pruneOldSweepSnapshots = operation(acceptanceImpl.pruneOldSweepSnapshots);
+export const getAcceptanceCoverageOverview = operation(acceptanceImpl.getAcceptanceCoverageOverview);
+export const listScenariosForAcceptanceSweep = operation(acceptanceImpl.listScenariosForAcceptanceSweep);
+export * from "./acceptance/index.js";

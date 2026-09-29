@@ -32,6 +32,7 @@ import {
   previewReplaceStepsWithModule,
   replaceStepsWithModule,
   acceptModuleResolution,
+  getScenarioAcceptanceHistory,
   type DbHandle,
 } from '@cairn/db'
 import {
@@ -62,6 +63,8 @@ import {
   type ModuleUpgradeBody,
   type ModuleUpgradePreviewBody,
   type ModuleResolveAcceptBody,
+  type AcceptanceHistoryQuery,
+  type ScenarioAcceptanceHistoryResponse,
 } from '@cairn/shared'
 import { composeScenarioKnowledge } from './knowledge-operations'
 import { requireProposalAccess } from '../map/knowledge-access'
@@ -339,5 +342,13 @@ export class ScenariosService {
 
   acceptModuleResolution(id: string, requestId: string, body: ModuleResolveAcceptBody, actor: RequestAccount) {
     return acceptModuleResolution(this.db, id, requestId, { ...body, actor: { id: actor.id } }).catch(rethrowDomain)
+  }
+
+  acceptanceHistory(id: string, query: AcceptanceHistoryQuery): Promise<ScenarioAcceptanceHistoryResponse> {
+    return getScenarioAcceptanceHistory(this.db, {
+      scenarioId: id,
+      limit: query.limit,
+      since: query.since ? new Date(query.since) : undefined,
+    }).catch(rethrowDomain)
   }
 }

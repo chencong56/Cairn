@@ -157,6 +157,7 @@ import { ManagedStageScreen } from './components/managed-stage-screen'
 import { StudioInspectorHost } from './components/inspector/studio-inspector-host'
 import { AcceptanceWorkbench } from './acceptance/acceptance-workbench'
 import { ScenarioConfigWorkspace } from './components/inspector/scenario-config-workspace'
+import { ScenarioHealthInspector } from './components/inspector/scenario-health-inspector'
 import { DiagnosticList } from './components/inspector/diagnostic-list'
 import { SegmentedStepInspector } from './components/inspector/segmented-step-inspector'
 import { useStudioDraft } from './use-studio-draft'
@@ -444,7 +445,7 @@ export function ScenarioDetailPage() {
   const importedStepIds = importedStepsQuery.data ?? []
   const [mobilePane, setMobilePane] = useState<'steps' | 'properties' | 'page'>('steps')
   const [viewPreset, setViewPreset] = useState<StudioViewPreset>('balanced')
-  const [inspectorView, setInspectorView] = useState<'step' | 'scenario' | 'acceptance'>('step')
+  const [inspectorView, setInspectorView] = useState<'step' | 'scenario' | 'acceptance' | 'health'>('step')
   /** 验收面板发起的基线运行与复跑验证，用来区分 Studio 当前跟随的是哪一次。 */
   const [acceptanceRuns, setAcceptanceRuns] = useState<{ baselineRunId?: string; verifyRunId?: string }>({})
   /** 场景配置工作区「验收体检」入口触发的外部体检信号。 */
@@ -1421,8 +1422,52 @@ export function ScenarioDetailPage() {
               draft.setSelectedId(stepId)
               setStepNavigation((current) => ({ id: stepId, sequence: (current?.sequence ?? 0) + 1 }))
             }}
+            onApplyUpdateOutcome={async (contractId, patch) => {
+              const v2 = toAuthoringDocumentV2(document)
+              const applied = applyAuthoringOperations(v2, [
+                {
+                  kind: 'update_outcome',
+                  id: `tune-${contractId}-${Date.now()}`,
+                  contractId,
+                  patch,
+                },
+              ])
+              if (!applied.ok) {
+                return { ok: false, reason: applied.error.message }
+              }
+              draft.applyStructure(applied.document, draft.selectedId)
+              return { ok: true }
+            }}
             onClose={() => setInspectorView('step')}
             auditSignal={acceptanceAuditSignal}
+          />
+        </InspectorShield>
+      )
+    }
+    if (effectiveInspectorView === 'health' && scenario) {
+      return (
+        <InspectorShield>
+          <ScenarioHealthInspector
+            scenarioId={scenarioId}
+            steps={scenarioSteps}
+            focusedStepId={draft.selectedId}
+            focusedStepIndex={hasSteps && draft.selectedIndex >= 0 ? draft.selectedIndex : undefined}
+            locatorHealth={locatorHealth}
+            disabled={disabled}
+            onBatchAdopt={() => {
+              void locatorHealth.batchAdoptAll(
+                draft.baseline?.revision ?? scenario?.draft?.revision ?? 1,
+              )
+            }}
+            onSelectStep={(stepId) => {
+              draft.setSelectedId(stepId)
+              setInspectorView('step')
+              setMobilePane('properties')
+            }}
+            onReturnToStep={() => {
+              setInspectorView('step')
+              setMobilePane('properties')
+            }}
           />
         </InspectorShield>
       )
@@ -1440,17 +1485,6 @@ export function ScenarioDetailPage() {
             target={target?.resolutionPolicy}
             focusedStepIndex={hasSteps && draft.selectedIndex >= 0 ? draft.selectedIndex : undefined}
             focusedStepName={hasSteps ? draft.selected?.name : undefined}
-            locatorHealth={locatorHealth}
-            onBatchAdopt={() => {
-              void locatorHealth.batchAdoptAll(
-                draft.baseline?.revision ?? scenario?.draft?.revision ?? 1,
-              )
-            }}
-            onSelectStep={(stepId) => {
-              draft.setSelectedId(stepId)
-              setInspectorView('step')
-              setMobilePane('properties')
-            }}
             onReturnToSteps={() => {
               if (!draft.selectedId && draft.nodes.length > 0) {
                 draft.setSelectedId(nodeId(draft.nodes[0]))
@@ -1473,6 +1507,10 @@ export function ScenarioDetailPage() {
             onOpenAcceptanceAudit={() => {
               setInspectorView('acceptance')
               setAcceptanceAuditSignal((current) => current + 1)
+            }}
+            onOpenHealth={() => {
+              setInspectorView('health')
+              setMobilePane('properties')
             }}
           />
         ) : (
@@ -2667,6 +2705,12 @@ export function ScenarioDetailPage() {
                       capabilitiesData={capabilitiesQuery.data}
                       flowgram={flowgram}
                       locatorHealthMap={locatorHealth.healthMap}
+                      locatorHealth={locatorHealth}
+                      isHealthView={effectiveInspectorView === 'health'}
+                      onOpenHealthInspector={() => {
+                        setInspectorView((prev) => (prev === 'health' ? 'step' : 'health'))
+                        setMobilePane('properties')
+                      }}
                       onToggleFlowgram={(f) => {
                         void navigate({
                           from: '/scenarios/$scenarioId/',

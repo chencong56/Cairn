@@ -5,7 +5,7 @@ import { MaintenancePage } from '@/features/maintenance'
 import { useAuthStore } from '@/stores/auth-store'
 
 const searchSchema = z.object({
-  view: z.enum(['incidents', 'assets']).optional().catch('incidents'),
+  view: z.enum(['incidents', 'assets', 'coverage']).optional().catch('incidents'),
   targetId: z.string().optional().catch(undefined),
   status: z.string().optional().catch(undefined),
   severity: z.string().optional().catch(undefined),

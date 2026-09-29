@@ -109,6 +109,7 @@ function mockService() {
       scenario,
       diagnostics: [],
     })),
+    acceptanceHistory: vi.fn(async (_id: string, _q?: any) => ({ scenarioId: scenario.id, insights: [] as any[] })),
   }
 }
 
@@ -415,5 +416,33 @@ describe('Scenarios HTTP', () => {
       .send(body)
       .expect(200)
     expect(service.acceptModuleResolution).toHaveBeenCalled()
+  })
+
+  it('GET /scenarios/:scenarioId/acceptance-history 需要 workflow:read 权限，支持 limit 与 since 参数', async () => {
+    service.acceptanceHistory = vi.fn(async (id: string, q: any) => ({
+      scenarioId: id,
+      insights: [
+        {
+          contractId: '77777777-7777-4777-8777-777777777777',
+          meaning: '检查欢迎文案',
+          scope: 'step' as const,
+          sampleCount: 15,
+          sampleBreakdown: { manual: 15 },
+          passCount: 10,
+          failCount: 5,
+          unknownCount: 0,
+          inspectionalFailCount: 5,
+          suggestions: [],
+        },
+      ],
+    }))
+
+    const res = await request(viewerApp.getHttpServer())
+      .get(`/scenarios/${scenario.id}/acceptance-history?limit=10`)
+      .expect(200)
+
+    expect(res.body.scenarioId).toBe(scenario.id)
+    expect(res.body.insights).toHaveLength(1)
+    expect(service.acceptanceHistory).toHaveBeenCalledWith(scenario.id, { limit: 10 })
   })
 })

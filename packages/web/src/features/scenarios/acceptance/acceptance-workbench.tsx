@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   MAX_ACCEPTANCE_INTENTS,
   type AcceptanceIntentKind,
@@ -8,12 +8,17 @@ import {
   type AssistantAuthoringProposal,
   type EffectType,
   type RunDetailDto,
+  type AcceptanceHistoryInsight,
+  type AcceptanceTuningSuggestion,
+  type AcceptanceTuningPatch,
 } from '@cairn/shared'
 import {
   AlertTriangle,
+  BarChart3,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  History,
   ListChecks,
   MousePointerClick,
   Play,
@@ -22,6 +27,7 @@ import {
   Sparkles,
   Stethoscope,
   Trash2,
+  TrendingUp,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -36,6 +42,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { useAuthoringObserve } from '../authoring-observe'
@@ -54,7 +61,7 @@ import {
   type CardVerification,
   type IntentDraft,
 } from './acceptance-model'
-import { requestAcceptanceAudit, requestAcceptanceProposal } from './acceptance-api'
+import { requestAcceptanceAudit, requestAcceptanceProposal, fetchScenarioAcceptanceHistory } from './acceptance-api'
 
 export type AcceptanceStep = {
   id: string
@@ -82,6 +89,7 @@ export type AcceptanceWorkbenchProps = {
   onClose: () => void
   /** 变化时立即执行一次验收体检（供场景配置工作区等外部入口触发）。 */
   auditSignal?: number
+  onApplyUpdateOutcome?: (contractId: string, patch: AcceptanceTuningPatch) => Promise<{ ok: boolean; reason?: string }>
 }
 
 const COMPARE_OPTIONS = [
@@ -143,6 +151,7 @@ export function AcceptanceWorkbench({
   onLocateStep,
   onClose,
   auditSignal = 0,
+  onApplyUpdateOutcome,
 }: AcceptanceWorkbenchProps) {
   const observe = useAuthoringObserve()
   const capabilities = useAssistantStore((s) => s.capabilities)
@@ -805,6 +814,7 @@ export function AcceptanceWorkbench({
       </div>
 
       <AcceptanceAuditDialog
+        scenarioId={scenarioId}
         open={auditOpen}
         onOpenChange={setAuditOpen}
         loading={auditing}
@@ -819,6 +829,7 @@ export function AcceptanceWorkbench({
           onLocateStep(stepId)
         }}
         onApplySuggestedIntents={handleApplySuggestedIntents}
+        onApplyUpdateOutcome={onApplyUpdateOutcome}
       />
     </section>
   )
@@ -1067,6 +1078,7 @@ function stageText(stage: string): string {
 }
 
 export function AcceptanceAuditDialog({
+  scenarioId,
   open,
   onOpenChange,
   loading,
@@ -1078,7 +1090,9 @@ export function AcceptanceAuditDialog({
   stepName,
   onLocateStep,
   onApplySuggestedIntents,
+  onApplyUpdateOutcome,
 }: {
+  scenarioId: string
   open: boolean
   onOpenChange: (open: boolean) => void
   loading: boolean
@@ -1092,8 +1106,36 @@ export function AcceptanceAuditDialog({
   stepName: (id: string) => string
   onLocateStep: (stepId: string) => void
   onApplySuggestedIntents: (selected: AssistantAcceptanceAuditReport['suggestedIntents']) => void
+  onApplyUpdateOutcome?: (contractId: string, patch: AcceptanceTuningPatch) => Promise<{ ok: boolean; reason?: string }>
 }) {
+  const [activeTab, setActiveTab] = useState<'audit' | 'history'>('audit')
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
+
+  // 历史洞察状态
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string>()
+  const [historyInsights, setHistoryInsights] = useState<AcceptanceHistoryInsight[]>([])
+  const [adoptedSuggestionKeys, setAdoptedSuggestionKeys] = useState<Set<string>>(new Set())
+
+  const loadHistory = useCallback(async () => {
+    if (!scenarioId) return
+    setHistoryLoading(true)
+    setHistoryError(undefined)
+    try {
+      const res = await fetchScenarioAcceptanceHistory(scenarioId)
+      setHistoryInsights(res.insights ?? [])
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : '获取历史洞察失败')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [scenarioId])
+
+  useEffect(() => {
+    if (open) {
+      void loadHistory()
+    }
+  }, [open, loadHistory])
 
   useEffect(() => {
     if (report?.suggestedIntents) {
@@ -1110,6 +1152,21 @@ export function AcceptanceAuditDialog({
     })
   }
 
+  const handleAdoptSuggestion = async (contractId: string, suggestion: AcceptanceTuningSuggestion, key: string) => {
+    if (!suggestion.suggestedPatch) return
+    if (!onApplyUpdateOutcome) {
+      toast.error('当前无法应用到草稿，请在场景配置工作区打开')
+      return
+    }
+    const res = await onApplyUpdateOutcome(contractId, suggestion.suggestedPatch)
+    if (res.ok) {
+      setAdoptedSuggestionKeys((prev) => new Set(prev).add(key))
+      toast.success('已写入草稿，可保存或复核')
+    } else {
+      toast.error(res.reason || '采纳失败')
+    }
+  }
+
   const selectedSuggestions = (report?.suggestedIntents ?? []).filter((item) => checkedIds.has(item.id))
   const overLimit = maxAddable !== undefined && selectedSuggestions.length > maxAddable
 
@@ -1119,162 +1176,406 @@ export function AcceptanceAuditDialog({
         <DialogHeader className='p-4 border-b border-border-divider'>
           <DialogTitle className='flex items-center gap-2'>
             <Stethoscope className='size-5 text-primary' />
-            场景验收体检报告
+            场景验收体检与历史洞察
           </DialogTitle>
           <DialogDescription>
-            对当前草稿的验收成功条件、指标声明与步骤可观测性进行静态体检，并提供智能补全建议。
+            静态体检当前草稿的验收成功条件与指标完整性，并基于历史运行判定提供数据驱动的条件调优建议。
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className='flex-1 p-4'>
-          {loading ? (
-            <div className='flex flex-col items-center justify-center py-12 text-sm text-muted-foreground gap-2'>
-              <Sparkles className='size-6 animate-spin text-primary' />
-              <span>正在体检当前场景验收设计…{stage ? `（${stageText(stage)}）` : ''}</span>
-            </div>
-          ) : error ? (
-            <div className='rounded-md border border-status-warning-border bg-status-warning-background/20 p-4 text-small text-status-warning-foreground'>
-              {error}
-            </div>
-          ) : report ? (
-            <div className='space-y-4'>
-              {/* 体检概览 */}
-              <div className='grid grid-cols-2 gap-2 rounded-md border border-border-default bg-surface-subtle p-3 text-small'>
-                <div>
-                  <span className='font-medium text-foreground'>有成功条件的浏览器步骤：</span>
-                  <span className='text-muted-foreground'>
-                    {report.coverage.coveredBrowserStepsCount}/{report.coverage.browserStepsCount}（
-                    {Math.round(report.coverage.browserStepCoverage * 100)}%）
-                  </span>
-                </div>
-                <div>
-                  <span className='font-medium text-foreground'>取数进报告：</span>
-                  <span className='text-muted-foreground'>
-                    {report.coverage.coveredOutputsCount}/{report.coverage.outputsCount}（
-                    {Math.round(report.coverage.outputMetricCoverage * 100)}%）
-                  </span>
-                </div>
-                <div>
-                  <span className='font-medium text-foreground'>发现问题：</span>
-                  <span className={cn('font-semibold', report.findings.length > 0 ? 'text-status-warning-foreground' : 'text-status-success-foreground')}>
-                    {report.findings.length} 个
-                  </span>
-                </div>
-                <div>
-                  <span className='font-medium text-foreground'>补全建议：</span>
-                  <span className='font-semibold text-primary'>{report.suggestedIntents.length} 项</span>
-                </div>
-              </div>
-
-              {/* 发现清单 */}
-              <div className='space-y-2'>
-                <h4 className='text-small font-semibold flex items-center gap-1.5'>
-                  {report.findings.length > 0 ? <AlertTriangle className='size-4 text-status-warning-foreground' /> : <CheckCircle2 className='size-4 text-status-success-foreground' />}
-                  体检发现（{report.findings.length}）
-                </h4>
-                {report.findings.length === 0 ? (
-                  <p className='rounded-md border border-border-default bg-surface-subtle p-3 text-label text-muted-foreground'>
-                    ✓ 未发现明显的验收设计缺陷或孤立取数问题。
-                  </p>
-                ) : (
-                  <ul className='space-y-2'>
-                    {report.findings.map((finding) => (
-                      <li key={finding.id} className='rounded-md border border-border-default p-2.5 text-label space-y-1 bg-surface-subtle'>
-                        <div className='flex items-center gap-2'>
-                          <Badge variant={finding.severity === 'warning' ? 'secondary' : 'outline'}>
-                            {finding.severity === 'warning' ? '警告' : '提示'}
-                          </Badge>
-                          <span className='font-medium text-foreground'>{finding.message}</span>
-                          {finding.stepId ? (
-                            <button
-                              type='button'
-                              className='text-link hover:underline'
-                              onClick={() => onLocateStep(finding.stepId!)}
-                              title='跳转到对应步骤'
-                            >
-                              （步骤「{finding.stepName ?? stepName(finding.stepId)}」）
-                            </button>
-                          ) : finding.stepName ? (
-                            <span className='text-muted-foreground'>（步骤「{finding.stepName}」）</span>
-                          ) : null}
-                        </div>
-                        {finding.rationale ? <p className='text-xs text-muted-foreground pl-1'>{finding.rationale}</p> : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {/* 建议清单 */}
-              <div className='space-y-2'>
-                <h4 className='text-small font-semibold flex items-center gap-1.5'>
-                  <Sparkles className='size-4 text-primary' />
-                  智能补全建议（{report.suggestedIntents.length}）
-                </h4>
-                {modelDisabled ? (
-                  <p className='rounded-md border border-status-warning-border/40 bg-status-warning-background/20 p-2.5 text-label text-status-warning-foreground'>
-                    平台 AI 尚未启用或未配置模型，AI 增补建议不可用；以下仅包含确定性体检给出的建议。
-                  </p>
+        <Tabs value={activeTab} onValueChange={(val) => setActiveTab(val as 'audit' | 'history')} className='flex flex-col flex-1 min-h-0'>
+          <div className='px-4 pt-2 border-b border-border-divider bg-surface-subtle/50'>
+            <TabsList className='grid grid-cols-2 w-52'>
+              <TabsTrigger value='audit' className='flex items-center gap-1.5'>
+                <Stethoscope className='size-3.5' />
+                体检发现
+                {report && report.findings.length > 0 ? (
+                  <Badge variant='secondary' className='ml-1 text-2xs px-1.5 py-0'>
+                    {report.findings.length}
+                  </Badge>
                 ) : null}
-                {report.suggestedIntents.length === 0 ? (
-                  <p className='rounded-md border border-dashed border-border-divider p-3 text-label text-muted-foreground'>
-                    当前场景验收设计已较为完备，暂无补充建议。
-                  </p>
-                ) : (
-                  <ul className='space-y-2'>
-                    {report.suggestedIntents.map((item) => {
-                      const checked = checkedIds.has(item.id)
-                      return (
-                        <li
-                          key={item.id}
-                          className={cn(
-                            'flex items-start gap-2.5 rounded-md border p-2.5 cursor-pointer transition-colors',
-                            checked ? 'border-primary/40 bg-primary/5' : 'border-border-default bg-surface-subtle'
-                          )}
-                          onClick={() => toggleCheck(item.id)}
-                        >
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={() => toggleCheck(item.id)}
-                            className='mt-0.5'
-                            aria-label={`选择建议：${item.label}`}
-                          />
-                          <div className='min-w-0 flex-1 space-y-1 text-label'>
-                            <div className='flex flex-wrap items-center gap-1.5'>
-                              <span className='font-medium text-foreground'>{item.label}</span>
-                              <Badge variant='outline'>{ACCEPTANCE_INTENT_META[item.intent.kind]?.label ?? item.intent.kind}</Badge>
-                              {item.needsTarget ? <Badge variant='secondary'>需页面对象</Badge> : null}
-                              {item.needsBaseline ? <Badge variant='secondary'>需基线</Badge> : null}
-                            </div>
-                            <p className='text-xs text-muted-foreground'>{item.rationale}</p>
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-              </div>
-            </div>
-          ) : null}
-        </ScrollArea>
+              </TabsTrigger>
+              <TabsTrigger value='history' className='flex items-center gap-1.5'>
+                <History className='size-3.5' />
+                历史洞察
+                {historyInsights.some((i) => i.suggestions.length > 0) ? (
+                  <Badge variant='outline' className='ml-1 text-2xs px-1.5 py-0 text-primary border-primary/30'>
+                    建议
+                  </Badge>
+                ) : null}
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-        {report && report.suggestedIntents.length > 0 ? (
-          <DialogFooter className='p-3 border-t border-border-divider bg-surface-footer flex justify-between items-center sm:justify-between'>
-            <span className={cn('text-xs', overLimit ? 'text-status-warning-foreground' : 'text-muted-foreground')}>
-              已选中 {selectedSuggestions.length} / {report.suggestedIntents.length} 项建议
-              {maxAddable !== undefined ? ` · 还可加入 ${maxAddable} 项意图` : ''}
-              {overLimit ? `，超出上限，请减少勾选或先删减已有意图卡` : ''}
-            </span>
-            <Button
-              type='button'
-              size='sm'
-              disabled={selectedSuggestions.length === 0 || overLimit}
-              onClick={() => onApplySuggestedIntents(selectedSuggestions)}
-            >
-              把勾选建议加入意图（{selectedSuggestions.length}）
-            </Button>
-          </DialogFooter>
-        ) : null}
+          <TabsContent value='audit' className='flex-1 m-0 min-h-0 flex flex-col'>
+            <ScrollArea className='flex-1 p-4'>
+              {loading ? (
+                <div className='flex flex-col items-center justify-center py-12 text-sm text-muted-foreground gap-2'>
+                  <Sparkles className='size-6 animate-spin text-primary' />
+                  <span>正在体检当前场景验收设计…{stage ? `（${stageText(stage)}）` : ''}</span>
+                </div>
+              ) : error ? (
+                <div className='rounded-md border border-status-warning-border bg-status-warning-background/20 p-4 text-small text-status-warning-foreground'>
+                  {error}
+                </div>
+              ) : report ? (
+                <div className='space-y-4'>
+                  {/* 体检概览 */}
+                  <div className='grid grid-cols-2 gap-2 rounded-md border border-border-default bg-surface-subtle p-3 text-small'>
+                    <div>
+                      <span className='font-medium text-foreground'>有成功条件的浏览器步骤：</span>
+                      <span className='text-muted-foreground'>
+                        {report.coverage.coveredBrowserStepsCount}/{report.coverage.browserStepsCount}（
+                        {Math.round(report.coverage.browserStepCoverage * 100)}%）
+                      </span>
+                    </div>
+                    <div>
+                      <span className='font-medium text-foreground'>取数进报告：</span>
+                      <span className='text-muted-foreground'>
+                        {report.coverage.coveredOutputsCount}/{report.coverage.outputsCount}（
+                        {Math.round(report.coverage.outputMetricCoverage * 100)}%）
+                      </span>
+                    </div>
+                    <div>
+                      <span className='font-medium text-foreground'>发现问题：</span>
+                      <span className={cn('font-semibold', report.findings.length > 0 ? 'text-status-warning-foreground' : 'text-status-success-foreground')}>
+                        {report.findings.length} 个
+                      </span>
+                    </div>
+                    <div>
+                      <span className='font-medium text-foreground'>补全建议：</span>
+                      <span className='font-semibold text-primary'>{report.suggestedIntents.length} 项</span>
+                    </div>
+                  </div>
+
+                  {/* 发现清单 */}
+                  <div className='space-y-2'>
+                    <h4 className='text-small font-semibold flex items-center gap-1.5'>
+                      {report.findings.length > 0 ? <AlertTriangle className='size-4 text-status-warning-foreground' /> : <CheckCircle2 className='size-4 text-status-success-foreground' />}
+                      体检发现（{report.findings.length}）
+                    </h4>
+                    {report.findings.length === 0 ? (
+                      <p className='rounded-md border border-border-default bg-surface-subtle p-3 text-label text-muted-foreground'>
+                        ✓ 未发现明显的验收设计缺陷或孤立取数问题。
+                      </p>
+                    ) : (
+                      <ul className='space-y-2'>
+                        {report.findings.map((finding) => (
+                          <li key={finding.id} className='rounded-md border border-border-default p-2.5 text-label space-y-1 bg-surface-subtle'>
+                            <div className='flex items-center gap-2'>
+                              <Badge variant={finding.severity === 'warning' ? 'secondary' : 'outline'}>
+                                {finding.severity === 'warning' ? '警告' : '提示'}
+                              </Badge>
+                              <span className='font-medium text-foreground'>{finding.message}</span>
+                              {finding.stepId ? (
+                                <button
+                                  type='button'
+                                  className='text-link hover:underline'
+                                  onClick={() => onLocateStep(finding.stepId!)}
+                                  title='跳转到对应步骤'
+                                >
+                                  （步骤「{finding.stepName ?? stepName(finding.stepId)}」）
+                                </button>
+                              ) : finding.stepName ? (
+                                <span className='text-muted-foreground'>（步骤「{finding.stepName}」）</span>
+                              ) : null}
+                            </div>
+                            {finding.rationale ? <p className='text-xs text-muted-foreground pl-1'>{finding.rationale}</p> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* 建议清单 */}
+                  <div className='space-y-2'>
+                    <h4 className='text-small font-semibold flex items-center gap-1.5'>
+                      <Sparkles className='size-4 text-primary' />
+                      智能补全建议（{report.suggestedIntents.length}）
+                    </h4>
+                    {modelDisabled ? (
+                      <p className='rounded-md border border-status-warning-border/40 bg-status-warning-background/20 p-2.5 text-label text-status-warning-foreground'>
+                        平台 AI 尚未启用或未配置模型，AI 增补建议不可用；以下仅包含确定性体检给出的建议。
+                      </p>
+                    ) : null}
+                    {report.suggestedIntents.length === 0 ? (
+                      <p className='rounded-md border border-dashed border-border-divider p-3 text-label text-muted-foreground'>
+                        当前场景验收设计已较为完备，暂无补充建议。
+                      </p>
+                    ) : (
+                      <ul className='space-y-2'>
+                        {report.suggestedIntents.map((item) => {
+                          const checked = checkedIds.has(item.id)
+                          return (
+                            <li
+                              key={item.id}
+                              className={cn(
+                                'flex items-start gap-2.5 rounded-md border p-2.5 cursor-pointer transition-colors',
+                                checked ? 'border-primary/40 bg-primary/5' : 'border-border-default bg-surface-subtle'
+                              )}
+                              onClick={() => toggleCheck(item.id)}
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={() => toggleCheck(item.id)}
+                                className='mt-0.5'
+                                aria-label={`选择建议：${item.label}`}
+                              />
+                              <div className='min-w-0 flex-1 space-y-1 text-label'>
+                                <div className='flex flex-wrap items-center gap-1.5'>
+                                  <span className='font-medium text-foreground'>{item.label}</span>
+                                  <Badge variant='outline'>{ACCEPTANCE_INTENT_META[item.intent.kind]?.label ?? item.intent.kind}</Badge>
+                                  {item.needsTarget ? <Badge variant='secondary'>需页面对象</Badge> : null}
+                                  {item.needsBaseline ? <Badge variant='secondary'>需基线</Badge> : null}
+                                </div>
+                                <p className='text-xs text-muted-foreground'>{item.rationale}</p>
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </ScrollArea>
+
+            {report && report.suggestedIntents.length > 0 ? (
+              <DialogFooter className='p-3 border-t border-border-divider bg-surface-footer flex justify-between items-center sm:justify-between'>
+                <span className={cn('text-xs', overLimit ? 'text-status-warning-foreground' : 'text-muted-foreground')}>
+                  已选中 {selectedSuggestions.length} / {report.suggestedIntents.length} 项建议
+                  {maxAddable !== undefined ? ` · 还可加入 ${maxAddable} 项意图` : ''}
+                  {overLimit ? `，超出上限，请减少勾选或先删减已有意图卡` : ''}
+                </span>
+                <Button
+                  type='button'
+                  size='sm'
+                  disabled={selectedSuggestions.length === 0 || overLimit}
+                  onClick={() => onApplySuggestedIntents(selectedSuggestions)}
+                >
+                  把勾选建议加入意图（{selectedSuggestions.length}）
+                </Button>
+              </DialogFooter>
+            ) : null}
+          </TabsContent>
+
+          <TabsContent value='history' className='flex-1 m-0 min-h-0 flex flex-col'>
+            <ScrollArea className='flex-1 p-4'>
+              {historyLoading ? (
+                <div className='flex flex-col items-center justify-center py-12 text-sm text-muted-foreground gap-2'>
+                  <RefreshCw className='size-6 animate-spin text-primary' />
+                  <span>正在分析近 50 次运行判定历史与分布…</span>
+                </div>
+              ) : historyError ? (
+                <div className='rounded-md border border-status-warning-border bg-status-warning-background/20 p-4 text-small text-status-warning-foreground'>
+                  {historyError}
+                </div>
+              ) : historyInsights.length === 0 ? (
+                <div className='py-12 text-center text-muted-foreground text-sm space-y-2'>
+                  <History className='size-8 mx-auto text-muted-foreground/60 mb-2' />
+                  <p className='font-medium text-foreground'>暂无足够的运行历史数据</p>
+                  <p className='text-xs max-w-sm mx-auto'>
+                    需要至少 10 次 runThrough 运行以形成可靠的判定分布与数据驱动的阈值调优建议。
+                  </p>
+                </div>
+              ) : (
+                <div className='space-y-4'>
+                  {historyInsights.map((insight) => (
+                    <div
+                      key={insight.contractId}
+                      className='rounded-lg border border-border-default bg-surface-subtle p-3.5 space-y-3'
+                    >
+                      <div className='flex items-center justify-between gap-2 border-b border-border-divider pb-2'>
+                        <div className='flex items-center gap-2 min-w-0'>
+                          <span className='font-medium text-foreground truncate'>{insight.meaning}</span>
+                          <Badge variant='outline'>{insight.scope === 'step' ? '步骤级' : '场景级'}</Badge>
+                        </div>
+                        {insight.priorSegmentSampleCount ? (
+                          <span className='text-xs text-muted-foreground shrink-0'>
+                            调整前历史：{insight.priorSegmentSampleCount} 次
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* 判定分布条 */}
+                      <div className='space-y-1.5'>
+                        <div className='flex items-center justify-between text-xs text-muted-foreground'>
+                          <div className='flex items-center gap-3'>
+                            <span>
+                              样本：<strong className='text-foreground'>{insight.sampleCount}</strong> 次
+                            </span>
+                            <span>
+                              PASS：<strong className='text-status-success-foreground'>{insight.passCount}</strong>
+                            </span>
+                            <span>
+                              FAIL：
+                              <strong
+                                className={cn(
+                                  insight.failCount > 0 ? 'text-status-warning-foreground font-semibold' : 'text-muted-foreground'
+                                )}
+                              >
+                                {insight.failCount}
+                              </strong>
+                            </span>
+                            {insight.unknownCount > 0 ? (
+                              <span>
+                                UNKNOWN：<strong className='text-muted-foreground'>{insight.unknownCount}</strong>
+                              </span>
+                            ) : null}
+                            {insight.inspectionalFailCount > 0 ? (
+                              <span className='text-status-warning-foreground font-medium'>
+                                巡检型失败：<strong>{insight.inspectionalFailCount}</strong> 次
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {insight.sampleCount > 0 ? (
+                          <div className='h-2 w-full rounded-full bg-surface-base border border-border-default overflow-hidden flex'>
+                            <div
+                              className='bg-status-success-foreground h-full'
+                              style={{ width: `${(insight.passCount / insight.sampleCount) * 100}%` }}
+                              title={`PASS: ${insight.passCount}`}
+                            />
+                            <div
+                              className='bg-status-warning-foreground h-full'
+                              style={{ width: `${(insight.failCount / insight.sampleCount) * 100}%` }}
+                              title={`FAIL: ${insight.failCount}`}
+                            />
+                            <div
+                              className='bg-muted-foreground/30 h-full'
+                              style={{ width: `${(insight.unknownCount / insight.sampleCount) * 100}%` }}
+                              title={`UNKNOWN: ${insight.unknownCount}`}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* 数值 / 耗时分布摘要 */}
+                      {insight.actualDistribution ? (
+                        <div className='rounded bg-surface-base border border-border-default px-2.5 py-1.5 text-xs text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1'>
+                          <span className='font-medium text-foreground flex items-center gap-1'>
+                            <BarChart3 className='size-3.5 text-primary' /> 分布摘要：
+                          </span>
+                          <span>
+                            P50:{' '}
+                            <strong className='text-foreground'>
+                              {insight.actualDistribution.p50}
+                              {insight.actualDistribution.unitHint ?? ''}
+                            </strong>
+                          </span>
+                          <span>
+                            P95:{' '}
+                            <strong className='text-foreground'>
+                              {insight.actualDistribution.p95}
+                              {insight.actualDistribution.unitHint ?? ''}
+                            </strong>
+                          </span>
+                          <span>
+                            极值范围: {insight.actualDistribution.min} ~ {insight.actualDistribution.max}
+                            {insight.actualDistribution.unitHint ?? ''}
+                          </span>
+                        </div>
+                      ) : null}
+
+                      {/* 条件调整卡 */}
+                      <div className='space-y-2 pt-1'>
+                        <div className='text-xs font-medium text-muted-foreground flex items-center gap-1'>
+                          <TrendingUp className='size-3.5 text-primary' /> 条件调整建议：
+                        </div>
+                        {insight.suggestions.length === 0 ? (
+                          <p className='text-xs text-muted-foreground pl-1 italic'>
+                            当前条件与近期运行表现吻合，无需调整。
+                          </p>
+                        ) : (
+                          <div className='space-y-2'>
+                            {insight.suggestions.map((sug) => {
+                              const key = `${insight.contractId}-${sug.kind}-${sug.ruleName}`
+                              const isAdopted = adoptedSuggestionKeys.has(key)
+                              const kindLabel =
+                                sug.kind === 'loosen_threshold'
+                                  ? '放宽阈值'
+                                  : sug.kind === 'tighten_threshold'
+                                    ? '收紧阈值'
+                                    : sug.kind === 'lower_severity'
+                                      ? '降低等级'
+                                      : sug.kind === 'measurement_missing'
+                                        ? '度量缺失'
+                                        : '失效条件'
+
+                              return (
+                                <div
+                                  key={key}
+                                  className='rounded-md border border-border-default bg-surface-base p-2.5 space-y-2 text-xs'
+                                >
+                                  <div className='flex items-start justify-between gap-2'>
+                                    <div className='space-y-1 min-w-0'>
+                                      <div className='flex items-center gap-1.5 flex-wrap'>
+                                        <Badge variant={sug.kind === 'tighten_threshold' ? 'secondary' : 'outline'}>
+                                          {kindLabel}
+                                        </Badge>
+                                        <span className='font-medium text-foreground'>{sug.ruleName}</span>
+                                      </div>
+                                      {sug.fromValue !== undefined && sug.toValue !== undefined ? (
+                                        <div className='font-mono text-xs text-muted-foreground pt-0.5'>
+                                          旧值: <span className='line-through'>{sug.fromValue}</span> → 建议值:{' '}
+                                          <strong className='text-primary'>{sug.toValue}</strong>
+                                        </div>
+                                      ) : null}
+                                      <p className='text-muted-foreground text-xs leading-relaxed'>{sug.rationale}</p>
+                                      {sug.kind === 'tighten_threshold' ? (
+                                        <p className='text-status-warning-foreground text-xs'>
+                                          ⚠️ 风险提示：收紧阈值可能暴露潜在偶发抖动，采纳后请复跑验证。
+                                        </p>
+                                      ) : null}
+                                      <div className='text-2xs text-muted-foreground/80'>
+                                        依据：{sug.sampleCount} 次历史样本
+                                      </div>
+                                    </div>
+
+                                    <div className='shrink-0 pt-0.5'>
+                                      {isAdopted ? (
+                                        <Badge
+                                          variant='outline'
+                                          className='text-status-success-foreground border-status-success-border bg-status-success-background/20'
+                                        >
+                                          已写入草稿
+                                        </Badge>
+                                      ) : sug.suggestedPatch ? (
+                                        <Button
+                                          size='sm'
+                                          variant='outline'
+                                          className='h-7 text-xs px-2.5'
+                                          onClick={() => handleAdoptSuggestion(insight.contractId, sug, key)}
+                                        >
+                                          采纳
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+
+            <DialogFooter className='p-3 border-t border-border-divider bg-surface-footer flex justify-between items-center sm:justify-between'>
+              <span className='text-xs text-muted-foreground'>
+                洞察基于近 50 次 runThrough 运行统计；采纳调整将更新草稿中的条件阈值。
+              </span>
+              <Button type='button' variant='outline' size='sm' onClick={loadHistory} disabled={historyLoading}>
+                <RefreshCw className={cn('size-3.5 mr-1', historyLoading ? 'animate-spin' : '')} />
+                刷新历史
+              </Button>
+            </DialogFooter>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   )

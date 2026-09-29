@@ -7,6 +7,7 @@ import {
   type PeriodicSlotSkip,
 } from "@cairn/db";
 import {
+  DEFAULT_ACCEPTANCE_SWEEP_INTERVAL_MS,
   REAPER_PERIODIC_SLOT_ORDER,
   type PeriodicSlotName,
 } from "@cairn/shared";
@@ -54,6 +55,13 @@ export function reaperPeriodicSlotRequests(input: {
       name: "service.request_logs.purge",
       mode: "throttle",
       intervalMs: input.serviceRequestLogPurgeIntervalMs,
+      owner: input.owner,
+    },
+    {
+      name: "acceptance.audit.sweep",
+      mode: "single_flight",
+      intervalMs: DEFAULT_ACCEPTANCE_SWEEP_INTERVAL_MS,
+      leaseTtlMs: input.leaseTtlMs,
       owner: input.owner,
     },
   ];

@@ -16,6 +16,10 @@ import {
   maintenanceUpgradeJobSchema,
   reliabilityIncidentDtoSchema,
   reliabilityIncidentListResponseSchema,
+  acceptanceCoverageOverviewResponseSchema,
+  acceptanceSweepBatchSchema,
+  type AcceptanceCoverageOverviewResponse,
+  type AcceptanceSweepBatch,
 } from '@cairn/shared'
 import { z } from 'zod'
 import { apiFetch, toQueryString } from '@/lib/api-client'
@@ -130,4 +134,14 @@ export function executeBatchUpgrade(
 
 export function fetchUpgradeJob(jobId: string): Promise<MaintenanceUpgradeJobDto> {
   return apiFetch(`/api/reliability/upgrade-jobs/${jobId}`, maintenanceUpgradeJobSchema)
+}
+
+export function fetchAcceptanceCoverage(): Promise<AcceptanceCoverageOverviewResponse> {
+  return apiFetch('/api/maintenance/acceptance-coverage', acceptanceCoverageOverviewResponseSchema)
+}
+
+export function triggerAcceptanceSweep(): Promise<AcceptanceSweepBatch> {
+  return apiFetch('/api/maintenance/acceptance-sweeps', acceptanceSweepBatchSchema, {
+    method: 'POST',
+  })
 }

@@ -206,6 +206,16 @@ describe.skipIf(!parsed.success)('迁移与 Drizzle schema 一致性（集成）
     }
   })
 
+  it('验收巡检批次与覆盖快照的列与 Drizzle 定义一致', async () => {
+    for (const table of [logicalSchema.acceptanceSweepBatches, logicalSchema.acceptanceCoverageSnapshots]) {
+      const { rows } = await pool.query<{ column_name: string; is_nullable: string }>(
+        `SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY column_name`,
+        [TEST_SCHEMA, getTableName(table)],
+      )
+      expect(rows).toEqual(Object.values(getTableColumns(table)).map(c => ({ column_name: c.name, is_nullable: c.notNull ? 'NO' : 'YES' })).sort((a, b) => a.column_name.localeCompare(b.column_name)))
+    }
+  })
+
   it('console_audit_events 的列与 Drizzle 定义一致', async () => {
     const { rows } = await pool.query<{ column_name: string; is_nullable: string }>(
       `SELECT column_name, is_nullable FROM information_schema.columns
@@ -738,6 +748,7 @@ describe.skipIf(!parsed.success)('迁移与 Drizzle schema 一致性（集成）
       'base_revision_id→report_revisions',
       'ai_revision_id→report_revisions',
       'entry_id→map_menu_entries',
+      'batch_id→acceptance_sweep_batches',
     ])
     const violations = rows.filter((r) => {
       if (!r.column_name.endsWith('_id')) return false

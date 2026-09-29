@@ -80,4 +80,5 @@ export {
   type TargetAuthCleansingContext,
 } from './cleansing-predicates.js'
 export { auditAcceptance } from './audit.js'
+export { suggestOutcomeTuning, type OutcomeHistoricalStats } from './tuning.js'
 

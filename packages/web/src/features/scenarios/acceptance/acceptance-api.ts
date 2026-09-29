@@ -1,9 +1,11 @@
-import type {
-  AcceptanceRequest,
-  AssistantAcceptanceAuditReport,
-  AssistantAuthoringProposal,
-  AssistantResult,
-  AssistantTurn,
+import {
+  type AcceptanceRequest,
+  type AssistantAcceptanceAuditReport,
+  type AssistantAuthoringProposal,
+  type AssistantResult,
+  type AssistantTurn,
+  scenarioAcceptanceHistoryResponseSchema,
+  type ScenarioAcceptanceHistoryResponse,
 } from '@cairn/shared'
 import {
   createAssistantConversation,
@@ -11,6 +13,7 @@ import {
   fetchAssistantTurn,
   observeAssistantTurn,
 } from '@/lib/assistant-api'
+import { apiFetch, toQueryString } from '@/lib/api-client'
 
 const TERMINAL_TURN_STATUSES = new Set<AssistantTurn['status']>(['COMPLETED', 'CLARIFY', 'FAILED', 'CANCELLED', 'INTERRUPTED'])
 
@@ -174,4 +177,12 @@ export async function requestAcceptanceAudit(input: {
       onError: fail,
     })
   })
+}
+
+export async function fetchScenarioAcceptanceHistory(
+  scenarioId: string,
+  params?: { limit?: number; since?: string },
+): Promise<ScenarioAcceptanceHistoryResponse> {
+  const query = toQueryString(params)
+  return apiFetch(`/api/scenarios/${scenarioId}/acceptance-history${query}`, scenarioAcceptanceHistoryResponseSchema)
 }

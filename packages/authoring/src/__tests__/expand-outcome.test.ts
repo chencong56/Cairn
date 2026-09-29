@@ -595,14 +595,35 @@ describe('OC-A: 编写展开与契约派生 (expand-outcome)', () => {
 })
 
 describe('OCA-EXP（二期）：run_duration 场景级派生', () => {
+  const navStep: Step = {
+    id: '30000000-0000-4000-8000-000000000001',
+    name: '打开页面',
+    type: 'navigate',
+    effectType: 'READ_ONLY',
+    input: { url: 'https://example.com' },
+  }
+  const actStep: Step = {
+    id: '30000000-0000-4000-8000-000000000002',
+    name: '点击查询',
+    type: 'click',
+    effectType: 'IDEMPOTENT',
+    input: { target: { framePath: [], candidates: [{ by: 'role', value: 'button', name: '查询' }] } },
+  }
+  const context = (): ExpansionContext =>
+    ({
+      platformConfig: undefined,
+      resolution: undefined,
+      modules: new Map(),
+    }) as unknown as ExpansionContext
+
   it('run_duration 契约派生 check_duration{runTotal:true} 检查步骤', () => {
     const doc: ScenarioAuthoringDocumentV2 = {
       authoringSchemaVersion: 2,
       schemaVersion: 1,
       inputs: [],
       nodes: [
-        { kind: 'step', step: navigateStep },
-        { kind: 'step', step: clickStep },
+        { kind: 'step', step: navStep },
+        { kind: 'step', step: actStep },
       ],
       scenarioOutcomes: [
         {
@@ -617,7 +638,7 @@ describe('OCA-EXP（二期）：run_duration 场景级派生', () => {
       ],
     }
 
-    const result = expandAuthoringDocument(doc, makeContext())
+    const result = expandAuthoringDocument(doc, context())
     expect(result.ok).toBe(true)
     const lastStep = result.definition?.steps.at(-1)!
     expect(lastStep.id).toBe(deterministicStepId('scenario', '20000000-0000-4000-8000-000000000030'))

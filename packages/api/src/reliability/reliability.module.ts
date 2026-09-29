@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { MaintenanceAcceptanceController } from './maintenance-acceptance.controller'
 import {
   ReliabilityAssetsController,
   ReliabilityIncidentsController,
@@ -13,6 +14,7 @@ import { ReliabilityService } from './reliability.service'
     ReliabilityAssetsController,
     ReliabilityIncidentsController,
     ReliabilityUpgradeJobsController,
+    MaintenanceAcceptanceController,
   ],
   providers: [ReliabilityService],
   exports: [ReliabilityService],

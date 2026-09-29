@@ -66,6 +66,16 @@ import {
   DomainError,
   WORKER_ID_CONFLICT,
   type WorkerHeartbeatOutcome,
+  claimSweepBatch,
+  renewSweepBatchLease,
+  finishSweepBatch,
+  createSweepBatch,
+  insertCoverageSnapshots,
+  pruneOldSweepSnapshots,
+  listScenariosForAcceptanceSweep,
+  type AuditableScenarioItem,
+  type InsertCoverageSnapshotItem,
+  expandWithLoader,
 } from "@cairn/db";
 import {
   SCHEDULE_TICK_INTERVAL_MS,
@@ -80,6 +90,11 @@ import {
   parseWorkerRoles,
   protocolCapabilitiesForRoles,
   isHaltedRunStatus,
+  isAuthoringDocumentV2,
+  toAuthoringDocumentV2,
+  parseScenarioDocument,
+  type AcceptanceSnapshotFindingSummary,
+  type ScenarioAuthoringDocumentV2,
   REAPER_DEADLINE_BATCH,
   REAPER_DRIFT_BATCH,
   REAPER_SESSION_LEASE_BATCH,
@@ -89,6 +104,7 @@ import {
   type RunGrant,
   type WorkerRoleSet,
 } from "@cairn/shared";
+import { auditAcceptance } from "@cairn/authoring";
 import type { LocalSecretProvider } from "@cairn/secret";
 import { executeAnalysisJob } from './analysis-executor.js';
 import { processReliabilityIncrement } from '../reliability/index.js';
@@ -168,8 +184,9 @@ export class LifecycleService
   private readonly inFlight = new Map<string, InFlight>();
   private readonly exportHeartbeats = new Set<() => Promise<void>>();
   private readonly auxiliaryTasks = new SingleFlightTasks<
-    "reports.generate" | "reports.export" | "reports.ai"
+    "reports.generate" | "reports.export" | "reports.ai" | "acceptance.sweep"
   >();
+  private acceptanceSweepTask: Promise<void> | undefined;
   private tick: NodeJS.Timeout | undefined;
   private scheduleTick: NodeJS.Timeout | undefined;
   private analysisTick: NodeJS.Timeout | undefined;
@@ -290,7 +307,10 @@ export class LifecycleService
         );
         this.startVideoMediaDispatch();
       }
-      if (roles.maintenance) void this.enqueueBackgroundMaintenance();
+      if (roles.maintenance) {
+        void this.enqueueBackgroundMaintenance();
+        void this.enqueueAcceptanceSweep();
+      }
       this.heartbeatTick = setInterval(() => {
         void this.beat();
       }, timerJitter(config.CAIRN_WORKER_HEARTBEAT_MS));
@@ -452,6 +472,7 @@ export class LifecycleService
     if (this.maintenanceTick || this.shutdownCalled) return;
     this.maintenanceTick = setInterval(() => {
       void this.enqueueBackgroundMaintenance();
+      void this.enqueueAcceptanceSweep();
     }, timerJitter(TICK_INTERVAL_MS));
   }
 
@@ -862,6 +883,14 @@ export class LifecycleService
           await drainWhileFull(config.CAIRN_REAPER_DRAIN_BUDGET_MS, 1000, () =>
             reapServiceRequestLogs(this.handle, { limit: 1000 }),
           );
+        },
+      );
+    }
+    if (claimedByName.has("acceptance.audit.sweep")) {
+      await this.runClaimedSlot(
+        claimedByName.get("acceptance.audit.sweep")!,
+        async () => {
+          await createSweepBatch(this.handle, { trigger: 'periodic' });
         },
       );
     }
@@ -1840,6 +1869,152 @@ export class LifecycleService
         error instanceof Error ? error.message : error,
         "排队后台会话维护失败",
       );
+    }
+  }
+
+  private enqueueAcceptanceSweep(): Promise<void> {
+    if (this.acceptanceSweepTask || this.stopped || !this.roles().maintenance) {
+      return this.acceptanceSweepTask ?? Promise.resolve();
+    }
+    const task = this.runAcceptanceSweepTick().catch((error) => {
+      this.logger.error(
+        error instanceof Error ? error.message : error,
+        "验收批量巡检执行失败",
+      );
+    });
+    this.acceptanceSweepTask = task.finally(() => {
+      this.acceptanceSweepTask = undefined;
+    });
+    return this.acceptanceSweepTask;
+  }
+
+  private async runAcceptanceSweepTick(): Promise<void> {
+    if (this.stopped || !this.roles().maintenance) return;
+
+    // 1. 原子领取 queued 批次（带 15 分钟租约与僵尸批次回收）
+    const batch = await claimSweepBatch(this.handle, {
+      workerId: config.CAIRN_WORKER_ID,
+      leaseMinutes: 15,
+    });
+    if (!batch) return;
+
+    this.logger.log(`开始执行验收批量巡检批次「${batch.id}」（触发来源：${batch.trigger}）`);
+    const sweepStartedAt = Date.now();
+    let scenarioCount = 0;
+    let skippedCount = 0;
+
+    try {
+      // 2. 查询所有未软删除且有草稿的场景
+      const auditableScenarios = await listScenariosForAcceptanceSweep(this.handle);
+
+      const scenariosByTarget = new Map<string, AuditableScenarioItem[]>();
+      for (const s of auditableScenarios) {
+        let list = scenariosByTarget.get(s.targetId);
+        if (!list) {
+          list = [];
+          scenariosByTarget.set(s.targetId, list);
+        }
+        list.push(s);
+      }
+
+      const snapshotsToInsert: InsertCoverageSnapshotItem[] = [];
+
+      for (const [targetId, scenarios] of scenariosByTarget.entries()) {
+        if (this.stopped) break;
+
+        // 目标级续租
+        await renewSweepBatchLease(this.handle, {
+          batchId: batch.id,
+          workerId: config.CAIRN_WORKER_ID,
+          leaseMinutes: 15,
+        });
+
+        for (const scenario of scenarios) {
+          if (this.stopped) break;
+          const t0 = Date.now();
+          try {
+            const rawDoc = scenario.draftDocument;
+            const document: ScenarioAuthoringDocumentV2 = isAuthoringDocumentV2(rawDoc)
+              ? rawDoc
+              : toAuthoringDocumentV2(parseScenarioDocument(rawDoc));
+
+            // 与单场景体检一致的编译
+            const compileResult = await expandWithLoader(
+              this.handle,
+              targetId,
+              document,
+              'trial',
+              true,
+            );
+
+            const hasCompileErrors = compileResult.diagnostics.some((d) => d.severity === 'error');
+            const auditReport = auditAcceptance(document, compileResult.diagnostics, scenario.id);
+            const durationMs = Date.now() - t0;
+
+            const topFindings: AcceptanceSnapshotFindingSummary[] = auditReport.findings
+              .slice(0, 10)
+              .map((f) => ({
+                code: f.code,
+                message: f.message,
+                stepId: f.stepId,
+                severity: f.severity,
+              }));
+
+            snapshotsToInsert.push({
+              batchId: batch.id,
+              targetId,
+              scenarioId: scenario.id,
+              draftRevision: scenario.draftRevision,
+              auditedAt: new Date(),
+              trigger: batch.trigger,
+              coverage: hasCompileErrors ? null : auditReport.coverage,
+              findingsCount: auditReport.findings.length,
+              topFindings,
+              durationMs,
+            });
+
+            scenarioCount += 1;
+          } catch (scenarioErr) {
+            this.logger.warn(
+              scenarioErr instanceof Error ? scenarioErr.message : scenarioErr,
+              `场景「${scenario.id}」验收体检异常，计入跳过`,
+            );
+            skippedCount += 1;
+          }
+        }
+      }
+
+      // 3. 快照批量落库
+      if (snapshotsToInsert.length > 0) {
+        await insertCoverageSnapshots(this.handle, snapshotsToInsert);
+      }
+
+      // 4. 清理 90 天前旧快照
+      await pruneOldSweepSnapshots(this.handle, 90);
+
+      // 5. 批次正常完成
+      await finishSweepBatch(this.handle, {
+        batchId: batch.id,
+        status: 'completed',
+        scenarioCount,
+        skippedCount,
+        durationMs: Date.now() - sweepStartedAt,
+      });
+
+      this.logger.log(
+        `验收批量巡检批次「${batch.id}」执行完成（已体检：${scenarioCount}，跳过：${skippedCount}，耗时：${Date.now() - sweepStartedAt}ms）`,
+      );
+    } catch (batchErr) {
+      const errorMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
+      this.logger.error(batchErr instanceof Error ? batchErr.message : batchErr, `验收巡检批次「${batch.id}」执行异常`);
+      await finishSweepBatch(this.handle, {
+        batchId: batch.id,
+        status: 'failed',
+        scenarioCount,
+        skippedCount,
+        durationMs: Date.now() - sweepStartedAt,
+        error: errorMsg,
+      });
     }
   }
 }

@@ -158,3 +158,17 @@ describe('handleScenarioAuditAcceptance (场景验收体检)', () => {
     expect(report.suggestedIntents.every((s) => s.source === 'deterministic')).toBe(true)
   })
 })
+
+describe('体检调用关联草稿修订（二期复查）', () => {
+  beforeEach(() => {
+    vi.mocked(getScenario).mockResolvedValue(sampleScenario())
+  })
+
+  it('draftRevision 与当前草稿不一致时返回冲突，不产出过期报告', async () => {
+    await expect(
+      handleScenarioAuditAcceptance(
+        context({ slots: { scenarioId: 'sc-123', draftRevision: 99 } }),
+      ),
+    ).rejects.toMatchObject({ code: 'DRAFT_REVISION_MISMATCH' })
+  })
+})

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { ConflictException, Inject, Injectable } from '@nestjs/common'
 import {
   authorizeTargetRequest,
   dismissIncident,
@@ -15,6 +15,8 @@ import {
   resolveIncident,
   silenceIncident,
   splitIncidents,
+  getAcceptanceCoverageOverview,
+  createSweepBatch,
   type DbHandle,
 } from '@cairn/db'
 import type {
@@ -28,6 +30,8 @@ import type {
   SilenceIncidentBody,
   SplitIncidentBody,
   TriggerEvaluationBody,
+  AcceptanceCoverageOverviewResponse,
+  AcceptanceSweepBatch,
 } from '@cairn/shared'
 import { rethrowDomain } from '../common/domain-error.js'
 import { DB_HANDLE } from '../db/db.module'
@@ -140,5 +144,34 @@ export class ReliabilityService {
 
   getUpgradeJob(jobId: string, actorId: string) {
     return getMaintenanceUpgradeJob(this.database, jobId, actorId).catch(rethrowDomain)
+  }
+
+  getAcceptanceCoverage(): Promise<AcceptanceCoverageOverviewResponse> {
+    return getAcceptanceCoverageOverview(this.database).catch(rethrowDomain)
+  }
+
+  async triggerAcceptanceSweep(): Promise<AcceptanceSweepBatch> {
+    const res = await createSweepBatch(this.database, { trigger: 'manual' }).catch(rethrowDomain)
+    if (!res.ok) {
+      throw new ConflictException({
+        code: 'ACTIVE_SWEEP_BATCH_EXISTS',
+        message: '当前已有运行中或排队中的验收巡检批次',
+      })
+    }
+    return {
+      id: res.batch.id,
+      scope: 'platform',
+      trigger: res.batch.trigger,
+      status: res.batch.status,
+      leaseOwner: res.batch.leaseOwner,
+      leaseExpiresAt: res.batch.leaseExpiresAt ? res.batch.leaseExpiresAt.toISOString() : null,
+      startedAt: res.batch.startedAt ? res.batch.startedAt.toISOString() : null,
+      finishedAt: res.batch.finishedAt ? res.batch.finishedAt.toISOString() : null,
+      scenarioCount: res.batch.scenarioCount ?? undefined,
+      skippedCount: res.batch.skippedCount ?? undefined,
+      durationMs: res.batch.durationMs ?? undefined,
+      error: res.batch.error ?? null,
+      createdAt: res.batch.createdAt.toISOString(),
+    }
   }
 }

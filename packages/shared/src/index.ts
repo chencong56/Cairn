@@ -288,6 +288,8 @@ export {
   DEFAULT_CREDENTIAL_REMINDER_SCAN_INTERVAL_MS,
   DEFAULT_SERVICE_REQUEST_LOG_PURGE_INTERVAL_MS,
   DEFAULT_MONITOR_OVERVIEW_CACHE_MS,
+  DEFAULT_ACCEPTANCE_SWEEP_INTERVAL_MS,
+  DEFAULT_ACCEPTANCE_SWEEP_LEASE_TTL_MS,
   isPeriodicSlotName,
   isPeriodicSlotMode,
   periodicSlotDueToleranceMs,
@@ -3777,3 +3779,5 @@ export * from './action-module-cases.js'
 export * from './ai-path-learning.js'
 export * from './expression.js'
 export * from './recording-generalization.js'
+export * from './acceptance-tuning.js'
+export * from './acceptance-sweeps.js'

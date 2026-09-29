@@ -11,6 +11,7 @@ export const PERIODIC_SLOT_NAMES = [
   'reaper.liveness',
   'credential.reminders',
   'service.request_logs.purge',
+  'acceptance.audit.sweep',
 ] as const
 export type PeriodicSlotName = (typeof PERIODIC_SLOT_NAMES)[number]
 
@@ -25,6 +26,9 @@ export const DEFAULT_CREDENTIAL_REMINDER_SCAN_INTERVAL_MS = 60_000
 /** Request diagnostics are short-lived facts; one daily maintenance pass is sufficient. */
 export const DEFAULT_SERVICE_REQUEST_LOG_PURGE_INTERVAL_MS = 86_400_000
 export const DEFAULT_MONITOR_OVERVIEW_CACHE_MS = 3_000
+/** Acceptance audit platform sweep runs daily by default. */
+export const DEFAULT_ACCEPTANCE_SWEEP_INTERVAL_MS = 86_400_000
+export const DEFAULT_ACCEPTANCE_SWEEP_LEASE_TTL_MS = 900_000
 
 export const REAPER_DEADLINE_BATCH = 200
 export const REAPER_STALE_LEASE_BATCH = 50
@@ -38,6 +42,7 @@ export const REAPER_PERIODIC_SLOT_ORDER = [
   'monitor.alerts.evaluate',
   'credential.reminders',
   'service.request_logs.purge',
+  'acceptance.audit.sweep',
 ] as const satisfies readonly PeriodicSlotName[]
 
 export function isPeriodicSlotName(value: string): value is PeriodicSlotName {

@@ -544,8 +544,25 @@ describe('applyAuthoringOperations (原子应用与纯函数受限编辑)', () =
 })
 
 describe('applyAuthoringOperations 场景级 add_outcome（二期）', () => {
+  const doc: ScenarioAuthoringDocumentV2 = normalizeAuthoringDocument({
+    authoringSchemaVersion: 2,
+    inputs: [],
+    nodes: [
+      {
+        kind: 'step',
+        step: {
+          id: '01912345-0000-7000-8000-000000000021',
+          name: '打开页面',
+          type: 'navigate',
+          effectType: 'READ_ONLY',
+          input: { url: 'https://example.com' },
+        },
+      },
+    ],
+  })
+
   it('stepId 缺省时写入 scenarioOutcomes，确定性 ID 使用 scenario 前缀', () => {
-    const res = applyAuthoringOperations(baseDoc, [
+    const res = applyAuthoringOperations(doc, [
       {
         kind: 'add_outcome',
         id: 'op-sc-outcome',
@@ -564,14 +581,14 @@ describe('applyAuthoringOperations 场景级 add_outcome（二期）', () => {
     expect(contract?.scope).toBe('scenario')
     expect(contract?.rule).toEqual({ kind: 'run_duration', op: 'lte', valueMs: 30_000 })
     // 草稿节点不受影响
-    expect(res.document.nodes).toHaveLength(baseDoc.nodes.length)
+    expect(res.document.nodes).toHaveLength(doc.nodes.length)
     // diff 记录场景级 outcome_add（无 stepId）
     const diff = res.diffs[0]
     expect(diff?.type === 'outcome_add' && diff.stepId === undefined && diff.scope === 'scenario').toBe(true)
   })
 
   it('step_duration 不允许挂场景级；run_duration 场景级不允许 halt', () => {
-    const stepDuration = applyAuthoringOperations(baseDoc, [
+    const stepDuration = applyAuthoringOperations(doc, [
       {
         kind: 'add_outcome',
         id: 'op-bad-1',
@@ -584,7 +601,7 @@ describe('applyAuthoringOperations 场景级 add_outcome（二期）', () => {
     ])
     expect(stepDuration.ok).toBe(false)
 
-    const halt = applyAuthoringOperations(baseDoc, [
+    const halt = applyAuthoringOperations(doc, [
       {
         kind: 'add_outcome',
         id: 'op-bad-2',
@@ -598,3 +615,159 @@ describe('applyAuthoringOperations 场景级 add_outcome（二期）', () => {
     expect(halt.ok).toBe(false)
   })
 })
+
+describe('applyAuthoringOperations 条件调优 update_outcome（三期）', () => {
+  const stepId = '01912345-0000-7000-8000-000000000031'
+  const scenarioOutcomeId = '01912345-0000-7000-8000-000000000032'
+  const stepOutcomeId = '01912345-0000-7000-8000-000000000033'
+
+  const doc: ScenarioAuthoringDocumentV2 = normalizeAuthoringDocument({
+    authoringSchemaVersion: 2,
+    inputs: [],
+    nodes: [
+      {
+        kind: 'step',
+        step: {
+          id: stepId,
+          name: '点击按钮',
+          type: 'click',
+          effectType: 'IDEMPOTENT',
+          input: { target: { framePath: [], candidates: [{ by: 'css', value: '#btn' }] } },
+        },
+        outcomes: [
+          {
+            id: stepOutcomeId,
+            scope: 'step',
+            meaning: '点击耗时不超过 1 秒',
+            rule: { kind: 'step_duration', op: 'lte', valueMs: 1_000 },
+            severity: 'MUST',
+            onViolation: 'continue',
+            provenance: 'manual',
+          },
+        ],
+      },
+    ],
+    scenarioOutcomes: [
+      {
+        id: scenarioOutcomeId,
+        scope: 'scenario',
+        meaning: '全程耗时不超过 30 秒',
+        rule: { kind: 'run_duration', op: 'lte', valueMs: 30_000 },
+        severity: 'SHOULD',
+        onViolation: 'continue',
+        provenance: 'manual',
+      },
+    ],
+  })
+
+  it('成功更新场景级条件阈值，contractId 保持不变，产出 outcome_update diff', () => {
+    const res = applyAuthoringOperations(doc, [
+      {
+        kind: 'update_outcome',
+        id: 'op-upd-1',
+        contractId: scenarioOutcomeId,
+        patch: {
+          meaning: '全程耗时不超过 45 秒',
+          rule: { kind: 'run_duration', op: 'lte', valueMs: 45_000 },
+        },
+      },
+    ])
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    const updated = res.document.scenarioOutcomes?.find((c) => c.id === scenarioOutcomeId)
+    expect(updated).toBeDefined()
+    expect(updated?.id).toBe(scenarioOutcomeId) // contractId 不变
+    expect(updated?.meaning).toBe('全程耗时不超过 45 秒')
+    expect(updated?.rule).toEqual({ kind: 'run_duration', op: 'lte', valueMs: 45_000 })
+    expect(updated?.severity).toBe('SHOULD') // 未 patch 保持原样
+
+    const diff = res.diffs[0]
+    expect(diff?.type).toBe('outcome_update')
+    if (diff?.type === 'outcome_update') {
+      expect(diff.contractId).toBe(scenarioOutcomeId)
+      expect(diff.scope).toBe('scenario')
+      expect(diff.before?.meaning).toBe('全程耗时不超过 30 秒')
+      expect(diff.after?.meaning).toBe('全程耗时不超过 45 秒')
+    }
+  })
+
+  it('成功更新步骤级条件严重度与阈值', () => {
+    const res = applyAuthoringOperations(doc, [
+      {
+        kind: 'update_outcome',
+        id: 'op-upd-2',
+        contractId: stepOutcomeId,
+        patch: {
+          severity: 'SHOULD',
+          rule: { kind: 'step_duration', op: 'lte', valueMs: 2_000 },
+        },
+      },
+    ])
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    const stepNode = res.document.nodes[0] as any
+    const updated = stepNode.outcomes?.find((c: any) => c.id === stepOutcomeId)
+    expect(updated?.severity).toBe('SHOULD')
+    expect(updated?.rule).toEqual({ kind: 'step_duration', op: 'lte', valueMs: 2_000 })
+
+    const diff = res.diffs[0]
+    expect(diff?.type).toBe('outcome_update')
+    if (diff?.type === 'outcome_update') {
+      expect(diff.contractId).toBe(stepOutcomeId)
+      expect(diff.scope).toBe('step')
+      expect(diff.stepId).toBe(stepId)
+    }
+  })
+
+  it('禁止跨 rule.kind 修改规则（硬约束）', () => {
+    const res = applyAuthoringOperations(doc, [
+      {
+        kind: 'update_outcome',
+        id: 'op-upd-invalid-kind',
+        contractId: stepOutcomeId,
+        patch: {
+          rule: { kind: 'run_duration', op: 'lte', valueMs: 2_000 },
+        },
+      },
+    ])
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.error.code).toBe('INVALID_OUTCOME_RULE_KIND')
+    }
+  })
+
+  it('契约不存在时返回 OUTCOME_NOT_FOUND', () => {
+    const res = applyAuthoringOperations(doc, [
+      {
+        kind: 'update_outcome',
+        id: 'op-upd-missing',
+        contractId: '01912345-0000-7000-8000-999999999999',
+        patch: {
+          meaning: '不存在的条件',
+        },
+      },
+    ])
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.error.code).toBe('OUTCOME_NOT_FOUND')
+    }
+  })
+
+  it('SHOULD / INFO 级别不允许配置 halt', () => {
+    const res = applyAuthoringOperations(doc, [
+      {
+        kind: 'update_outcome',
+        id: 'op-upd-halt',
+        contractId: scenarioOutcomeId,
+        patch: {
+          onViolation: 'halt',
+        },
+      },
+    ])
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.error.code).toBe('INVALID_OUTCOME_VIOLATION')
+    }
+  })
+})
+

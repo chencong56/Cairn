@@ -653,3 +653,92 @@ describe('验收意图（二期）：自由描述、全程耗时与跨页一致'
     expect(blockedCard?.blockedMessage).toContain('位于分支或循环内部')
   })
 })
+
+describe('验收意图（二期复查）：自由描述合并与 unsupported 不丢失', () => {
+  beforeEach(() => {
+    vi.mocked(getScenario).mockResolvedValue(sampleScenario())
+  })
+
+  it('自由描述与面板结构化意图合并生成，不丢弃结构化意图，拆解结果经 parsedIntents 回填', async () => {
+    vi.mocked(generateAcceptanceIntents).mockResolvedValue({
+      output: {
+        intents: [{ kind: 'scenario_duration', maxMs: 20_000, severity: 'SHOULD' }],
+      },
+    })
+
+    const res = await handleScenarioProposeAcceptance(
+      context(undefined, {
+        body: {
+          question: '补全验收',
+          acceptance: {
+            intents: [
+              { key: 'vc', kind: 'value_consistency', stepIdA: NAV_ID, stepIdB: CLICK_ID, severity: 'MUST' },
+            ],
+            description: '全程不超过 20 秒',
+          },
+        },
+        session: {} as never,
+      }),
+    )
+
+    const proposal = asProposal(res)
+    // 结构化意图不被描述路径丢弃：即使因缺少 outputKey 被拦下，卡仍在列表中给出原因
+    const consistencyCard = proposal.cards.find((card) => card.intentKind === 'value_consistency')
+    expect(consistencyCard?.blockedReason).toBe('VALUE_SOURCE_MISSING')
+    expect(proposal.cards.some((card) => card.intentKind === 'scenario_duration')).toBe(true)
+    // 拆解出的意图回填面板（仅模型拆解部分）
+    expect(proposal.parsedIntents).toHaveLength(1)
+    expect(proposal.parsedIntents?.[0]?.kind).toBe('scenario_duration')
+  })
+
+  it('模型拆出的无效意图（缺步骤引用）转为 unsupported，不再静默丢弃', async () => {
+    vi.mocked(generateAcceptanceIntents).mockResolvedValue({
+      output: {
+        intents: [
+          { kind: 'value_consistency' },
+          { kind: 'scenario_duration', maxMs: 15_000, severity: 'SHOULD' },
+        ],
+      },
+    })
+
+    const res = await handleScenarioProposeAcceptance(
+      context(undefined, {
+        body: {
+          question: '补全验收',
+          acceptance: { intents: [], description: '两处金额要一致，全程不超过 15 秒' },
+        },
+        session: {} as never,
+      }),
+    )
+
+    const proposal = asProposal(res)
+    expect(proposal.unsupported).toHaveLength(1)
+    expect(proposal.unsupported?.[0]?.excerpt).toContain('跨页数值一致')
+    expect(proposal.cards).toHaveLength(1)
+  })
+
+  it('一个意图都拆不出来时，clarify 追问带上未支持的部分', async () => {
+    vi.mocked(generateAcceptanceIntents).mockResolvedValue({
+      output: {
+        intents: [],
+        unsupported: [{ excerpt: '结束后发飞书消息', reason: '暂不支持发送通知' }],
+      },
+    })
+
+    const res = await handleScenarioProposeAcceptance(
+      context(undefined, {
+        body: {
+          question: '补全验收',
+          acceptance: { intents: [], description: '结束后发飞书消息' },
+        },
+        session: {} as never,
+      }),
+    )
+
+    expect(res.kind).toBe('clarify')
+    if (res.kind === 'clarify') {
+      expect(res.question).toContain('未支持的部分')
+      expect(res.question).toContain('结束后发飞书消息')
+    }
+  })
+})

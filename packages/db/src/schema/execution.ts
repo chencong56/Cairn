@@ -343,6 +343,7 @@ export const outcomeResults = cairnSchema.table(
     index('outcome_results_run_idx').on(t.runId),
     index('outcome_results_step_run_idx').on(t.stepRunId),
     index('outcome_results_verdict_idx').on(t.verdict),
+    index('outcome_results_contract_idx').on(t.contractId),
   ],
 )
 

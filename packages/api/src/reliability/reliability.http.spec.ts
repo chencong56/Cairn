@@ -11,6 +11,7 @@ import { TargetScopeGuard } from '../rbac/target-scope.guard'
 import { DB_HANDLE } from '../db/db.module'
 import { listenForSupertest } from '../__tests__/http-app'
 import { TargetReliabilityController, ReliabilityAssetsController, ReliabilityIncidentsController, ReliabilityUpgradeJobsController } from './reliability.controller'
+import { MaintenanceAcceptanceController } from './maintenance-acceptance.controller'
 import { ReliabilityService } from './reliability.service'
 
 const targetId = '11111111-1111-4111-8111-111111111111'
@@ -203,6 +204,20 @@ function mockService() {
       createdAt: '2026-09-23T00:00:00.000Z',
       completedAt: '2026-09-23T00:00:01.000Z',
     })),
+    getAcceptanceCoverage: vi.fn(async () => ({
+      platformAverageCoverage: 0.85,
+      unauditedScenarioCount: 2,
+      totalScenarioCount: 10,
+      latestBatch: null,
+      scenarios: [],
+    })),
+    triggerAcceptanceSweep: vi.fn(async () => ({
+      id: 'batch-test-1',
+      scope: 'platform' as const,
+      trigger: 'manual' as const,
+      status: 'queued' as const,
+      createdAt: '2026-09-29T10:00:00.000Z',
+    })),
   }
 }
 
@@ -218,6 +233,7 @@ describe('Reliability HTTP Endpoints', () => {
         ReliabilityAssetsController,
         ReliabilityIncidentsController,
         ReliabilityUpgradeJobsController,
+        MaintenanceAcceptanceController,
       ],
       providers: [
         { provide: ReliabilityService, useValue: service },
@@ -466,5 +482,26 @@ describe('Reliability HTTP Endpoints', () => {
       expect.anything(),
       viewer.id,
     )
+  })
+
+  it('GET /maintenance/acceptance-coverage 需要 reliability:read 权限', async () => {
+    currentAccount = null
+    await request(app.getHttpServer()).get('/maintenance/acceptance-coverage').expect(401)
+
+    currentAccount = viewer
+    const res = await request(app.getHttpServer()).get('/maintenance/acceptance-coverage').expect(200)
+    expect(res.body.platformAverageCoverage).toBe(0.85)
+    expect(service.getAcceptanceCoverage).toHaveBeenCalled()
+  })
+
+  it('POST /maintenance/acceptance-sweeps 需要 reliability:triage 权限，排队巡检批次', async () => {
+    currentAccount = viewer
+    await request(app.getHttpServer()).post('/maintenance/acceptance-sweeps').expect(403)
+
+    currentAccount = triager
+    const res = await request(app.getHttpServer()).post('/maintenance/acceptance-sweeps').expect(200)
+    expect(res.body.id).toBe('batch-test-1')
+    expect(res.body.status).toBe('queued')
+    expect(service.triggerAcceptanceSweep).toHaveBeenCalled()
   })
 })

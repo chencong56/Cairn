@@ -5,21 +5,27 @@ import {
   AlertTriangle,
   ArrowRight,
   Boxes,
+  CheckCircle2,
   ExternalLink,
   Layers,
   RefreshCw,
   Search,
+  ShieldCheck,
+  Stethoscope,
   Wrench,
   VolumeX,
   XCircle,
 } from 'lucide-react'
 import {
   dismissIncident,
+  fetchAcceptanceCoverage,
   fetchAssetReliability,
   fetchIncidents,
   silenceIncident,
 } from '@/lib/reliability-api'
 import { fetchTargets } from '@/lib/targets-api'
+import { formatRelativeTime } from '@/lib/formatters'
+import { AcceptanceCoverageView } from './coverage-view'
 import { CursorPagination } from '@/components/data-table'
 import { useCursorPage } from '@/hooks/use-cursor-page'
 import { CollectionSummary } from '@/components/collection-summary'
@@ -68,7 +74,7 @@ const SEVERITY_VARIANTS: Record<IncidentSeverity, 'destructive' | 'outline' | 's
 }
 
 
-const MAINTENANCE_VIEWS = ['incidents', 'assets'] as const
+const MAINTENANCE_VIEWS = ['incidents', 'assets', 'coverage'] as const
 export function getIncidentStatusMeta(status: IncidentStatus): { tone: StatusTone; label: string } {
   switch (status) {
     case 'DETECTED':
@@ -92,7 +98,7 @@ export function getIncidentStatusMeta(status: IncidentStatus): { tone: StatusTon
 
 export function MaintenancePage() {
   const search = useSearch({ from: '/_authenticated/maintenance/' }) as {
-    view?: 'incidents' | 'assets'
+    view?: 'incidents' | 'assets' | 'coverage'
     targetId?: string
     status?: string
     severity?: string
@@ -171,6 +177,13 @@ export function MaintenancePage() {
         cursor: assetsPage.cursor,
         limit: assetsPage.pageSize,
       }),
+  })
+
+  // Fetch acceptance coverage overview
+  const coverageQuery = useQuery({
+    queryKey: ['maintenance-acceptance-coverage'],
+    queryFn: fetchAcceptanceCoverage,
+    enabled: currentView === 'coverage',
   })
 
   const handleTriageSubmit = async () => {
@@ -267,6 +280,46 @@ export function MaintenancePage() {
     [activeIncidentsCount, degradedAssetsCount, totalAssets, totalSamples],
   )
 
+  const coverageSummaryItems = useMemo(() => {
+    const data = coverageQuery.data
+    const rate = data ? `${data.platformAverageCoverage.toFixed(1)}%` : '--'
+    const unaudited = data?.unauditedScenarioCount ?? 0
+    const total = data?.totalScenarioCount ?? 0
+    const covered = total - unaudited
+    const withFindings = data?.scenarios.filter((s) => (s.findingsCount ?? 0) > 0).length ?? 0
+    const latestBatch = data?.latestBatch
+    const latestSweepDesc = latestBatch
+      ? `${latestBatch.status === 'completed' ? '完成于 ' + formatRelativeTime(latestBatch.finishedAt ?? latestBatch.createdAt) : latestBatch.status === 'running' ? '执行中...' : latestBatch.status} · 共 ${latestBatch.scenarioCount ?? 0} 个场景`
+      : '暂无巡检记录'
+
+    return [
+      {
+        label: '平台平均覆盖率',
+        value: rate,
+        description: `已覆盖 ${covered} / ${total} 个场景`,
+        icon: <ShieldCheck className="size-4 text-primary" />,
+      },
+      {
+        label: '未体检场景数',
+        value: unaudited,
+        description: '尚未生成体检快照或需重新评估的场景',
+        icon: <AlertTriangle className={`size-4 ${unaudited > 0 ? 'text-warning' : 'text-muted-foreground'}`} />,
+      },
+      {
+        label: '体检发现异常',
+        value: withFindings,
+        description: '存在体检建议或风险待采纳的场景',
+        icon: <Stethoscope className="size-4 text-warning" />,
+      },
+      {
+        label: '最近巡检批次',
+        value: latestBatch ? (latestBatch.status === 'completed' ? '已完成' : latestBatch.status === 'running' ? '进行中' : latestBatch.status) : '未巡检',
+        description: latestSweepDesc,
+        icon: <CheckCircle2 className="size-4 text-primary" />,
+      },
+    ]
+  }, [coverageQuery.data])
+
   return (
     <>
       <PageHeader
@@ -277,13 +330,21 @@ export function MaintenancePage() {
             variant="outline"
             size="sm"
             onClick={() => {
-              incidentsQuery.refetch()
-              assetsQuery.refetch()
+              if (currentView === 'coverage') {
+                coverageQuery.refetch()
+              } else {
+                incidentsQuery.refetch()
+                assetsQuery.refetch()
+              }
             }}
-            disabled={incidentsQuery.isFetching || assetsQuery.isFetching}
+            disabled={
+              currentView === 'coverage'
+                ? coverageQuery.isFetching
+                : incidentsQuery.isFetching || assetsQuery.isFetching
+            }
           >
             <RefreshCw
-              className={`mr-2 size-4 ${incidentsQuery.isFetching || assetsQuery.isFetching ? 'animate-spin' : ''}`}
+              className={`mr-2 size-4 ${(currentView === 'coverage' ? coverageQuery.isFetching : incidentsQuery.isFetching || assetsQuery.isFetching) ? 'animate-spin' : ''}`}
             />
             刷新
           </Button>
@@ -291,7 +352,7 @@ export function MaintenancePage() {
       />
 
       <Main className="space-y-6">
-        <CollectionSummary items={summaryItems} />
+        <CollectionSummary items={currentView === 'coverage' ? coverageSummaryItems : summaryItems} />
 
         <Tabs value={currentView} onValueChange={handleViewChange} className="space-y-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-3">
@@ -302,10 +363,14 @@ export function MaintenancePage() {
               <TabsTrigger value="assets">
                 资产状态 ({assets.length})
               </TabsTrigger>
+              <TabsTrigger value="coverage">
+                验收覆盖 {coverageQuery.data ? `(${coverageQuery.data.scenarios.length})` : ''}
+              </TabsTrigger>
             </TabsList>
 
             {/* Filter Bar */}
-            <div className="flex flex-wrap items-center gap-2">
+            {currentView !== 'coverage' && (
+              <div className="flex flex-wrap items-center gap-2">
               <div className="relative w-48">
                 <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
                 <Input
@@ -386,6 +451,7 @@ export function MaintenancePage() {
                 </Select>
               )}
             </div>
+            )}
           </div>
 
           {/* Tab 1: Incidents View */}
@@ -652,6 +718,28 @@ export function MaintenancePage() {
                   />
                 </div>
               </div>
+            )}
+          </TabsContent>
+
+          {/* Tab 3: Acceptance Coverage View */}
+          <TabsContent value="coverage" className="space-y-4">
+            {coverageQuery.isLoading ? (
+              <PageSkeleton />
+            ) : coverageQuery.isError ? (
+              <QueryErrorState
+                title="加载验收覆盖失败"
+                description={coverageQuery.error?.message ?? '无法获取验收覆盖与巡检概览'}
+                onRetry={() => coverageQuery.refetch()}
+              />
+            ) : (
+              <AcceptanceCoverageView
+                data={coverageQuery.data}
+                targets={targetsQuery.data?.items ?? []}
+                targetIdFilter={targetIdFilter}
+                onTargetFilterChange={(val) => updateSearch({ targetId: val === 'all' ? undefined : val })}
+                searchTerm={searchTerm}
+                onSearchChange={(val) => updateSearch({ search: val || undefined })}
+              />
             )}
           </TabsContent>
         </Tabs>

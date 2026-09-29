@@ -161,6 +161,14 @@ vi.mock("@cairn/db", async (importOriginal) => {
     reapSessionLeases: vi.fn(async () => ({ settled: 0, scanned: 0 })),
     scanCredentialReminders: vi.fn(async () => ({ opened: 0, closed: 0 })),
     reapServiceRequestLogs: vi.fn(async () => ({ scanned: 0, deleted: 0 })),
+    createSweepBatch: vi.fn(async () => null),
+    claimSweepBatch: vi.fn(async () => null),
+    renewSweepBatchLease: vi.fn(async () => true),
+    finishSweepBatch: vi.fn(async () => true),
+    listScenariosForAcceptanceSweep: vi.fn(async () => []),
+    insertCoverageSnapshots: vi.fn(async () => undefined),
+    pruneOldSweepSnapshots: vi.fn(async () => 0),
+    expandWithLoader: vi.fn(async () => ({ diagnostics: [] })),
     claimOutboundDeliveries: vi.fn(async () => []),
     claimRunVideoMediaJobs: vi.fn(async () => []),
     enqueueRunVideoMediaJob: vi.fn(async () => ({ id: "job" })),
@@ -1888,6 +1896,90 @@ describe("LifecycleService", () => {
       vi.useRealTimers();
       vi.mocked(expireRunDeadlines).mockImplementation(async () => ({ settled: 0, scanned: 0 }));
     }
+  });
+
+  it("验收巡检批次被正确认领并执行，生成覆盖率快照并完工", async () => {
+    const {
+      claimSweepBatch,
+      listScenariosForAcceptanceSweep,
+      insertCoverageSnapshots,
+      pruneOldSweepSnapshots,
+      finishSweepBatch,
+    } = await import("@cairn/db");
+
+    vi.mocked(claimSweepBatch).mockResolvedValueOnce({
+      id: "batch-test-1",
+      scope: "platform",
+      trigger: "periodic",
+      status: "running",
+      leaseOwner: "local-worker",
+      leaseExpiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      startedAt: new Date(),
+      finishedAt: null,
+      scenarioCount: 1,
+      skippedCount: 0,
+      durationMs: null,
+      error: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    vi.mocked(listScenariosForAcceptanceSweep).mockResolvedValueOnce([
+      {
+        id: "sc-1",
+        targetId: "tgt-1",
+        name: "Test Scenario",
+        draftRevision: 1,
+        draftDocument: {
+          authoringSchemaVersion: 2,
+          schemaVersion: 1,
+          inputs: [],
+          nodes: [
+            {
+              kind: "step",
+              step: {
+                id: "step-1",
+                name: "Step 1",
+                action: { kind: "navigate", url: "https://example.com" },
+                outcomes: [
+                  {
+                    id: "out-1",
+                    name: "Expect welcome",
+                    rule: { kind: "text_match", mode: "exact", text: "Welcome" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      } as any,
+    ]);
+
+    const svc = await buildLifecycle();
+    await (svc as unknown as { runAcceptanceSweepTick: () => Promise<void> }).runAcceptanceSweepTick();
+
+    expect(claimSweepBatch).toHaveBeenCalled();
+    expect(listScenariosForAcceptanceSweep).toHaveBeenCalledWith(expect.anything());
+    expect(insertCoverageSnapshots).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining([
+        expect.objectContaining({
+          batchId: "batch-test-1",
+          scenarioId: "sc-1",
+          targetId: "tgt-1",
+        }),
+      ]),
+    );
+    expect(pruneOldSweepSnapshots).toHaveBeenCalled();
+    expect(finishSweepBatch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        batchId: "batch-test-1",
+        status: "completed",
+        scenarioCount: 1,
+      }),
+    );
+    await svc.onApplicationShutdown();
   });
 
   async function buildLifecycle(): Promise<LifecycleService> {

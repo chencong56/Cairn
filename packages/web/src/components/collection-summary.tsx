@@ -9,7 +9,7 @@ export function CollectionSummary({
 }: {
   items: {
     label: string
-    value: number
+    value: number | string | ReactNode
     description: string
     icon: ReactNode
     onClick?: () => void
