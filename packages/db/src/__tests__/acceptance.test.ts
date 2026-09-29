@@ -313,12 +313,12 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
       })
 
       const saved = await saveScenarioDraft(handle.db, scenario.id, {
-        revision: scenario.draft.revision,
+        revision: scenario.draft!.revision,
         actor: { kind: 'console', id: adminId },
         document: doc,
       })
       const published = await publishScenarioDraft(handle.db, scenario.id, {
-        revision: saved.draft.revision,
+        revision: saved.draft!.revision,
         actor: { kind: 'console', id: adminId },
       })
 
