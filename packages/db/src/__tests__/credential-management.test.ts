@@ -142,12 +142,8 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
     await expect(targets.updateAccount(other.id, b.id, { password: 'nope', validity: { mode: 'permanent' } }, operator)).rejects.toMatchObject({ code: 'TARGET_NOT_FOUND' })
     await expect(targets.updateAccount(target.id, account.id, { displayName: '不允许修改身份' }, operator)).rejects.toMatchObject({ code: 'TARGET_NOT_FOUND' })
     await targets.updateAccount(target.id, account.id, { validity: { mode: 'permanent' } }, operator)
-    const resolved = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, targetCode: 't1', username: '001alice' }, { row: 3, targetCode: 't2', username: '001alice' }] }, operator)
-    expect(resolved.rows[0]?.item?.id).toBe(account.id)
-    expect(resolved.rows[1]?.item).toBeNull()
-    expect(resolved.rows[1]?.error).not.toContain('t2')
     expect((await api.listCredentialUsages(db, account.id, operator)).items.map(i => i.resource)).toEqual(['target_account'])
-    const batch = await api.createCredentialBatch(db, { source: 'excel', kind: 'password_replace', idempotencyKey: newId(), items: [{ itemId: newId(), credentialId: account.id, expectedRevision: resolved.rows[0]!.item!.revision }] }, operator)
+    const batch = await api.createCredentialBatch(db, { source: 'excel', kind: 'password_replace', idempotencyKey: newId(), items: [{ itemId: newId(), credentialId: account.id, expectedRevision: (await api.getCredential(db, account.id, operator)).revision }] }, operator)
     await rbac.assignAccountRoles(operator.id, { roleIds: [read.id, write.id], targetScopes: [{ roleId: read.id, mode: 'none', targetIds: [] }, { roleId: write.id, mode: 'none', targetIds: [] }] }, admin)
     expect((await targets.listTargets({}, operator)).items).toHaveLength(0)
     expect((await api.listCredentials(db, {}, operator)).stats.visible).toBe(0)
@@ -158,12 +154,9 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
     await expect(rbac.assignAccountRoles(operator.id, { roleIds: [read.id], targetScopes: [{ roleId: read.id, mode: 'all', targetIds: [] }] }, operator)).rejects.toMatchObject({ kind: 'forbidden' })
     await expect(rbac.updateRole(read.id, { permissions: ['target:read', 'credential:write'] }, operator)).rejects.toMatchObject({ kind: 'forbidden' })
   })
-  it('匹配严格校验技术标识与业务键、重复全部拒绝且不改变密码', async () => {
-    const { db, admin, account, target, makeTarget, makeAccount } = await setup()
-    const t2 = await makeTarget('t2'); const b = await makeAccount(t2.id, '001alice')
-    const rows = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, credentialId: account.id, targetCode: 't2', username: '001alice' }, { row: 3, credentialId: b.id, targetId: target.id }, { row: 4, targetCode: 't1', username: '001alice' }, { row: 5, targetAccountId: account.id, targetId: target.id }] }, admin)
-    expect(rows.rows.every(r => r.error)).toBe(true)
-    expect(rows.rows.slice(0, 2).every(r => r.item === null)).toBe(true)
+  it('批次导入严格校验技术标识与业务键且不改变密码', async () => {
+    const { db, admin, account, target, makeTarget } = await setup()
+    const t2 = await makeTarget('t2')
     const current = await api.getCredential(db, account.id, admin)
     await expect(api.createCredentialBatch(db, { kind: 'password_replace', idempotencyKey: newId(), items: [{ itemId: newId(), credentialId: account.id, targetId: t2.id, expectedRevision: current.revision }] }, admin)).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_MISMATCH' })
     expect((await api.getCredential(db, account.id, admin)).revision).toBe(current.revision)
@@ -221,7 +214,7 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
     expect(await native.select().from(tables.targetAccounts)).toHaveLength(1)
     expect(await native.select().from(tables.credentials)).toHaveLength(1)
   })
-  it('超过 200 条目录先聚合后分页，导入可匹配末页账号', async () => {
+  it('超过 200 条目录先聚合后分页', async () => {
     const { db, native, tables, admin, target } = await setup()
     const ids = Array.from({ length: 210 }, () => newId())
     const now = new Date('2025-01-01T00:00:00.000Z')
@@ -232,9 +225,6 @@ describe.each(DRIVERS)('%s 账号凭据管理闭环', (driver: ContractDriver) =
     let page = await api.listCredentials(db, { limit: 100 }, admin)
     expect(page.stats.visible).toBe(211)
     expect(page.stats.unknown).toBe(210)
-    const firstIds = new Set(page.items.map(i => i.id)); const last = ids.find(id => !firstIds.has(id))!
-    const match = await api.resolveCredentialImport(db, { version: 1, rows: [{ row: 2, credentialId: last, targetCode: 't1', username: `bulk-${ids.indexOf(last)}` }] }, admin)
-    expect(match.rows[0]?.item?.id).toBe(last)
     const all = [...page.items]
     while (page.nextCursor) { page = await api.listCredentials(db, { limit: 100, cursor: page.nextCursor }, admin); all.push(...page.items) }
     expect(new Set(all.map(i => i.id)).size).toBe(211)

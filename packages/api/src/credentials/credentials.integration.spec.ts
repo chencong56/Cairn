@@ -23,8 +23,7 @@ describe('凭据服务：真实加密与隔离数据库', () => {
     const target = await targets.createTarget({ code: 'credential-integration', name: '凭据联调', entryUrl: 'https://example.com', authMethod: 'password', captchaMode: 'none', status: 'active', loginFields: null }, actor)
     const account = await targets.createAccount(target.id, { displayName: '零开头账号', username: '000001', password: 'old-fixture', usage: 'business', status: 'active', validity: { mode: 'permanent' } }, actor)
     const before = await handle.db.select().from(secrets)
-    const matched = await service.resolve({ version: 1, rows: [{ row: 2, targetCode: target.code, username: '000001' }] }, actor)
-    const item = matched.rows[0]!.item!
+    const item = (await service.list({ targetId: target.id }, actor)).items[0]!
     expect(await handle.db.select().from(secrets)).toHaveLength(before.length)
     const itemId = randomUUID()
     const batch = await service.createBatch({ kind: 'password_replace', source: 'excel', idempotencyKey: randomUUID(), items: [{ itemId, credentialId: item.id, targetId: target.id, targetAccountId: account.id, expectedRevision: item.revision }] }, actor)

@@ -2719,8 +2719,6 @@ export {
   type CredentialSessionSummary,
   type CredentialStats,
 } from './credentials.js'
-export { credentialImportResolveBodySchema, credentialImportResolveResponseSchema } from './credentials.js'
-export type { CredentialImportResolveBody, CredentialImportResolveResponse } from './credentials.js'
 export { roleTargetScopeSchema } from './rbac.js'
 export type { RoleTargetScope } from './rbac.js'
 export {

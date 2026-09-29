@@ -1374,9 +1374,6 @@ export const replaceCredentialMaterial = operation(
   credentialImpl.replaceCredentialMaterial,
 );
 export const clearCredential = operation(credentialImpl.clearCredential);
-export const resolveCredentialImport = operation(
-  credentialImpl.resolveCredentialImport,
-);
 export const credentialOwnerCandidates = operation(
   credentialImpl.credentialOwnerCandidates,
 );

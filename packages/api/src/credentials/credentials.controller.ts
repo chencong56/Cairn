@@ -8,8 +8,6 @@ import {
   credentialRegisterBodySchema,
   credentialReplaceBodySchema,
   credentialRevisionBodySchema,
-  credentialImportResolveBodySchema,
-  type CredentialImportResolveBody,
   type CredentialBatchCreateBody,
   type CredentialBatchItemSubmitBody,
   type CredentialHistoryQuery,
@@ -56,17 +54,6 @@ export class CredentialsController {
     @CurrentAccount() account: RequestAccount,
   ) {
     return this.credentials.createBatch(body, account)
-  }
-
-  /**
-   * @deprecated 仅用于兼容旧版 Excel 导入回执对账，凭据库交互瘦身后已废弃
-   */
-  @Post('import/resolve')
-  @HttpCode(HttpStatus.OK)
-  @RequirePermissions('credential:read', 'credential:write', 'credential:import', 'target:read')
-  resolve(@Body(new ZodValidationPipe(credentialImportResolveBodySchema)) body: CredentialImportResolveBody,
-    @CurrentAccount() account: RequestAccount) {
-    return this.credentials.resolve(body, account)
   }
 
   @Get(':credentialId/owners')

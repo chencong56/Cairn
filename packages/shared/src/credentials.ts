@@ -668,20 +668,6 @@ export const credentialBatchSchema = z.strictObject({
 })
 export type CredentialBatch = z.infer<typeof credentialBatchSchema>
 
-export const credentialImportResolveBodySchema = z.strictObject({
-  version: z.literal(1),
-  rows: z.array(z.strictObject({
-    row: z.number().int().positive(),
-    credentialId: entityIdSchema.optional(), targetId: entityIdSchema.optional(), targetAccountId: entityIdSchema.optional(),
-    targetCode: z.string().min(1).max(256).optional(), username: z.string().min(1).max(256).optional(),
-  })).min(1).max(1000),
-})
-export type CredentialImportResolveBody = z.infer<typeof credentialImportResolveBodySchema>
-export const credentialImportResolveResponseSchema = z.object({
-  rows: z.array(z.object({ row: z.number().int(), item: credentialListItemSchema.nullable(), error: z.string().nullable() })),
-})
-export type CredentialImportResolveResponse = z.infer<typeof credentialImportResolveResponseSchema>
-
 export const frozenCredentialBindingSchema = z.strictObject({
   credentialId: entityIdSchema,
   versionId: entityIdSchema,

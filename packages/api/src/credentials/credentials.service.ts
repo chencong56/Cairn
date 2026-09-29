@@ -10,7 +10,6 @@ import {
   registerCredential,
   DomainError,
   clearCredential,
-  resolveCredentialImport,
   credentialOwnerCandidates,
   replaceCredentialMaterial,
   revokeCredentialVersion,
@@ -32,7 +31,6 @@ import {
   type CredentialRegisterBody,
   type CredentialReplaceBody,
   type CredentialRevisionBody,
-  type CredentialImportResolveBody,
 } from '@cairn/shared'
 import { rethrowDomain } from '../common/domain-error.js'
 import type { RequestAccount } from '../common/request-account'
@@ -61,10 +59,6 @@ export class CredentialsService {
 
   list(query: CredentialListQuery, account: RequestAccount) {
     return listCredentials(this.database, query, this.actor(account), this.options(account)).catch(rethrowDomain)
-  }
-
-  resolve(body: CredentialImportResolveBody, account: RequestAccount) {
-    return resolveCredentialImport(this.database, body, this.actor(account)).catch(rethrowDomain)
   }
 
   owners(id: string, account: RequestAccount) {

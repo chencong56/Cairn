@@ -39,4 +39,4 @@ export {
   submitSealedBatchPassword,
 } from './batch.js'
 export { scanCredentialReminders, listOpenCredentialReminders, markReminderDelivered } from './reminders.js'
-export { resolveCredentialImport, credentialOwnerCandidates } from './import.js'
+export { credentialOwnerCandidates } from './import.js'

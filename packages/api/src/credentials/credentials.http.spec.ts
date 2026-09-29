@@ -139,7 +139,6 @@ describe('Credentials HTTP', () => {
     await request(viewerApp.getHttpServer()).get('/credentials').expect(200)
     expect(service.list).toHaveBeenCalled()
     await request(viewerApp.getHttpServer()).post(`/credentials/${credentialId}/metadata`).send({ expectedRevision: 1, name: '越权' }).expect(403)
-    await request(viewerApp.getHttpServer()).post('/credentials/import/resolve').send({ version: 1, rows: [{ row: 2, credentialId }] }).expect(403)
     expect(service.metadata).not.toHaveBeenCalled()
   })
 
