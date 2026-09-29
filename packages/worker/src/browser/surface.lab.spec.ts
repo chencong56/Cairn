@@ -149,10 +149,12 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
         expect(clicked.ok, `小图标 #${i}`).toBe(true)
         expect(await page.locator('#deleted').innerText()).toBe('乙订单')
       }
-    } catch (error) {
+    } catch (caught) {
       // 采样命中概率性信号时给出确定性复跑路径，避免在浅采样上反复猜
-      error.message = `${error.message}\n[浸泡采样] 当前每场景 ${SOAK_ITERS} 次采样命中失败：请用 CAIRN_SOAK_ITERS=20 复跑定位（pnpm --filter @cairn/worker test:soak）`
-      throw error
+      if (caught instanceof Error) {
+        caught.message = `${caught.message}\n[浸泡采样] 当前每场景 ${SOAK_ITERS} 次采样命中失败：请用 CAIRN_SOAK_ITERS=20 复跑定位（pnpm --filter @cairn/worker test:soak）`
+      }
+      throw caught
     }
   })
 

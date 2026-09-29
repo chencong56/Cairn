@@ -11,12 +11,14 @@
     "test:db": "vitest run --config vitest.db.config.mts",
     "test:browser": "vitest run --config vitest.browser.config.mts",
     "test:live": "vitest run --config vitest.live.config.mts",
+    "test:demo": "vitest run --config vitest.demo.config.mts",
     "test:soak": "CAIRN_SOAK_ITERS=20 vitest run --config vitest.browser.config.mts src/browser/surface.lab.spec.ts",
     "browser:install": "playwright install chromium",
     "dev": "pnpm run build && concurrently -k -n tsc,node -c blue,green \"tsc -w --preserveWatchOutput -p tsconfig.build.json\" \"node --watch --watch-preserve-output dist/main.js\"",
     "register-ai-secret": "node dist/bin/register-browser-ai-secret.js"
   },
   "dependencies": {
+    "@cairn/authoring": "workspace:*",
     "@cairn/db": "workspace:*",
     "@cairn/map": "workspace:*",
     "@cairn/secret": "workspace:*",
@@ -38,7 +40,6 @@
     "sharp": "^0.35.4"
   },
   "devDependencies": {
-    "@cairn/authoring": "workspace:*",
     "@nestjs/testing": "^12.0.1",
     "@swc/core": "^1.16.2",
     "@types/jpeg-js": "^0.3.7",

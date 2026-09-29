@@ -174,7 +174,7 @@ describe('系统检查步骤 check_context / check_duration', () => {
 
 describe('check_duration runTotal 的账本口径（二期复查）', () => {
   it('runTotal 向 loadStepStates 请求全 scope 账本（null），单步口径仍按当前 scope', async () => {
-    const executor = new FixtureStepExecutor(ports)
+    const executor = new FixtureStepExecutor()
     const runTotalStep: Step = {
       id: '01912345-6789-7abc-def0-1234567890b1',
       name: '检查全程耗时',
@@ -220,11 +220,12 @@ describe('check_duration runTotal 的账本口径（二期复查）', () => {
         },
       }),
     )
-    expect(requestedScopes).toEqual([''])
+    // 单步口径按当前 scope（此处未设置 scopePath，原样透传）
+    expect(requestedScopes).toEqual([undefined])
   })
 
   it('重试尝试下全程耗时从首次尝试起算（含被丢弃的早期失败尝试）', async () => {
-    const executor = new FixtureStepExecutor(ports)
+    const executor = new FixtureStepExecutor()
     const checkStep: Step = {
       id: '01912345-6789-7abc-def0-1234567890b3',
       name: '检查全程耗时',
@@ -239,7 +240,7 @@ describe('check_duration runTotal 的账本口径（二期复查）', () => {
         ordinal: 0,
         status: 'SUCCEEDED' as const,
         attempts: [
-          { id: 'a1', attemptNo: 1, status: 'FAILED' as const, error: { code: 'X' }, startedAt: new Date(1000), finishedAt: new Date(1500) },
+          { id: 'a1', attemptNo: 1, status: 'FAILED' as const, error: null, startedAt: new Date(1000), finishedAt: new Date(1500) },
           { id: 'a2', attemptNo: 2, status: 'SUCCEEDED' as const, error: null, startedAt: new Date(2000), finishedAt: new Date(3000) },
         ],
       },

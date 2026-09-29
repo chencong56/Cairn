@@ -5,27 +5,41 @@
  * - DB：真实 PostgreSQL，浏览器端口是假的。模板库克隆不能并发，所以串行，
  *   但不跟 Chromium 挤在同一条队列里。`test:db`，并计入 `pnpm test`。
  * - BROWSER：启动 Chromium，但页面来自 setContent、127.0.0.1 或被路由拦截的保留域名。
- *   结果确定，必须串行，并计入 `pnpm test`。
+ *   结果确定，计入 `pnpm test`。BROWSER 内部再按是否连 PostgreSQL 分两档：
+ *   - SERIAL：openIsolatedDb 克隆模板库，并发会互踩，必须串行；
+ *   - PARALLEL：不连库，各自独立临时 profile + 随机端口，无跨文件共享资源，
+ *     可受控并行（maxWorkers 限制并发 Chromium 数）。CAIRN_BROWSER_PARALLEL=0
+ *     可整档退回串行（排查偶发时的逃生舱）。
+ * - DEMO：演示 / 验收类全链路（守卫 vs 演示分类，2026-09-29）。验证「某条能力链
+ *   走得通」而非回归不变式，默认套件不跑，通过 `test:demo` 按需触发；改动相关
+ *   子系统时由 verify:changed 的 L3 提示补跑。
  * - LIVE：会访问公网站点或在线模型。不进 `test` / `test:browser`，只通过 `test:live` 手动巡检。
  */
 
-export const BROWSER_SPEC_FILES: readonly string[] = [
-  'src/ai/demonstration.lab.spec.ts',
-  'src/ai/midscene/__tests__/action-recorder.lab.spec.ts',
+/** BROWSER 组中连 PostgreSQL 的文件：模板库克隆互斥，保持串行。 */
+export const BROWSER_SERIAL_SPEC_FILES: readonly string[] = [
   'src/ai/midscene/managed-page.lab.spec.ts',
+  'src/browser/engine.lab.spec.ts',
+  'src/browser/engine.outcome-c.lab.spec.ts',
+  'src/browser/engine.outcome.lab.spec.ts',
+  'src/browser/file-submission.lab.spec.ts',
+  'src/browser/managed-browser.lab.spec.ts',
+  'src/browser/session-auth-driven.integration.spec.ts',
+  'src/browser/session-manager.integration.spec.ts',
+  'src/runtime/e2e-report-simulation.spec.ts',
+]
+
+/** BROWSER 组中不连 PostgreSQL 的文件：无跨文件共享资源，可受控并行。 */
+export const BROWSER_PARALLEL_SPEC_FILES: readonly string[] = [
+  'src/ai/midscene/__tests__/action-recorder.lab.spec.ts',
   'src/ai/midscene/page-write-gate.spec.ts',
   'src/ai/page-agent/inpage-binding.spec.ts',
   'src/browser/aria-match.spec.ts',
   'src/browser/aria-snapshot.spec.ts',
   'src/browser/captcha/__tests__/captcha-integration.spec.ts',
-  'src/browser/engine.lab.spec.ts',
-  'src/browser/engine.outcome-c.lab.spec.ts',
-  'src/browser/engine.outcome.lab.spec.ts',
   'src/browser/explore-network-guard.spec.ts',
-  'src/browser/file-submission.lab.spec.ts',
   'src/browser/host-isolation.lab.spec.ts',
   'src/browser/landing-settle.lab.spec.ts',
-  'src/browser/managed-browser.lab.spec.ts',
   'src/browser/managed-helpers.spec.ts',
   'src/browser/map-consumption.lab.spec.ts',
   'src/browser/map-ingest-collector.spec.ts',
@@ -33,22 +47,30 @@ export const BROWSER_SPEC_FILES: readonly string[] = [
   'src/browser/resolved-handle.lab.spec.ts',
   'src/browser/reverse-locator-probe.lab.spec.ts',
   'src/browser/reverse-locator.spec.ts',
-  'src/browser/run-video-lead.lab.spec.ts',
   'src/browser/runtime.hmi.spec.ts',
   'src/browser/runtime.health.spec.ts',
   'src/browser/runtime.navigation.spec.ts',
   'src/browser/runtime.screenshot.spec.ts',
   'src/browser/screencast.spec.ts',
   'src/browser/screenshot-quality.lab.spec.ts',
-  'src/browser/session-auth-driven.integration.spec.ts',
   'src/browser/session-auth.page.spec.ts',
-  'src/browser/session-manager.integration.spec.ts',
   'src/browser/surface.aria-assert.spec.ts',
   'src/browser/surface.business-flows.lab.spec.ts',
   'src/browser/surface.dynamic-lab.spec.ts',
   'src/browser/surface.lab.spec.ts',
   'src/browser/target-scope.spec.ts',
-  'src/runtime/e2e-report-simulation.spec.ts',
+]
+
+export const BROWSER_SPEC_FILES: readonly string[] = [
+  ...BROWSER_SERIAL_SPEC_FILES,
+  ...BROWSER_PARALLEL_SPEC_FILES,
+]
+
+/** 演示 / 验收档：验证能力链走得通，非回归守卫；默认不跑，`test:demo` 按需触发。 */
+export const DEMO_SPEC_FILES: readonly string[] = [
+  'src/ai/demonstration.lab.spec.ts',
+  'src/browser/file-submission.demo.lab.spec.ts',
+  'src/browser/run-video-lead.lab.spec.ts',
 ]
 
 export const DB_SPEC_FILES: readonly string[] = [

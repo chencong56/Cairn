@@ -1,4 +1,8 @@
-/** Dual-source authoring → persisted trial → Engine → managed Chromium / installed SDK.
+/** DEMO 档（2026-09-29 守卫 vs 演示分类）：编写→试跑全链路演示，默认套件不跑，
+ * 通过 `pnpm --filter @cairn/worker test:demo` 按需触发；改动编写/固化链路时由
+ * verify:changed L3 提示补跑。
+ *
+ * Dual-source authoring → persisted trial → Engine → managed Chromium / installed SDK.
  * Only the VL provider is replaced with a local, page-grounded fixture. Business writes,
  * leases, AI budgets, attempts, outcomes, object evidence and validation are real.
  */

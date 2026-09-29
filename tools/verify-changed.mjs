@@ -130,6 +130,7 @@ function main() {
     console.log('⚡ 判定结论: 执行 L1 局部受影响包验证 (Targeted Verification)')
     console.log(`直接涉及包: [${analysis.changedPackages.join(', ') || '无'}]`)
     console.log(`验证目标包 (含下游依赖): [${analysis.targetPackages.join(', ')}]`)
+    for (const note of analysis.gateNotes ?? []) console.log(`  ℹ️  ${note}`)
   }
 
   if (analysis.l3Suggestions.length > 0) {

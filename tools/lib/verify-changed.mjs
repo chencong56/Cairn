@@ -165,6 +165,34 @@ export function analyzeVerificationScope(files) {
       if (file.includes('lease') || file.includes('occupancy')) {
         l3Suggestions.add('pnpm test:rf06')
       }
+      // 定位/表面执行核心：surface.lab 的浸泡用例默认只采样 3 次，
+      // 改动这些文件时必须补跑 20 次深浸泡，防止低概率误点回归漏网。
+      if (
+        file === 'packages/worker/src/browser/surface.ts' ||
+        file === 'packages/worker/src/browser/observe.ts' ||
+        file === 'packages/worker/src/browser/resolver.ts' ||
+        file === 'packages/worker/src/browser/element-candidate-inspector.ts'
+      ) {
+        l3Suggestions.add('pnpm --filter @cairn/worker test:soak')
+      }
+      // 演示档（DEMO）：全链路演示默认不跑，改动对应子系统时提示补跑。
+      if (
+        file.includes('run-video') ||
+        file.includes('run-file') ||
+        file.includes('file-submission') ||
+        file.includes('upload') ||
+        (file.includes('demonstration') && file.startsWith('packages/worker/'))
+      ) {
+        l3Suggestions.add('pnpm --filter @cairn/worker test:demo')
+      }
+      // worker 非核心降档的补偿控制：改浏览器/AI 层源码时提示补跑浏览器守卫段
+      // （本地门降为 fast+db 后，浏览器段对非核心改动由 CI 兜底；此提示供提前本地验证）。
+      if (
+        pkg === '@cairn/worker' &&
+        (file.startsWith('packages/worker/src/browser/') || file.startsWith('packages/worker/src/ai/'))
+      ) {
+        l3Suggestions.add('pnpm --filter @cairn/worker test:browser')
+      }
       continue
     }
 
@@ -196,8 +224,29 @@ export function analyzeVerificationScope(files) {
   const downstream = getDownstreamPackages(changedPackages)
   const targetPackages = [...new Set([...changedPackages, ...downstream])].sort()
 
+  // worker 包内分档（2026-09-29 决议）：非核心 worker 改动的本地交付门降为
+  // test:fast + test:db（约 95s、全确定性红绿）；浏览器守卫段由两条自动机制兜底——
+  // 核心改动（engine/runtime/session，升级清单内）仍自动全量，CI 的 pnpm test 保持全量。
+  // 仅当 worker 是唯一改动包（无 db/shared 上游连带）时降档；上游改动可能影响任何层，保持全量。
+  const workerFastGate =
+    !isFull &&
+    changedPackages.length === 1 &&
+    changedPackages[0] === '@cairn/worker'
+
   const turboFilters = targetPackages.map((p) => `--filter=${p}`).join(' ')
-  const turboCommand = targetPackages.length > 0 ? `turbo run typecheck lint test ${turboFilters}` : null
+  let turboCommand = targetPackages.length > 0 ? `turbo run typecheck lint test ${turboFilters}` : null
+  const gateNotes = []
+  if (workerFastGate && turboCommand) {
+    turboCommand = [
+      `turbo run typecheck lint ${turboFilters}`,
+      'pnpm --filter @cairn/worker test:fast',
+      'pnpm --filter @cairn/worker test:db',
+    ].join(' && ')
+    gateNotes.push(
+      'worker 非核心改动：本地交付门降为 test:fast + test:db（约 95s，全确定性红绿）。',
+      '浏览器守卫段本次未跑：由 CI 全量兜底；命中浏览器/AI 层源码时见上方 test:browser 提示，核心改动仍自动全量。',
+    )
+  }
   const fullCommand = 'pnpm check && pnpm lint && pnpm typecheck && pnpm test'
 
   return {
@@ -208,6 +257,7 @@ export function analyzeVerificationScope(files) {
     targetPackages,
     l3Suggestions: [...l3Suggestions].sort(),
     turboCommand,
+    gateNotes,
     fullCommand,
   }
 }

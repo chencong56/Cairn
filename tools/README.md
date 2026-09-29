@@ -27,9 +27,9 @@
 | 层级 | 时机 | 范围 | 入口命令 |
 | --- | --- | --- | --- |
 | **L0 内循环** | 每轮修改后 | 当前被改文件相关的测试（`vitest related`）及当前包快速检查 | 单包 vitest 命令、`pnpm test:worker:fast` |
-| **L1 交付** | 任务交付前 | 受影响包**及其下游依赖**的 `typecheck`、`lint`、`test`（含测试文件） | `pnpm verify:changed` |
+| **L1 交付** | 任务交付前 | 受影响包**及其下游依赖**的 `typecheck`、`lint`、`test`（含测试文件）。例外：worker 非核心改动（未命中运行/会话/租约核心升级清单，且 worker 为唯一改动包）本地门降为 `test:fast + test:db`（约 95s），浏览器守卫段由 CI 全量兜底；核心改动与多包/上游连带照旧全量 | `pnpm verify:changed` |
 | **L2 全量** | 触发升级条件时、提交/合并前、CI | 全仓构建、代码检查、类型检查与全量测试 | `pnpm verify:full`（或 `pnpm verify:changed` 自动升级） |
-| **L3 专项 e2e** | 改动命中对应垂直领域时 | 独立领域专项用例 | `test:reliability`、`test:omf-e2e`、`test:action-modules-e2e`、`test:rf06` 等（由 `verify:changed` 自动提示） |
+| **L3 专项 e2e** | 改动命中对应垂直领域时 | 独立领域专项用例 | `test:reliability`、`test:omf-e2e`、`test:action-modules-e2e`、`test:rf06` 等（由 `verify:changed` 自动提示）；改动 worker 定位／表面执行核心（`surface.ts`、`observe.ts`、`resolver.ts`、`element-candidate-inspector.ts`）时提示补跑 `pnpm --filter @cairn/worker test:soak`（浸泡默认采样 3 次，深浸泡须显式触发） |
 
 ### 升级为全量的条件（L1 → L2）
 满足以下任一项时，`pnpm verify:changed` 自动升级为全量验证：

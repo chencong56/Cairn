@@ -460,52 +460,9 @@ describe('ExecutionEngine × 真浏览器（垂直切片）', { timeout: 180_000
     return { detail, evidence, ms }
   }
 
-  it('失败保留 Trace / 截图；成功 on_failure 丢弃 Trace', async () => {
-    const failClick: Step = {
-      id: newId(),
-      name: '点不存在',
-      type: 'click',
-      effectType: 'READ_ONLY',
-      input: {
-        target: {
-          framePath: [],
-          candidates: [{ by: 'text', value: '不存在的按钮' }],
-        },
-      },
-    }
-    const failed = await runWithPolicy(
-      [
-        {
-          id: newId(),
-          name: '打开',
-          type: 'navigate',
-          effectType: 'IDEMPOTENT',
-          input: { url: `${baseUrl}/` },
-        },
-        failClick,
-      ],
-      { screenshot: 'on_failure', trace: 'on_failure' },
-    )
-    expect(failed.detail.status).toBe('FAILED')
-    expect(failed.evidence.items.some((item) => item.type === 'screenshot' && item.status === 'available')).toBe(true)
-    expect(failed.evidence.items.some((item) => item.type === 'trace' && item.status === 'available')).toBe(true)
-    expect(failed.detail.stepRuns.every((step) => step.attempts.length === 1)).toBe(true)
-
-    const ok = await runWithPolicy(
-      [
-        {
-          id: newId(),
-          name: '打开',
-          type: 'navigate',
-          effectType: 'IDEMPOTENT',
-          input: { url: `${baseUrl}/` },
-        },
-      ],
-      { screenshot: 'on_failure', trace: 'on_failure' },
-    )
-    expect(ok.detail.status).toBe('SUCCEEDED')
-    expect(ok.evidence.items.some((item) => item.type === 'trace')).toBe(false)
-  })
+  // 2026-09-29 守卫 vs 演示分类追加裁定（用户确认）：trace 的 on_failure 保留/丢弃
+  // 与 off/always 策略语义用例删除——那是证据管道策略矩阵，trace 文件本身的生成
+  // 属 Playwright 能力不测；「trace 不串 Run」这类静默污染守卫保留（下方用例）。
 
   it('成功与失败都留整次录像，同一 Session 连跑两条互不串联', async () => {
     const nav = (): Step => ({
@@ -515,17 +472,14 @@ describe('ExecutionEngine × 真浏览器（垂直切片）', { timeout: 180_000
       effectType: 'IDEMPOTENT',
       input: { url: `${baseUrl}/` },
     })
-    const failClick: Step = {
+    // 失败形状用越界导航：即时失败，省掉点不存在元素的定位等待。
+    // 本用例验证的是失败 Run 的录像证据，不依赖具体错误码。
+    const failNav: Step = {
       id: newId(),
-      name: '点不存在',
-      type: 'click',
-      effectType: 'READ_ONLY',
-      input: {
-        target: {
-          framePath: [],
-          candidates: [{ by: 'text', value: '不存在的按钮' }],
-        },
-      },
+      name: '越界打开',
+      type: 'navigate',
+      effectType: 'IDEMPOTENT',
+      input: { url: 'https://evil.example/' },
     }
     const ok = await runWithPolicy([nav()], { screenshot: 'always', video: 'always', trace: 'off' })
     expect(ok.detail.status).toBe('SUCCEEDED')
@@ -537,7 +491,7 @@ describe('ExecutionEngine × 真浏览器（垂直切片）', { timeout: 180_000
     expect(ok.evidence.items.some((item) => item.type === 'screenshot' && item.status === 'available')).toBe(true)
     expect(ok.detail.evidenceStatus).toBe('COMPLETE')
 
-    const failed = await runWithPolicy([nav(), failClick], { screenshot: 'always', video: 'always', trace: 'off' })
+    const failed = await runWithPolicy([failNav], { screenshot: 'always', video: 'always', trace: 'off' })
     expect(failed.detail.status).toBe('FAILED')
     const video2 = failed.evidence.items.find((item) => item.type === 'video')
     expect(video2?.status).toBe('available')
@@ -553,58 +507,20 @@ describe('ExecutionEngine × 真浏览器（垂直切片）', { timeout: 180_000
   })
 
   it('同一 Session 连续两个失败 Run 的 Trace 互不串联', async () => {
-    const failStep = (): Step => ({
+    // 失败形状用越界导航即时失败（与录像用例同款手法）：trace 从会话租约获取即开始
+    // 录制，断言只关心两 Run 的 trace 证据互不串挂，不依赖失败步骤形状。
+    const failNav = (): Step => ({
       id: newId(),
-      name: '点不存在',
-      type: 'click',
-      effectType: 'READ_ONLY',
-      input: {
-        target: {
-          framePath: [],
-          candidates: [{ by: 'text', value: `missing-${newId()}` }],
-        },
-      },
+      name: '越界打开',
+      type: 'navigate',
+      effectType: 'IDEMPOTENT',
+      input: { url: 'https://evil.example/' },
     })
-    const first = await runWithPolicy(
-      [
-        { id: newId(), name: '打开', type: 'navigate', effectType: 'IDEMPOTENT', input: { url: `${baseUrl}/` } },
-        failStep(),
-      ],
-      { trace: 'on_failure', screenshot: 'off' },
-    )
-    const second = await runWithPolicy(
-      [
-        { id: newId(), name: '打开', type: 'navigate', effectType: 'IDEMPOTENT', input: { url: `${baseUrl}/` } },
-        failStep(),
-      ],
-      { trace: 'on_failure', screenshot: 'off' },
-    )
+    const first = await runWithPolicy([failNav()], { trace: 'on_failure', screenshot: 'off' })
+    const second = await runWithPolicy([failNav()], { trace: 'on_failure', screenshot: 'off' })
     const traces = [...first.evidence.items, ...second.evidence.items].filter((item) => item.type === 'trace')
     expect(traces).toHaveLength(2)
     expect(traces[0]?.objectKey).not.toBe(traces[1]?.objectKey)
     expect(traces[0]?.runId).not.toBe(traces[1]?.runId)
-  })
-
-  it('S04：Trace off / always 的单 Attempt 延迟与体积', async () => {
-    const nav = (): Step[] => [
-      { id: newId(), name: '打开', type: 'navigate', effectType: 'IDEMPOTENT', input: { url: `${baseUrl}/` } },
-    ]
-    await runWithPolicy(nav(), { screenshot: 'off', trace: 'off' })
-    const off = await runWithPolicy(nav(), { screenshot: 'off', trace: 'off' })
-    const on = await runWithPolicy(nav(), { screenshot: 'off', trace: 'always' })
-    const onTrace = on.evidence.items.find((item) => item.type === 'trace')
-    const report = {
-      offMs: off.ms,
-      onMs: on.ms,
-      offTraceBytes: 0,
-      onTraceBytes: onTrace?.byteSize ?? 0,
-      onTraceStatus: onTrace?.status ?? 'missing',
-    }
-    process.stdout.write(`S04_TRACE_COST ${JSON.stringify(report)}\n`)
-    expect(off.detail.status).toBe('SUCCEEDED')
-    expect(on.detail.status).toBe('SUCCEEDED')
-    expect(off.evidence.items.some((item) => item.type === 'trace')).toBe(false)
-    expect(onTrace?.status).toBe('available')
-    expect(report.onTraceBytes).toBeGreaterThan(0)
   })
 })

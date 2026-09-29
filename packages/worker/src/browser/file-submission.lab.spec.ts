@@ -12,7 +12,6 @@ import {
   createScenarioWithVersion,
   getRun,
   grantAdminScope,
-  listRunEvidence,
   newId,
   openIsolatedDb,
   registerWorker,
@@ -37,8 +36,6 @@ import { BrowserSessionManager } from './session-manager.js'
 import { LocalObjectStore } from '@cairn/storage'
 import { ObjectService } from '../objects/object.service.js'
 import { ExecutionEngine } from '../engine/engine.js'
-import { existsSync } from 'node:fs'
-import { runFileWorkspaceDir } from '../engine/run-file-workspace.js'
 
 type LabServerHandle = {
   port: number
@@ -48,7 +45,7 @@ type LabServerHandle = {
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_fsub`
 
-describe('浏览器文件上传/下载与Target夹具全链路业务系统验证（L2 真机真服）', { timeout: 180_000 }, () => {
+describe('浏览器文件上传边界守卫（L2 真机真服）：隐藏框穿透、摘要篡改、跨 Run 句柄、无文件框报错', { timeout: 180_000 }, () => {
   let lab: LabServerHandle
   let handle: DbHandle
   let manager: BrowserSessionManager
@@ -229,196 +226,6 @@ describe('浏览器文件上传/下载与Target夹具全链路业务系统验证
     expect(grant?.runId).toBe(runId)
     return grant!
   }
-
-  it('Round 1 (主流程完整闭环)：下载模版 -> 填选填表单 -> 夹具上传(隐藏框触发) -> 上下文模版回传 -> 提交生成单号', async () => {
-    const steps: Step[] = [
-      {
-        id: newId(),
-        name: '打开报销与提报系统',
-        type: 'navigate',
-        effectType: 'IDEMPOTENT',
-        input: { url: `${lab.url}/file-submission.html` },
-      },
-      {
-        id: newId(),
-        name: '下载报销标准模板',
-        type: 'download',
-        effectType: 'SIDE_EFFECT',
-        outputKey: 'downloadedTemplate',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#download-template-btn' }] },
-          waitMs: 15_000,
-          expect: {
-            fileNamePattern: '\\.csv$',
-            minBytes: 10,
-          },
-        },
-      },
-      {
-        id: newId(),
-        name: '填写申请人工号与姓名',
-        type: 'fill',
-        effectType: 'SIDE_EFFECT',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#applicant-name' }] },
-          value: '李四 (ENG-2048)',
-        },
-      },
-      {
-        id: newId(),
-        name: '选择报销类别',
-        type: 'select',
-        effectType: 'SIDE_EFFECT',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#category-select' }] },
-          by: 'value',
-          value: 'INVOICE',
-        },
-      },
-      {
-        id: newId(),
-        name: '填写选填业务说明',
-        type: 'fill',
-        effectType: 'SIDE_EFFECT',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#remarks' }] },
-          value: 'Q3研发机房扩容采购及差旅报销',
-        },
-      },
-      {
-        id: newId(),
-        name: '填写选填紧急联系电话',
-        type: 'fill',
-        effectType: 'SIDE_EFFECT',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#emergency-phone' }] },
-          value: '13987654321',
-        },
-      },
-      {
-        id: newId(),
-        name: '勾选加急审批选项',
-        type: 'click',
-        effectType: 'SIDE_EFFECT',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#urgent-check' }] },
-        },
-      },
-      {
-        id: newId(),
-        name: '上传受管发票夹具（点击按钮唤起隐藏input）',
-        type: 'upload',
-        effectType: 'SIDE_EFFECT',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#btn-select-invoice' }] },
-          files: [
-            {
-              source: 'asset',
-              fixtureId,
-              digest: fixtureDigest,
-              name: 'invoice-2026-q3.pdf',
-            },
-          ],
-        },
-      },
-      {
-        id: newId(),
-        name: '上传上下文引用的下载模板作为补充材料',
-        type: 'upload',
-        effectType: 'SIDE_EFFECT',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#extra-file' }] },
-          files: [
-            {
-              source: 'context',
-              from: 'downloadedTemplate',
-            },
-          ],
-        },
-      },
-      {
-        id: newId(),
-        name: '提交提报表单',
-        type: 'click',
-        effectType: 'SIDE_EFFECT',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#submit-btn' }] },
-        },
-      },
-      {
-        id: newId(),
-        name: '断言生成申请单号',
-        type: 'assert',
-        effectType: 'READ_ONLY',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#ticket-id' }] },
-          expect: { kind: 'exists' },
-        },
-      },
-      {
-        id: newId(),
-        name: '提取生成的业务单号',
-        type: 'extract',
-        effectType: 'READ_ONLY',
-        outputKey: 'claimTicketId',
-        input: {
-          target: { framePath: [], candidates: [{ by: 'css', value: '#ticket-id' }] },
-          as: 'text',
-        },
-      },
-    ]
-
-    const scenario = await createScenarioWithVersion(handle.db, {
-      targetId,
-      name: `fsub-r1-${newId()}`,
-      steps,
-      actor: { id: actorId },
-    })
-
-    const created = await createRunWithSnapshot(handle.db, {
-      scenarioId: scenario.id,
-      targetAccountId: accountId,
-      actor: { id: actorId },
-    })
-    const runId = created.detail.id
-
-    const grant = await claimTargetRun(runId)
-    const browserPort = createBrowserPort(manager, objects)
-    const engine = new ExecutionEngine(handle, browserPort, secretsProvider, undefined, undefined, undefined, objects)
-
-    await engine.execute(runId, { grant })
-
-    // 校验 Run 状态与输出
-    const detail = await getRun(handle.db, runId)
-    expect(detail.status).toBe('SUCCEEDED')
-
-    const context = detail.context as Record<string, any>
-    expect(context).toBeDefined()
-    expect(typeof context.claimTicketId).toBe('string')
-    expect(context.claimTicketId).toMatch(/^CLAIM-\d{8}-\d{4}$/)
-
-    // 校验下载步骤输出为合法句柄
-    const downHandle = context.downloadedTemplate as RunFileHandle
-    expect(downHandle.kind).toBe(RUN_FILE_HANDLE_KIND)
-    expect(downHandle.scope).toBe('run')
-    expect(downHandle.name).toBe('template.csv')
-    expect(downHandle.mimeType).toBe('text/csv')
-    expect(downHandle.digest).toMatch(/^sha256:[0-9a-f]{64}$/)
-
-    // 校验证据链完整性且不含 Base64
-    const evidences = await listRunEvidence(handle.db, runId)
-    const fileEvidence = evidences.items.find((e) => e.type === 'file')
-    expect(fileEvidence).toBeDefined()
-    expect(fileEvidence?.status).toBe('available')
-
-    const serializedEvidences = JSON.stringify(evidences.items)
-    expect(serializedEvidences).not.toContain('data:application/pdf;base64')
-    expect(serializedEvidences).not.toContain('base64,')
-
-    // 校验生命周期隔离：Run 结束后工作区自动彻底清除
-    const wsDir = runFileWorkspaceDir(runId)
-    expect(existsSync(wsDir)).toBe(false)
-  })
 
   it('Round 2 (边界：隐藏文件框 DOM 直接注入)：直接定位 style="display:none" input 完成穿透', async () => {
     const steps: Step[] = [

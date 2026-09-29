@@ -1,6 +1,10 @@
 /**
  * 验证方案 B 优化效果：
  * 录像起始时间与步骤 1 执行起点紧密对齐，消除原本 4~5 秒的 about:blank 前置空白。
+ *
+ * 演示档（DEMO，2026-09-29 守卫 vs 演示分类）：本用例是对录像起点优化的一次性验收，
+ * 非回归守卫，默认套件不跑；改动录像/计时链路时由 verify:changed L3 提示补跑，
+ * 或手动 `pnpm --filter @cairn/worker test:demo`。
  */
 import { createServer } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
