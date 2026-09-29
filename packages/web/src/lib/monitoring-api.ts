@@ -35,10 +35,9 @@ import {
   type MonitoringOverviewResponse,
   type PlatformConfigCurrent,
   REQUEST_ID_HEADER,
-  apiErrorSchema,
 } from '@cairn/shared'
-import { ApiRequestError, apiFetch, toQueryString } from '@/lib/api-client'
-import { readSseStream } from '@/lib/sse'
+import { apiFetch, toQueryString } from '@/lib/api-client'
+import { assertSseResponseOk, newSseRequestId, parseJson, readSseStream } from '@/lib/sse'
 import { useAuthStore } from '@/stores/auth-store'
 
 export function fetchMonitoringOverview(): Promise<MonitoringOverviewResponse> {
@@ -119,20 +118,6 @@ export type MonitorStreamHandlers = {
   onControl?: (control: MonitorStreamControl) => void
 }
 
-function newSseRequestId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-  const bytes = crypto.getRandomValues(new Uint8Array(16))
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-}
-
 export async function subscribeMonitoringStream(input: {
   intervalMs?: number
   lastEventId?: string
@@ -150,23 +135,7 @@ export async function subscribeMonitoringStream(input: {
     },
     signal: input.signal,
   })
-  if (!res.ok) {
-    if (res.status === 401 && token === useAuthStore.getState().auth.accessToken) {
-      useAuthStore.getState().auth.reset()
-    }
-    const body: unknown = await res.json().catch(() => null)
-    const parsed = apiErrorSchema.safeParse(body)
-    throw new ApiRequestError(
-      res.status,
-      parsed.success
-        ? parsed.data
-        : {
-            code: 'REQUEST_FAILED',
-            message: `请求失败（HTTP ${res.status}）`,
-            requestId: res.headers.get(REQUEST_ID_HEADER) ?? 'unknown',
-          },
-    )
-  }
+  await assertSseResponseOk(res, token)
   if (!res.body) return
   await readSseStream(
     res.body,

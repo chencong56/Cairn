@@ -1,8 +1,46 @@
+import { apiErrorSchema, REQUEST_ID_HEADER } from '@cairn/shared'
+import { ApiRequestError } from '@/lib/api-client'
+import { useAuthStore } from '@/stores/auth-store'
+
 export type SseFrame = {
   id?: string
   event: string
   data: string
   retry?: number
+}
+
+/** SSE 订阅握手失败的统一处理：401 且令牌未轮换时登出，并抛出带 requestId 的 ApiRequestError。 */
+export async function assertSseResponseOk(res: Response, token: string | undefined): Promise<void> {
+  if (res.ok) return
+  if (res.status === 401 && token === useAuthStore.getState().auth.accessToken) {
+    useAuthStore.getState().auth.reset()
+  }
+  const body: unknown = await res.json().catch(() => null)
+  const parsed = apiErrorSchema.safeParse(body)
+  throw new ApiRequestError(
+    res.status,
+    parsed.success
+      ? parsed.data
+      : {
+          code: 'REQUEST_FAILED',
+          message: `请求失败（HTTP ${res.status}）`,
+          requestId: res.headers.get(REQUEST_ID_HEADER) ?? 'unknown',
+        },
+  )
+}
+
+export function newSseRequestId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+export function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
 }
 
 /**

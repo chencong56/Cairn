@@ -68,12 +68,11 @@ import {
   type AiTaskListResponse,
   type CreateSolidificationDraftResponse,
   REQUEST_ID_HEADER,
-  apiErrorSchema,
 } from '@cairn/shared'
 import { z } from 'zod'
-import { ApiRequestError, apiFetch, apiFetchBlob, toQueryString } from '@/lib/api-client'
+import { apiFetch, apiFetchBlob, toQueryString } from '@/lib/api-client'
 import { useAuthStore } from '@/stores/auth-store'
-import { readSseStream } from '@/lib/sse'
+import { assertSseResponseOk, newSseRequestId, parseJson, readSseStream } from '@/lib/sse'
 
 export function fetchRuns(query?: RunListQuery): Promise<RunListResponse> {
   return apiFetch(`/api/runs${toQueryString(query)}`, runListResponseSchema)
@@ -188,26 +187,7 @@ export async function subscribeRunEvents(
     },
     signal: input.signal,
   })
-  if (!res.ok) {
-    if (
-      res.status === 401 &&
-      token === useAuthStore.getState().auth.accessToken
-    ) {
-      useAuthStore.getState().auth.reset()
-    }
-    const body: unknown = await res.json().catch(() => null)
-    const parsed = apiErrorSchema.safeParse(body)
-    throw new ApiRequestError(
-      res.status,
-      parsed.success
-        ? parsed.data
-        : {
-            code: 'REQUEST_FAILED',
-            message: `请求失败（HTTP ${res.status}）`,
-            requestId: res.headers.get(REQUEST_ID_HEADER) ?? 'unknown',
-          },
-    )
-  }
+  await assertSseResponseOk(res, token)
   if (!res.body) return
   await readSseStream(
     res.body,
@@ -222,20 +202,6 @@ export async function subscribeRunEvents(
     },
     input.signal,
   )
-}
-
-function newSseRequestId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-  const bytes = crypto.getRandomValues(new Uint8Array(16))
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
 }
 
 export function runEvidenceContentPath(runId: string, evidenceId: string): string {
@@ -349,23 +315,7 @@ export async function subscribeBrowserFrames(
     },
     signal: input.signal,
   })
-  if (!res.ok) {
-    if (res.status === 401 && token === useAuthStore.getState().auth.accessToken) {
-      useAuthStore.getState().auth.reset()
-    }
-    const body: unknown = await res.json().catch(() => null)
-    const parsed = apiErrorSchema.safeParse(body)
-    throw new ApiRequestError(
-      res.status,
-      parsed.success
-        ? parsed.data
-        : {
-            code: 'REQUEST_FAILED',
-            message: `请求失败（HTTP ${res.status}）`,
-            requestId: res.headers.get(REQUEST_ID_HEADER) ?? 'unknown',
-          },
-    )
-  }
+  await assertSseResponseOk(res, token)
   if (!res.body) return
   await readSseStream(
     res.body,

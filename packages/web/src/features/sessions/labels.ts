@@ -11,6 +11,7 @@ import {
   type SessionStatus,
   type SessionSystemOverviewFilter,
 } from '@cairn/shared'
+import { formatDurationMs } from '@/lib/formatters'
 
 export function describeSessionOperationError(code: string | null | undefined): string | null {
   const value = code?.trim()
@@ -194,13 +195,6 @@ export function describeOperationWait(
 /** 需要用户处理而不是再等等的排队原因。 */
 export function operationWaitNeedsAttention(reason: string | null | undefined): boolean {
   return reason === 'NO_ELIGIBLE_WORKER' || reason === 'WORKER_PROTOCOL_MISSING' || reason === 'SESSION_LOST'
-}
-
-export function formatDurationMs(ms: number): string {
-  if (ms < 1000) return '< 1秒'
-  const seconds = Math.round(ms / 1000)
-  if (seconds < 60) return `${seconds}秒`
-  return `${Math.floor(seconds / 60)}分${seconds % 60}秒`
 }
 
 const AUTH_PROBE_RESULT_LABELS: Record<string, string> = {
