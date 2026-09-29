@@ -497,8 +497,6 @@ export function OutboundAlertRules() {
     />
   )
 }
-export const NotificationAlertRules = OutboundAlertRules
-export const NotificationRulesPanel = OutboundRulesPanel
 
 function AlertRulesForm({
   rules,

@@ -12,45 +12,37 @@ import { readSseStream } from './sse'
 export type OutboundChannels = z.infer<
   typeof outboundChannelsResponseSchema
 >
-export type NotificationChannels = OutboundChannels
 
 export type OutboundList = z.infer<typeof outboundEventListSchema>
-export type NotificationList = OutboundList
 
 export const outboundReceipt = z.object({ eventId: z.string() })
-export const notificationReceipt = outboundReceipt
 
 export function outboundCommandKey() {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
     b.toString(16).padStart(2, '0')
   ).join('')
 }
-export const notificationCommandKey = outboundCommandKey
 
 export const fetchOutboundChannels = (targetId?: string) =>
   apiFetch(
     `/api/outbound/channels${toQueryString({ targetId })}`,
     outboundChannelsResponseSchema
   )
-export const fetchNotificationChannels = fetchOutboundChannels
 
 export const fetchOutboundEvents = (query: Record<string, unknown>) =>
   apiFetch(
     `/api/outbound/events${toQueryString(query)}`,
     outboundEventListSchema
   )
-export const fetchNotificationEvents = fetchOutboundEvents
 
 export const fetchOutboundEvent = (id: string) =>
   apiFetch(`/api/outbound/events/${id}`, outboundEventSchema)
-export const fetchNotificationEvent = fetchOutboundEvent
 
 export const fetchOutboundPolicy = (id: string) =>
   apiFetch(
     `/api/outbound/scenarios/${id}/policy`,
     outboundPolicyResponseSchema
   )
-export const fetchNotificationPolicy = fetchOutboundPolicy
 
 export const postOutbound = <T>(
   path: string,

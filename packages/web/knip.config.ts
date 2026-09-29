@@ -1,6 +1,9 @@
 import type { KnipConfig } from 'knip'
 
 const config: KnipConfig = {
+  // 门禁范围先钉在「死文件 / 无用依赖 / 重复导出」三类会持续腐烂的问题上；
+  // 142 个存量未使用导出（多为 feature barrel 转发）待专项收敛后再纳入。
+  include: ['files', 'dependencies', 'duplicates'],
   ignore: [
     // shadcn/ui 原语整体保留：按需组合，不逐文件判定是否已被业务页面引用
     'src/components/ui/**',

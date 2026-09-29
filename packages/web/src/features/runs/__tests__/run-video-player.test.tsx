@@ -311,7 +311,7 @@ describe('RunVideoPlayer', () => {
       ordinal: i,
       name: i % 2 === 0 ? `常规业务步骤 ${i + 1}` : `长文本检查步骤验证系统响应 ${i + 1}`,
       type: 'click',
-      status: (i === 4 ? 'FAILED' : i === 7 ? 'RUNNING' : 'SUCCEEDED') as const,
+      status: i === 4 ? ('FAILED' as const) : i === 7 ? ('RUNNING' as const) : ('SUCCEEDED' as const),
       fromMs: i * 2000,
       toMs: (i + 1) * 2000,
       durationMs: 2000,

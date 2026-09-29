@@ -185,7 +185,6 @@ export function OutboundPage() {
     </Main>
   )
 }
-export const NotificationsPage = OutboundPage
 
 function OutboundRecords({
   runId,
@@ -610,7 +609,6 @@ function OutboundRecords({
     </div>
   )
 }
-export const NotificationRecords = OutboundRecords
 
 function OutboundDetail({ id }: { id: string }) {
   const detail = useQuery({

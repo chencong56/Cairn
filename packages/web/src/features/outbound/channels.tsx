@@ -1111,4 +1111,3 @@ export function validationMessage(error: unknown) {
   return error instanceof Error ? error.message : '保存失败，请重试'
 }
 
-export const NotificationChannelsPanel = OutboundChannelsPanel

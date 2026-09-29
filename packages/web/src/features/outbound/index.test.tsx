@@ -154,9 +154,6 @@ vi.mock('@/lib/outbound-api', async (importOriginal) => ({
     ],
   })),
   subscribeOutbound: vi.fn(async () => {}),
-  fetchNotificationEvents: vi.fn(async () => ({ items: [], nextCursor: null })),
-  fetchNotificationChannels: vi.fn(async () => ({ revision: 1, enabled: true, channels: [] })),
-  subscribeNotifications: vi.fn(async () => {}),
 }))
 
 vi.mock('@/lib/targets-api', () => ({
