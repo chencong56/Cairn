@@ -1,3 +1,5 @@
+2026-09-30--验收意图三期整体复查修复：巡检批次按 target 缓存平台配置与 resolution 编译结果（loadTargetCompileContext，目标组日志可证只编译一次）；编译失败场景快照置顶收录 error 级编译诊断摘要（编译诊断本身就是发现）；死条件判定基数改为「manifest 含该契约的运行数」（新加条件不再被历史运行误判为死条件，清理不可达分支）；统计窗口对齐方案 30 次/不足取 30 天（WINDOW_MAX/WINDOW_DAYS 常量启用，页脚文案与来源构成 sampleBreakdown 呈现同步修正）；批次并发与失联防护补齐（createSweepBatch 事务化防重、claim 阻塞锁保证同一时刻至多一条活跃批次串行领取、finishSweepBatch 校验持有者且旧持有者不得改写已回收终态、续租失败立即中止不提交事实、停机中断按 WORKER_SHUTDOWN 失败收尾不落半程快照）；全量契约、不变量、可移植性、单测、类型检查与全栈探活验证通过。
+
 2026-09-29--历史驱动的验收条件调优与全平台覆盖巡检：落实验收意图（三期）全链路；实现纯函数式历史运行判定聚合与阈值/严格度/失效条件调优建议（suggestOutcomeTuning，支持 P95 梯形收紧、偶发放宽、失效度量缺失预警与断点隔离）；新增 update_outcome 编排操作无缝衔接草稿版本管理与 Undo/Redo；落地全平台体检巡检批次管理（acceptance_sweep_batches）、覆盖率快照（acceptance_coverage_snapshots）与 90 天自动修剪，接入 Worker 周期任务槽（acceptance.audit.sweep，15 分钟维护租约续期与僵尸批次自愈）；Web Studio 验收面板新增「历史洞察」Tab 与调优采纳；Web 维护中心新增「验收覆盖」横向视图（系统筛选、状态统计 HUD、即时巡检与直达 Studio 调优）；全量契约、不变量、数据库可移植性、单测、类型检查与全栈探活 STACK_OK。
 
 2026-09-29--场景编排工作台定位稳定性解耦与全流程健康感知重构：将定位稳定性从场景配置工作区彻底剥离，净化场景配置为纯静态输入契约并在底部增加转场引导卡；在左侧步骤流水线次级栏注入步骤健康胶囊（PipelineHealthPill，零运行样本冷启动静默隐藏，衰减预警高亮，点击直达）；右侧检查器新增独立「定位健康度与规则自愈」工作区（ScenarioHealthInspector，支持全局命中率总览、一键批量自愈、单步直跳联动与停靠半选悬挂视觉态协同）；全套单元测试、类型检查、Lint 100% 绿灯通过，全栈服务探活 STACK_OK。
@@ -731,3 +733,5 @@
 2026-09-29--worker trace 用例处置（用户确认追加）：trace 属 Playwright 浏览器能力不测生成；删除 on_failure 保留/丢弃与 S04 off/always 两条策略矩阵用例（后者实为前者重复覆盖），保留「连续两失败 Run trace 互不串联」静默污染守卫并改单步越界导航即时失败（32.2s→13.1s，断言原样）；engine.lab 6 条 130.4s→4 条 80.6s，浏览器段预计约 449s；trace on_failure 策略静默回归不再被默认套件覆盖已登记为残余风险
 
 2026-09-29--worker 分层验证降档与连库测试受控并行：verify:changed 对 worker 非核心改动（未命中运行/会话/租约核心升级清单且 worker 为唯一改动包）本地交付门降为 test:fast + test:db（约 95s），浏览器守卫段由 CI 全量与核心自动升级双机制兜底，浏览器/AI 层源码改动新增 test:browser L3 提示（17 单测）；浏览器连库串行档复用 openIsolatedDb 克隆冲突自愈开 maxWorkers: 2，与无库档两路并行，浏览器段 499s→271s（三轮 dev 负载门控全绿）；DB 组并行尝试在门控中暴露 lifecycle.integration 停机竞态用例的并行耦合（单文件绿、负载下确定性失守，该区域另一会话改造中），按「耦合即回退」纪律回退串行并留档；worker 全量 10.5→6:17 分钟，全仓 pnpm test 8:39（16/16 全绿）
+
+2026-09-29--全仓测试资源隔离与 worker 调度合流：新增 tools/test-pg-second.mjs 第二 PG 实例启动器（Homebrew postgres initdb scram 密码认证、5433 可达即复用、initdb 不可用回退主实例不破坏），@cairn/db 套件接线独立实例消除四套件挤单实例的 2-4 倍互相拖慢（398→90s）；api 套件 maxWorkers: 3 限并发；worker 三段 && 串接合并为单配置多 project 同调度（fast+db 被 browser 时间线吸收，db 组组内串行规避停机竞态耦合）；browser-serial 3 路尝试在门控中触发 managed-page.lab（真 Midscene SDK、时序敏感）13 用例耦合，按纪律回退 2 路并留档；门控集成配置多轮全绿；turbo 缓存实证：代码无改动时 pnpm test 仅 52s

@@ -8,11 +8,11 @@ import {
 /**
  * 浏览器集成测试：真 Chromium，页面来自 setContent / 127.0.0.1 / 被拦截的保留域名。
  *
- * 默认拆两个 project 受控并行：
+ * 默认拆两个 project 受控并行（vitest 4 约束：同 group 的 projects 必须同
+ * maxWorkers，故两档统一 2；3 路曾触发 managed-page.lab 时序耦合，已回退）：
  * - browser-serial：连 PostgreSQL 的文件。openIsolatedDb 内置克隆冲突自愈
- *   （剔除模板库残留连接后重试，兜底全量迁移），maxWorkers: 2 两路并行，
- *   与 browser-parallel 的两路合计至多 4 个并发用例文件；
- * - browser-parallel：不连库的文件（独立临时 profile + 随机端口），maxWorkers: 2。
+ *   （剔除模板库残留连接后重试，兜底全量迁移）；
+ * - browser-parallel：不连库的文件（独立临时 profile + 随机端口）。
  *
  * CAIRN_BROWSER_PARALLEL=0 为强制串行逃生舱：浏览器段出现偶发失败时，先用它
  * 复现定性（区分并行耦合与真实回归），再决定回退。

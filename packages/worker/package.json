@@ -6,7 +6,7 @@
     "build": "tsc -p tsconfig.build.json && cp src/browser/video-encoder-child.cjs dist/browser/video-encoder-child.cjs",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config vitest.config.mts && vitest run --config vitest.db.config.mts && vitest run --config vitest.browser.config.mts",
+    "test": "vitest run --config vitest.config.mts && vitest run --config vitest.integration.config.mts",
     "test:fast": "vitest run --config vitest.config.mts",
     "test:db": "vitest run --config vitest.db.config.mts",
     "test:browser": "vitest run --config vitest.browser.config.mts",
