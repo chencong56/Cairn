@@ -5,6 +5,7 @@ import { createDb, type DbHandle } from '../client.js'
 import { expose } from '../database.js'
 import { migrateDatabase } from '../migrate-native.js'
 import { grantAdminScope, openIsolatedDb, requireReachableDb, seedFixtureStepsEnabled } from '../testing.js'
+import { acquireReusedContractDb } from './contract-reuse.js'
 
 // 现有用例都从 contract-fixture 取它；实现只此一份，在 testing.ts。
 export { grantAdminScope }
@@ -35,6 +36,10 @@ export async function openContractDb(
   _label?: string,
   options: { pristine?: boolean } = {},
 ): Promise<DbHandle & { env: DbEnv }> {
+  // 同一 worker 里的 PostgreSQL 用例复用库，只在第一次打开时克隆模板。同时持有两个库的用例仍会新建。
+  if (driver === 'postgres' && process.env.CAIRN_DB_CONTRACT_REUSE !== '0') {
+    return acquireReusedContractDb(options)
+  }
   const name = `cairn_port_${newId().replaceAll('-', '')}`
   if (driver === 'postgres') {
     const handle = await openIsolatedDb(name, options)

@@ -12,5 +12,7 @@ export default defineConfig({
     // 与 worker 用同一档预算，不让两个包对同一件事有两套上限。
     hookTimeout: 60_000,
     globalSetup: ['./vitest.global-setup.mts'],
+    // 每个文件开始时归还上一个文件占用的复用库，下一次 openContractDb 会先清表。
+    setupFiles: ['./src/__tests__/contract-reuse-setup.ts'],
   },
 })
