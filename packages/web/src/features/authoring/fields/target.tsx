@@ -2,16 +2,12 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import {
-  deriveStepResolutionBadge,
   describeLocatorCandidates,
   sanitizeLocatorLabel,
-  FACTORY_COMPILE_RESOLUTION,
   LOCATOR_BY,
   MAX_FRAME_DEPTH,
-  mergeEffectiveResolution,
   observationShowsFragileCss,
   RELATIVE_ANCHOR_SCOPES,
-  RESOLUTION_MODE_LABELS,
   LOCATOR_PRESETS,
   LOCATOR_PRESET_LABELS,
   locatorPresetFor,
@@ -19,7 +15,6 @@ import {
   resolveLocatorPlan,
   locatorReadiness,
   type LocatorPlan,
-  type LocatorRoute,
   type LocatorBy,
   type RelativeAnchorScope,
   type ResolutionPolicy,
@@ -29,7 +24,6 @@ import {
 import { toast } from 'sonner'
 import { fetchScenarioCapabilities } from '@/lib/scenarios-api'
 import { Button } from '@/components/ui/button'
-import { StatusBadge } from '@/components/status-badge'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -93,7 +87,6 @@ export function TargetFields({
   const textReady = platform ? locatorReadiness(platform).textReady : capabilities?.textReady === true
   const presetKeys = Object.keys(LOCATOR_PRESETS) as Array<keyof typeof LOCATOR_PRESETS>
   let planPreview = ''
-  let actualLocatorRoutes: LocatorRoute[] | undefined
   if (platform) {
     try {
       const result = resolveLocatorPlan({
@@ -103,7 +96,6 @@ export function TargetFields({
         step: { plan: policy?.locatorPlan, policy: policy?.resolution },
         ...locatorReadiness(platform),
       })
-      actualLocatorRoutes = result.actual
       planPreview = `本步请求：${locatorRouteListLabel(result.requested)}；实际：${locatorRouteListLabel(result.actual)}${result.skipped.length ? `；跳过：${locatorSkippedLabel(result.skipped)}` : ''}`
     } catch (error) { planPreview = error instanceof Error ? error.message : '定位路线不可用' }
   }
@@ -113,18 +105,6 @@ export function TargetFields({
       : [{ by: 'label' as const, value: '' }]
   const frames = target.framePath ?? []
   const observeDisabled = disabled && !observe.livePage
-  const effective = mergeEffectiveResolution({
-    ceiling: capabilities?.ceiling ?? FACTORY_COMPILE_RESOLUTION.ceiling,
-    defaultResolution: capabilities?.default ?? FACTORY_COMPILE_RESOLUTION.default,
-    targetCeiling: targetPolicy?.ceiling,
-    targetPreference: targetPolicy?.preference,
-    step: policy?.resolution,
-  })
-  const badge = deriveStepResolutionBadge({
-    effective,
-    hasCandidates: target.candidates.some((item) => item.value.trim()),
-    aiRungAvailable: capabilities?.aiRungAvailable === true && effective !== 'deterministic_only',
-  })
   const [advanced, setAdvanced] = useState(
     Boolean(forceAdvanced || target.anchor || frames.length > 0 || policy?.resolution || policy?.locatorPlan || policy?.deepLocate),
   )
@@ -158,16 +138,11 @@ export function TargetFields({
                     ? `${BY_LABELS[target.candidates.find((c) => c.value.trim())!.by]}: "${target.candidates.find((c) => c.value.trim())!.value}"${target.candidates.find((c) => c.value.trim())!.name ? ` (${sanitizeLocatorLabel(target.candidates.find((c) => c.value.trim())!.name!)})` : ''}`
                     : sanitizeLocatorLabel(target.semantic ?? '')}
                 </span>
-                <StatusBadge tone='neutral'>{ruleOnly ? '仅规则判定' : actualLocatorRoutes && (resolutionSource.locatorProtocol === 2 || policy?.locatorPlan || platform?.locator) ? locatorRouteListLabel(actualLocatorRoutes) : RESOLUTION_MODE_LABELS[badge.kind]}</StatusBadge>
               </div>
               {target.semantic && target.candidates.some((c) => c.value.trim()) ? (
                 <p className='truncate text-label text-muted-foreground'>
                   {sanitizeLocatorLabel(target.semantic)}
                 </p>
-              ) : null}
-              {/* 解析方式只在这里出现一次；AI 兜底不可用的原因跟着它走，否则「规则 · AI 兜底」会误导。 */}
-              {!ruleOnly && badge.unavailable && !(resolutionSource.locatorProtocol === 2 || policy?.locatorPlan || platform?.locator) ? (
-                <p className='truncate text-label text-muted-foreground'>{badge.unavailable}</p>
               ) : null}
             </div>
             {observe.canIndicate ? (
@@ -297,7 +272,7 @@ export function TargetFields({
         <CollapsibleTrigger asChild>
           <Button type='button' variant='ghost' size='sm' className='gap-1.5 text-muted-foreground hover:text-foreground'>
             <span>{advanced ? '收起高级定位' : ruleOnly ? '高级：规则候选与锚点' : '高级：规则候选、锚点与定位顺序'}</span>
-            {!advanced && (frames.length > 0 || Boolean(target.anchor) || candidates.filter(c => c.value.trim()).length > 1) && (
+            {!advanced && (frames.length > 0 || Boolean(target.anchor) || candidates.filter(c => c.value.trim()).length > 1 || Boolean(!ruleOnly && (policy?.locatorPlan || policy?.resolution))) && (
               <div className='flex items-center gap-1 ml-1' data-testid='target-active-pills'>
                 {frames.length > 0 && (
                   <span className='rounded bg-muted px-1.5 py-0.2 text-3xs font-mono text-muted-foreground'>
@@ -312,6 +287,15 @@ export function TargetFields({
                 {candidates.filter(c => c.value.trim()).length > 1 && (
                   <span className='rounded bg-muted px-1.5 py-0.2 text-3xs text-muted-foreground'>
                     {candidates.filter(c => c.value.trim()).length}个候选
+                  </span>
+                )}
+                {!ruleOnly && Boolean(policy?.locatorPlan || policy?.resolution) && (
+                  <span className='rounded bg-muted px-1.5 py-0.2 text-3xs text-muted-foreground'>
+                    {policy?.locatorPlan
+                      ? (locatorPresetFor(policy.locatorPlan)
+                          ? LOCATOR_PRESET_LABELS[locatorPresetFor(policy.locatorPlan)!]
+                          : '自定顺序')
+                      : '自定顺序'}
                   </span>
                 )}
               </div>

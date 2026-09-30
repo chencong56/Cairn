@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { withPickedSemantic, TargetFields } from './target'
 import { AuthoringObserveProvider, useAuthoringObserve } from '../observe'
 import { createBlankStep } from '../step-registry'
-import { fetchScenarioCapabilities } from '@/lib/scenarios-api'
 import { observeSession } from '@/lib/sessions-api'
 
 vi.mock('@/lib/sessions-api', () => ({
@@ -92,12 +91,12 @@ describe('TargetFields', () => {
     expect(step.type === 'wait' && step.input.kind).toBe('visible')
   })
 
-  it('解析方式只在摘要卡里出现一次；目标为空时不显示', async () => {
+  it('指认或填写目标后，在摘要卡完整展示候选信息与语义，不被策略徽标挤占', async () => {
     const empty = await render(
       harness(<TargetFields target={{ framePath: [], candidates: [] }} onChange={vi.fn()} />),
     )
     await expect.element(empty.getByLabelText('要找的页面元素')).toBeInTheDocument()
-    await expect.element(empty.getByText('规则', { exact: true })).not.toBeInTheDocument()
+    await expect.element(empty.getByText('标签: "查询"')).not.toBeInTheDocument()
     await empty.unmount()
 
     const filled = await render(
@@ -108,31 +107,25 @@ describe('TargetFields', () => {
         />,
       ),
     )
-    // getByText 命中多个元素会直接报错，所以这一句同时断言了「只出现一次」
-    await expect.element(filled.getByText('规则', { exact: true })).toBeInTheDocument()
+    await expect.element(filled.getByText('标签: "查询"')).toBeInTheDocument()
+    await expect.element(filled.getByText('查询按钮')).toBeInTheDocument()
+    expect(filled.container.textContent).not.toMatch(/规则 → 文本模型 → 视觉模型/)
   })
 
-  it('允许 AI 兜底但 AI 未开放时，「不可用」提示跟着摘要卡的徽标走', async () => {
-    const capabilities = vi.mocked(fetchScenarioCapabilities)
-    const original = capabilities.getMockImplementation()!
-    capabilities.mockImplementation(async (...args) => {
-      const base = await original(...args)
-      return { ...base, resolution: { ...base.resolution!, ceiling: 'prefer_ai' as const } }
-    })
-    try {
-      const screen = await render(
-        harness(
-          <TargetFields
-            target={{ framePath: [], semantic: '查询按钮', candidates: [{ by: 'label', value: '查询' }] }}
-            onChange={vi.fn()}
-          />,
-        ),
-      )
-      await expect.element(screen.getByText('规则 · AI 兜底')).toBeInTheDocument()
-      await expect.element(screen.getByText('当前未开放 AI 解析')).toBeInTheDocument()
-    } finally {
-      capabilities.mockImplementation(original)
-    }
+  it('当本步自定定位顺序时默认展开高级配置，收起后在折叠栏标题旁呈现顺序胶囊', async () => {
+    const screen = await render(
+      harness(
+        <TargetFields
+          target={{ framePath: [], semantic: '查询按钮', candidates: [{ by: 'label', value: '查询' }] }}
+          policy={{ locatorPlan: { v: 2, order: ['rule'] } }}
+          onPolicyChange={vi.fn()}
+          onChange={vi.fn()}
+        />,
+      ),
+    )
+    await expect.element(screen.getByLabelText('定位顺序')).toBeInTheDocument()
+    await screen.getByRole('button', { name: '收起高级定位' }).click()
+    await expect.element(screen.getByText('仅规则')).toBeInTheDocument()
   })
 
   it('主字段是语义描述，候选默认折叠', async () => {
@@ -146,7 +139,7 @@ describe('TargetFields', () => {
       ),
     )
     await expect.element(screen.getByLabelText('要找的页面元素')).toBeInTheDocument()
-    await expect.element(screen.getByText('规则', { exact: true })).toBeInTheDocument()
+    await expect.element(screen.getByText('标签: "查询"')).toBeInTheDocument()
     await expect.element(screen.getByRole('button', { name: '高级：规则候选、锚点与定位顺序' })).toBeInTheDocument()
     await expect.element(screen.getByLabelText('定位值 1')).not.toBeInTheDocument()
     await screen.getByRole('button', { name: '高级：规则候选、锚点与定位顺序' }).click()
