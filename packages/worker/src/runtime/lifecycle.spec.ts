@@ -166,6 +166,7 @@ vi.mock("@cairn/db", async (importOriginal) => {
     renewSweepBatchLease: vi.fn(async () => true),
     finishSweepBatch: vi.fn(async () => true),
     listScenariosForAcceptanceSweep: vi.fn(async () => []),
+    loadTargetCompileContext: vi.fn(async () => ({ platform: {}, resolution: {} })),
     insertCoverageSnapshots: vi.fn(async () => undefined),
     pruneOldSweepSnapshots: vi.fn(async () => 0),
     expandWithLoader: vi.fn(async () => ({ diagnostics: [] })),
@@ -1905,6 +1906,8 @@ describe("LifecycleService", () => {
       insertCoverageSnapshots,
       pruneOldSweepSnapshots,
       finishSweepBatch,
+      loadTargetCompileContext,
+      expandWithLoader,
     } = await import("@cairn/db");
 
     vi.mocked(claimSweepBatch).mockResolvedValueOnce({
@@ -1955,11 +1958,24 @@ describe("LifecycleService", () => {
       } as any,
     ]);
 
+    vi.mocked(loadTargetCompileContext).mockClear();
+
     const svc = await buildLifecycle();
     await (svc as unknown as { runAcceptanceSweepTick: () => Promise<void> }).runAcceptanceSweepTick();
 
     expect(claimSweepBatch).toHaveBeenCalled();
     expect(listScenariosForAcceptanceSweep).toHaveBeenCalledWith(expect.anything());
+    // 同 target 的平台配置与 resolution 只编译一次，批量内复用
+    expect(loadTargetCompileContext).toHaveBeenCalledTimes(1);
+    expect(expandWithLoader).toHaveBeenCalledWith(
+      expect.anything(),
+      "tgt-1",
+      expect.anything(),
+      "trial",
+      true,
+      undefined,
+      expect.objectContaining({ platform: {}, resolution: {} }),
+    );
     expect(insertCoverageSnapshots).toHaveBeenCalledWith(
       expect.anything(),
       expect.arrayContaining([
@@ -1975,10 +1991,55 @@ describe("LifecycleService", () => {
       expect.anything(),
       expect.objectContaining({
         batchId: "batch-test-1",
+        workerId: config.CAIRN_WORKER_ID,
         status: "completed",
         scenarioCount: 1,
       }),
     );
+    await svc.onApplicationShutdown();
+  });
+
+  it("验收巡检续租失败时立即中止：不落快照、不改写批次终态", async () => {
+    const { claimSweepBatch, renewSweepBatchLease, listScenariosForAcceptanceSweep, insertCoverageSnapshots, finishSweepBatch } =
+      await import("@cairn/db");
+
+    vi.mocked(claimSweepBatch).mockResolvedValueOnce({
+      id: "batch-lost-1",
+      scope: "platform",
+      trigger: "periodic",
+      status: "running",
+      leaseOwner: "local-worker",
+      leaseExpiresAt: new Date(Date.now() - 1000),
+      startedAt: new Date(),
+      finishedAt: null,
+      scenarioCount: 0,
+      skippedCount: 0,
+      durationMs: null,
+      error: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    // 首次目标级续租即失败：批次已被回收
+    vi.mocked(renewSweepBatchLease).mockResolvedValueOnce(false);
+    vi.mocked(listScenariosForAcceptanceSweep).mockResolvedValueOnce([
+      {
+        id: "sc-lease-lost",
+        targetId: "tgt-1",
+        name: "Lease Lost Scenario",
+        draftRevision: 1,
+        draftDocument: { authoringSchemaVersion: 2, schemaVersion: 1, inputs: [], nodes: [] },
+      } as any,
+    ]);
+    vi.mocked(insertCoverageSnapshots).mockClear();
+    vi.mocked(finishSweepBatch).mockClear();
+
+    const svc = await buildLifecycle();
+    await (svc as unknown as { runAcceptanceSweepTick: () => Promise<void> }).runAcceptanceSweepTick();
+
+    expect(renewSweepBatchLease).toHaveBeenCalled();
+    // 旧持有者不得继续提交事实：不落快照、不尝试改写终态
+    expect(insertCoverageSnapshots).not.toHaveBeenCalled();
+    expect(finishSweepBatch).not.toHaveBeenCalled();
     await svc.onApplicationShutdown();
   });
 

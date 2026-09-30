@@ -141,6 +141,10 @@ export const previewScenarioExpansion = operation(
   impl0.previewScenarioExpansion,
 );
 export const expandWithLoader = operation(impl0.expandWithLoader);
+export const loadTargetCompileContext = operation(
+  impl0.loadTargetCompileContext,
+);
+export type { ExpandWithLoaderPrecomputed } from "./runs/index.js";
 export const inlineScenarioModuleInvocation = operation(
   impl0.inlineScenarioModuleInvocation,
 );

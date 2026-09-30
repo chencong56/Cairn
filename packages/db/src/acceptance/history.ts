@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, inArray, isNull } from 'drizzle-orm'
 import {
+  OUTCOME_TUNING_RULES,
   walkAuthoringNodes,
   type AcceptanceHistoryInsight,
   type ActualDistribution,
@@ -66,8 +67,9 @@ export async function getScenarioAcceptanceHistory(
     }
   }
 
-  // 3. 查询近期已完成的 runThrough 运行（最多 50 次窗口）
-  const recentRuns = await db
+  // 3. 查询近期已完成的 runThrough 运行（窗口：最近 WINDOW_MAX 次；不足时仅保留近 WINDOW_DAYS 天）
+  const windowLimit = Math.min(50, Math.max(1, input.limit ?? OUTCOME_TUNING_RULES.WINDOW_MAX))
+  let recentRuns = await db
     .select({
       id: runs.id,
       status: runs.status,
@@ -89,7 +91,12 @@ export async function getScenarioAcceptanceHistory(
       ),
     )
     .orderBy(desc(runs.createdAt))
-    .limit(Math.min(50, Math.max(1, input.limit ?? 50)))
+    .limit(windowLimit)
+
+  if (!input.since && recentRuns.length < OUTCOME_TUNING_RULES.WINDOW_MAX) {
+    const cutoff = new Date(Date.now() - OUTCOME_TUNING_RULES.WINDOW_DAYS * 24 * 60 * 60 * 1000)
+    recentRuns = recentRuns.filter((run) => run.createdAt >= cutoff)
+  }
 
   // 若草稿无契约，尝试从最新 Run 的 snapshot.outcomeManifest 兜底提取契约
   if (contractsMap.size === 0 && recentRuns.length > 0) {
@@ -204,6 +211,7 @@ export async function getScenarioAcceptanceHistory(
 
     let breakpointHit = false
     let priorSegmentSampleCount = 0
+    let manifestRunCount = 0
 
     let sampleCount = 0
     let passCount = 0
@@ -218,6 +226,7 @@ export async function getScenarioAcceptanceHistory(
       const entry = entries.find((e) => e.contractId === contract.id)
 
       if (entry) {
+        manifestRunCount += 1
         const runDefKey = JSON.stringify({ rule: entry.rule, severity: entry.severity })
         if (runDefKey !== baselineDefKey) {
           breakpointHit = true
@@ -296,7 +305,7 @@ export async function getScenarioAcceptanceHistory(
       unknownCount,
       inspectionalFailCount,
       actualDistribution,
-      totalScenarioRuns: recentRuns.length,
+      manifestRunCount,
     })
 
     insights.push({

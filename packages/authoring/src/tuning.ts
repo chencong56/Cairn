@@ -13,7 +13,8 @@ export interface OutcomeHistoricalStats {
   unknownCount: number
   inspectionalFailCount: number
   actualDistribution?: ActualDistribution
-  totalScenarioRuns?: number
+  /** 运行 manifest 中包含该契约的已完成运行数：死条件判定的样本基数。 */
+  manifestRunCount?: number
 }
 
 /**
@@ -25,12 +26,12 @@ export function suggestOutcomeTuning(
   contract: OutcomeContract,
   stats: OutcomeHistoricalStats,
 ): AcceptanceTuningSuggestion[] {
-  const { sampleCount, passCount, failCount, unknownCount, inspectionalFailCount, actualDistribution, totalScenarioRuns } = stats
+  const { sampleCount, passCount, failCount, unknownCount, inspectionalFailCount, actualDistribution, manifestRunCount } = stats
 
-  // 1. 检查死条件（可在样本不足时触发，例如场景已运行多次但该步骤从未被求值）
+  // 1. 死条件：该契约已随场景运行过足够多次（manifest 含该契约的运行 ≥ 10 次）却从未被求值。
+  //    基数只计 manifest 含该契约的运行，新加条件在历史运行上不构成死条件证据。
   const isDeadCondition =
-    (sampleCount === 0 && (totalScenarioRuns ?? 0) >= OUTCOME_TUNING_RULES.SAMPLE_MIN) ||
-    (sampleCount >= OUTCOME_TUNING_RULES.SAMPLE_MIN && passCount === 0 && failCount === 0 && unknownCount === 0)
+    sampleCount === 0 && (manifestRunCount ?? 0) >= OUTCOME_TUNING_RULES.SAMPLE_MIN
 
   // 样本下限判定：非死条件场景下样本不足 10 次不产生建议（避免小样本噪声）
   if (sampleCount < OUTCOME_TUNING_RULES.SAMPLE_MIN && !isDeadCondition) {

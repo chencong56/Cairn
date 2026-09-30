@@ -92,13 +92,15 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
       expect(renewed).toBe(true)
 
       // 完成
-      await finishSweepBatch(db, {
+      const finishedOk = await finishSweepBatch(db, {
         batchId: batch.id,
+        workerId: 'worker-1',
         status: 'completed',
         scenarioCount: 5,
         skippedCount: 1,
         durationMs: 3200,
       })
+      expect(finishedOk).toBe(true)
 
       const { acceptanceSweepBatches } = schemaFor(db)
       const [finished] = await db
@@ -112,6 +114,14 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
       expect(finished.leaseExpiresAt).toBeNull()
       expect(finished.scenarioCount).toBe(5)
       expect(finished.skippedCount).toBe(1)
+
+      // 已完结批次再次收尾被拒绝（幂等保护，不改写终态）
+      const finishedAgain = await finishSweepBatch(db, {
+        batchId: batch.id,
+        workerId: 'worker-1',
+        status: 'completed',
+      })
+      expect(finishedAgain).toBe(false)
     })
 
     it('僵尸批次自动回收：超时 running 批次在下次触发或领取时被置为 failed', async () => {
@@ -134,7 +144,7 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
       const createRes = await createSweepBatch(db, { trigger: 'manual' })
       expect(createRes.ok).toBe(true)
 
-      // 检查僵尸批次已被置为 failed (WORKER_LOST)
+      // 检查僵尸批次已被置为 failed (WORKER_LOST)，且租约被清理
       const { acceptanceSweepBatches } = schemaFor(db)
       const [zombieRow] = await db
         .select()
@@ -142,11 +152,79 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
         .where(eq(acceptanceSweepBatches.id, zombieId))
       expect(zombieRow?.status).toBe('failed')
       expect(zombieRow?.error).toBe('WORKER_LOST')
+      expect(zombieRow?.leaseOwner).toBeNull()
+      expect(zombieRow?.leaseExpiresAt).toBeNull()
 
-      // 清理新创建的批次
+      // 失联的旧持有者不得改写已回收批次的终态
+      const staleFinish = await finishSweepBatch(db, {
+        batchId: zombieId,
+        workerId: 'crashed-worker',
+        status: 'completed',
+        scenarioCount: 99,
+      })
+      expect(staleFinish).toBe(false)
+      const [afterStale] = await db
+        .select()
+        .from(acceptanceSweepBatches)
+        .where(eq(acceptanceSweepBatches.id, zombieId))
+      expect(afterStale?.status).toBe('failed')
+      expect(afterStale?.scenarioCount).toBe(0)
+
+      // 清理新创建的批次：领取后按持有者收尾
       if (createRes.ok) {
-        await finishSweepBatch(db, { batchId: createRes.batch.id, status: 'completed' })
+        const claimed = await claimSweepBatch(db, { workerId: 'cleanup-worker' })
+        expect(claimed?.id).toBe(createRes.batch.id)
+        await finishSweepBatch(db, {
+          batchId: createRes.batch.id,
+          workerId: 'cleanup-worker',
+          status: 'completed',
+        })
       }
+    })
+
+    it('单活跃互斥：running 批次执行期间排队批次不被领取，结束后才可继续', async () => {
+      const { db } = handle
+      const createRes = await createSweepBatch(db, { trigger: 'manual' })
+      expect(createRes.ok).toBe(true)
+      if (!createRes.ok) return
+      const runningId = createRes.batch.id
+
+      const claimed = await claimSweepBatch(db, { workerId: 'worker-a', leaseMinutes: 15 })
+      expect(claimed?.id).toBe(runningId)
+      expect(claimed?.status).toBe('running')
+
+      // 模拟并发创建竞态落下的第二条排队批次（绕过 API 防重直接插入）
+      const queuedId = newId()
+      await db.insert(pg_acceptanceSweepBatches).values({
+        id: queuedId,
+        scope: 'platform',
+        trigger: 'periodic',
+        status: 'queued',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+
+      // running 批次持有租约期间，另一 Worker 的领取必须返回空
+      const blockedClaim = await claimSweepBatch(db, { workerId: 'worker-b', leaseMinutes: 15 })
+      expect(blockedClaim).toBeNull()
+
+      // 原批次结束后，排队批次才能被领取
+      await finishSweepBatch(db, {
+        batchId: runningId,
+        workerId: 'worker-a',
+        status: 'completed',
+        scenarioCount: 1,
+      })
+      const nextClaim = await claimSweepBatch(db, { workerId: 'worker-b', leaseMinutes: 15 })
+      expect(nextClaim?.id).toBe(queuedId)
+      expect(nextClaim?.status).toBe('running')
+
+      await finishSweepBatch(db, {
+        batchId: queuedId,
+        workerId: 'worker-b',
+        status: 'completed',
+        scenarioCount: 0,
+      })
     })
   })
 
@@ -264,6 +342,7 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
       const { db } = handle
       const contractId = newId()
       const stepId = newId()
+      const deadContractId = newId()
 
       const contract: OutcomeContract = {
         id: contractId,
@@ -279,10 +358,26 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
         },
       }
 
+      // 场景级契约：随全部运行进入 manifest，但从不写求值结果 → 死条件
+      const deadContract: OutcomeContract = {
+        id: deadContractId,
+        scope: 'scenario',
+        meaning: '全程耗时不超过 10 秒',
+        severity: 'SHOULD',
+        onViolation: 'continue',
+        provenance: 'manual',
+        rule: {
+          kind: 'run_duration',
+          op: 'lte',
+          valueMs: 10_000,
+        },
+      }
+
       const doc: ScenarioAuthoringDocumentV2 = {
         authoringSchemaVersion: 2,
         schemaVersion: 1,
         inputs: [],
+        scenarioOutcomes: [deadContract],
         nodes: [
           {
             kind: 'step',
@@ -427,10 +522,11 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
 
       // 查询历史洞察
       const res = await getScenarioAcceptanceHistory(db, { scenarioId: scenario.id })
-      expect(res.insights).toHaveLength(1)
+      expect(res.insights).toHaveLength(2)
 
-      const insight = res.insights[0]!
-      expect(insight.contractId).toBe(contractId)
+      const insight = res.insights.find((i) => i.contractId === contractId)
+      expect(insight).toBeDefined()
+      if (!insight) throw new Error('insight is undefined')
       expect(insight.sampleCount).toBe(10)
       expect(insight.inspectionalFailCount).toBe(10) // 10 次巡检型失败
       expect(insight.failCount).toBe(10)
@@ -447,6 +543,88 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
         op: 'lte',
         valueMs: 1500,
       })
+
+      // 场景级契约随 10 次运行进入 manifest 却从未求值 → 死条件
+      const deadInsight = res.insights.find((i) => i.contractId === deadContractId)
+      expect(deadInsight).toBeDefined()
+      if (!deadInsight) throw new Error('deadInsight is undefined')
+      expect(deadInsight.sampleCount).toBe(0)
+      expect(deadInsight.suggestions).toHaveLength(1)
+      expect(deadInsight.suggestions[0]!.kind).toBe('dead_condition')
+    })
+
+    it('新加条件不算死条件：历史运行的 manifest 中尚无该契约时不产生死条件建议', async () => {
+      const { db } = handle
+      const stepId = newId()
+      const contractId = newId()
+
+      // 场景先以无条件版本运行 10 次
+      const scenario = await createScenarioWithVersion(handle.db, {
+        targetId,
+        actor: { kind: 'console', id: adminId },
+        name: 'Scenario Late Contract',
+        steps: [
+          {
+            id: stepId,
+            name: 'Navigate',
+            type: 'navigate' as const,
+            effectType: 'READ_ONLY' as const,
+            input: { url: 'https://test.local' },
+          },
+        ],
+      })
+      const published = scenario.latestVersionId
+      for (let i = 0; i < 10; i++) {
+        const runRes = await createRunWithSnapshot(handle.db, {
+          scenarioId: scenario.id,
+          scenarioVersionId: published,
+          debugMode: 'runThrough',
+          actor: { kind: 'console', id: adminId },
+        })
+        const { runs } = schemaFor(db)
+        await db.update(runs).set({ status: 'SUCCEEDED' }).where(eq(runs.id, runRes.detail.id))
+      }
+
+      // 之后再往草稿加条件（无新运行）：场景运行次数 >= 10，但该契约从未出现在 manifest 中
+      await saveScenarioDraft(handle.db, scenario.id, {
+        revision: scenario.draft!.revision,
+        actor: { kind: 'console', id: adminId },
+        document: {
+          authoringSchemaVersion: 2,
+          schemaVersion: 1,
+          inputs: [],
+          nodes: [
+            {
+              kind: 'step',
+              step: {
+                id: stepId,
+                name: 'Navigate',
+                type: 'navigate',
+                effectType: 'READ_ONLY' as const,
+                input: { url: 'https://test.local' },
+              },
+              outcomes: [
+                {
+                  id: contractId,
+                  scope: 'step',
+                  meaning: '页面加载在 500ms 内完成',
+                  severity: 'MUST',
+                  onViolation: 'continue',
+                  provenance: 'manual',
+                  rule: { kind: 'step_duration', op: 'lte', valueMs: 500 },
+                },
+              ],
+            },
+          ],
+        },
+      })
+
+      const res = await getScenarioAcceptanceHistory(db, { scenarioId: scenario.id })
+      const insight = res.insights.find((i) => i.contractId === contractId)
+      expect(insight).toBeDefined()
+      if (!insight) throw new Error('insight is undefined')
+      expect(insight.sampleCount).toBe(0)
+      expect(insight.suggestions).toEqual([]) // 不误报死条件
     })
   })
 })

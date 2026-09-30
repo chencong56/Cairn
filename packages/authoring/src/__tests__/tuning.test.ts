@@ -131,20 +131,33 @@ describe('suggestOutcomeTuning (表驱动历史驱动条件调优规则测试)',
     expect(sug.suggestedPatch).toBeUndefined()
   })
 
-  it('规则 3 (死条件)：场景已运行 10+ 次但条件 0 次求值时提示死条件', () => {
+  it('规则 3 (死条件)：契约已随 10+ 次运行进入 manifest 却 0 次求值时提示死条件', () => {
     const stats: OutcomeHistoricalStats = {
       sampleCount: 0,
       passCount: 0,
       failCount: 0,
       unknownCount: 0,
       inspectionalFailCount: 0,
-      totalScenarioRuns: 12,
+      manifestRunCount: 12,
     }
     const suggestions = suggestOutcomeTuning(durationContract, stats)
     expect(suggestions).toHaveLength(1)
     const sug = suggestions[0]!
     expect(sug.kind).toBe('dead_condition')
     expect(sug.suggestedPatch).toBeUndefined()
+  })
+
+  it('规则 3 (死条件)：新加条件（历史运行 manifest 中尚不存在）不构成死条件证据', () => {
+    const stats: OutcomeHistoricalStats = {
+      sampleCount: 0,
+      passCount: 0,
+      failCount: 0,
+      unknownCount: 0,
+      inspectionalFailCount: 0,
+      manifestRunCount: 0, // 场景跑过很多次，但该契约从未出现在 manifest 中
+    }
+    const suggestions = suggestOutcomeTuning(durationContract, stats)
+    expect(suggestions).toEqual([])
   })
 
   it('规则 4 (阈值收紧)：耗时类 PASS 率 100% 且实际耗时最大值 <= 阈值 50% 建议收紧', () => {

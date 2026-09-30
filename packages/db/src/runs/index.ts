@@ -19,6 +19,8 @@ export {
   updateScenarioMeta,
   previewScenarioExpansion,
   expandWithLoader,
+  loadTargetCompileContext,
+  type ExpandWithLoaderPrecomputed,
   inlineScenarioModuleInvocation,
   getOrCreateModuleVerificationScenario,
   prepareModuleDraftTrial,

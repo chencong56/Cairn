@@ -73,8 +73,10 @@ import {
   insertCoverageSnapshots,
   pruneOldSweepSnapshots,
   listScenariosForAcceptanceSweep,
+  loadTargetCompileContext,
   type AuditableScenarioItem,
   type InsertCoverageSnapshotItem,
+  type ExpandWithLoaderPrecomputed,
   expandWithLoader,
 } from "@cairn/db";
 import {
@@ -1891,7 +1893,7 @@ export class LifecycleService
   private async runAcceptanceSweepTick(): Promise<void> {
     if (this.stopped || !this.roles().maintenance) return;
 
-    // 1. 原子领取 queued 批次（带 15 分钟租约与僵尸批次回收）
+    // 1. 原子领取 queued 批次（带 15 分钟租约与僵尸批次回收；已有活跃批次时不领取）
     const batch = await claimSweepBatch(this.handle, {
       workerId: config.CAIRN_WORKER_ID,
       leaseMinutes: 15,
@@ -1918,19 +1920,42 @@ export class LifecycleService
       }
 
       const snapshotsToInsert: InsertCoverageSnapshotItem[] = [];
+      let aborted = false;
+      let leaseLost = false;
 
       for (const [targetId, scenarios] of scenariosByTarget.entries()) {
-        if (this.stopped) break;
+        if (this.stopped) {
+          aborted = true;
+          break;
+        }
 
-        // 目标级续租
-        await renewSweepBatchLease(this.handle, {
+        // 目标级续租：续租失败说明批次已被回收（租约超时后其他维护者触发僵尸回收），
+        // 旧持有者不得继续执行或提交事实，立即中止。
+        const renewed = await renewSweepBatchLease(this.handle, {
           batchId: batch.id,
           workerId: config.CAIRN_WORKER_ID,
           leaseMinutes: 15,
         });
+        if (!renewed) {
+          aborted = true;
+          leaseLost = true;
+          break;
+        }
+
+        // 同 target 的平台配置与 resolution 编译结果只计算一次，批量内复用。
+        const targetCtx: ExpandWithLoaderPrecomputed = await loadTargetCompileContext(
+          this.handle,
+          targetId,
+        );
+        this.logger.log(
+          `目标「${targetId}」平台配置与 resolution 编译完成（本批 ${scenarios.length} 个场景复用）`,
+        );
 
         for (const scenario of scenarios) {
-          if (this.stopped) break;
+          if (this.stopped) {
+            aborted = true;
+            break;
+          }
           const t0 = Date.now();
           try {
             const rawDoc = scenario.draftDocument;
@@ -1945,20 +1970,32 @@ export class LifecycleService
               document,
               'trial',
               true,
+              undefined,
+              targetCtx,
             );
 
-            const hasCompileErrors = compileResult.diagnostics.some((d) => d.severity === 'error');
+            const errorDiagnostics = compileResult.diagnostics.filter((d) => d.severity === 'error');
             const auditReport = auditAcceptance(document, compileResult.diagnostics, scenario.id);
             const durationMs = Date.now() - t0;
 
-            const topFindings: AcceptanceSnapshotFindingSummary[] = auditReport.findings
+            // 编译诊断本身就是发现：error 级诊断置顶收录，coverage 置空。
+            const compileErrorFindings: AcceptanceSnapshotFindingSummary[] = errorDiagnostics
               .slice(0, 10)
-              .map((f) => ({
+              .map((d) => ({
+                code: d.code,
+                message: d.message,
+                stepId: d.stepId,
+                severity: 'error',
+              }));
+            const topFindings: AcceptanceSnapshotFindingSummary[] = [
+              ...compileErrorFindings,
+              ...auditReport.findings.map((f) => ({
                 code: f.code,
                 message: f.message,
                 stepId: f.stepId,
                 severity: f.severity,
-              }));
+              })),
+            ].slice(0, 10);
 
             snapshotsToInsert.push({
               batchId: batch.id,
@@ -1967,8 +2004,8 @@ export class LifecycleService
               draftRevision: scenario.draftRevision,
               auditedAt: new Date(),
               trigger: batch.trigger,
-              coverage: hasCompileErrors ? null : auditReport.coverage,
-              findingsCount: auditReport.findings.length,
+              coverage: errorDiagnostics.length > 0 ? null : auditReport.coverage,
+              findingsCount: errorDiagnostics.length + auditReport.findings.length,
               topFindings,
               durationMs,
             });
@@ -1982,6 +2019,31 @@ export class LifecycleService
             skippedCount += 1;
           }
         }
+        if (aborted) break;
+      }
+
+      if (leaseLost) {
+        this.logger.warn(
+          `验收巡检批次「${batch.id}」租约已失效，剩余体检中止且不提交任何事实`,
+        );
+        return;
+      }
+
+      if (aborted) {
+        // 停机中断：批次按失败收尾，不落部分快照。
+        const finished = await finishSweepBatch(this.handle, {
+          batchId: batch.id,
+          workerId: config.CAIRN_WORKER_ID,
+          status: 'failed',
+          scenarioCount,
+          skippedCount,
+          durationMs: Date.now() - sweepStartedAt,
+          error: 'WORKER_SHUTDOWN',
+        });
+        if (!finished) {
+          this.logger.warn(`验收巡检批次「${batch.id}」停机收尾失败：批次已不在本 Worker 持有中`);
+        }
+        return;
       }
 
       // 3. 快照批量落库
@@ -1993,13 +2055,17 @@ export class LifecycleService
       await pruneOldSweepSnapshots(this.handle, 90);
 
       // 5. 批次正常完成
-      await finishSweepBatch(this.handle, {
+      const completed = await finishSweepBatch(this.handle, {
         batchId: batch.id,
+        workerId: config.CAIRN_WORKER_ID,
         status: 'completed',
         scenarioCount,
         skippedCount,
         durationMs: Date.now() - sweepStartedAt,
       });
+      if (!completed) {
+        this.logger.warn(`验收巡检批次「${batch.id}」完成收尾失败：批次已不在本 Worker 持有中`);
+      }
 
       this.logger.log(
         `验收批量巡检批次「${batch.id}」执行完成（已体检：${scenarioCount}，跳过：${skippedCount}，耗时：${Date.now() - sweepStartedAt}ms）`,
@@ -2007,14 +2073,18 @@ export class LifecycleService
     } catch (batchErr) {
       const errorMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
       this.logger.error(batchErr instanceof Error ? batchErr.message : batchErr, `验收巡检批次「${batch.id}」执行异常`);
-      await finishSweepBatch(this.handle, {
+      const failed = await finishSweepBatch(this.handle, {
         batchId: batch.id,
+        workerId: config.CAIRN_WORKER_ID,
         status: 'failed',
         scenarioCount,
         skippedCount,
         durationMs: Date.now() - sweepStartedAt,
         error: errorMsg,
       });
+      if (!failed) {
+        this.logger.warn(`验收巡检批次「${batch.id}」异常收尾失败：批次已不在本 Worker 持有中`);
+      }
     }
   }
 }

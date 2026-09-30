@@ -137,6 +137,14 @@ const TONE_CLASS = {
   muted: 'text-muted-foreground',
 } as const
 
+const SAMPLE_SOURCE_LABELS: Record<string, string> = {
+  manual: '手工',
+  api: 'API',
+  suite: '套件',
+  batch: '批量',
+  other: '其他',
+}
+
 export function AcceptanceWorkbench({
   scenarioId,
   steps,
@@ -1449,6 +1457,15 @@ export function AcceptanceAuditDialog({
                             />
                           </div>
                         ) : null}
+
+                        {Object.keys(insight.sampleBreakdown).length > 0 ? (
+                          <div className='text-2xs text-muted-foreground/80'>
+                            来源构成：
+                            {Object.entries(insight.sampleBreakdown)
+                              .map(([source, count]) => `${SAMPLE_SOURCE_LABELS[source] ?? source} ${count}`)
+                              .join(' · ')}
+                          </div>
+                        ) : null}
                       </div>
 
                       {/* 数值 / 耗时分布摘要 */}
@@ -1567,7 +1584,7 @@ export function AcceptanceAuditDialog({
 
             <DialogFooter className='p-3 border-t border-border-divider bg-surface-footer flex justify-between items-center sm:justify-between'>
               <span className='text-xs text-muted-foreground'>
-                洞察基于近 50 次 runThrough 运行统计；采纳调整将更新草稿中的条件阈值。
+                洞察基于近 30 次 runThrough 运行统计（不足 30 次时取近 30 天）；采纳调整将更新草稿中的条件阈值。
               </span>
               <Button type='button' variant='outline' size='sm' onClick={loadHistory} disabled={historyLoading}>
                 <RefreshCw className={cn('size-3.5 mr-1', historyLoading ? 'animate-spin' : '')} />

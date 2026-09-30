@@ -95,7 +95,7 @@ export const scenarioAcceptanceHistoryResponseSchema = z.strictObject({
 export type ScenarioAcceptanceHistoryResponse = z.infer<typeof scenarioAcceptanceHistoryResponseSchema>
 
 export const acceptanceHistoryQuerySchema = z.strictObject({
-  limit: z.coerce.number().int().min(1).max(50).default(20),
+  limit: z.coerce.number().int().min(1).max(50).default(OUTCOME_TUNING_RULES.WINDOW_MAX),
   since: utcInstantSchema.optional(),
 })
 export type AcceptanceHistoryQuery = z.infer<typeof acceptanceHistoryQuerySchema>

@@ -11,76 +11,85 @@ import {
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { newId } from '../id.js'
-import { atomic, locked, schemaFor } from '../native.js'
+import { atomic, locked, schemaFor, updateRows } from '../native.js'
 import type {
   AcceptanceCoverageSnapshotRow,
   AcceptanceSweepBatchRow,
 } from '../schema/acceptance.js'
 
-export async function createSweepBatch(
-  db: Db,
-  input: { scope?: string; trigger: SweepBatchTrigger },
-): Promise<{ ok: true; batch: AcceptanceSweepBatchRow } | { ok: false; activeBatch: AcceptanceSweepBatchRow }> {
-  const { acceptanceSweepBatches } = schemaFor(db)
-  const now = new Date()
-
-  // 1. 自动回收超时僵尸批次
-  await db
+/** 超时 running 批次（租约已过期或已失联的批次）自动回收为 failed。 */
+async function recycleExpiredSweepBatches(tx: Db, now: Date): Promise<void> {
+  const { acceptanceSweepBatches } = schemaFor(tx)
+  await tx
     .update(acceptanceSweepBatches)
     .set({
       status: 'failed',
       error: 'WORKER_LOST',
       finishedAt: now,
+      leaseOwner: null,
+      leaseExpiresAt: null,
       updatedAt: now,
     })
     .where(
       and(
         eq(acceptanceSweepBatches.status, 'running'),
-        sql`${acceptanceSweepBatches.leaseExpiresAt} <= ${now}`,
-      ),
-    )
-
-  // 2. 检查是否存在活跃批次（queued 或未过期的 running）
-  const [activeBatch] = await db
-    .select()
-    .from(acceptanceSweepBatches)
-    .where(
-      and(
-        inArray(acceptanceSweepBatches.status, ['queued', 'running']),
         or(
           isNull(acceptanceSweepBatches.leaseExpiresAt),
-          sql`${acceptanceSweepBatches.leaseExpiresAt} > ${now}`,
+          sql`${acceptanceSweepBatches.leaseExpiresAt} <= ${now}`,
         ),
       ),
     )
-    .limit(1)
+}
 
-  if (activeBatch) {
-    return { ok: false, activeBatch }
-  }
+export async function createSweepBatch(
+  db: Db,
+  input: { scope?: string; trigger: SweepBatchTrigger },
+): Promise<{ ok: true; batch: AcceptanceSweepBatchRow } | { ok: false; activeBatch: AcceptanceSweepBatchRow }> {
+  return atomic(db, async (tx) => {
+    const { acceptanceSweepBatches } = schemaFor(tx)
+    const now = new Date()
 
-  // 3. 写入新的 queued 批次
-  const id = newId()
-  await db
-    .insert(acceptanceSweepBatches)
-    .values({
-      id,
-      scope: input.scope ?? 'platform',
-      trigger: input.trigger,
-      status: 'queued',
-      scenarioCount: 0,
-      skippedCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    })
+    // 1. 自动回收超时僵尸批次
+    await recycleExpiredSweepBatches(tx, now)
 
-  const [batch] = await db
-    .select()
-    .from(acceptanceSweepBatches)
-    .where(eq(acceptanceSweepBatches.id, id))
-    .limit(1)
+    // 2. 锁定全部活跃批次行后再判定：并发手动触发 / 手动与定时并发时串行化，
+    //    后到者看到先到者写入的活跃批次并被拒绝（空表竞态由 claim 侧单活跃互斥兜底）。
+    const activeRows = await locked(
+      tx,
+      tx
+        .select()
+        .from(acceptanceSweepBatches)
+        .where(inArray(acceptanceSweepBatches.status, ['queued', 'running']))
+        .orderBy(asc(acceptanceSweepBatches.createdAt)),
+    )
 
-  return { ok: true, batch: batch! }
+    if (activeRows && activeRows.length > 0) {
+      return { ok: false, activeBatch: activeRows[0]! }
+    }
+
+    // 3. 写入新的 queued 批次
+    const id = newId()
+    await tx
+      .insert(acceptanceSweepBatches)
+      .values({
+        id,
+        scope: input.scope ?? 'platform',
+        trigger: input.trigger,
+        status: 'queued',
+        scenarioCount: 0,
+        skippedCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      })
+
+    const [batch] = await tx
+      .select()
+      .from(acceptanceSweepBatches)
+      .where(eq(acceptanceSweepBatches.id, id))
+      .limit(1)
+
+    return { ok: true, batch: batch! }
+  })
 }
 
 export async function claimSweepBatch(
@@ -92,35 +101,28 @@ export async function claimSweepBatch(
     const now = new Date()
 
     // 1. 回收超时僵尸批次
-    await tx
-      .update(acceptanceSweepBatches)
-      .set({
-        status: 'failed',
-        error: 'WORKER_LOST',
-        finishedAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(acceptanceSweepBatches.status, 'running'),
-          sql`${acceptanceSweepBatches.leaseExpiresAt} <= ${now}`,
-        ),
-      )
+    await recycleExpiredSweepBatches(tx, now)
 
-    // 2. 原子锁定并领取最早的 queued 批次
-    const query = tx
-      .select()
-      .from(acceptanceSweepBatches)
-      .where(eq(acceptanceSweepBatches.status, 'queued'))
-      .orderBy(asc(acceptanceSweepBatches.createdAt))
-      .limit(1)
+    // 2. 阻塞锁定全部活跃批次行（按创建序），保证「同一时刻至多一条活跃批次」：
+    //    若最早的一条已是 running，说明有批次在执行，排队批次等它结束后再被领取。
+    const rows = await locked(
+      tx,
+      tx
+        .select()
+        .from(acceptanceSweepBatches)
+        .where(inArray(acceptanceSweepBatches.status, ['queued', 'running']))
+        .orderBy(asc(acceptanceSweepBatches.createdAt)),
+    )
 
-    const rows = await locked(tx, query, true)
     if (!rows || rows.length === 0) {
       return null
     }
 
     const candidate = rows[0]!
+    if (candidate.status !== 'queued') {
+      return null
+    }
+
     const leaseMinutes = input.leaseMinutes ?? 15
     const leaseExpiresAt = new Date(now.getTime() + leaseMinutes * 60 * 1000)
 
@@ -154,48 +156,41 @@ export async function renewSweepBatchLease(
   const leaseMinutes = input.leaseMinutes ?? 15
   const leaseExpiresAt = new Date(now.getTime() + leaseMinutes * 60 * 1000)
 
-  const [target] = await db
-    .select({ id: acceptanceSweepBatches.id })
-    .from(acceptanceSweepBatches)
-    .where(
-      and(
-        eq(acceptanceSweepBatches.id, input.batchId),
-        eq(acceptanceSweepBatches.status, 'running'),
-        eq(acceptanceSweepBatches.leaseOwner, input.workerId),
-      ),
-    )
-    .limit(1)
+  const rows = await updateRows(
+    db,
+    acceptanceSweepBatches,
+    { leaseExpiresAt, updatedAt: now },
+    and(
+      eq(acceptanceSweepBatches.id, input.batchId),
+      eq(acceptanceSweepBatches.status, 'running'),
+      eq(acceptanceSweepBatches.leaseOwner, input.workerId),
+    ),
+    { id: acceptanceSweepBatches.id },
+  )
 
-  if (!target) return false
-
-  await db
-    .update(acceptanceSweepBatches)
-    .set({
-      leaseExpiresAt,
-      updatedAt: now,
-    })
-    .where(eq(acceptanceSweepBatches.id, input.batchId))
-
-  return true
+  return rows.length > 0
 }
 
 export async function finishSweepBatch(
   db: Db,
   input: {
     batchId: string
+    workerId: string
     status: 'completed' | 'failed'
     scenarioCount?: number
     skippedCount?: number
     durationMs?: number
     error?: string | null
   },
-): Promise<void> {
+): Promise<boolean> {
   const { acceptanceSweepBatches } = schemaFor(db)
   const now = new Date()
 
-  await db
-    .update(acceptanceSweepBatches)
-    .set({
+  // 仅持有租约的 running 批次允许收尾：已被回收（failed）的批次拒绝旧持有者改写终态。
+  const rows = await updateRows(
+    db,
+    acceptanceSweepBatches,
+    {
       status: input.status,
       leaseOwner: null,
       leaseExpiresAt: null,
@@ -205,8 +200,16 @@ export async function finishSweepBatch(
       durationMs: input.durationMs,
       error: input.error ?? null,
       updatedAt: now,
-    })
-    .where(eq(acceptanceSweepBatches.id, input.batchId))
+    },
+    and(
+      eq(acceptanceSweepBatches.id, input.batchId),
+      eq(acceptanceSweepBatches.status, 'running'),
+      eq(acceptanceSweepBatches.leaseOwner, input.workerId),
+    ),
+    { id: acceptanceSweepBatches.id },
+  )
+
+  return rows.length > 0
 }
 
 export interface InsertCoverageSnapshotItem {

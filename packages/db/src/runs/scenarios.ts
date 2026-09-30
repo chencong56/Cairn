@@ -320,6 +320,25 @@ export function createModuleVersionLoader(
   }
 }
 
+export interface ExpandWithLoaderPrecomputed {
+  platform?: Awaited<ReturnType<typeof import('../platform-config/store.js').getOrCreatePlatformConfig>>
+  resolution?: CompileResolutionContext
+}
+
+/**
+ * 一次性加载某目标的平台配置与 resolution 编译上下文；同目标的批量编译
+ * （如验收巡检批次）复用同一份结果，避免逐场景重复读取与编译。
+ */
+export async function loadTargetCompileContext(
+  db: Db,
+  targetId?: string,
+): Promise<Required<ExpandWithLoaderPrecomputed>> {
+  const { getOrCreatePlatformConfig } = await import('../platform-config/store.js')
+  const platform = await getOrCreatePlatformConfig(db)
+  const resolution = await compileResolutionFromPlatform(db, targetId)
+  return { platform, resolution }
+}
+
 export async function expandWithLoader(
   db: Db,
   targetId: string,
@@ -327,6 +346,7 @@ export async function expandWithLoader(
   mode: 'publish' | 'trial' | 'preview',
   allowDraftFallback: boolean,
   compilerCtx?: Partial<CompileContext>,
+  precomputed?: ExpandWithLoaderPrecomputed,
 ): Promise<ExpansionResult> {
   const loader = createModuleVersionLoader(db, targetId, allowDraftFallback)
   const loadedModules = new Map<string, LoadedModuleVersion>()
@@ -346,8 +366,8 @@ export async function expandWithLoader(
     }
   }
   const { getOrCreatePlatformConfig } = await import('../platform-config/store.js')
-  const platform = await getOrCreatePlatformConfig(db)
-  const resolution = await compileResolutionFromPlatform(db, targetId)
+  const platform = precomputed?.platform ?? (await getOrCreatePlatformConfig(db))
+  const resolution = precomputed?.resolution ?? (await compileResolutionFromPlatform(db, targetId))
   return expandAuthoringDocument(doc, {
     targetId,
     mode,

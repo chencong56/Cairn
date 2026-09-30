@@ -182,6 +182,8 @@ describe('AcceptanceWorkbench UI', () => {
     await historyTab.click()
 
     await expect.element(screen.getByText('全流程耗时检查')).toBeInTheDocument()
+    // 样本来源构成随洞察呈现
+    await expect.element(screen.getByText(/来源构成：/)).toBeInTheDocument()
     await expect.element(screen.getByRole('button', { name: '采纳' })).toBeInTheDocument()
 
     // 点击采纳调优
