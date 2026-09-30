@@ -18,7 +18,7 @@ import {
   uploadDemonstration,
 } from './api'
 import { bindingTargetUrl, resolveStudioBinding } from './binding'
-import { DEFAULT_ENVIRONMENT_ID } from './config'
+import { DEFAULT_ENVIRONMENT_ID, CUSTOM_ENVIRONMENT_ID, validateApiOrigin } from './config'
 import { resolveRecordingUploadMeta } from './draft-meta'
 import { formatPickedElement } from './inspect'
 import { recordingItemMeta } from './labels'
@@ -30,6 +30,7 @@ import {
   clearAuth,
   loadCairnSession,
   saveAuth,
+  saveCustomOrigin,
   saveDraftName,
   saveEnvironmentId,
   saveTargetId,
@@ -59,6 +60,7 @@ async function dispatchMode(mode: CairnAttachMode) {
 export const CairnPanel: React.FC<Props> = ({ sources, mode, picked }) => {
   const [session, setSession] = React.useState<CairnSession | null>(null)
   const [environmentId, setEnvironmentId] = React.useState<string>(DEFAULT_ENVIRONMENT_ID)
+  const [customOrigin, setCustomOrigin] = React.useState<string>('')
   const [email, setEmail] = React.useState('')
   const [password, setPassword] = React.useState('')
   const [targetId, setTargetId] = React.useState('')
@@ -106,6 +108,7 @@ export const CairnPanel: React.FC<Props> = ({ sources, mode, picked }) => {
     const next = await loadCairnSession()
     setSession(next)
     setEnvironmentId(next.environmentId)
+    setCustomOrigin(next.customOrigin)
     setDraftName((current) => current || next.draftName)
     if (!canAttachRecorder(next)) {
       setTargets([])
@@ -211,12 +214,37 @@ export const CairnPanel: React.FC<Props> = ({ sources, mode, picked }) => {
     }
   }, [])
 
+  const handleEnvironmentId = (id: string) => {
+    setEnvironmentId(id)
+    void saveEnvironmentId(id, customOrigin)
+  }
+
+  const handleCustomOrigin = (value: string) => {
+    setCustomOrigin(value)
+    void saveCustomOrigin(value)
+  }
+
   const onLogin = async (event: React.FormEvent) => {
     event.preventDefault()
     setBusy(true)
     setLoginError(null)
     try {
-      const environment = await saveEnvironmentId(environmentId)
+      let targetOrigin = customOrigin
+      if (environmentId === CUSTOM_ENVIRONMENT_ID) {
+        const validated = validateApiOrigin(customOrigin)
+        if (!validated.ok) {
+          setLoginError(validated.error)
+          setBusy(false)
+          return
+        }
+        targetOrigin = validated.origin
+      }
+      const environment = await saveEnvironmentId(environmentId, targetOrigin)
+      if (!environment.origin) {
+        setLoginError('当前环境未配置有效服务地址')
+        setBusy(false)
+        return
+      }
       await ensureHostPermission(environment.origin)
       const result = await login({ email, password })
       await saveAuth({
@@ -513,7 +541,9 @@ export const CairnPanel: React.FC<Props> = ({ sources, mode, picked }) => {
     return (
       <LoginForm
         environmentId={environmentId}
-        onEnvironmentId={setEnvironmentId}
+        onEnvironmentId={handleEnvironmentId}
+        customOrigin={customOrigin}
+        onCustomOrigin={handleCustomOrigin}
         email={email}
         password={password}
         onEmail={setEmail}

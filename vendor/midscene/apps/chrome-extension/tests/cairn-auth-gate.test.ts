@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from '@rstest/core';
 import { useCairnStore } from '../src/store';
 import { loginToCairn } from '../src/utils/cairn';
-import { CAIRN_ENVIRONMENTS } from '../src/utils/cairn-environments';
+import { CAIRN_ENVIRONMENTS, validateApiOrigin } from '../src/utils/cairn-environments';
 
 const account = {
   id: 'user-1',
@@ -109,5 +109,36 @@ describe('识途扩展登录门禁', () => {
     expect(useCairnStore.getState().authStatus).toBe('error');
     expect(useCairnStore.getState().token).toBeNull();
     expect(localStorage.getItem('cairn-auth-token')).toBe('saved-token');
+  });
+
+  it('自定义服务地址校验与归一化', () => {
+    expect(validateApiOrigin('')).toEqual({ ok: false, error: '请输入自定义服务地址' });
+    expect(validateApiOrigin('invalid')).toEqual({
+      ok: false,
+      error: '服务地址格式不正确，必须包含协议，如 http:// 或 https://',
+    });
+    expect(validateApiOrigin('ftp://api.internal')).toEqual({
+      ok: false,
+      error: '服务地址必须以 http:// 或 https:// 开头',
+    });
+    expect(validateApiOrigin('http://192.168.1.100:3030/')).toEqual({
+      ok: true,
+      origin: 'http://192.168.1.100:3030',
+    });
+  });
+
+  it('自定义环境地址持久化与初始化恢复', async () => {
+    localStorage.setItem('cairn-environment', 'custom');
+    localStorage.setItem('cairn-custom-origin', 'http://192.168.1.200:3030');
+    await useCairnStore.getState().initialize();
+
+    expect(useCairnStore.getState().environment).toBe('custom');
+    expect(useCairnStore.getState().customOrigin).toBe('http://192.168.1.200:3030');
+    expect(useCairnStore.getState().apiOrigin).toBe('http://192.168.1.200:3030');
+
+    // 登出时不清除自定义环境与地址
+    useCairnStore.getState().logout();
+    expect(localStorage.getItem('cairn-environment')).toBe('custom');
+    expect(localStorage.getItem('cairn-custom-origin')).toBe('http://192.168.1.200:3030');
   });
 });

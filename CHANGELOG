@@ -1,3 +1,35 @@
+2026-09-30--表格验收遗留缺口第二轮修复与现场验收：①列类型闭环——Worker discover 按列抽样探测类型建议（金额→decimal、布尔词表、文本兜底）经契约透传，工作台选用表格采纳建议并新增「列与类型」编辑器（文本/整数/小数/布尔，修正后提示重采样），解除数字规则人工路径死路；②证据绑定最小版——Worker 落证据携带 holdId/会话代次/pageRef，预览端点要求基线仍 HOLDING 且 checkpoint.holdId 与采样时一致，堵住旧基线 60 秒窗口冒充当前页；③共用生成器贯通——acceptance/preview 端点改 intents 数组并复用 buildAcceptanceCard 支持全部九类意图（跨页对账除外，需基线结构分析），模型关闭时前端「生成验收方案」分流至预览端点（模型调用为 0，含 UI 测试），补上 P0 无模型门槛；④画布时序闭环最小集——observe 上下文新增 tableMarkers 通道，受管画面以编号蓝色线框渲染各表包围盒并支持点击选用，表格目标一经锁定（点选所属表格/画面点选）自动触发整页发现；⑤现场验收（本地登录+订单表格夹具、真实 Chromium 全链路 13/13）：试跑挂起→自动化登录→discover 双表含包围盒与列类型→sample 5 行分页不降级（complete+pagination 线索）→decimalValue 1234.50 精确保留→真实 runId 绑定→预览 VIOLATED 如实且可采纳、provenance=manual→无模型生成页面耗时意图→篡改计划被 TABLE_PLAN_MISMATCH 拒绝；现场验收修复两个真实链路断点：Worker observe 路由对 discover 结果误按 tableObservationSchema 解码（必 400，discover 从未在真实链路通过）与 AUTHORING_ALLOWED_STEP_TYPES/FIELD_POLICIES 缺 check_context（所有表格验收提案采纳必 500/409），补 check_context 类型与字段白名单（key/field/expect）。shared 959、authoring 222、db 970、api 919、worker 377、web 1247 测试通过，全仓 typecheck/web lint/不变量/可移植性通过，dev 栈 STACK_OK。
+
+2026-09-30--Playwright CRX 与 MidScene 录制扩展自定义环境选择与持久化落地：支持开发/测试/生产预设与「自定义环境…」选项，选中自定义展开 API 地址输入框并支持协议格式校验与归一化；基于 chrome.storage.local 持久化保存用户输入与选中态，登出不清理环境，两端协议对齐并全量单测通过。
+
+2026-09-30--Studio页面观察与表格验收复查修复：求值核心改三值语义（字段缺失/遮蔽/类型不符→UNKNOWN，禁止布尔/文本/数字隐式转换），any 量化符覆盖非 complete 一律 UNKNOWN、空表未证实报 TABLE_EMPTY_UNVERIFIED 不再误判业务失败；行表达式作用域收敛为独立只读 row 绑定（不再平铺外层 Context 与顶层列键），根必须布尔；新增规则×读取计划列类型交叉校验与 row_expression 编译期校验（列声明、字面量位数、decimal/float 相等必须显式精度策略、定点操作数白名单），人工预览与 AI 提案共用；Worker 采样补 TABLE_NOT_FOUND/TABLE_AMBIGUOUS 按定位失败抛错、零行须命中声明空态才算空表、分页只留范围线索不再降级覆盖、就绪仅认 aria-busy 与计划声明信号、数字列保留 decimalValue 精确十进制、诊断码对齐方案（READINESS_TIMEOUT/MUTATING_UNSTABLE/EMPTY_UNVERIFIED/ROW_LIMIT_TRUNCATED）、sample.source 绑定真实 run/stepRun/attempt/pageRef；预览端点 provenance 修正为 manual、实测 FAIL 仍可采纳、证据过期改 OBSERVATION_STALE 诊断、补目标/基线 Run 绑定核验；extract table 能力闸门落地（table.acceptance@1 协议登记、快照标记 superRefine 强制、领取谓词拦截旧 Worker）；修复人工路径必现阻断的 maxCols 50>32 契约冲突（web/step-fields/handler 三处）与前端弱 z.any() 契约收紧；non_empty 对表格样本按行数与覆盖判定；前端补人工预览「采纳到草稿」出口、心跳 401/403 停发与离开挂起清场、structure 观察解码分支、样本预览按 previewCount 封顶、规则编辑器数值转换与 row.field 引用；新增 table-observe 单测 10 项与 shared 求值/校验测试 9 项；顺手修复并行工作三处夹具红灯（workers.http node-health provider、reaper RSS 采样、lifecycle getPrewarmStatus）。shared 959、db 970、api 919、worker 全量 377、web 1246、authoring 222 测试通过，全仓 typecheck/lint/不变量/可移植性通过，dev 栈重启后 STACK_OK，executor 已声明 table.acceptance@1。
+
+2026-09-30--浏览器预热与宿主池多端呈现落地及 Apple Design 验收：在执行节点详情落地专用 Apple Bento 仪表盘（4组指标微卡：空闲备用、宿主规模、命中效率与受管内存，兼顾调档与内存受压自愈提示）、执行节点列表侧抽屉新增紧凑预热卡片，账号会话页头无感内嵌「预热就绪」胶囊，实例子表格透出共享/独占隔离与宿主短ID；通过 Headless Chromium 真实全屏与 390px 移动断点视口走查，通过全套单测与类型检查。
+
+2026-09-30--浏览器并发方案复查修复：排空退役 CLOSING 会话接入 reaper 受控收尾（此前无任何通道推进终态导致账号永久拒绝，补 worker 集成 A22 收敛回归）；维护型会话操作领取补传 isolation、复用遇隔离模式不一致返回 SESSION_ISOLATION_MISMATCH（shared 契约新增）；RESTART 重建收敛到 recreateSessionForOperation 并延续 isolation/predecessorSessionId/保留意图；maxBrowserHosts 成为共享放置与预热统一总帽并计入独占宿主；受管进程树 RSS 采样接入宿主快照高水位、内存预算与预热门控（采样过旧停止新增预热）；取消清理持放置锁并消除取消后误删新宿主竞态；自适应零流量降档；平台配置新增「浏览器预热」表单，node-health 携带预热观测并经 /workers/:id/node-health 透出，前端展示各节点策略修订/资源允许/实际备用/受限原因。worker 纯测 84、集成与 lab 33、db 45 通过。
+
+2026-09-30--Studio现场观察与表格验收落地：P0~P2全阶段交付，打通画布表格拾取、稳定采样与单列/逐行/表达式数值精度校验，补齐人工验收预览端点、挂起心跳续期与不可用事实语义。
+
+2026-09-30--按用户确认将运行详情与截图证据优化、测试分层与加速治理、定位健康度与原地自愈三篇方案标记为已完成并归档；删除助手思考流与智能折叠方案，后续需求另起方案；同步活跃与历史归档索引。
+
+2026-09-30--账号并发、浏览器共享链路修复与预热池落地：完成 P0~P6 全阶段交付，修正并发配置一致性与平台降级排空闭环；接通 SHARED 模式真实 Playwright 多 Context 纳管、Profile 槽位隔离与认证态无损保存恢复；消除长锁串行启动阻塞并支持启动取消安全回滚（A09/A23）；单 Worker 三并发真实 Chromium 屏障重叠执行、strict 分散与容量边界验收（concurrency-p4-barrier.lab.spec.ts）；落地固定与自适应预热池（Ladder 1→3→5）、空闲防抖、maxAge 平滑轮转、内存压力即时回收与平台配置 30s 热同步；全量 25 组验收标准与架构不变量、可移植性通过。
+
+2026-09-30--环境配置废项清理与生产部署口径梳理：从 workerEnvSchema 移除已被控制台「平台配置」接管、环境设置静默无效的三个会话变量（空闲 TTL／最大寿命／无人值守超时）及其交叉校验；清除 .env.remote 的 CAIRN_ENV 废档残留与三处「非 development」过时注释（档位已废除，相对路径一律按仓库根解析）；.env.example 补录 CAIRN_LOG_LEVEL／CAIRN_BUILD_VERSION 说明。env:use 的画像对齐口径升级为「注释形态的可选项也算键」，两份画像补齐 25 个注释键与 example 键集完全一致（75 键），键集漂移在切换／status／pnpm check（新增 use-env 单测）三处被拒绝。shared 全量 931 测试通过，api/worker typecheck 通过（worker 既有 host-pool.spec 两处 TS2532 属并行未提交工作，非本次引入），env 画像对齐通过，后端重启后 STACK_OK。
+
+2026-09-30--补齐录制助手的定位改进与成功条件提案：仅基于已有定位观察展示修改前后，录制断言或用户填写的业务预期须显式确认后生成新提案；复用选择、编译预览、草稿采纳、持久回执及保护撤销，校验来源动作与修改依赖；修复无效预期的错误提示、回执恢复和 Studio 中 AI 成功条件的显示与编辑。
+
+2026-09-30--识途助手宏观感知与跨页矩阵复查修复：补齐 V2 模块/控制块上下文与全流程末尾锚点、自然语言业务分流、真实依赖/窗口/样本/映射分析和来源复核；打通双协议录制的选择、编译预览、草稿采纳、持久回执及保护撤销，修正重复节点与回执唯一范围（迁移 0144）；补齐未发布/空草稿、筛选快照展示、来源跳转和工作区自适应侧栏。回归同步修正领取排序精度及 Worker 在途领取的有界停机收尾。
+
+2026-09-30--场景编排工作台顶栏 Apple 风格重构与操作降噪：将左侧长胶囊重构为目标系统层级面包屑与极简微状态徽章（版本号、草稿号与状态指示灯内敛合一，节省超 50% 横向宽度）；治理右侧按钮堆砌，废除大屏强展定时任务与推送，彻底收纳进「更多」菜单并构建 3 级操作流水线；底部状态栏居中融入工作台步骤总数被动度量；全套单元测试、类型检查、Lint 与全真浏览器真实场景 UI 验收 100% 通过。
+
+2026-09-30--识途助手宏观场景感知、跨页面能力矩阵与防重叠重构：实现 Studio 推荐卡片 4-chip 硬上限与去重过滤，彻底消除主视口上下双胞胎卡片；构建全平台 8 大路由页面宏观感知与确定性跨页面推荐矩阵（覆盖场景集、模块、录制、调度、批量任务等）；实现 15 项无幻觉确定性业务分析器注入知识问答（跨页依赖、输入契约校验、版本升级影响、并发节奏、准入重叠与重复片段嗅探）；落地录制清洗与场景草稿提议闭环（支持脚本/Demonstration 双源、清洗规则、提议生成、候选预览、单事务原子采纳及保护性撤销）；全量单测、数据库可移植性、类型检查、Lint 与全栈探活 STACK_OK。
+
+2026-09-30--可靠性 v2 复查修复：补齐 v2 启用链路（claim/request 建检查点即启用、终态入账自愈补启用、迁移 0143 回填存量目标，此前 v2 管线无任何启用途径处于暗转）；消费器按 v2Enabled 门控 v1 回退路径杜绝旧口径写回并在批次后释放租约；信号唯一键纳入 scope_digest 消除同 Run 多作用域延迟信号互相挤占、基线版本以单调评估序号决胜同事务多版本、错误族字符集消毒防分组键解析破坏、复发成员计数防重放膨胀；修复旧消费器单测（真实契约枚举 + v1/v2 双路径）并新增 v2 评估器 7 项集成测试（启用/门槛/循环去重/正交信号/梯级回退与漂移/session_fault 即时 P2/衰减闭环与 sweep/重放幂等）；衰减口径按产品拍板收紧为连续 5 次健康即入观察期（废除 30 次窗口异常率叠加，14 天观察期兜底复发打回），无账号 session_fault 维持只记信号不建事件。
+
+2026-09-30--实现自动化维护信号与事件语义校准（v2）：落地模块三元身份注入（moduleId / implementationKey / internalStepId）、细粒度信号分类（事实/假设/故障）与真实梯子记录；构建 Run 终态待消费回执（reliability_run_receipts）与不可变样本事实投影（reliability_run_samples）；实现单事务原子批量评估引擎（租约校验、健康重评、滑动窗口 EWMA 漂移/延迟检测、事件生命周期状态迁移与回执消费）；按资产作用域严格隔离指标与影响分析；可移植性与迁移校验通过；复查发现启用链路缺失与测试缺口，已于同日复查修复条目补齐并通过真实消费链路端到端验证。
+
+2026-09-30--识途助手感知推荐去重与 Markdown 格式化排版重构：在感知态下隐藏主视口重复的「有什么可以帮你？」与双胞胎场景卡片，由顶层/流内 ContextCapsule 统一承接专属操作 Chips，空视口呈现极简呼吸感 ContextFocusIndicator；构建安全轻量防 XSS 的 AssistantMarkdown 渲染器全面替代裸文本，升级后端 Prompt 规范与拼接换行，长文分析告别生字块并呈现优雅的段落间距、编号序列、粗体重点与行内代码标签；全量自动化测试、Apple Design 真实浏览器仿真走查、类型检查、Lint 与全栈探活 STACK_OK。
+
 2026-09-30--元素指认卡片降噪与目标信息空间释放：彻底移除步骤目标卡片顶层冗余的长流水线策略徽标（规则 → 文本模型 → 视觉模型），释放全部展示宽度供指认元素特征（角色、无障碍名称与文字）完整呈现，消除截断遮挡；定位顺序调度策略回归高级配置折叠面板并支持自定顺序胶囊弱感知；全量单测、类型检查、Lint 与全栈探活 STACK_OK。
 
 2026-09-30--场景编排工作台布局降噪与管线聚焦防挤压：移除受管舞台顶部冗余控制条释放全部纵向空间，切换入口收拢至常驻底栏；重构工作台聚焦分栏宽度，舞台聚焦保留 250px 舒适管线，编排聚焦赋予管线主舞台大空间（flex-1），彻底消除各模式下的管线挤压。

@@ -13,6 +13,7 @@ export type CairnAccount = {
 export type CairnSession = {
   environmentId: string
   environment: ApiEnvironment
+  customOrigin: string
   apiOrigin: string
   accessToken: string
   expiresAt: number | null
@@ -23,6 +24,7 @@ export type CairnSession = {
 
 const KEYS = [
   'cairnEnvironmentId',
+  'cairnCustomOrigin',
   'cairnAccessToken',
   'cairnExpiresAt',
   'cairnAccount',
@@ -45,12 +47,13 @@ function asAccount(value: unknown): CairnAccount | null {
 
 export async function loadCairnSession(): Promise<CairnSession> {
   const stored = await chrome.storage.local.get([...KEYS])
-  const environment = resolveApiEnvironment(
-    typeof stored.cairnEnvironmentId === 'string' ? stored.cairnEnvironmentId : DEFAULT_ENVIRONMENT_ID,
-  )
+  const customOrigin = typeof stored.cairnCustomOrigin === 'string' ? stored.cairnCustomOrigin : ''
+  const environmentId = typeof stored.cairnEnvironmentId === 'string' ? stored.cairnEnvironmentId : DEFAULT_ENVIRONMENT_ID
+  const environment = resolveApiEnvironment(environmentId, customOrigin)
   return {
     environmentId: environment.id,
     environment,
+    customOrigin,
     apiOrigin: environment.origin,
     accessToken: typeof stored.cairnAccessToken === 'string' ? stored.cairnAccessToken : '',
     expiresAt: typeof stored.cairnExpiresAt === 'number' ? stored.cairnExpiresAt : null,
@@ -69,10 +72,22 @@ export async function saveDraftName(draftName: string): Promise<void> {
   await chrome.storage.local.set({ cairnDraftName: draftName })
 }
 
-export async function saveEnvironmentId(environmentId: string): Promise<ApiEnvironment> {
-  const environment = resolveApiEnvironment(environmentId)
-  await chrome.storage.local.set({ cairnEnvironmentId: environment.id })
+export async function saveCustomOrigin(customOrigin: string): Promise<void> {
+  await chrome.storage.local.set({ cairnCustomOrigin: customOrigin })
+}
+
+export async function saveEnvironment(environmentId: string, customOrigin?: string): Promise<ApiEnvironment> {
+  const environment = resolveApiEnvironment(environmentId, customOrigin)
+  const toSave: Record<string, string> = { cairnEnvironmentId: environment.id }
+  if (customOrigin !== undefined) {
+    toSave.cairnCustomOrigin = customOrigin
+  }
+  await chrome.storage.local.set(toSave)
   return environment
+}
+
+export async function saveEnvironmentId(environmentId: string, customOrigin?: string): Promise<ApiEnvironment> {
+  return saveEnvironment(environmentId, customOrigin)
 }
 
 export async function saveAuth(input: {

@@ -4,7 +4,12 @@ import { CairnApiError, formatRecordingUploadError } from '../api'
 import { formatTransportError, performCairnRequest } from '../api-bridge'
 import { describeAttachment, shortLocation } from '../attachment'
 import { canAttachRecorder, canReadTargets, canUploadRecording } from '../auth-gate'
-import { CAIRN_API_ENVIRONMENTS, resolveApiEnvironment } from '../config'
+import {
+  CAIRN_API_ENVIRONMENTS,
+  CUSTOM_ENVIRONMENT_ID,
+  resolveApiEnvironment,
+  validateApiOrigin,
+} from '../config'
 import { formatPickedElement } from '../inspect'
 import { RECORDING_STATUS_LABEL, recordingItemMeta } from '../labels'
 import { WORKBENCH_PATH, nextRecorderPanelPath, resetRecorderPanelPath, withDeadline } from '../panel-window'
@@ -22,12 +27,38 @@ function previewOf(sources: readonly Source[], excluded: readonly number[] = [])
 }
 
 describe('平台环境名单', () => {
-  it('本期只有本地开发环境，地址是 localhost:3030', () => {
+  it('支持开发、测试、生产预设与自定义环境配置', () => {
     expect(CAIRN_API_ENVIRONMENTS).toEqual([
       { id: 'local', label: '本地开发环境', origin: 'http://localhost:3030' },
+      { id: 'testing', label: '测试环境', origin: '' },
+      { id: 'production', label: '生产环境', origin: '' },
+      { id: CUSTOM_ENVIRONMENT_ID, label: '自定义环境...', origin: '', isCustom: true },
     ])
     expect(resolveApiEnvironment(undefined).origin).toBe('http://localhost:3030')
     expect(resolveApiEnvironment('missing').id).toBe('local')
+    expect(resolveApiEnvironment(CUSTOM_ENVIRONMENT_ID, 'http://192.168.1.100:3030').origin).toBe('http://192.168.1.100:3030')
+    expect(resolveApiEnvironment(CUSTOM_ENVIRONMENT_ID, 'http://192.168.1.100:3030/').origin).toBe('http://192.168.1.100:3030')
+  })
+
+  it('自定义服务地址校验', () => {
+    expect(validateApiOrigin('')).toEqual({ ok: false, error: '请输入自定义服务地址' })
+    expect(validateApiOrigin('   ')).toEqual({ ok: false, error: '请输入自定义服务地址' })
+    expect(validateApiOrigin('invalid-url')).toEqual({
+      ok: false,
+      error: '服务地址格式不正确，必须包含协议，如 http:// 或 https://',
+    })
+    expect(validateApiOrigin('ftp://cairn.local')).toEqual({
+      ok: false,
+      error: '服务地址必须以 http:// 或 https:// 开头',
+    })
+    expect(validateApiOrigin('http://localhost:3030/')).toEqual({
+      ok: true,
+      origin: 'http://localhost:3030',
+    })
+    expect(validateApiOrigin('https://cairn-qa.example.com///')).toEqual({
+      ok: true,
+      origin: 'https://cairn-qa.example.com',
+    })
   })
 })
 

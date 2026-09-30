@@ -498,6 +498,7 @@ export type ServiceModeType = 'Server' | 'In-Browser' | 'In-Browser-Extension'; 
 // ==================== 识途平台协同 Store ====================
 
 const CAIRN_STORAGE_ENVIRONMENT = 'cairn-environment';
+const CAIRN_STORAGE_CUSTOM_ORIGIN = 'cairn-custom-origin';
 const CAIRN_LEGACY_STORAGE_ORIGIN = 'cairn-api-origin';
 const CAIRN_STORAGE_TOKEN = 'cairn-auth-token';
 const CAIRN_STORAGE_ACCOUNT = 'cairn-auth-account';
@@ -505,6 +506,7 @@ const CAIRN_STORAGE_TARGET_ID = 'cairn-target-id';
 
 export interface CairnState {
   environment: CairnEnvironment;
+  customOrigin: string;
   apiOrigin: string;
   token: string | null;
   account: CairnAccount | null;
@@ -515,6 +517,7 @@ export interface CairnState {
   isLoading: boolean;
   error: string | null;
   setEnvironment: (environment: CairnEnvironment) => void;
+  setCustomOrigin: (origin: string) => void;
   setAuth: (token: string | null, account: CairnAccount | null) => void;
   setTargetId: (targetId: string | null) => void;
   setBinding: (binding: CairnBinding | null) => void;
@@ -526,6 +529,7 @@ export interface CairnState {
 
 export const useCairnStore = create<CairnState>((set, get) => ({
   environment: 'development',
+  customOrigin: '',
   apiOrigin: cairnEnvironmentOrigin('development')!,
   token: null,
   account: null,
@@ -537,11 +541,20 @@ export const useCairnStore = create<CairnState>((set, get) => ({
   error: null,
 
   setEnvironment: (environment: CairnEnvironment) => {
-    const origin = cairnEnvironmentOrigin(environment);
-    if (!origin || environment === get().environment) return;
+    if (environment === get().environment) return;
     get().logout();
     void cairnStorage.setItem(CAIRN_STORAGE_ENVIRONMENT, environment);
+    const origin = cairnEnvironmentOrigin(environment, get().customOrigin) || '';
     set({ environment, apiOrigin: origin });
+  },
+
+  setCustomOrigin: (origin: string) => {
+    void cairnStorage.setItem(CAIRN_STORAGE_CUSTOM_ORIGIN, origin);
+    const currentEnv = get().environment;
+    set({
+      customOrigin: origin,
+      ...(currentEnv === 'custom' ? { apiOrigin: origin.trim().replace(/\/+$/, '') } : {}),
+    });
   },
 
   setAuth: (token: string | null, account: CairnAccount | null) => {
@@ -583,18 +596,22 @@ export const useCairnStore = create<CairnState>((set, get) => ({
   initialize: async () => {
     set({ authStatus: 'checking', token: null, account: null, error: null });
     try {
-      const [savedEnvironment, legacyOrigin, savedToken, savedTargetId] = await Promise.all([
+      const [savedEnvironment, savedCustomOrigin, legacyOrigin, savedToken, savedTargetId] = await Promise.all([
         cairnStorage.getItem(CAIRN_STORAGE_ENVIRONMENT),
+        cairnStorage.getItem(CAIRN_STORAGE_CUSTOM_ORIGIN),
         cairnStorage.getItem(CAIRN_LEGACY_STORAGE_ORIGIN),
         cairnStorage.getItem(CAIRN_STORAGE_TOKEN),
         cairnStorage.getItem(CAIRN_STORAGE_TARGET_ID),
       ]);
 
-      const savedEnvironmentIsConfigured = isCairnEnvironment(savedEnvironment) && !!cairnEnvironmentOrigin(savedEnvironment);
+      const customOrigin = savedCustomOrigin || '';
+      const savedEnvironmentIsConfigured = isCairnEnvironment(savedEnvironment) && (
+        savedEnvironment === 'custom' || !!cairnEnvironmentOrigin(savedEnvironment)
+      );
       const environment = savedEnvironmentIsConfigured
         ? savedEnvironment
         : 'development';
-      const apiOrigin = cairnEnvironmentOrigin(environment)!;
+      const apiOrigin = cairnEnvironmentOrigin(environment, customOrigin) || '';
       // 旧版可自填地址；只复用同一本地开发 API 的会话，避免向新环境发送旧 Token。
       const legacyOriginIsDevelopment = !legacyOrigin ||
         ['http://localhost:3030', 'http://127.0.0.1:3030', 'http://127.0.0.1:5173', apiOrigin].includes(legacyOrigin.replace(/\/+$/, ''));
@@ -605,12 +622,13 @@ export const useCairnStore = create<CairnState>((set, get) => ({
       void cairnStorage.removeItem(CAIRN_LEGACY_STORAGE_ORIGIN);
       set({
         environment,
+        customOrigin,
         apiOrigin,
         targetId: reuseSavedSession ? savedTargetId || null : null,
       });
 
-      // 如果有 Token，则调用 /api/me 校验
-      if (savedToken && reuseSavedSession) {
+      // 如果有 Token 且 apiOrigin 存在，则调用 /api/me 校验
+      if (savedToken && reuseSavedSession && apiOrigin) {
         try {
           const meRes = await fetchCairnMe(apiOrigin, savedToken);
           if (!meRes.account?.id) {

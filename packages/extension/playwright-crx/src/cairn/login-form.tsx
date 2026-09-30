@@ -1,6 +1,7 @@
 import * as React from 'react'
 import {
   CAIRN_API_ENVIRONMENTS,
+  CUSTOM_ENVIRONMENT_ID,
   resolveApiEnvironment,
   type ApiEnvironment,
 } from './config'
@@ -9,6 +10,8 @@ type Props = {
   environments?: readonly ApiEnvironment[]
   environmentId: string
   onEnvironmentId: (id: string) => void
+  customOrigin: string
+  onCustomOrigin: (value: string) => void
   email: string
   password: string
   onEmail: (value: string) => void
@@ -22,6 +25,8 @@ export const LoginForm: React.FC<Props> = ({
   environments = CAIRN_API_ENVIRONMENTS,
   environmentId,
   onEnvironmentId,
+  customOrigin,
+  onCustomOrigin,
   email,
   password,
   onEmail,
@@ -30,7 +35,7 @@ export const LoginForm: React.FC<Props> = ({
   error,
   onSubmit,
 }) => {
-  const current = resolveApiEnvironment(environmentId, environments)
+  const current = resolveApiEnvironment(environmentId, customOrigin, environments)
 
   return (
     <div className='cairn-login'>
@@ -45,6 +50,7 @@ export const LoginForm: React.FC<Props> = ({
         <h1>登录识途</h1>
         <p className='cairn-lead'>用控制台账号进入。没有登录不能录制。</p>
         <div className='cairn-field'>
+          <label htmlFor='cairn-env'>环境</label>
           <select
             id='cairn-env'
             aria-label='环境'
@@ -52,12 +58,30 @@ export const LoginForm: React.FC<Props> = ({
             onChange={(event) => onEnvironmentId(event.target.value)}
           >
             {environments.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
+              <option
+                key={item.id}
+                value={item.id}
+                disabled={!item.origin && !item.isCustom}
+              >
+                {!item.origin && !item.isCustom ? `${item.label}（未配置）` : item.label}
               </option>
             ))}
           </select>
         </div>
+        {current.id === CUSTOM_ENVIRONMENT_ID && (
+          <div className='cairn-field'>
+            <label htmlFor='cairn-custom-origin'>服务地址</label>
+            <input
+              id='cairn-custom-origin'
+              name='customOrigin'
+              type='url'
+              autoComplete='off'
+              placeholder='如 http://192.168.1.100:3030'
+              value={customOrigin}
+              onChange={(event) => onCustomOrigin(event.target.value)}
+            />
+          </div>
+        )}
         <div className='cairn-field'>
           <label htmlFor='cairn-email'>账号</label>
           <input

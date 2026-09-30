@@ -25,6 +25,7 @@ import { useCairnStore } from '../store';
 import { loginToCairn } from '../utils/cairn';
 import {
   CAIRN_ENVIRONMENTS,
+  validateApiOrigin,
   type CairnEnvironment,
 } from '../utils/cairn-environments';
 
@@ -41,6 +42,7 @@ export const CairnConnectModal: React.FC<CairnConnectModalProps> = ({
 }) => {
   const {
     environment,
+    customOrigin,
     apiOrigin,
     authStatus,
     error: authError,
@@ -51,6 +53,7 @@ export const CairnConnectModal: React.FC<CairnConnectModalProps> = ({
     binding,
     isLoading,
     setEnvironment,
+    setCustomOrigin,
     initialize,
     setAuth,
     setTargetId,
@@ -76,7 +79,22 @@ export const CairnConnectModal: React.FC<CairnConnectModalProps> = ({
     setSubmitting(true);
     setLoginError(null);
     try {
-      const res = await loginToCairn(apiOrigin, values.email.trim(), values.password);
+      let targetOrigin = apiOrigin;
+      if (environment === 'custom') {
+        const validated = validateApiOrigin(customOrigin);
+        if (!validated.ok) {
+          setLoginError(validated.error);
+          setSubmitting(false);
+          return;
+        }
+        targetOrigin = validated.origin;
+      }
+      if (!targetOrigin) {
+        setLoginError('当前环境未配置有效服务地址');
+        setSubmitting(false);
+        return;
+      }
+      const res = await loginToCairn(targetOrigin, values.email.trim(), values.password);
       setAuth(res.accessToken, res.account);
       form.resetFields(['password']);
       message.success(`登录成功，欢迎 ${res.account.displayName}`);
@@ -121,15 +139,35 @@ export const CairnConnectModal: React.FC<CairnConnectModalProps> = ({
             onChange={setEnvironment}
             disabled={!!token || submitting}
             style={{ width: '100%', marginTop: 4 }}
-            options={Object.entries(CAIRN_ENVIRONMENTS).map(([value, config]) => ({
-              value: value as CairnEnvironment,
-              label: config.origin ? config.label : `${config.label}（未配置）`,
-              disabled: !config.origin,
-            }))}
+            options={Object.entries(CAIRN_ENVIRONMENTS).map(([value, config]) => {
+              const isCustom = value === 'custom';
+              const hasOrigin = Boolean(config.origin);
+              return {
+                value: value as CairnEnvironment,
+                label: hasOrigin || isCustom ? config.label : `${config.label}（未配置）`,
+                disabled: !hasOrigin && !isCustom,
+              };
+            })}
           />
-          <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
-            {apiOrigin}
-          </Text>
+          {environment === 'custom' && (
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                服务地址
+              </Text>
+              <Input
+                placeholder="如 http://192.168.1.100:3030"
+                value={customOrigin}
+                onChange={(e) => setCustomOrigin(e.target.value)}
+                disabled={!!token || submitting}
+                style={{ marginTop: 4 }}
+              />
+            </div>
+          )}
+          {environment !== 'custom' && apiOrigin ? (
+            <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>
+              {apiOrigin}
+            </Text>
+          ) : null}
         </div>
 
         {/* 状态展示 */}
