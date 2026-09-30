@@ -29,10 +29,14 @@ import {
   evaluateWorkerRoute,
   hasAllPermissions,
   debugActionSchema,
+  debugPresenceBodySchema,
+  debugPresenceResponseSchema,
   managedBrowserMetaSchema,
   observeOperationSchema,
   parseWorkerEndpoints,
   structureObservationSchema,
+  tableDiscoveryObservationSchema,
+  tableObservationSchema,
   targetObservationSchema,
   workerInternalPath,
   workerRunsInternalPath,
@@ -40,6 +44,8 @@ import {
   type AuthControlInputBody,
   type AuthControlTokenBody,
   type DebugAction,
+  type DebugPresenceBody,
+  type DebugPresenceResponse,
   type ManagedBrowserMeta,
   type ObserveOperation,
   type ResumeAuthBody,
@@ -179,7 +185,14 @@ export class BrowserService {
 
   observe(runId: string, body: ObserveOperation, actor: RequestAccount) {
     const parsed = observeOperationSchema.parse(body)
-    const schema = parsed.op === 'structure' ? structureObservationSchema : targetObservationSchema
+    const schema =
+      parsed.op === 'structure'
+        ? structureObservationSchema
+        : parsed.op === 'table'
+          ? parsed.subOp === 'discover'
+            ? tableDiscoveryObservationSchema
+            : tableObservationSchema
+          : targetObservationSchema
     return this.mutate(
       runId,
       actor,
@@ -204,6 +217,19 @@ export class BrowserService {
     } catch (error) {
       rethrowDomain(error)
     }
+  }
+
+  async debugPresence(runId: string, body: DebugPresenceBody, actor: RequestAccount): Promise<DebugPresenceResponse> {
+    const parsed = debugPresenceBodySchema.parse(body)
+    const res = await this.mutate(
+      runId,
+      actor,
+      workerRunsInternalPath('/debug-presence'),
+      JSON.stringify(parsed),
+      debugPresenceResponseSchema,
+      ['run:read', 'workflow:write'],
+    )
+    return res as DebugPresenceResponse
   }
 
   private async mutate(

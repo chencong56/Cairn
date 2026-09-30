@@ -4,6 +4,12 @@ import { SuitesPage } from '@/features/suites'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/suites/')({
+  staticData: {
+    assistant: {
+      routeKey: 'suites.index',
+      pageKind: 'suite',
+    },
+  },
   beforeLoad: () => {
     const user = useAuthStore.getState().auth.user
     if (!user || !hasPermission(user.permissions, 'suite:read')) {

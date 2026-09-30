@@ -56,6 +56,8 @@ import {
   type ModuleResolveAcceptBody,
   acceptanceHistoryQuerySchema,
   type AcceptanceHistoryQuery,
+  acceptancePreviewRequestBodySchema,
+  type AcceptancePreviewRequestBody,
 } from '@cairn/shared'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
 import type { RequestAccount } from '../common/request-account'
@@ -125,6 +127,17 @@ export class ScenariosController {
     @Query(new ZodValidationPipe(acceptanceHistoryQuerySchema)) query: AcceptanceHistoryQuery,
   ) {
     return this.scenarios.acceptanceHistory(scenarioId, query)
+  }
+
+  @Post(':scenarioId/acceptance/preview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('workflow:read', 'workflow:write', 'run:read')
+  acceptancePreview(
+    @Param('scenarioId') scenarioId: string,
+    @Body(new ZodValidationPipe(acceptancePreviewRequestBodySchema)) body: AcceptancePreviewRequestBody,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return this.scenarios.previewAcceptance(scenarioId, body, actor)
   }
 
   @Post(':scenarioId')

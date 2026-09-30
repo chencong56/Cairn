@@ -19,5 +19,6 @@ export {
   recordPlatformAiCall,
   listPlatformAiCalls,
   renewAssistantTurnLease,
+  createCompletedAssistantTurn,
 } from './store.js'
 export type { AssistantTurnRecord, PromotedAssistantTurn } from './store.js'

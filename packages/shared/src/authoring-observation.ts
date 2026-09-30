@@ -5,6 +5,7 @@ import { isSensitiveLocatorHay } from './sensitive-fill.js'
 import { stepSchema } from './step.js'
 import { targetDescriptorSchema } from './target-descriptor.js'
 import { entityIdSchema } from './wire.js'
+import { tableSampleSchema, tableReadPlanSchema, type TableSample } from './table-acceptance.js'
 
 export const TARGET_OBSERVATION_OUTCOMES = [
   'FOUND',
@@ -67,6 +68,7 @@ export const targetObservationSchema = z.strictObject({
     .optional(),
   assist: targetAssistSchema.optional(),
   disambiguation: pickDisambiguationSchema.optional(),
+  enclosingTable: targetDescriptorSchema.optional(),
 })
 export type TargetObservation = z.infer<typeof targetObservationSchema>
 
@@ -80,14 +82,38 @@ export type ObserveGrant = z.infer<typeof observeGrantSchema>
 
 export const MAX_STRUCTURE_SNAPSHOT_CHARS = 32_000
 
-export const observeOperationSchema = z.strictObject({
-  op: z.enum(['highlight', 'pick', 'structure']),
-  x: z.number().optional(),
-  y: z.number().optional(),
+export const observeTableDiscoverOperationSchema = z.strictObject({
+  op: z.literal('table'),
+  subOp: z.literal('discover'),
   target: targetDescriptorSchema.optional(),
-  applyOverlay: z.boolean().optional(),
-  clearOverlayStepId: entityIdSchema.optional(),
 })
+export type ObserveTableDiscoverOperation = z.infer<typeof observeTableDiscoverOperationSchema>
+
+export const observeTableSampleOperationSchema = z.strictObject({
+  op: z.literal('table'),
+  subOp: z.literal('sample'),
+  target: targetDescriptorSchema.optional(),
+  plan: tableReadPlanSchema,
+})
+export type ObserveTableSampleOperation = z.infer<typeof observeTableSampleOperationSchema>
+
+export const observeTableOperationSchema = z.discriminatedUnion('subOp', [
+  observeTableDiscoverOperationSchema,
+  observeTableSampleOperationSchema,
+])
+export type ObserveTableOperation = z.infer<typeof observeTableOperationSchema>
+
+export const observeOperationSchema = z.union([
+  z.strictObject({
+    op: z.enum(['highlight', 'pick', 'structure']),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    target: targetDescriptorSchema.optional(),
+    applyOverlay: z.boolean().optional(),
+    clearOverlayStepId: entityIdSchema.optional(),
+  }),
+  observeTableOperationSchema,
+])
 export type ObserveOperation = z.infer<typeof observeOperationSchema>
 
 export const structureObservationSchema = z.strictObject({
@@ -99,6 +125,53 @@ export const structureObservationSchema = z.strictObject({
   truncated: z.boolean(),
 })
 export type StructureObservation = z.infer<typeof structureObservationSchema>
+
+export const tableDiscoveredItemSchema = z.strictObject({
+  index: z.number().int().nonnegative(),
+  target: targetDescriptorSchema,
+  columns: z.array(
+    z.strictObject({
+      key: z.string(),
+      name: z.string(),
+      tag: z.string().optional(),
+      /** 依据样本单元格探测的类型建议；供人工确认或修正，不是最终声明。 */
+      valueType: z.enum(['text', 'number', 'boolean']).optional(),
+      numericKind: z.enum(['integer', 'decimal', 'float']).optional(),
+    }),
+  ),
+  rowCountHint: z.number().int().nonnegative().optional(),
+  box: z
+    .strictObject({
+      x: z.number(),
+      y: z.number(),
+      width: z.number(),
+      height: z.number(),
+    })
+    .optional(),
+  readinessClues: z.array(z.string()).optional(),
+})
+export type TableDiscoveredItem = z.infer<typeof tableDiscoveredItemSchema>
+
+export const tableDiscoveryObservationSchema = z.strictObject({
+  outcome: targetObservationOutcomeSchema,
+  page: z.strictObject({
+    pageRef: pageRefSchema.optional(),
+    url: z.string().optional(),
+    title: z.string().optional(),
+  }),
+  tables: z.array(tableDiscoveredItemSchema).max(10),
+  source: z.enum(['managed', 'extension']).default('managed'),
+})
+export type TableDiscoveryObservation = z.infer<typeof tableDiscoveryObservationSchema>
+
+export const tableObservationSchema = z.strictObject({
+  outcome: targetObservationOutcomeSchema,
+  evidenceId: entityIdSchema,
+  sample: tableSampleSchema,
+  diagnostics: resolverDiagnosticsSchema.optional(),
+  source: z.enum(['managed', 'extension']).default('managed'),
+})
+export type TableObservation = z.infer<typeof tableObservationSchema>
 
 export const DEBUG_ACTIONS = [
   'retry_current',

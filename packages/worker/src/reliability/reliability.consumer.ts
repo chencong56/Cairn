@@ -1,5 +1,6 @@
 import {
   claimReliabilityEvaluation,
+  evaluateReliabilityBatch,
   loadReliabilityIncrementalData,
   reconcileHangingIncidents,
   writeReliabilityEvaluation,
@@ -50,7 +51,25 @@ export async function processReliabilityIncrement(
     return { processed: false }
   }
 
-  // 2. Fetch completed runs and step runs for this target after last watermark
+  // 2. v2 目标：账本批次评估（sweep 与消费在同一事务内完成），不再回落 v1
+  if (claimed.v2Enabled) {
+    const v2Result = await evaluateReliabilityBatch(db, {
+      workerId: input.workerId,
+      targetId: claimed.targetId,
+      fencingToken: claimed.fencingToken,
+      batchLimit,
+      policy,
+    })
+    return {
+      processed: v2Result.receiptsCount > 0,
+      targetId: v2Result.targetId,
+      sampleCount: v2Result.samplesCount,
+      breachesCount: 0,
+      incidentCount: v2Result.incidentsCreated + v2Result.incidentsUpdated,
+    }
+  }
+
+  // 3. v1 目标：历史水位消费逻辑（仅服务未启用 v2 的存量目标）
   const afterSeq = claimed.watermarkVector.runCompletedSeq
   const { maxEventSeq, runRows, stepRows } = await loadReliabilityIncrementalData(db, {
     targetId: claimed.targetId,

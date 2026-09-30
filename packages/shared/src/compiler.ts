@@ -151,7 +151,7 @@ export function outputShapeForStep(step: Step): OutputShape {
     }
   }
   if (step.type === 'extract') {
-    if (step.input.many) {
+    if (step.input.as !== 'table' && step.input.many) {
       return {
         kind: 'list',
         item: { kind: 'scalar', type: 'string' },

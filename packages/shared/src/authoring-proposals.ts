@@ -32,6 +32,7 @@ import {
 import { authoringNodeSchema, type AuthoringNode } from './authoring-document.js'
 import { compileDiagnosticSchema, type CompileDiagnostic } from './scenario.js'
 import { dataBindingSchema, type DataBinding } from './dataset.js'
+import { tableReadPlanSchema, tableExpectRuleSchema, type TableReadPlan } from './table-acceptance.js'
 
 export const digestHexSchema = z.string().regex(/^[a-f0-9]{64}$/, '摘要须为 64 位十六进制 SHA-256')
 
@@ -52,6 +53,8 @@ export const AUTHORING_ALLOWED_STEP_TYPES = [
   'ai_extract',
   'ai_assert',
   'compute',
+  // 验收提案会生成只读的上下文判定步骤（表格验收等）；不放开有副作用的系统步骤。
+  'check_context',
 ] as const
 export type AuthoringAllowedStepType = (typeof AUTHORING_ALLOWED_STEP_TYPES)[number]
 export const authoringAllowedStepTypeSchema = z.enum(AUTHORING_ALLOWED_STEP_TYPES)
@@ -92,7 +95,7 @@ export const AUTHORING_STEP_FIELD_POLICIES: Record<
     allowsOutputKey: false,
   },
   extract: {
-    allowedInputKeys: ['target', 'as', 'attribute', 'many'],
+    allowedInputKeys: ['target', 'as', 'attribute', 'many', 'table'],
     allowsOutputKey: true,
   },
   assert: {
@@ -114,6 +117,10 @@ export const AUTHORING_STEP_FIELD_POLICIES: Record<
   compute: {
     allowedInputKeys: ['expression'],
     allowsOutputKey: true,
+  },
+  check_context: {
+    allowedInputKeys: ['key', 'field', 'expect'],
+    allowsOutputKey: false,
   },
 }
 
@@ -173,8 +180,8 @@ export const authoringAddOutcomeOperationSchema = z.strictObject({
   rule: outcomeRuleSchema,
   severity: outcomeSeveritySchema.default('SHOULD'),
   onViolation: outcomeOnViolationSchema.default('continue'),
-  /** 验收提案生成的条件记为 ai_compiled；缺省沿用 generalized。 */
-  provenance: z.enum(['generalized', 'ai_compiled']).optional(),
+  /** 条件来源：验收提案生成记为 ai_compiled，人工编写入口记为 manual；缺省沿用 generalized。 */
+  provenance: z.enum(['generalized', 'ai_compiled', 'manual']).optional(),
 })
 export type AuthoringAddOutcomeOperation = z.infer<typeof authoringAddOutcomeOperationSchema>
 
@@ -298,7 +305,7 @@ export const authoringDiffOutcomeAddSchema = z.strictObject({
   stepName: z.string().min(1).max(128).optional(),
   contractId: entityIdSchema,
   meaning: z.string().min(1).max(512),
-  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration']),
+  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table']),
   severity: outcomeSeveritySchema,
   onViolation: outcomeOnViolationSchema,
   scope: outcomeScopeSchema.optional(),
@@ -310,7 +317,7 @@ export const authoringDiffOutcomeUpdateSchema = z.strictObject({
   type: z.literal('outcome_update'),
   contractId: entityIdSchema,
   meaning: z.string().min(1).max(512),
-  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration']),
+  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table']),
   severity: outcomeSeveritySchema,
   onViolation: outcomeOnViolationSchema,
   scope: outcomeScopeSchema.optional(),
@@ -379,6 +386,7 @@ export const ACCEPTANCE_INTENT_KINDS = [
   'page_reachable',
   'page_duration',
   'table_non_empty',
+  'table_acceptance',
   'number_range',
   'text_present_or_absent',
   'extract_to_report',
@@ -392,6 +400,7 @@ export const acceptanceIntentKindSchema = z.enum(ACCEPTANCE_INTENT_KINDS)
 export const ACCEPTANCE_TARGET_INTENTS = [
   'page_reachable',
   'table_non_empty',
+  'table_acceptance',
   'number_range',
   'extract_to_report',
 ] as const satisfies readonly AcceptanceIntentKind[]
@@ -431,6 +440,14 @@ export const acceptanceIntentRequestSchema = z.discriminatedUnion('kind', [
     ...acceptanceStepIntentBase,
     kind: z.literal('table_non_empty'),
     target: targetDescriptorSchema.optional(),
+    metricName: acceptanceMetricNameSchema.optional(),
+  }),
+  z.strictObject({
+    ...acceptanceStepIntentBase,
+    kind: z.literal('table_acceptance'),
+    target: targetDescriptorSchema.optional(),
+    tablePlan: tableReadPlanSchema.optional(),
+    rules: z.array(tableExpectRuleSchema).min(1).max(10).optional(),
     metricName: acceptanceMetricNameSchema.optional(),
   }),
   z.strictObject({
@@ -495,6 +512,9 @@ export const ACCEPTANCE_CARD_TEST_RESULTS = [
   'NOT_FOUND',
   'SURFACE_LOST',
   'UNTESTED',
+  'PASSED',
+  'VIOLATED',
+  'FACTS_UNAVAILABLE',
   /** 不涉及页面对象（如耗时），无需实测。 */
   'NOT_REQUIRED',
 ] as const
@@ -540,7 +560,7 @@ export const acceptanceProposalCardSchema = z.strictObject({
   rationale: z.string().max(512).optional(),
   config: z
     .strictObject({
-      ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration']),
+      ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table']),
       metric: scenarioMetricDeclSchema.optional(),
       summaryTemplateSnippet: z.string().optional(),
       stepName: z.string().optional(),
@@ -727,3 +747,33 @@ export const dataMappingProposalSchema = z.strictObject({
 export type DataMappingProposal = z.infer<typeof dataMappingProposalSchema>
 
 export const SYNC_PREFLIGHT_MAX_ROWS = 2000
+
+// ---------------------------------------------------------------------------
+// C5: Acceptance Preview Request / Response Schemas
+// ---------------------------------------------------------------------------
+
+export const acceptancePreviewRequestBodySchema = z.strictObject({
+  revision: z.number().int().nonnegative(),
+  documentDigest: z.string().optional(),
+  baselineRunId: entityIdSchema.optional(),
+  /** 表格验收意图做现场实测时必填；非表格意图不需要证据。 */
+  evidenceId: entityIdSchema.optional(),
+  intents: z.array(acceptanceIntentRequestSchema).min(1).max(MAX_ACCEPTANCE_INTENTS),
+  plan: tableReadPlanSchema.optional(),
+})
+export type AcceptancePreviewRequestBody = z.infer<typeof acceptancePreviewRequestBodySchema>
+
+export const acceptancePreviewResponseSchema = z.strictObject({
+  proposal: assistantAuthoringProposalSchema,
+  operations: z.array(authoringOperationSchema),
+  testResult: acceptanceCardTestResultSchema,
+  diagnostics: z.array(z.string()).default([]),
+  acceptable: z.boolean(),
+  evidenceId: entityIdSchema.optional(),
+  planDigest: z.string().optional(),
+  sampleDigest: z.string().optional(),
+  sampledAt: utcInstantSchema.optional(),
+  draftRevision: z.number().int().nonnegative(),
+})
+export type AcceptancePreviewResponse = z.infer<typeof acceptancePreviewResponseSchema>
+

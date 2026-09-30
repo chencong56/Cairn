@@ -122,30 +122,28 @@ describe('StudioToolbar 容器响应式与侧边栏自适应', () => {
     expect(screen.getByRole('menuitem', { name: '修改建议' }).elements()).toHaveLength(0)
   })
 
-  it('当容器宽度充裕（无侧边栏或超宽屏，宽 1440px）时，次要操作平铺展开为独立按钮', async () => {
+  it('即使容器宽度充裕（宽 1440px），运维类操作（定时任务与结果推送）依然克制收纳于「更多」中，保障主工作流聚焦', async () => {
     useAssistantStore.setState({ open: false, mode: 'floating' })
 
     const screen = await renderToolbar(1440)
 
-    // 快捷按钮直接在外部工具栏平铺展开
-    await expect.element(screen.getByTestId('object-schedules-btn')).toBeInTheDocument()
-    await expect.element(screen.getByRole('link', { name: /结果推送/ })).toBeInTheDocument()
+    // 核心主操作保持平铺可达
     await expect.element(screen.getByRole('button', { name: '保存草稿' })).toBeInTheDocument()
     await expect.element(screen.getByRole('button', { name: '试跑' })).toBeInTheDocument()
-    // AI 助手快捷提问已从顶栏解耦，不再占用外部工具栏
-    expect(screen.getByRole('button', { name: /解释步骤/ }).elements()).toHaveLength(0)
-    expect(screen.getByRole('button', { name: /修改建议/ }).elements()).toHaveLength(0)
 
-    // 点击「更多」后，下拉菜单中不再重复显示平铺展开的快捷操作
+    // 外部工具栏不平铺展开低频运维快捷按钮
+    expect(screen.getByTestId('object-schedules-btn').elements()).toHaveLength(0)
+    expect(screen.getByRole('link', { name: /结果推送/ }).elements()).toHaveLength(0)
+
+    // 点击「更多」后，定时任务与结果推送常驻可用
     const moreBtn = screen.getByRole('button', { name: '更多' })
     await moreBtn.click()
-    expect(screen.getByRole('menuitem', { name: '定时任务' }).elements()).toHaveLength(0)
-    expect(screen.getByRole('menuitem', { name: '结果推送' }).elements()).toHaveLength(0)
-    // 但常规操作（如“运行已发布版本”）依然在更多菜单中
+    await expect.element(screen.getByRole('menuitem', { name: '定时任务' })).toBeInTheDocument()
+    await expect.element(screen.getByRole('menuitem', { name: '结果推送' })).toBeInTheDocument()
     await expect.element(screen.getByRole('menuitem', { name: '运行已发布版本' })).toBeInTheDocument()
   })
 
-  it('当外部容器尺寸动态变化时，自适应平滑切换展示形态', async () => {
+  it('当外部容器尺寸变化为极窄时，微状态徽章自适应收起以优先保障标题与主操作', async () => {
     useAssistantStore.setState({ open: false, mode: 'floating' })
 
     const queryClient = new QueryClient({
@@ -153,7 +151,7 @@ describe('StudioToolbar 容器响应式与侧边栏自适应', () => {
     })
     const screen = await render(
       <QueryClientProvider client={queryClient}>
-        <div id='test-wrapper' style={{ width: '1500px' }}>
+        <div id='test-wrapper' style={{ width: '900px' }}>
           <StudioToolbar
             scenario={mockScenario}
             target={mockTarget}
@@ -188,18 +186,18 @@ describe('StudioToolbar 容器响应式与侧边栏自适应', () => {
       </QueryClientProvider>
     )
 
-    // 大屏下展开
-    await expect.element(screen.getByTestId('object-schedules-btn')).toBeInTheDocument()
+    // 900px 宽度下微状态徽章正常可见
+    await expect.element(screen.getByTestId('studio-micro-badge')).toBeInTheDocument()
 
-    // 模拟挂靠助手侧边栏导致工作区容器宽度变窄为 900px
+    // 模拟容器宽度被大幅挤压至 400px
     const wrapper = document.getElementById('test-wrapper')
     if (wrapper) {
-      wrapper.style.width = '900px'
+      wrapper.style.width = '400px'
     }
 
-    // 等待 ResizeObserver 生效，快捷按钮收进更多
-    await expect.poll(() => screen.getByTestId('object-schedules-btn').elements()).toHaveLength(0)
-    await expect.element(screen.getByRole('button', { name: '更多' })).toBeInTheDocument()
+    // 等待 ResizeObserver 生效，微状态徽章优雅收起
+    await expect.poll(() => screen.getByTestId('studio-micro-badge').elements()).toHaveLength(0)
+    await expect.element(screen.getByRole('button', { name: '试跑' })).toBeInTheDocument()
   })
 
   it('草稿修改 dirty 时，保存草稿呈现为 Outline 强调色，试跑为唯一实心蓝主按钮', async () => {

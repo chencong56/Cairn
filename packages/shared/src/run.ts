@@ -15,6 +15,7 @@ import { platformRunAuthRecoverySchema } from './session-auth-recovery.js'
 import { candidateGroupsSchema, moduleManifestSchema, type ModuleManifest } from './authoring-document.js'
 import { IMPORTED_OUTCOME_PROTOCOL, outcomeManifestSchema, type OutcomeManifest } from './outcome.js'
 import { runtimeInvariantManifestSchema, type RuntimeInvariantManifest } from './runtime-invariant.js'
+import { TABLE_ACCEPTANCE_PROTOCOL } from './table-acceptance.js'
 import { frozenCredentialBindingSchema } from './credentials.js'
 import { secretRefSchema } from './secret-ref.js'
 import { sessionPolicySchema } from './session.js'
@@ -29,6 +30,7 @@ import {
   FORBIDDEN_CONTEXT_KEYS,
   isAiStepType,
   stepSchema,
+  type Step,
 } from './step.js'
 import { targetDescriptorSchema } from './target-descriptor.js'
 import {
@@ -98,8 +100,28 @@ export const debugCheckpointSchema = z.strictObject({
   sessionGeneration: z.number().int().nonnegative(),
   fencingToken: z.string(),
   overlayRevision: z.number().int().nonnegative(),
+  holdId: entityIdSchema.optional(),
+  heldAt: z.string().optional(),
+  lastAuthoringActivityAt: z.string().optional(),
+  holdExpiresAt: z.string().optional(),
+  holdHardExpiresAt: z.string().optional(),
 })
 export type DebugCheckpoint = z.infer<typeof debugCheckpointSchema>
+
+export const debugPresenceBodySchema = z.strictObject({
+  holdId: z.string().min(1),
+  fencingToken: z.string().min(1),
+  sessionGeneration: z.number().int().nonnegative().optional().default(0),
+  activity: z.string().optional(),
+})
+export type DebugPresenceBody = z.infer<typeof debugPresenceBodySchema>
+
+export const debugPresenceResponseSchema = z.strictObject({
+  serverTime: z.string(),
+  holdExpiresAt: z.string(),
+  holdHardExpiresAt: z.string(),
+})
+export type DebugPresenceResponse = z.infer<typeof debugPresenceResponseSchema>
 
 export const STEP_ITERATION_STATUSES = [
   'PENDING',
@@ -314,6 +336,39 @@ export const controlFlowManifestSchema = z.strictObject({
 })
 export type ControlFlowManifest = z.infer<typeof controlFlowManifestSchema>
 
+/**
+ * 快照是否使用表格验收执行特性：extract as=table、table 型成功条件，
+ * 或表达式扩展（mul / numericPolicy）。旧 Worker 不得领取这类 Run。
+ * JSON 子串匹配只会命中结构化 AST 字段（字符串字面量中的引号会被转义），不会误报。
+ */
+export function snapshotUsesTableAcceptance(
+  steps: readonly Step[],
+  outcomeManifest?: OutcomeManifest | null,
+): boolean {
+  for (const step of steps) {
+    if (step.type === 'extract' && step.input.as === 'table') return true
+    const serialized = JSON.stringify(step)
+    if (
+      serialized.includes('"kind":"table"') ||
+      serialized.includes('"fn":"mul"') ||
+      serialized.includes('"numericPolicy":')
+    ) {
+      return true
+    }
+  }
+  if (outcomeManifest) {
+    const serialized = JSON.stringify(outcomeManifest)
+    if (
+      serialized.includes('"kind":"table"') ||
+      serialized.includes('"fn":"mul"') ||
+      serialized.includes('"numericPolicy":')
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 export const runSnapshotSchema = z
   .strictObject({
     schemaVersion: runtimeSchemaVersionSchema,
@@ -359,6 +414,8 @@ export const runSnapshotSchema = z
     aiAtomicActionsProtocol: z.literal(AI_ATOMIC_ACTIONS_PROTOCOL).optional(),
     listOutputProtocol: z.literal(LIST_OUTPUT_PROTOCOL).optional(),
     importedOutcomeProtocol: z.literal(IMPORTED_OUTCOME_PROTOCOL).optional(),
+    /** 表格验收执行能力标记：使用 extract as=table / table 条件 / 表达式 mul・numericPolicy 时必须声明。 */
+    tableAcceptanceProtocol: z.literal(TABLE_ACCEPTANCE_PROTOCOL).optional(),
     /** 创建时读取的平台配置修订。旧快照可缺省。 */
     platformConfigRevision: z.number().int().positive().optional(),
     outboundPolicy: frozenOutboundPolicySchema.optional(),
@@ -453,7 +510,7 @@ export const runSnapshotSchema = z
     if (
       snapshot.steps.some(
         (step) =>
-          (step.type === 'extract' && Boolean(step.input.many)) ||
+          (step.type === 'extract' && 'many' in step.input && Boolean(step.input.many)) ||
           (step.type === 'ai_extract' && step.input.outputSchema?.kind === 'list'),
       ) &&
       !snapshot.listOutputProtocol
@@ -462,6 +519,9 @@ export const runSnapshotSchema = z
     }
     if (snapshot.outcomeManifest?.entries.some((entry) => entry.provenance === 'imported' || entry.provenance === 'generalized') && !snapshot.importedOutcomeProtocol) {
       ctx.addIssue({ code: 'custom', path: ['importedOutcomeProtocol'], message: '导入或泛化成功条件必须声明执行协议能力' })
+    }
+    if (snapshotUsesTableAcceptance(snapshot.steps, snapshot.outcomeManifest) && !snapshot.tableAcceptanceProtocol) {
+      ctx.addIssue({ code: 'custom', path: ['tableAcceptanceProtocol'], message: '使用表格验收特性必须声明 table.acceptance 执行协议能力' })
     }
     const hasControlFlowFeatures = snapshot.steps.some(
       (s) => s.type === 'decide' || s.type === 'probe' || s.type === 'compute' || s.type === 'loop' || Boolean(s.optional),

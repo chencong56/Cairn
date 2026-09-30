@@ -180,7 +180,20 @@ function OutcomeCard({
           onChange={(event) => onChange({ ...contract, meaning: event.target.value })}
         />
       </div>
-      {contract.rule.kind === 'context' ||
+      {contract.rule.kind === 'ai' ? (
+        <div className='space-y-2'>
+          <Label htmlFor={`outcome-ai-${contract.id}`}>AI 检查要求</Label>
+          <Textarea
+            id={`outcome-ai-${contract.id}`}
+            aria-label={`成功条件 ${index + 1} AI 检查要求`}
+            value={contract.rule.instruction}
+            disabled={disabled}
+            onChange={(event) => onChange({ ...contract, rule: { kind: 'ai', instruction: event.target.value } })}
+          />
+          <p className='text-caption text-muted-foreground'>运行时由 AI 核对页面是否满足以上要求；保存条件不代表已经验证通过。</p>
+          <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>移除</Button>
+        </div>
+      ) : contract.rule.kind === 'context' ||
       contract.rule.kind === 'step_duration' ||
       contract.rule.kind === 'run_duration' ? (
         <NonPageRuleFields contract={contract} index={index} disabled={disabled} onChange={onChange} onRemove={onRemove} />

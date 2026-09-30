@@ -1,4 +1,4 @@
-import { useState, useId, useMemo, useEffect, useRef } from 'react'
+import { useState, useId, useMemo } from 'react'
 import {
   normalizeAssistantPageContext,
   type AssistantCapabilitiesResponse,
@@ -17,10 +17,9 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AssistantBoundContext } from '@/stores/assistant-store'
-import { resolveContextRecommendations } from './recommendation-engine'
-import { useCan } from '@/hooks/use-permissions'
+import type { AssistantRouteContext } from './route-context'
 
-export type PromptCategoryKey = 'recommended' | 'authoring' | 'diagnostics' | 'session' | 'explore'
+export type PromptCategoryKey = 'authoring' | 'diagnostics' | 'session' | 'explore'
 
 export interface PromptCardItem {
   id: string
@@ -158,23 +157,15 @@ function getInitialCategory(pageContext: AssistantPageContext | null): PromptCat
 
 export function PromptCards({
   pageContext,
-  boundContext,
+  boundContext: _boundContext,
   capabilities,
   onSelectPrompt,
 }: {
   pageContext: AssistantPageContext | null
-  boundContext?: AssistantBoundContext | null
+  boundContext?: AssistantBoundContext | AssistantRouteContext | null
   capabilities?: AssistantCapabilitiesResponse | null
   onSelectPrompt: (question: string, capabilityHint?: AssistantCapabilityId) => void
 }) {
-  const canAssist = useCan('ai:assist')
-  const canWrite = useCan('workflow:write')
-  const canWriteTarget = useCan('target:write')
-  const canReadTarget = useCan('target:read')
-  const canReadSession = useCan('session:read')
-  const canReadSchedule = useCan('schedule:read')
-  const canReadRun = useCan('run:read')
-
   const categoryTabsId = useId()
   const normalizedPageContext = normalizeAssistantPageContext(pageContext)
 
@@ -182,69 +173,6 @@ export function PromptCards({
     () => (capabilities ? new Set(capabilities.items.filter((item) => item.available).map((item) => item.id)) : null),
     [capabilities],
   )
-
-  // 1. 解析当前场景推荐 (Context Recommended)
-  const recommendedChips = useMemo(() => {
-    if (!capabilities?.modelEnabled) return []
-    // 若 boundContext 中已传入带 ID 的结构化推荐 Chips（来自推荐引擎）
-    if (boundContext?.chips && boundContext.chips.length > 0 && boundContext.chips.some((c) => Boolean(c.id))) {
-      return boundContext.chips.filter((chip) => {
-        if (!chip.id) return false
-        if (chip.capabilityHint && !availableIds?.has(chip.capabilityHint)) return false
-        return true
-      })
-    }
-    // 未显式提供 chips 时，如果处于具体业务页面且拥有 ai:assist 权限，通过推荐引擎解析
-    if (boundContext && !boundContext.chips?.length && canAssist) {
-      return resolveContextRecommendations({
-        boundContext,
-        pageContext,
-        capabilities,
-        permissions: { canAssist, canWrite, canWriteTarget, canReadTarget, canReadSession, canReadSchedule, canReadRun },
-      })
-    }
-    return []
-  }, [boundContext, pageContext, capabilities, availableIds, canAssist, canWrite, canWriteTarget, canReadTarget, canReadSession, canReadSchedule, canReadRun])
-
-  const recommendedCategory = useMemo((): PromptCategory | null => {
-    if (recommendedChips.length === 0) return null
-    return {
-      key: 'recommended',
-      label: '场景推荐',
-      icon: Sparkles,
-      cards: recommendedChips.map((chip) => {
-        let icon: LucideIcon = Sparkles
-        if (chip.capabilityHint === 'scenario.propose-step') icon = FileCode2
-        else if (chip.capabilityHint === 'run.diagnose') icon = ScanSearch
-        else if (chip.capabilityHint === 'run.compare') icon = Layers
-        else if (chip.capabilityHint === 'platform.guide') icon = Compass
-
-        return {
-          id: chip.id ?? `rec-${chip.label}`,
-          title: chip.label,
-          description: chip.question,
-          question: chip.question,
-          capabilityHint: chip.capabilityHint,
-          icon,
-        }
-      }),
-    }
-  }, [recommendedChips])
-
-  const [activeTab, setActiveTab] = useState<PromptCategoryKey>(() => {
-    if (boundContext && recommendedCategory) return 'recommended'
-    return getInitialCategory(pageContext)
-  })
-
-  // 当业务页面切换选中步骤或上下文更新时，保持推荐标签激活
-  const prevContextSig = useRef('')
-  const contextSig = `${pageContext?.page}:${pageContext?.runId}:${pageContext?.scenarioId}:${boundContext?.selectedStepId}:${boundContext?.isDirty}`
-  useEffect(() => {
-    if (prevContextSig.current && prevContextSig.current !== contextSig && recommendedCategory) {
-      setActiveTab('recommended')
-    }
-    prevContextSig.current = contextSig
-  }, [contextSig, recommendedCategory])
 
   const standardCategories = PROMPT_CATEGORIES.map((category) => ({
     ...category,
@@ -256,12 +184,9 @@ export function PromptCards({
     }),
   })).filter((category) => category.cards.length > 0)
 
-  const visibleCategories = [
-    ...(recommendedCategory ? [recommendedCategory] : []),
-    ...standardCategories,
-  ]
+  const [activeTab, setActiveTab] = useState<PromptCategoryKey>(() => getInitialCategory(pageContext))
 
-  const currentCategory = visibleCategories.find((cat) => cat.key === activeTab) ?? visibleCategories[0]
+  const currentCategory = standardCategories.find((cat) => cat.key === activeTab) ?? standardCategories[0]
 
   if (!currentCategory) return null
 
@@ -287,7 +212,7 @@ export function PromptCards({
         aria-label='问题场景分类'
         className='flex flex-wrap items-center gap-1.5'
       >
-        {visibleCategories.map((category) => {
+        {standardCategories.map((category) => {
           const isActive = category.key === currentCategory.key
           const Icon = category.icon
           const tabId = `${categoryTabsId}-tab-${category.key}`

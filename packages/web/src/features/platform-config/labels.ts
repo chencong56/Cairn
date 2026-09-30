@@ -30,3 +30,9 @@ export function inheritCaptureLabel(
   }
   return fallback
 }
+
+export const PREWARM_MODE_LABELS = {
+  off: '关闭',
+  fixed: '固定备用',
+  adaptive: '自动阶梯',
+} as const

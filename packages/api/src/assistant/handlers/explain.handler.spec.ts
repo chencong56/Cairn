@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AssistantCapabilityHandlerContext } from '../registry.js'
 
 vi.mock('@cairn/db', () => ({
+  expandWithLoader: vi.fn(async () => ({ ok: true, diagnostics: [] })),
   getScenario: vi.fn(),
   loadScenarioVersion: vi.fn(),
   DomainError: class DomainError extends Error {

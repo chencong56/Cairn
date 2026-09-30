@@ -7,6 +7,40 @@ import type { WorkerStatus, WorkerSummary } from '@cairn/shared'
 import { WorkersPage } from './index'
 
 const fetchWorkers = vi.fn()
+const fetchWorkerNodeHealth = vi.fn().mockResolvedValue({
+  reachable: true,
+  health: {
+    status: 'ok',
+    service: 'cairn-worker',
+    uptimeSeconds: 3600,
+    checks: { database: 'up' },
+    node: {
+      workerId: 'worker-ready',
+      instanceId: '11111111-1111-4111-8111-111111111111',
+      lastTickAt: '2026-09-14T00:00:00.000Z',
+      loopAlive: true,
+      runningRunCount: 1,
+      liveHandleCount: 1,
+      shuttingDown: false,
+    },
+    browserPrewarm: {
+      mode: 'fixed',
+      policyRevision: 1,
+      configuredTarget: 1,
+      effectiveTarget: 1,
+      actualIdleCount: 1,
+      activeCount: 1,
+      startingCount: 0,
+      contextsCount: 1,
+      warmHits: 8,
+      coldMisses: 2,
+      reuseHits: 5,
+      underMemoryPressure: false,
+      memoryBudgetMb: 2048,
+      managedRssBytes: 150 * 1024 * 1024,
+    },
+  },
+})
 
 vi.mock('@tanstack/react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-router')>()),
@@ -23,6 +57,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => ({
 }))
 vi.mock('@/lib/workers-api', () => ({
   fetchWorkers: (...args: unknown[]) => fetchWorkers(...args),
+  fetchWorkerNodeHealth: (...args: unknown[]) => fetchWorkerNodeHealth(...args),
   disableWorker: vi.fn().mockResolvedValue({}),
   enableWorker: vi.fn().mockResolvedValue({}),
   removeWorker: vi.fn().mockResolvedValue({ ok: true }),
@@ -121,4 +156,16 @@ it('加载失败有明确反馈', async () => {
   fetchWorkers.mockRejectedValue(new Error('boom'))
   const screen = await renderPage()
   await expect.element(screen.getByText('无法加载执行节点')).toBeInTheDocument()
+})
+
+it('节点概览显示浏览器宿主池与预热状态', async () => {
+  fetchWorkers.mockResolvedValue({
+    items: [summary('worker-ready', 'READY', true)],
+    asOf: AS_OF,
+  })
+  const screen = await renderPage()
+  await expect.element(screen.getByRole('heading', { name: 'worker-ready' })).toBeInTheDocument()
+  await expect.element(screen.getByText('宿主池与预热')).toBeInTheDocument()
+  await expect.element(screen.getByText('固定备用')).toBeInTheDocument()
+  await expect.element(screen.getByText('80%')).toBeInTheDocument()
 })

@@ -72,6 +72,12 @@ const mockHistoryTurns: AssistantTurn[] = [
 ]
 
 vi.mock('@/lib/assistant-api', () => ({
+  adoptRecordingProposal: vi.fn(),
+  previewRecordingProposal: vi.fn(),
+  selectRecordingProposal: vi.fn(),
+  confirmRecordingOutcome: vi.fn(),
+  fetchRecordingAdoptions: vi.fn(async () => []),
+  revertRecordingAdoption: vi.fn(),
   fetchAssistantCapabilities: vi.fn(async () => ({
     items: [
       { id: 'scenario.explain', label: '场景解释', available: true, missingPermissions: [], requiredContext: [] },

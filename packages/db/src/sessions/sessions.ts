@@ -680,6 +680,14 @@ export async function listReapableSessions(
   return rows.map(toSession)
 }
 
+/**
+ * 需要本 Worker 收尾的关闭预约：resource_deleted 是控制面处置，
+ * draining_concurrency_cap 是平台降并发排空退役。两者都已置 CLOSING，
+ * 但浏览器句柄仍由本进程持有，必须由所属 Runtime 走受控关闭推进到终态，
+ * 否则排空永不收敛（方案 P1.1.3：不能只等自然过期）。
+ */
+const REQUESTED_CLOSE_REASONS = ['resource_deleted', 'draining_concurrency_cap'] as const
+
 export async function listRequestedCloseSessions(
   db: Db,
   workerId: string,
@@ -693,7 +701,7 @@ export async function listRequestedCloseSessions(
       and(
         eq(browserSessions.ownerWorkerId, workerId),
         eq(browserSessions.status, 'CLOSING'),
-        eq(browserSessions.closeReason, 'resource_deleted'),
+        inArray(browserSessions.closeReason, [...REQUESTED_CLOSE_REASONS]),
       ),
     )
     .orderBy(browserSessions.updatedAt, browserSessions.id)

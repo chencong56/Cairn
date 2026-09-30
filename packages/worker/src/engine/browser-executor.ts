@@ -452,6 +452,18 @@ export class BrowserStepExecutor implements StepExecutor {
     }
 
     if (step.type === 'extract') {
+      if (step.input.as === 'table') {
+        const target = step.input.table?.target ?? { framePath: [], candidates: [{ by: 'css', value: 'table' }] }
+        return {
+          ok: true,
+          command: {
+            type: 'extract',
+            as: 'table',
+            target,
+            table: step.input.table,
+          },
+        }
+      }
       const target = descriptorFrom(input) ?? step.input.target
       const many =
         input && typeof input === 'object' && !Array.isArray(input) && 'many' in input && (input as any).many

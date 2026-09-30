@@ -39,12 +39,16 @@ import {
   type PageRef,
   type TargetObservation,
   type StructureObservation,
+  type TableObservation,
+  type TableDiscoveryObservation,
+  tableReadPlanSchema,
   type JsonValue,
   MAX_STRUCTURE_SNAPSHOT_CHARS,
   stepRunFor,
   type SessionGrant
 } from '@cairn/shared'
 import { getAriaSnapshot } from './aria-snapshot.js'
+import { discoverTablesOnPage, sampleTableOnPage } from './table-observe.js'
 import { highlightOnPage, pickOnPage } from './observe'
 import { resolveObserveGrant } from './observe-grant'
 import { refreshScreencastIfStale, startScreencast } from './screencast'
@@ -171,7 +175,7 @@ export async function describeHoldPage(this: SessionManagerContext, runId: strin
     }
   }
 
-export async function observeRun(this: SessionManagerContext, input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation> {
+export async function observeRun(this: SessionManagerContext, input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation> {
     const { session, live, run } = await this.requireLiveAuthSession(input.runId)
     const detail = await loadRunDetail(this.dbHandle, input.runId)
     const sessionAuthoring = !detail && session?.status === 'OPEN'
@@ -188,6 +192,58 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
     const pageRef = pageRefFor(session.id, session.generation, entry)
     const url = entry.page.url()
     const title = await entry.page.title().catch(() => undefined)
+
+    if (input.op.op === 'table') {
+      if (input.op.subOp === 'discover') {
+        const discovered = await discoverTablesOnPage(entry.page)
+        return {
+          outcome: discovered.length > 0 ? ('FOUND' as const) : ('NOT_FOUND' as const),
+          page: { pageRef, url, title },
+          tables: discovered,
+          source: 'managed' as const,
+        }
+      }
+      const planParsed = tableReadPlanSchema.safeParse(input.op.plan)
+      if (!planParsed.success) {
+        throw conflict('TABLE_PLAN_INVALID', '表格采样请求携带的读取计划未通过契约校验')
+      }
+      const checkpointStepId = detail?.checkpoint?.stepId
+      const stepRun = checkpointStepId && detail
+        ? stepRunFor(detail.stepRuns, checkpointStepId)
+        : undefined
+      const lastAttempt = stepRun?.attempts[stepRun.attempts.length - 1]
+      const sample = await sampleTableOnPage(entry.page, planParsed.data, {
+        meta: {
+          runId: input.runId,
+          stepRunId: stepRun?.id,
+          attemptId: lastAttempt?.id,
+          pageRef,
+        },
+      })
+      const evidenceId = randomUUID()
+      await insertLogEvidence(this.dbHandle, {
+        evidenceId,
+        runId: input.runId,
+        stepRunId: stepRun?.id,
+        attemptId: lastAttempt?.id,
+        payload: {
+          role: 'table_sample',
+          sample,
+          url,
+          title,
+          // 服务端绑定：预览端点据此与当前基线检查点比对，检测继续/重挂起后的陈旧证据
+          holdId: detail?.checkpoint?.holdId,
+          sessionGeneration: detail?.checkpoint?.sessionGeneration,
+          pageRef,
+        } as unknown as JsonValue,
+      })
+      return {
+        outcome: 'FOUND' as const,
+        evidenceId,
+        sample,
+        source: 'managed' as const,
+      }
+    }
 
     if (input.op.op === 'structure') {
       const snapshotRes = await getAriaSnapshot(entry.page, {

@@ -303,7 +303,8 @@ export const scenarioAuthoringDocumentV2Schema = z
     authoringSchemaVersion: z.literal(2),
     schemaVersion: runtimeSchemaVersionSchema.default(RUNTIME_SCHEMA_VERSION),
     inputs: z.array(scenarioInputDeclSchema).max(64).default([]),
-    nodes: z.array(authoringNodeSchema).min(1).max(MAX_AUTHORING_NODES),
+    // 编写中的空草稿可保存与撤销；发布和运行仍由编译器要求至少一个可执行步骤。
+    nodes: z.array(authoringNodeSchema).max(MAX_AUTHORING_NODES),
     scenarioOutcomes: z.array(outcomeContractSchema).optional(),
     runtimeInvariants: z.array(runtimeInvariantSchema).optional(),
     outputs: scenarioOutputDeclSchema.optional(),

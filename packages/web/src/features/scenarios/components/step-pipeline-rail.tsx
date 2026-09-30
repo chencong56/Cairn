@@ -1017,7 +1017,7 @@ export function StepPipelineRail({
             const outputKey = step?.outputKey
             const listOutput = Boolean(
               step &&
-              ((step.type === 'extract' && Boolean(step.input.many)) ||
+              ((step.type === 'extract' && ('many' in step.input ? Boolean(step.input.many) : step.input.as === 'table')) ||
                 (step.type === 'ai_extract' &&
                   step.input.outputSchema.kind === 'list'))
             )

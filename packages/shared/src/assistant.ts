@@ -1,5 +1,8 @@
 import { z } from 'zod'
 import { canonicalJson } from './canonical.js'
+import { recordingInsertAnchorSchema } from './recording-import.js'
+import { targetDescriptorSchema } from './target-descriptor.js'
+import { outcomeRuleSchema } from './outcome.js'
 import { sha256Hex } from './internal-auth.js'
 import { hasPermission, nextCursorSchema, type PermissionCode } from './rbac.js'
 import { assertExpectSchema } from './browser-command.js'
@@ -23,6 +26,10 @@ import {
 } from './authoring-proposals.js'
 import {
   authoringDocumentDigest,
+  authoringSteps,
+  authoringNodeId,
+  isAuthoringDocumentV2,
+  walkAuthoringNodes,
   type ScenarioAuthoringDocumentV2,
 } from './authoring-document.js'
 import {
@@ -44,6 +51,7 @@ export const ASSISTANT_HISTORICAL_CAPABILITY_IDS = [
   'scenario.discover',
   'target.business-records.list',
   'target.propose-form',
+  'recording.propose-scenario',
   'operations.diagnose',
   'schedules.propose',
   'operations.action',
@@ -66,6 +74,7 @@ export const ASSISTANT_PUBLISHED_CAPABILITY_IDS = [
   'scenario.discover',
   'target.business-records.list',
   'target.propose-form',
+  'recording.propose-scenario',
   'in-page.guidance',
   'knowledge.answer',
 ] as const
@@ -111,13 +120,19 @@ export const ASSISTANT_CITATION_KINDS = [
   'dataset',
   'session',
   'incident',
+  'suite',
+  'suiteRun',
+  'actionModule',
+  'recording',
+  'batch',
+  'analysis',
 ] as const
 export type AssistantCitationKind = (typeof ASSISTANT_CITATION_KINDS)[number]
 
 export const assistantCitationKeySchema = z
   .string()
   .regex(
-    /^(target|run|stepRun|attempt|evidence|step|occurrence|schedule|dataset|session|incident):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    /^(target|run|stepRun|attempt|evidence|step|occurrence|schedule|dataset|session|incident|suite|suiteRun|actionModule|recording|batch|analysis):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     '引用键须为 kind:uuid',
   )
 export type AssistantCitationKey = z.infer<typeof assistantCitationKeySchema>
@@ -153,6 +168,10 @@ export const ASSISTANT_PAGE_KINDS = [
   'home',
   'navigation',
   'platform-config',
+  'suite',
+  'action-module',
+  'recording',
+  'batch',
   'other',
 ] as const
 export type AssistantPageKind = (typeof ASSISTANT_PAGE_KINDS)[number]
@@ -169,6 +188,10 @@ export const ASSISTANT_OBJECT_REF_KINDS = [
   'dataset',
   'stepRun',
   'attempt',
+  'suite',
+  'actionModule',
+  'recording',
+  'batch',
 ] as const
 export type AssistantObjectRefKind = (typeof ASSISTANT_OBJECT_REF_KINDS)[number]
 export const assistantObjectRefSchema = z.strictObject({
@@ -439,6 +462,12 @@ export const ASSISTANT_CAPABILITIES: readonly AssistantCapabilityDef[] = [
     label: '目标配置建议',
     requiredPermissions: ['ai:assist', 'target:read', 'target:write'],
     description: '结合目标表单上下文与当前事实，按自然语言意图生成配置项修改提案',
+  },
+  {
+    id: 'recording.propose-scenario',
+    label: '录制清洗提案',
+    requiredPermissions: ['ai:assist', 'workflow:write', 'target:read'],
+    description: '结合录制或示教观察事实，生成清洗优化后的场景草稿提案与采纳预览',
   },
   {
     id: 'in-page.guidance',
@@ -1087,6 +1116,288 @@ export const PAGE_LANDMARK_MANIFESTS: Record<string, PageLandmarkDefinition> = {
   },
 }
 
+export const ASSISTANT_BUSINESS_INTENT_IDS = [
+  'suite.collection-summary',
+  'suite.dependencies',
+  'suite.resource-groups',
+  'suite.duration',
+  'module.repeated-fragments',
+  'module.input-contract',
+  'module.references',
+  'recording.collection-summary',
+  'recording.quality',
+  'schedule.window-overlap',
+  'schedule.skip-summary',
+  'schedule.resource-contention',
+  'batch.collection-summary',
+  'batch.input-mapping',
+  'batch.resource-limits',
+] as const
+export type AssistantBusinessIntentId = (typeof ASSISTANT_BUSINESS_INTENT_IDS)[number]
+export const assistantBusinessIntentIdSchema = z.enum(ASSISTANT_BUSINESS_INTENT_IDS)
+
+export const assistantContextFeatureSchema = z.strictObject({
+  id: assistantBusinessIntentIdSchema,
+  capability: assistantCapabilityIdSchema,
+  pages: z.array(assistantPageKindSchema),
+  requiredRefKinds: z.array(z.enum(ASSISTANT_OBJECT_REF_KINDS)),
+  requiredPermissions: z.array(z.string().min(1).max(64)),
+  available: z.boolean(),
+})
+export type AssistantContextFeature = z.infer<typeof assistantContextFeatureSchema>
+
+export interface AssistantBusinessIntentDef {
+  id: AssistantBusinessIntentId
+  capability: AssistantCapabilityId
+  pages: readonly AssistantPageKind[]
+  requiredRefKinds: readonly AssistantObjectRefKind[]
+  requiredPermissions: readonly string[]
+}
+
+export const ASSISTANT_BUSINESS_INTENTS: readonly AssistantBusinessIntentDef[] = [
+  {
+    id: 'suite.collection-summary',
+    capability: 'knowledge.answer',
+    pages: ['suite'],
+    requiredRefKinds: [],
+    requiredPermissions: ['ai:assist', 'suite:read', 'workflow:read'],
+  },
+  {
+    id: 'suite.dependencies',
+    capability: 'knowledge.answer',
+    pages: ['suite'],
+    requiredRefKinds: ['suite'],
+    requiredPermissions: ['ai:assist', 'suite:read', 'workflow:read'],
+  },
+  {
+    id: 'suite.resource-groups',
+    capability: 'knowledge.answer',
+    pages: ['suite'],
+    requiredRefKinds: ['suite'],
+    requiredPermissions: ['ai:assist', 'suite:read', 'workflow:read', 'session:read'],
+  },
+  {
+    id: 'suite.duration',
+    capability: 'knowledge.answer',
+    pages: ['suite'],
+    requiredRefKinds: ['suite'],
+    requiredPermissions: ['ai:assist', 'suite:read', 'workflow:read', 'run:read'],
+  },
+  {
+    id: 'module.repeated-fragments',
+    capability: 'knowledge.answer',
+    pages: ['action-module'],
+    requiredRefKinds: [],
+    requiredPermissions: ['ai:assist', 'module:read', 'workflow:read'],
+  },
+  {
+    id: 'module.input-contract',
+    capability: 'knowledge.answer',
+    pages: ['action-module'],
+    requiredRefKinds: ['actionModule'],
+    requiredPermissions: ['ai:assist', 'module:read'],
+  },
+  {
+    id: 'module.references',
+    capability: 'knowledge.answer',
+    pages: ['action-module'],
+    requiredRefKinds: ['actionModule'],
+    requiredPermissions: ['ai:assist', 'module:read'],
+  },
+  {
+    id: 'recording.collection-summary',
+    capability: 'knowledge.answer',
+    pages: ['recording'],
+    requiredRefKinds: [],
+    requiredPermissions: ['ai:assist', 'workflow:write'],
+  },
+  {
+    id: 'recording.quality',
+    capability: 'knowledge.answer',
+    pages: ['recording'],
+    requiredRefKinds: ['recording'],
+    requiredPermissions: ['ai:assist', 'workflow:write', 'target:read'],
+  },
+  {
+    id: 'schedule.window-overlap',
+    capability: 'knowledge.answer',
+    pages: ['schedule'],
+    requiredRefKinds: [],
+    requiredPermissions: ['ai:assist', 'schedule:read'],
+  },
+  {
+    id: 'schedule.skip-summary',
+    capability: 'knowledge.answer',
+    pages: ['schedule'],
+    requiredRefKinds: [],
+    requiredPermissions: ['ai:assist', 'schedule:read'],
+  },
+  {
+    id: 'schedule.resource-contention',
+    capability: 'knowledge.answer',
+    pages: ['schedule'],
+    requiredRefKinds: ['schedule'],
+    requiredPermissions: ['ai:assist', 'schedule:read', 'session:read'],
+  },
+  {
+    id: 'batch.collection-summary',
+    capability: 'knowledge.answer',
+    pages: ['batch'],
+    requiredRefKinds: [],
+    requiredPermissions: ['ai:assist', 'batch:read'],
+  },
+  {
+    id: 'batch.input-mapping',
+    capability: 'knowledge.answer',
+    pages: ['batch'],
+    requiredRefKinds: ['batch'],
+    requiredPermissions: ['ai:assist', 'batch:read', 'workflow:read', 'dataset:read'],
+  },
+  {
+    id: 'batch.resource-limits',
+    capability: 'knowledge.answer',
+    pages: ['batch'],
+    requiredRefKinds: ['batch'],
+    requiredPermissions: ['ai:assist', 'batch:read', 'session:read'],
+  },
+]
+
+export function resolveAvailableContextFeatures(
+  userPermissions: readonly string[],
+  featureAvailabilityMap?: Partial<Record<AssistantBusinessIntentId, boolean>>,
+): AssistantContextFeature[] {
+  return ASSISTANT_BUSINESS_INTENTS.map((intent) => {
+    const hasPerms = intent.requiredPermissions.every((p) => userPermissions.includes(p))
+    const isReady = featureAvailabilityMap ? Boolean(featureAvailabilityMap[intent.id]) : true
+    return {
+      id: intent.id,
+      capability: intent.capability,
+      pages: [...intent.pages],
+      requiredRefKinds: [...intent.requiredRefKinds],
+      requiredPermissions: [...intent.requiredPermissions],
+      available: hasPerms && isReady,
+    }
+  })
+}
+
+export const assistantSourceItemSchema = z.strictObject({
+  kind: z.string().min(1).max(64),
+  id: entityIdSchema,
+  targetId: entityIdSchema.optional(),
+  revision: z.number().int().optional(),
+  version: z.union([z.number().int(), z.string().max(64)]).optional(),
+  digest: z.string().max(64).optional(),
+  requiredPermissions: z.array(z.string().min(1).max(64)).default([]),
+})
+export type AssistantSourceItem = z.infer<typeof assistantSourceItemSchema>
+
+export const assistantAnalysisRuleSchema = z.strictObject({
+  id: z.string().min(1).max(64),
+  version: z.union([z.number().int(), z.string().max(64)]),
+  digest: z.string().max(64).optional(),
+})
+export type AssistantAnalysisRule = z.infer<typeof assistantAnalysisRuleSchema>
+
+export const assistantSourceManifestSchema = z.strictObject({
+  version: z.literal('1.0'),
+  asOf: utcInstantSchema,
+  scope: z.record(z.string(), z.unknown()),
+  sources: z.array(assistantSourceItemSchema).max(2000),
+  analysisRules: z.array(assistantAnalysisRuleSchema).optional(),
+  digest: z.string().max(64),
+})
+export type AssistantSourceManifest = z.infer<typeof assistantSourceManifestSchema>
+
+export const assistantAnalysisFindingSchema = z.strictObject({
+  id: z.string().min(1).max(64),
+  code: z.string().min(1).max(64),
+  message: z.string().min(1).max(1024),
+  citationRefs: z.array(z.string()).default([]),
+  condition: z.string().max(256).optional(),
+  severity: z.enum(['info', 'warning', 'error']).optional(),
+})
+export type AssistantAnalysisFinding = z.infer<typeof assistantAnalysisFindingSchema>
+
+export const assistantAnalysisResultSchema = z.strictObject({
+  version: z.literal('1.0'),
+  intentId: assistantBusinessIntentIdSchema,
+  ruleVersion: z.union([z.number().int(), z.string().max(64)]),
+  asOf: utcInstantSchema,
+  scope: z.record(z.string(), z.unknown()),
+  coverage: z.enum(['complete', 'partial']),
+  findings: z.array(assistantAnalysisFindingSchema),
+  sampleSize: z.number().int().nonnegative().optional(),
+  method: z.string().max(256).optional(),
+  missing: z.array(z.string()).optional(),
+  desensitizedInputs: z.record(z.string(), z.unknown()).optional(),
+})
+export type AssistantAnalysisResult = z.infer<typeof assistantAnalysisResultSchema>
+
+export const assistantRecordingDecisionSchema = z.strictObject({
+  label: z.string().max(256).optional(),
+  itemId: z.string().min(1).max(64),
+  action: z.enum(['keep', 'replace', 'exclude', 'modify']),
+  reason: z.string().min(1).max(512),
+  sourceIndex: z.number().int().nonnegative().optional(),
+  sourceId: z.string().max(64).optional(),
+  change: z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('locator'), sourceItemId: z.string().min(1).max(64),
+      before: targetDescriptorSchema, after: targetDescriptorSchema,
+    }),
+    z.strictObject({
+      kind: z.literal('outcome'), sourceItemId: z.string().min(1).max(64),
+      meaning: z.string().trim().min(1).max(512), rule: outcomeRuleSchema,
+      confirmedBy: entityIdSchema,
+      recordedItemId: z.string().min(1).max(64).optional(),
+    }),
+  ]).optional(),
+})
+export type AssistantRecordingDecision = z.infer<typeof assistantRecordingDecisionSchema>
+
+/** Changes depend on the original action; deselecting it must never move a check elsewhere. */
+export function assistantRecordingSelectionError(decisions: readonly AssistantRecordingDecision[], selectedItemIds: readonly string[]): string | undefined {
+  const selected = new Set(selectedItemIds)
+  if (!selected.size || selected.size !== selectedItemIds.length) return '请选择内容，且不能重复选择同一项。'
+  const items = decisions.filter((item) => selected.has(item.itemId))
+  if (items.length !== selected.size || items.some((item) => item.action === 'exclude')) return '选择包含未知或已排除的项目。'
+  if (items.filter((item) => item.change).length > 4) return '一次最多采纳 4 项修改，请减少选择。'
+  const missing = items.find((item) => item.change && !selected.has(item.change.sourceItemId))
+  if (missing) return `「${missing.label ?? '修改'}」需要同时保留对应的录制动作。`
+  return undefined
+}
+
+const recordingOutcomeOptionSchema = z.strictObject({
+  itemId: z.string().min(1).max(64), afterItemId: z.string().min(1).max(64),
+  meaning: z.string().min(1).max(512), rule: outcomeRuleSchema,
+})
+
+export const assistantRecordingProposalResultSchema = z.strictObject({
+  kind: z.literal('recording_proposal'),
+  proposalId: z.string().min(1).max(64),
+  proposalFamilyId: z.string().min(1).max(64),
+  protocolVersion: z.enum(['script@1', 'demonstration@1']),
+  recordingId: entityIdSchema,
+  targetId: entityIdSchema,
+  recordingDigest: z.string().min(1).max(64),
+  recordingRevision: z.number().int().positive().optional(),
+  adapterVersion: z.string().min(1).max(64),
+  proposalSummary: z.string().min(1).max(1024),
+  sourceManifest: assistantSourceManifestSchema,
+  decisions: z.array(assistantRecordingDecisionSchema),
+  excludedItemIds: z.array(z.string().min(1).max(64)).default([]),
+  targetScenarioId: entityIdSchema.optional(),
+  insertAnchor: z.record(z.string(), z.unknown()).optional(),
+  diagnostics: z.array(z.record(z.string(), z.unknown())).default([]),
+  missingConfirmations: z.array(z.string()).default([]),
+  applicable: z.boolean(),
+  candidateDigest: z.string().max(64).optional(),
+  intent: z.enum(['cleanup', 'locator', 'outcome']).optional(),
+  outcomeOptions: z.array(recordingOutcomeOptionSchema).optional(),
+  needsOutcomeConfirmation: z.boolean().optional(),
+})
+export type AssistantRecordingProposalResult = z.infer<typeof assistantRecordingProposalResultSchema>
+
 export const assistantKnowledgeAnswerClaimSchema = z.strictObject({
   factKind: z.enum(['observed', 'human_confirmed', 'inferred']),
   text: z.string().min(1),
@@ -1112,6 +1423,8 @@ export const assistantKnowledgeAnswerResultSchema = z.strictObject({
   asOf: z.string(),
   sourceAsOf: utcInstantSchema.optional(),
   nextActions: z.array(assistantNextActionSchema).optional(),
+  analysis: assistantAnalysisResultSchema.optional(),
+  sourceManifest: assistantSourceManifestSchema.optional(),
 })
 export type AssistantKnowledgeAnswerResult = z.infer<typeof assistantKnowledgeAnswerResultSchema>
 
@@ -1170,6 +1483,7 @@ export const assistantResultSchema = z.discriminatedUnion('kind', [
   assistantInPageGuidanceSchema,
   assistantKnowledgeAnswerResultSchema,
   assistantAcceptanceAuditReportSchema,
+  assistantRecordingProposalResultSchema,
 ])
 export type AssistantResult = z.infer<typeof assistantResultSchema>
 export type { TargetFormProposal }
@@ -1236,8 +1550,114 @@ export type AssistantCapabilityStatus = z.infer<typeof assistantCapabilityStatus
 export const assistantCapabilitiesResponseSchema = z.strictObject({
   items: z.array(assistantCapabilityStatusSchema).max(32),
   modelEnabled: z.boolean(),
+  contextFeatures: z.array(assistantContextFeatureSchema).optional(),
 })
 export type AssistantCapabilitiesResponse = z.infer<typeof assistantCapabilitiesResponseSchema>
+
+export const createRecordingSelectionBodySchema = z.strictObject({
+  proposalDigest: z.string().min(1).max(64),
+  selectedItemIds: z.array(z.string().min(1).max(64)),
+  exclusions: z.array(z.string().min(1).max(64)).optional(),
+})
+export type CreateRecordingSelectionBody = z.infer<typeof createRecordingSelectionBodySchema>
+
+export const createRecordingSelectionResultSchema = z.strictObject({
+  turnId: entityIdSchema,
+  proposalId: z.string().min(1).max(64),
+  proposalFamilyId: z.string().min(1).max(64),
+  proposalDigest: z.string().min(1).max(64),
+  selectionSummary: z.string().min(1).max(512),
+})
+export type CreateRecordingSelectionResult = z.infer<typeof createRecordingSelectionResultSchema>
+
+export const confirmRecordingOutcomeBodySchema = z.strictObject({
+  proposalDigest: z.string().min(1).max(64),
+  outcome: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('recorded'), itemId: z.string().min(1).max(64) }),
+    z.strictObject({ kind: z.literal('custom'), afterItemId: z.string().min(1).max(64), expectedOutcome: z.string().trim().min(3).max(512) }),
+  ]),
+})
+export type ConfirmRecordingOutcomeBody = z.infer<typeof confirmRecordingOutcomeBodySchema>
+export const confirmRecordingOutcomeResultSchema = z.strictObject({ turnId: entityIdSchema, proposal: assistantRecordingProposalResultSchema })
+export type ConfirmRecordingOutcomeResult = z.infer<typeof confirmRecordingOutcomeResultSchema>
+
+export const recordingPreviewQuerySchema = z.object({
+  proposalId: z.string().min(1).max(64).optional(),
+  destinationScenarioId: entityIdSchema.optional(),
+  newScenarioName: z.string().min(1).max(128).optional(),
+  insertAnchor: z.string().max(1024).optional(),
+})
+export type RecordingPreviewQuery = z.infer<typeof recordingPreviewQuerySchema>
+
+export const recordingPreviewResultSchema = z.strictObject({
+  proposedSteps: z.array(z.object({ name: z.string(), type: z.string() })).default([]),
+  sourceDigest: z.string().min(1).max(64),
+  destinationScenarioId: entityIdSchema.optional(),
+  baseRevision: z.number().int().nonnegative().optional(),
+  baseDigest: z.string().max(64).optional(),
+  candidateDigest: z.string().min(1).max(64),
+  diagnostics: z.array(z.record(z.string(), z.unknown())).default([]),
+  proposedStepCount: z.number().int().nonnegative(),
+  proposedChanges: z.array(z.object({ label: z.string(), detail: z.string() })).optional(),
+  changesSummary: z.string().min(1).max(1024),
+})
+export type RecordingPreviewResult = z.infer<typeof recordingPreviewResultSchema>
+
+export const createRecordingAdoptionBodySchema = z.strictObject({
+  insertAnchor: recordingInsertAnchorSchema.optional(),
+  proposalDigest: z.string().min(1).max(64),
+  candidateDigest: z.string().min(1).max(64),
+  idempotencyKey: z
+    .string()
+    .regex(/^[A-Za-z0-9._:-]{8,128}$/, 'idempotencyKey 须为 8–128 位 [A-Za-z0-9._:-]'),
+  destinationScenarioId: entityIdSchema.optional(),
+  newScenarioName: z.string().min(1).max(128).optional(),
+  expectedRevision: z.number().int().nonnegative().optional(),
+  expectedDigest: z.string().max(64).optional(),
+})
+export type CreateRecordingAdoptionBody = z.infer<typeof createRecordingAdoptionBodySchema>
+
+export const createRecordingAdoptionResultSchema = z.strictObject({
+  receiptId: entityIdSchema,
+  scenarioId: entityIdSchema,
+  draftRevision: z.number().int().positive(),
+  draftDigest: z.string().min(1).max(64),
+  status: z.literal('applied'),
+})
+export type CreateRecordingAdoptionResult = z.infer<typeof createRecordingAdoptionResultSchema>
+
+export const recordingAdoptionReceiptDtoSchema = z.strictObject({
+  id: entityIdSchema,
+  scenarioId: entityIdSchema,
+  recordingDraftId: entityIdSchema,
+  proposalId: z.string().max(64).nullable(),
+  proposalFamilyId: z.string().max(64).nullable(),
+  proposalSummary: z.string().max(512).nullable(),
+  sourceProtocol: z.string().max(32).nullable(),
+  status: z.enum(['applied', 'reverted']),
+  beforeDigest: z.string().max(64).nullable(),
+  afterDigest: z.string().max(64).nullable(),
+  revertedRevision: z.number().int().nullable(),
+  revertedAt: utcInstantSchema.nullable(),
+  createdAt: utcInstantSchema,
+})
+export type RecordingAdoptionReceiptDto = z.infer<typeof recordingAdoptionReceiptDtoSchema>
+
+export const revertRecordingAdoptionBodySchema = z.strictObject({
+  idempotencyKey: z
+    .string()
+    .regex(/^[A-Za-z0-9._:-]{8,128}$/, 'idempotencyKey 须为 8–128 位 [A-Za-z0-9._:-]')
+    .optional(),
+})
+export type RevertRecordingAdoptionBody = z.infer<typeof revertRecordingAdoptionBodySchema>
+
+export const revertRecordingAdoptionResultSchema = z.strictObject({
+  receiptId: entityIdSchema,
+  scenarioId: entityIdSchema,
+  draftRevision: z.number().int().positive(),
+  status: z.literal('reverted'),
+})
+export type RevertRecordingAdoptionResult = z.infer<typeof revertRecordingAdoptionResultSchema>
 
 export const createAssistantConversationBodySchema = z.strictObject({
   idempotencyKey: z
@@ -1561,6 +1981,18 @@ export function routeAssistantTurn(input: {
   const context = normalizeAssistantPageContext(input.pageContext)
   const hasRunContext = Boolean(context?.runId || cleanQuestion.match(RUN_ID_IN_QUESTION)?.length)
   const hasKnowledge = input.available.includes('knowledge.answer')
+  // Business pages resolve their read-only analysis before generic scenario keywords.
+  // In particular, “场景集” must never become scenario discovery.
+  const businessPage = ['suite', 'action-module', 'recording', 'schedule', 'batch'].includes(context?.pageKind ?? '')
+  if (context?.pageKind === 'recording' && input.available.includes('recording.propose-scenario') &&
+    (input.capabilityHint === 'recording.propose-scenario' || (!input.capabilityHint &&
+      /(?:改进|优化|替换|修改|补充|添加|生成|提议|提案)/.test(cleanQuestion) && /定位|选择器|断言|成功条件|录制|草稿/.test(cleanQuestion)))) {
+    return { type: 'dispatch', capabilityId: 'recording.propose-scenario', slots: context.primaryRef?.kind === 'recording' ? { recordingId: context.primaryRef.id } : {} }
+  }
+  if (hasKnowledge && businessPage && (!input.capabilityHint || input.capabilityHint === 'knowledge.answer') &&
+    /分析|检查|概览|汇总|依赖|并发|耗时|入参|引用|重复|质量|待处理|窗口|跳过|映射|节奏|资源/.test(cleanQuestion)) {
+    return { type: 'dispatch', capabilityId: 'knowledge.answer', slots: {} }
+  }
   if (!input.capabilityHint && context?.runId && input.available.includes('run.compare') &&
       isPreviousRunComparisonQuestion(cleanQuestion)) {
     return routeAssistantTurn({ ...input, capabilityHint: 'run.compare' })
@@ -2097,25 +2529,47 @@ export function filterGuideCatalog(
     )
 }
 
-export function scenarioFactsForModel(document: ScenarioDocument, stepId?: string) {
-  return {
-    inputs: document.inputs.map((item) => ({ key: item.key, label: item.label })),
-    selectedStepId: stepId ?? null,
-    steps: document.steps.map((step) => {
-      if (step.type !== 'fill') {
-        return { id: step.id, name: step.name, type: step.type, input: step.input }
-      }
-      return {
-        id: step.id,
-        name: step.name,
-        type: step.type,
-        input: {
-          from: step.input.from,
-          fromField: step.input.fromField,
-          sensitive: isSensitiveFillInput(step.input),
-          hasLiteralValue: step.input.value !== undefined,
-        },
-      }
-    }),
+export function scenarioFactsForModel(document: ScenarioDocument | ScenarioAuthoringDocumentV2, stepId?: string) {
+  const v2 = isAuthoringDocumentV2(document) ? document : undefined
+  const steps = v2 ? authoringSteps(v2) : (document as ScenarioDocument).steps
+  const stepFacts = (step: Step) => {
+    const base = { id: step.id, name: step.name, type: step.type, disabled: step.disabled, effectType: step.effectType, outputKey: step.outputKey }
+    return step.type === 'fill'
+      ? { ...base, input: { from: step.input.from, fromField: step.input.fromField,
+          sensitive: isSensitiveFillInput(step.input), hasLiteralValue: step.input.value !== undefined } }
+      : { ...base, input: step.input }
   }
+  const facts = {
+    inputs: document.inputs.map((item) => ({ key: item.key, label: item.label, type: item.type, required: item.required, hasDefaultGenerator: item.defaultGenerator !== undefined })),
+    selectedStepId: stepId ?? null,
+    outputs: document.outputs,
+    scenarioOutcomes: v2?.scenarioOutcomes ? [...v2.scenarioOutcomes] : undefined,
+    steps: steps.map(stepFacts),
+    nodes: v2 ? walkAuthoringNodes(v2).map(({ node, id, parentId, branchKey, index }) => ({
+      id, parentId, branchKey, index, kind: node.kind,
+      ...(node.kind === 'step' ? { step: stepFacts(node.step), outcomes: node.outcomes } :
+        node.kind === 'module' ? {
+          name: node.name, moduleId: node.moduleId, moduleVersionId: node.moduleVersionId,
+          moduleDraft: node.moduleDraft, disabled: node.disabled,
+          inputBindings: Object.fromEntries(Object.entries(node.inputBindings).map(([key, binding]) =>
+            [key, binding.kind === 'literal' ? { kind: 'literal', value: '[已隐藏固定值]' } : binding])),
+          outputBindings: node.outputBindings,
+        } : { name: node.name, disabled: node.disabled, control: node.control }),
+    })) : undefined,
+    nodeCount: v2 ? walkAuthoringNodes(v2).length : steps.length,
+    topLevelTailId: v2?.nodes.length ? authoringNodeId(v2.nodes[v2.nodes.length - 1]!) : steps.at(-1)?.id,
+    coverage: 'complete' as 'complete' | 'partial',
+  }
+  if (JSON.stringify(facts).length > ASSISTANT_MAX_FACT_CHARS) {
+    facts.coverage = 'partial'
+    if (v2) facts.steps = [] // Nodes already carry their step facts.
+    while (JSON.stringify(facts).length > ASSISTANT_MAX_FACT_CHARS && (facts.nodes?.length || facts.steps.length)) {
+      if (facts.nodes?.length) facts.nodes.pop()
+      else facts.steps.pop()
+    }
+    while (JSON.stringify(facts).length > ASSISTANT_MAX_FACT_CHARS && facts.scenarioOutcomes?.length) facts.scenarioOutcomes.pop()
+    while (JSON.stringify(facts).length > ASSISTANT_MAX_FACT_CHARS && facts.inputs.length) facts.inputs.pop()
+    if (JSON.stringify(facts).length > ASSISTANT_MAX_FACT_CHARS) facts.outputs = undefined
+  }
+  return facts
 }

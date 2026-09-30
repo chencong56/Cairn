@@ -6,10 +6,12 @@ function mockCapabilities(
   available: string[] = [
     'scenario.explain',
     'scenario.propose-step',
+    'scenario.propose-acceptance',
     'run.diagnose',
     'run.compare',
     'platform.guide',
     'knowledge.answer',
+    'recording.propose-scenario',
   ],
   modelEnabled = true,
 ): AssistantCapabilitiesResponse {
@@ -18,10 +20,12 @@ function mockCapabilities(
     items: [
       'scenario.explain',
       'scenario.propose-step',
+      'scenario.propose-acceptance',
       'run.diagnose',
       'run.compare',
       'platform.guide',
       'knowledge.answer',
+      'recording.propose-scenario',
     ].map((id) => ({
       id,
       label: id,
@@ -60,7 +64,7 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
     expect(resNoPerm).toEqual([])
   })
 
-  it('场景编排（Studio 全局未选中单步）：推荐解释场景、检查完整性与测试分支', () => {
+  it('场景编排（Studio 全局未选中单步）：推荐解释全貌、检查缺漏、补全验收与追加末尾', () => {
     const chips = resolveContextRecommendations({
       boundContext: { page: 'studio', isDirty: false },
       pageContext: { page: 'studio', scenarioId: 'sc-1' },
@@ -69,13 +73,14 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
     })
 
     expect(chips.map((c) => c.label)).toEqual([
-      '💡 解释场景全貌',
-      '🔍 检查逻辑完整性',
-      '➕ 建议测试分支',
+      '解释场景全貌与依赖',
+      '检查潜在逻辑缺漏',
+      '补全全场景验收条件',
+      '为场景追加末尾步骤',
     ])
   })
 
-  it('场景编排（草稿未保存态）：不推荐助手无法看到的本地改动分析', () => {
+  it('场景编排（草稿未保存态）：依据已保存版本推荐', () => {
     const chips = resolveContextRecommendations({
       boundContext: { page: 'studio', isDirty: true },
       pageContext: { page: 'studio', scenarioId: 'sc-1' },
@@ -84,14 +89,15 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
     })
 
     expect(chips.map((c) => c.label)).toEqual([
-      '💡 解释场景全貌',
-      '🔍 检查逻辑完整性',
-      '➕ 建议测试分支',
+      '解释场景全貌与依赖',
+      '检查潜在逻辑缺漏',
+      '补全全场景验收条件',
+      '为场景追加末尾步骤',
     ])
     expect(chips.some((chip) => chip.id === 'studio-draft-diff')).toBe(false)
   })
 
-  it('场景编排（单步聚焦）：推荐修改建议、解释单步与断言', () => {
+  it('场景编排（单步聚焦）：推荐在此步骤后新增、优化配置、检查全流程与补全单步验收', () => {
     const chips = resolveContextRecommendations({
       boundContext: {
         page: 'studio',
@@ -104,13 +110,14 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
     })
 
     expect(chips.map((c) => c.label)).toEqual([
-      '✏️ 修改建议',
-      '📖 解释此步骤',
-      '🛡️ 补充断言',
+      '在此步骤后新增步骤',
+      '优化当前步骤配置',
+      '检查全流程结构与依赖',
+      '补全当前步骤验收条件',
     ])
   })
 
-  it('场景编排（单步聚焦含 CSS 候选）：推荐诊断选择器稳定性', () => {
+  it('场景编排（单步聚焦四项展示上限）：在窄 Dock 下保持 4 项规则齐备', () => {
     const chips = resolveContextRecommendations({
       boundContext: {
         page: 'studio',
@@ -122,11 +129,11 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
       permissions: defaultPermissions,
     })
 
-    // 优先级：修改建议 (110) > 解释此步骤 (100) > 诊断选择器稳定性 (85) [优于补充断言 (80)]
     expect(chips.map((c) => c.label)).toEqual([
-      '✏️ 修改建议',
-      '📖 解释此步骤',
-      '🎯 诊断选择器稳定性',
+      '在此步骤后新增步骤',
+      '优化当前步骤配置',
+      '检查全流程结构与依赖',
+      '补全当前步骤验收条件',
     ])
   })
 
@@ -142,9 +149,12 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
       permissions: { ...defaultPermissions, canWrite: false },
     })
 
-    // 修改建议、诊断选择器与补充断言均被过滤，保留解释此步骤
+    // 新增与优化建议均被过滤，保留解释与验收
     expect(chips.some((c) => c.capabilityHint === 'scenario.propose-step')).toBe(false)
-    expect(chips.map((c) => c.label)).toEqual(['📖 解释此步骤'])
+    expect(chips.map((c) => c.label)).toEqual([
+      '检查全流程结构与依赖',
+      '补全当前步骤验收条件',
+    ])
   })
 
   it('运行详情（失败复盘）：推荐排查本次失败与对比上一次运行', () => {
@@ -222,18 +232,14 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
     })
     expect(chipsNoSession.map((c) => c.label)).toEqual(['🗺️ 目标菜单地图覆盖'])
 
-    // 2. 缺少 target:read 权限 -> 安全回退全局引导
+    // 2. 缺少 target:read 权限 -> 安全静默无专属推荐
     const chipsNoTarget = resolveContextRecommendations({
       boundContext: { page: 'target', entityId: 'tgt-1' },
       pageContext: { page: 'target', targetId: 'tgt-1' },
       capabilities: mockCapabilities(),
       permissions: { ...defaultPermissions, canReadTarget: false },
     })
-    expect(chipsNoTarget.map((c) => c.label)).toEqual([
-      '🚀 快速上手编排',
-      '📊 查看近期异常运行',
-      '📋 常用功能导航',
-    ])
+    expect(chipsNoTarget).toEqual([])
   })
 
   it('能力下线过滤：若后端能力声明不可用，则严格过滤对应推荐项', () => {
@@ -254,10 +260,10 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
     })
 
     expect(chips.some((c) => c.capabilityHint === 'scenario.propose-step')).toBe(false)
-    expect(chips.map((c) => c.label)).toEqual(['📖 解释此步骤'])
+    expect(chips.map((c) => c.label)).toEqual(['检查全流程结构与依赖'])
   })
 
-  it('列表页推荐修正：运行列表页缺少 runId 时安全回退全局，不展示单次运行推荐 (Acceptance Criterion 3)', () => {
+  it('列表页推荐修正：运行列表页缺少 runId 时安全静默，不展示单次运行推荐 (Acceptance Criterion 3)', () => {
     // 列表页仅有 routeContext（page: 'run'，无 runId）
     const chips = resolveContextRecommendations({
       boundContext: { page: 'run' },
@@ -268,14 +274,10 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
 
     expect(chips.some((c) => c.id === 'run-perf-bottleneck')).toBe(false)
     expect(chips.some((c) => c.id === 'run-diagnose-rca')).toBe(false)
-    expect(chips.map((c) => c.label)).toEqual([
-      '🚀 快速上手编排',
-      '📊 查看近期异常运行',
-      '📋 常用功能导航',
-    ])
+    expect(chips).toEqual([])
   })
 
-  it('列表页推荐修正：目标列表页缺少 targetId 时安全回退全局，不展示单个目标推荐 (Acceptance Criterion 3)', () => {
+  it('列表页推荐修正：目标列表页缺少 targetId 时安全静默，不展示单个目标推荐 (Acceptance Criterion 3)', () => {
     // 列表页仅有 routeContext（page: 'target'，无 targetId / entityId）
     const chips = resolveContextRecommendations({
       boundContext: { page: 'target' },
@@ -286,11 +288,7 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
 
     expect(chips.some((c) => c.id === 'target-account-health')).toBe(false)
     expect(chips.some((c) => c.id === 'target-menu-map')).toBe(false)
-    expect(chips.map((c) => c.label)).toEqual([
-      '🚀 快速上手编排',
-      '📊 查看近期异常运行',
-      '📋 常用功能导航',
-    ])
+    expect(chips).toEqual([])
   })
 
   it('调度聚焦：有 scheduleId 且有 schedule:read 权限时展示调度排查推荐', () => {
@@ -301,8 +299,8 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
       permissions: { ...defaultPermissions, canReadSchedule: true },
     })
 
-    expect(chips.map((c) => c.id)).toEqual(['schedule-why-not-run', 'schedule-recent-summary'])
-    expect(chips.map((c) => c.label)).toEqual(['⏱️ 为什么没按时运行', '📋 最近触发情况汇总'])
+    expect(chips.map((c) => c.id)).toEqual(['schedule-resource-contention', 'schedule-why-not-run', 'schedule-recent-summary'])
+    expect(chips.map((c) => c.label)).toEqual(['检查账号资源竞争', '⏱️ 为什么没按时运行', '📋 最近触发情况汇总'])
     expect(chips[0].capabilityHint).toBe('knowledge.answer')
   })
 
@@ -320,7 +318,7 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
       permissions: { ...defaultPermissions, canReadSchedule: true },
     })
 
-    expect(chips.map((chip) => chip.id)).toEqual(['schedule-why-not-run', 'schedule-recent-summary'])
+    expect(chips.map((chip) => chip.id)).toEqual(['schedule-resource-contention', 'schedule-why-not-run', 'schedule-recent-summary'])
   })
 
   it('调度权限闸门：无 schedule:read 权限或缺少 scheduleId 时不展示调度排查推荐', () => {
@@ -331,12 +329,7 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
       capabilities: mockCapabilities(),
       permissions: { ...defaultPermissions, canReadSchedule: false },
     })
-    expect(chipsNoPerm.some((c) => c.id.startsWith('schedule-'))).toBe(false)
-    expect(chipsNoPerm.map((c) => c.label)).toEqual([
-      '🚀 快速上手编排',
-      '📊 查看近期异常运行',
-      '📋 常用功能导航',
-    ])
+    expect(chipsNoPerm).toEqual([])
 
     // 列表页无 scheduleId
     const chipsNoId = resolveContextRecommendations({
@@ -345,7 +338,7 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
       capabilities: mockCapabilities(),
       permissions: { ...defaultPermissions, canReadSchedule: true },
     })
-    expect(chipsNoId.some((c) => c.id.startsWith('schedule-'))).toBe(false)
+    expect(chipsNoId).toEqual([])
   })
 
   it('会话聚焦：在 session 页面且具备 targetId 与 canReadTarget 权限时展示会话排查卡片', () => {
@@ -380,27 +373,20 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
     expect(chips.some((c) => c.id.startsWith('session-'))).toBe(false)
   })
 
-  it('场景工作区未选中步骤时：具备 canReadRun 权限推荐「📉 这个场景最近为什么老失败」', () => {
+  it('场景工作区未选中步骤时：缺少 workflow:write 时追加末尾步骤被过滤', () => {
     const chips = resolveContextRecommendations({
       boundContext: { page: 'studio', scenarioId: 'sc-1' },
       pageContext: { page: 'studio' },
       capabilities: mockCapabilities(),
-      permissions: { ...defaultPermissions, canReadRun: true },
+      permissions: { ...defaultPermissions, canWrite: false },
     })
 
-    expect(chips.some((c) => c.id === 'studio-scenario-failure-history')).toBe(true)
-    const failureChip = chips.find((c) => c.id === 'studio-scenario-failure-history')
-    expect(failureChip?.label).toBe('📉 这个场景最近为什么老失败')
-    expect(failureChip?.capabilityHint).toBe('knowledge.answer')
-
-    // 无 canReadRun 时不展示
-    const chipsNoRunPerm = resolveContextRecommendations({
-      boundContext: { page: 'studio', scenarioId: 'sc-1' },
-      pageContext: { page: 'studio' },
-      capabilities: mockCapabilities(),
-      permissions: { ...defaultPermissions, canReadRun: false },
-    })
-    expect(chipsNoRunPerm.some((c) => c.id === 'studio-scenario-failure-history')).toBe(false)
+    expect(chips.some((c) => c.capabilityHint === 'scenario.propose-step')).toBe(false)
+    expect(chips.map((c) => c.label)).toEqual([
+      '解释场景全貌与依赖',
+      '检查潜在逻辑缺漏',
+      '补全全场景验收条件',
+    ])
   })
 
   it('运行列表排查：无 runId 且具备 canReadRun 权限时推荐「🧩 这些失败是同一个原因吗」', () => {
@@ -543,5 +529,123 @@ describe('resolveContextRecommendations (M2 - 全域上下文智能推荐解析�
 
     expect(chips.map((c) => c.label)).toContain('⏱️ 将登录等待设为30秒')
     expect(chips.map((c) => c.label)).toContain('🧹 开启自动整理欢迎层')
+  })
+
+  it('跨页矩阵：场景集（Suite）详情与列表筛选推荐', () => {
+    // 详情页
+    const detailChips = resolveContextRecommendations({
+      boundContext: { page: 'suite', entityId: 'suite-1' },
+      pageContext: { page: 'suite' },
+      capabilities: mockCapabilities(),
+      permissions: defaultPermissions,
+    })
+    expect(detailChips.map((c) => c.id)).toEqual([
+      'suite-dependencies',
+      'suite-resource-groups',
+      'suite-duration',
+    ])
+
+    // 列表页无筛选 -> 空
+    const listChipsEmpty = resolveContextRecommendations({
+      boundContext: { page: 'suite' },
+      pageContext: { page: 'suite' },
+      capabilities: mockCapabilities(),
+      permissions: defaultPermissions,
+    })
+    expect(listChipsEmpty).toEqual([])
+
+    // 列表页有业务筛选 -> 概览
+    const listChipsFiltered = resolveContextRecommendations({
+      boundContext: { page: 'suite', filters: { search: 'test' } },
+      pageContext: { page: 'suite' },
+      capabilities: mockCapabilities(),
+      permissions: defaultPermissions,
+    })
+    expect(listChipsFiltered.map((c) => c.id)).toEqual(['suite-list-summary'])
+  })
+
+  it('跨页矩阵：动作库（Action Module）详情与列表筛选推荐', () => {
+    // 详情页
+    const detailChips = resolveContextRecommendations({
+      boundContext: { page: 'action-module', entityId: 'mod-1' },
+      pageContext: { page: 'action-module' },
+      capabilities: mockCapabilities(),
+      permissions: defaultPermissions,
+    })
+    expect(detailChips.map((c) => c.id)).toEqual([
+      'module-input-contract',
+      'module-references',
+    ])
+
+    // 列表页有筛选 -> 重复步骤候选
+    const listChips = resolveContextRecommendations({
+      boundContext: { page: 'action-module', filters: { tag: 'login' } },
+      pageContext: { page: 'action-module' },
+      capabilities: mockCapabilities(),
+      permissions: defaultPermissions,
+    })
+    expect(listChips.map((c) => c.id)).toEqual(['module-repeated-fragments'])
+  })
+
+  it('跨页矩阵：录制（Recording）详情清洗提案与权限控制', () => {
+    const caps = mockCapabilities([
+      'knowledge.answer',
+      'recording.propose-scenario',
+    ])
+    // 有写权限 -> 清洗、定位与成功条件提案，以及只读质量检查。
+    const detailChips = resolveContextRecommendations({
+      boundContext: { page: 'recording', entityId: 'rec-1' },
+      pageContext: { page: 'recording' },
+      capabilities: caps,
+      permissions: defaultPermissions,
+    })
+    expect(detailChips.map((c) => c.id)).toEqual([
+      'recording-propose-scenario',
+      'recording-locator',
+      'recording-outcome',
+    ])
+    expect(detailChips[1]?.capabilityHint).toBe('recording.propose-scenario')
+    expect(detailChips[2]?.capabilityHint).toBe('recording.propose-scenario')
+
+    // 无写权限 -> 过滤 proposal 推荐
+    const noWriteChips = resolveContextRecommendations({
+      boundContext: { page: 'recording', entityId: 'rec-1' },
+      pageContext: { page: 'recording' },
+      capabilities: caps,
+      permissions: { ...defaultPermissions, canWrite: false },
+    })
+    expect(noWriteChips).toEqual([])
+
+    // 列表页有筛选 -> 待处理汇总
+    const listChips = resolveContextRecommendations({
+      boundContext: { page: 'recording', filters: { status: 'PENDING' } },
+      pageContext: { page: 'recording' },
+      capabilities: caps,
+      permissions: defaultPermissions,
+    })
+    expect(listChips.map((c) => c.id)).toEqual(['recording-list-summary'])
+  })
+
+  it('跨页矩阵：批量（Batch）详情与列表筛选推荐', () => {
+    // 详情页
+    const detailChips = resolveContextRecommendations({
+      boundContext: { page: 'batch', entityId: 'batch-1' },
+      pageContext: { page: 'batch' },
+      capabilities: mockCapabilities(),
+      permissions: defaultPermissions,
+    })
+    expect(detailChips.map((c) => c.id)).toEqual([
+      'batch-input-mapping',
+      'batch-resource-limits',
+    ])
+
+    // 列表页有筛选 -> 进度汇总
+    const listChips = resolveContextRecommendations({
+      boundContext: { page: 'batch', filters: { status: 'RUNNING' } },
+      pageContext: { page: 'batch' },
+      capabilities: mockCapabilities(),
+      permissions: defaultPermissions,
+    })
+    expect(listChips.map((c) => c.id)).toEqual(['batch-list-summary'])
   })
 })

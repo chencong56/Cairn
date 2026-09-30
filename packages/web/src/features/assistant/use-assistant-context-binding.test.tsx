@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { useState } from 'react'
 import { normalizeAssistantPageContext } from '@cairn/shared'
-import { useAssistantContextBinding } from './use-assistant-context-binding'
+import { useAssistantCollectionContext, useAssistantContextBinding } from './use-assistant-context-binding'
 import { useAssistantStore, type AssistantBoundContext } from '@/stores/assistant-store'
 
 function TestBindingComponent({
@@ -17,6 +17,26 @@ function TestBindingComponent({
 }
 
 describe('useAssistantContextBinding & ownerToken anti-race guard (CQ-02)', () => {
+  it('保留集合页名称与筛选，切换筛选不带入详情对象或分页参数', async () => {
+    useAssistantStore.getState().setRouteContext({
+      page: 'recording', title: '录制草稿', statusLabel: '录制草稿',
+      statusTone: 'neutral', summaryText: '审查后回填到场景', routeKey: 'recording-list',
+    })
+    function Collection() {
+      const [q, setQ] = useState('不存在')
+      useAssistantCollectionContext('recording', { q, page: 2, pageSize: 20 })
+      return <button onClick={() => setQ('')}>清除</button>
+    }
+    const screen = await render(<Collection />)
+    expect(useAssistantStore.getState().boundContext?.statusLabel).toBe('录制草稿')
+    expect(normalizeAssistantPageContext(useAssistantStore.getState().pageContext)).toMatchObject({
+      routeKey: 'recording-list', view: { filters: { q: '不存在' } },
+    })
+    expect(normalizeAssistantPageContext(useAssistantStore.getState().pageContext)?.primaryRef).toBeUndefined()
+    await screen.getByRole('button', { name: '清除' }).click()
+    expect(useAssistantStore.getState().boundContext?.filters).toEqual({ q: '' })
+  })
+
   it('prevents stale component unmount from wiping freshly bound context of new component', async () => {
     const contextRun: AssistantBoundContext = {
       page: 'run',

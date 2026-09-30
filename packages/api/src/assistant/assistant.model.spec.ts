@@ -365,6 +365,26 @@ describe('助手接入平台 AI（模拟供应商）', { timeout: 30_000 }, () =
     expect(prompts.length).toBe(before)
   })
 
+  it.each([
+    ['suite', '检查场景集依赖和参数传递'],
+    ['action-module', '检查动作模块入参契约'],
+    ['recording', '检查录制质量缺口'],
+    ['schedule', '检查调度账号容量'],
+    ['batch', '检查批量参数映射'],
+  ] as const)('%s 的业务分析先核对页面对象，不由模型误分流', async (pageKind, question) => {
+    const before = prompts.length
+    const sub = await request(app.getHttpServer())
+      .post(`/assistant/conversations/${conversationId}/turns`)
+      .send({ clientTurnId: `business-scope-${crypto.randomUUID()}`, question,
+        pageContext: { version: 2, routeKey: `${pageKind}.index`, pageKind, page: pageKind, view: { filters: {} } },
+      }).expect(202)
+    const turn = await waitForTurn(conversationId, sub.body.turnId)
+    expect(turn.capabilityId).toBe('knowledge.answer')
+    expect(turn.result?.kind).toBe('knowledge_answer')
+    expect(turn.result?.summary).toContain('请先打开')
+    expect(prompts.length).toBe(before)
+  })
+
   it('全量功能导览可保存目录中的全部入口', async () => {
     const sub = await request(app.getHttpServer())
       .post(`/assistant/conversations/${conversationId}/turns`)

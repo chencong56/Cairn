@@ -19,6 +19,7 @@
 /** BROWSER 组中连 PostgreSQL 的文件：模板库克隆互斥，保持串行。 */
 export const BROWSER_SERIAL_SPEC_FILES: readonly string[] = [
   'src/ai/midscene/managed-page.lab.spec.ts',
+  'src/browser/concurrency-p4-barrier.lab.spec.ts',
   'src/browser/engine.lab.spec.ts',
   'src/browser/engine.outcome-c.lab.spec.ts',
   'src/browser/engine.outcome.lab.spec.ts',
@@ -37,6 +38,7 @@ export const BROWSER_PARALLEL_SPEC_FILES: readonly string[] = [
   'src/browser/aria-match.spec.ts',
   'src/browser/aria-snapshot.spec.ts',
   'src/browser/captcha/__tests__/captcha-integration.spec.ts',
+  'src/browser/concurrency-p2-shared.lab.spec.ts',
   'src/browser/explore-network-guard.spec.ts',
   'src/browser/host-isolation.lab.spec.ts',
   'src/browser/landing-settle.lab.spec.ts',
@@ -122,6 +124,7 @@ export const PURE_SPEC_FILES: readonly string[] = [
   'src/browser/operation-progress.spec.ts',
   'src/browser/page-identity.spec.ts',
   'src/browser/port.spec.ts',
+  'src/browser/prewarm-adaptive.spec.ts',
   'src/browser/profiles.spec.ts',
   'src/browser/resolved-handle.spec.ts',
   'src/browser/resolver.spec.ts',
@@ -142,6 +145,7 @@ export const PURE_SPEC_FILES: readonly string[] = [
   'src/browser/session-idle-observer.spec.ts',
   'src/browser/session-maintenance.spec.ts',
   'src/browser/session-reaper.spec.ts',
+  'src/browser/table-observe.spec.ts',
   'src/browser/totp.spec.ts',
   'src/browser/tracing.boundary.spec.ts',
   'src/browser/upload-runtime.spec.ts',

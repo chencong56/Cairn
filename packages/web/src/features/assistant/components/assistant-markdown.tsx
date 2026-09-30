@@ -49,7 +49,7 @@ function renderInline(text: string): React.ReactNode {
         return (
           <code
             key={i}
-            className='mx-0.5 rounded bg-surface-subtle px-1.5 py-0.5 font-mono text-xs text-text-primary border border-border-default/40'
+            className='mx-0.5 rounded bg-surface-subtle px-1.5 py-0.5 font-mono text-caption text-text-primary border border-border-default/40'
           >
             {token.value}
           </code>
@@ -79,7 +79,7 @@ type Block =
   | { type: 'paragraph'; text: string }
 
 function parseBlocks(markdown: string): Block[] {
-  // 先统一换行符，并按多行空白拆分块
+  // 先统一换行符，并按多行空白拆分大块
   const rawParagraphs = markdown
     .replace(/\r\n/g, '\n')
     .split(/\n\s*\n/)
@@ -92,40 +92,58 @@ function parseBlocks(markdown: string): Block[] {
     const lines = para.split('\n').map((l) => l.trim()).filter(Boolean)
     if (lines.length === 0) continue
 
-    // 检查是否全为有序列表项 (如 1. xxx 或 1、xxx)
-    const isOrdered = lines.every((line) => /^\d+[\.、]\s+/.test(line))
-    if (isOrdered) {
-      blocks.push({
-        type: 'ol',
-        items: lines.map((line) => line.replace(/^\d+[\.、]\s+/, '')),
-      })
-      continue
-    }
+    let i = 0
+    while (i < lines.length) {
+      const line = lines[i]
 
-    // 检查是否全为无序列表项 (如 - xxx 或 * xxx 或 • xxx)
-    const isUnordered = lines.every((line) => /^[-*•]\s+/.test(line))
-    if (isUnordered) {
-      blocks.push({
-        type: 'ul',
-        items: lines.map((line) => line.replace(/^[-*•]\s+/, '')),
-      })
-      continue
-    }
+      // 有序列表
+      if (/^\d+[.、]\s+/.test(line)) {
+        const items: string[] = []
+        while (i < lines.length && /^\d+[.、]\s+/.test(lines[i])) {
+          items.push(lines[i].replace(/^\d+[.、]\s+/, ''))
+          i++
+        }
+        blocks.push({ type: 'ol', items })
+        continue
+      }
 
-    // 检查是否为引用块 (如 > xxx)
-    if (lines.every((line) => /^>\s*/.test(line))) {
-      blocks.push({
-        type: 'blockquote',
-        text: lines.map((line) => line.replace(/^>\s*/, '')).join(' '),
-      })
-      continue
-    }
+      // 无序列表
+      if (/^[-*•]\s+/.test(line)) {
+        const items: string[] = []
+        while (i < lines.length && /^[-*•]\s+/.test(lines[i])) {
+          items.push(lines[i].replace(/^[-*•]\s+/, ''))
+          i++
+        }
+        blocks.push({ type: 'ul', items })
+        continue
+      }
 
-    // 普通段落，内部包含普通软换行时保留行间距
-    blocks.push({
-      type: 'paragraph',
-      text: para,
-    })
+      // 引用块
+      if (/^>\s*/.test(line)) {
+        const quoteLines: string[] = []
+        while (i < lines.length && /^>\s*/.test(lines[i])) {
+          quoteLines.push(lines[i].replace(/^>\s*/, ''))
+          i++
+        }
+        blocks.push({ type: 'blockquote', text: quoteLines.join(' ') })
+        continue
+      }
+
+      // 普通段落行（连续非列表非引用行合并为一个普通段落）
+      const pLines: string[] = []
+      while (
+        i < lines.length &&
+        !/^\d+[.、]\s+/.test(lines[i]) &&
+        !/^[-*•]\s+/.test(lines[i]) &&
+        !/^>\s*/.test(lines[i])
+      ) {
+        pLines.push(lines[i])
+        i++
+      }
+      if (pLines.length > 0) {
+        blocks.push({ type: 'paragraph', text: pLines.join('\n') })
+      }
+    }
   }
 
   return blocks
@@ -143,7 +161,10 @@ export function AssistantMarkdown({ content, className }: AssistantMarkdownProps
   if (!content) return null
 
   return (
-    <div className={cn('text-body text-text-primary [overflow-wrap:anywhere]', className)}>
+    <div
+      data-testid='assistant-markdown'
+      className={cn('text-body text-text-primary [overflow-wrap:anywhere]', className)}
+    >
       {blocks.map((block, idx) => {
         switch (block.type) {
           case 'ol':

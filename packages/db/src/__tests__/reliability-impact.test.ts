@@ -251,6 +251,9 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
     await handle.db.insert(t.reliabilityIncidents).values({
       id: incidentId,
       targetId,
+      assetKind: 'action_module',
+      assetId: moduleId,
+      ruleVersion: 2,
       groupingKey: `gk-${incidentId.slice(0, 8)}`,
       scopeDigest: 'scope-impact-test',
       severity: 'P2',

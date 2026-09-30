@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { utcInstantSchema } from './wire.js'
+import { prewarmStatusSchema } from './browser-prewarm.js'
 
 /**
  * `/health` 的响应契约。
@@ -33,8 +34,18 @@ export type WorkerNodeHealthNode = z.infer<typeof workerNodeHealthNodeSchema>
 
 export const workerNodeHealthResponseSchema = healthResponseSchema.extend({
   node: workerNodeHealthNodeSchema,
+  /** 执行角色的浏览器预热状态；非执行角色或旧版本 Worker 不返回 */
+  browserPrewarm: prewarmStatusSchema.optional(),
 })
 export type WorkerNodeHealthResponse = z.infer<typeof workerNodeHealthResponseSchema>
+
+/** console 按 workerId 探测节点健康的响应：不可达时给出原因而不是抛错 */
+export const workerNodeHealthProbeSchema = z.object({
+  reachable: z.boolean(),
+  reason: z.string().optional(),
+  health: workerNodeHealthResponseSchema.optional(),
+})
+export type WorkerNodeHealthProbe = z.infer<typeof workerNodeHealthProbeSchema>
 
 export const platformHealthStatusSchema = z.enum(['healthy', 'degraded', 'critical', 'unknown'])
 export type PlatformHealthStatus = z.infer<typeof platformHealthStatusSchema>

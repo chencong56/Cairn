@@ -463,7 +463,7 @@ export async function applyRecordingImport(
   return { receipt: toReceiptDto(receipts[0]!), scenario: await getScenario(db, scenarioId, options) }
 }
 
-function compileImportPreview(
+export function compileImportPreview(
   events: unknown[],
   sourceVersion: string,
   recordingName: string,
@@ -538,7 +538,7 @@ function assertNodeAnchor(document: ScenarioAuthoringDocumentV2, anchor: Recordi
   }
 }
 
-function exclusionReasonForItem(
+export function exclusionReasonForItem(
   item: { id?: string; sourceIndexes: readonly number[] },
   exclusions: RecordingDraftExclusion[],
 ): string | undefined {
@@ -566,6 +566,10 @@ export function composeRecordingHandoffDocument(input: {
   recordingName: string
   recordingDraftId: string
   exclusions: RecordingDraftExclusion[]
+  selectedItemIds?: string[]
+  baseDocument?: ScenarioAuthoringDocumentV2
+  insertAnchor?: RecordingInsertAnchor
+  createId?: () => string
 }): {
   document: ScenarioAuthoringDocumentV2
   sourceMap: RecordingImportReceipt['sourceMap']
@@ -576,6 +580,9 @@ export function composeRecordingHandoffDocument(input: {
   const dispositions = enforceRecordingExclusions(
     preview.items,
     preview.items.map((item) => {
+      if (input.selectedItemIds && !input.selectedItemIds.includes(recordingItemExclusionId(item))) {
+        return { sourceIndexes: item.sourceIndexes, disposition: 'discard' as const, reason: '本次未选择' }
+      }
       const locked = exclusionReasonForItem(item, input.exclusions)
       if (locked) return { sourceIndexes: item.sourceIndexes, disposition: 'discard' as const, reason: locked }
       if (item.outcomeCandidate) {
@@ -587,7 +594,7 @@ export function composeRecordingHandoffDocument(input: {
     input.exclusions,
   )
   const empty: ScenarioAuthoringDocumentV2 = { authoringSchemaVersion: 2, schemaVersion: 1, inputs: [], nodes: [] }
-  const next = applyDispositionsToAuthoring(empty, preview.items, dispositions, { kind: 'start' }, input.recordingDraftId)
+  const next = applyDispositionsToAuthoring(input.baseDocument ?? empty, preview.items, dispositions, input.insertAnchor ?? { kind: 'start' }, input.recordingDraftId, input.createId)
   return {
     ...next,
     sourceDigest: preview.sourceDigest,
@@ -601,6 +608,7 @@ function applyDispositionsToAuthoring(
   dispositions: RecordingDisposition[],
   anchor: RecordingInsertAnchor,
   recordingDraftId?: string,
+  createId: () => string = newId,
 ): { document: ScenarioAuthoringDocumentV2; sourceMap: RecordingImportReceipt['sourceMap'] } {
   if (dispositions.length !== items.length) {
     throw badRequest('RECORDING_IMPORT_INCOMPLETE', '必须处理预览中的每一项')
@@ -643,7 +651,7 @@ function applyDispositionsToAuthoring(
 
     const asOutcome = disposition.disposition === 'accept' && Boolean(item.outcomeCandidate)
     if (asOutcome) {
-      const contract = outcomeContractFromCandidate(item.outcomeCandidate!, newId())
+      const contract = outcomeContractFromCandidate(item.outcomeCandidate!, createId())
       if (lastActionId) {
         const insertedNode = inserted.find((node) => node.step.id === lastActionId)
         if (insertedNode) {
@@ -671,9 +679,9 @@ function applyDispositionsToAuthoring(
       if (!item.ready || !item.candidateStep) {
         throw badRequest('RECORDING_IMPORT_INCOMPLETE', `「${item.name}」还不能接受，请修正或舍弃`)
       }
-      step = { ...item.candidateStep, id: newId() }
+      step = { ...item.candidateStep, id: createId() }
     } else {
-      step = { ...disposition.step, id: newId() }
+      step = { ...disposition.step, id: createId() }
     }
     inserted.push({
       kind: 'step',

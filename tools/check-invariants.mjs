@@ -117,7 +117,7 @@ export const INVARIANT_RULES = [
   },
   {
     id: 'INV003_SNAPSHOT_IMMUTABLE',
-    articles: ['编写与执行分离', '证据与保留策略'],
+    articles: ['执行分层', '证据与保留策略'],
     title: '执行期快照与已发布版本定义不可变 (Snapshot Freeze)',
     rationale: '历史 Run 必须依赖自身 Snapshot 复盘；runs.snapshot 与 scenario_versions.definition 写入后不得 UPDATE',
     targetDir: 'packages/db/src',
@@ -133,7 +133,7 @@ export const INVARIANT_RULES = [
   },
   {
     id: 'INV007_WEB_NO_WORKER_INTERNAL',
-    articles: ['执行分层', '编写与执行分离'],
+    articles: ['执行分层'],
     title: 'Web 不得直连 Worker 内部入口或 CDP',
     rationale: '画面与认证控制必须经 API 鉴权转发，Web 不能持有 Worker 地址映射或调试串',
     targetDir: 'packages/web/src',

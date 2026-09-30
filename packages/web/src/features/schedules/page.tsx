@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useAssistantCollectionContext } from '@/features/assistant/use-assistant-context-binding'
 import {
   keepPreviousData,
   useMutation,
@@ -62,6 +63,7 @@ export function SchedulesPage() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editing, setEditing] = useState<ScheduleDto | null>(null)
   const [detail, setDetail] = useState<ScheduleDto | null>(null)
+  useAssistantCollectionContext('schedule', { consumerKey: consumerKey || undefined })
   const query = useQuery({
     queryKey: ['schedules', 'list', page.cursor, page.pageSize, consumerKey],
     queryFn: () =>

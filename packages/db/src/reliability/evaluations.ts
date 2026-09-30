@@ -28,6 +28,7 @@ export interface ClaimedEvaluation {
   fencingToken: number
   leaseOwner: string
   leaseExpiresAt: Date
+  v2Enabled: boolean
 }
 
 export async function claimReliabilityEvaluation(
@@ -58,6 +59,8 @@ export async function claimReliabilityEvaluation(
           fencingToken: 0,
           leaseOwner: null,
           leaseExpiresAt: null,
+          v2Enabled: true,
+          v2EnabledAt: now,
           updatedAt: now,
         })
       }
@@ -112,6 +115,7 @@ export async function claimReliabilityEvaluation(
       fencingToken: nextFencingToken,
       leaseOwner: input.workerId,
       leaseExpiresAt,
+      v2Enabled: lockedRow.v2Enabled ?? false,
     }
   })
 }
@@ -435,6 +439,8 @@ export async function requestReliabilityEvaluation(
         fencingToken: 0,
         leaseOwner: null,
         leaseExpiresAt: null,
+        v2Enabled: true,
+        v2EnabledAt: now,
         updatedAt: now,
       })
     } else {

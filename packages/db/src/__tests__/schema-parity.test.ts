@@ -630,6 +630,17 @@ describe.skipIf(!parsed.success)('迁移与 Drizzle schema 一致性（集成）
       'suite_run_items.stage_id',
       'browser_sessions.host_id',
       'recording_draft_exclusions.item_id',
+      'recording_import_receipts.proposal_id',
+      'recording_import_receipts.proposal_family_id',
+      'reliability_incidents.account_id',
+      'reliability_incidents.asset_id',
+      'reliability_incidents.step_id',
+      'reliability_run_samples.account_id',
+      'reliability_run_samples.asset_id',
+      'reliability_run_samples.internal_step_id',
+      'reliability_run_samples.step_id',
+      'reliability_signals.source_id',
+      'step_runs.internal_step_id',
     ])
     const { rows } = await pool.query<{ table_name: string; column_name: string; data_type: string }>(
       `SELECT table_name, column_name, data_type FROM information_schema.columns

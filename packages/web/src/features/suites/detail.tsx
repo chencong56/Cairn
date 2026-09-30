@@ -216,7 +216,7 @@ export function SuiteDetailPage() {
   // Flat mode member handlers
   function addMemberFlat(scenarioId: string) {
     const scenario = scenarios.data?.items.find((item) => item.id === scenarioId)
-    if (!scenario) return
+    if (!scenario?.latestVersionId) return
     const allMembers = allSuiteMembers(document)
     const newId = nextMemberId(allMembers)
     const member: SuiteMember = {
@@ -263,7 +263,7 @@ export function SuiteDetailPage() {
   // Stage mode handlers
   function addMemberToStage(stageIndex: number, scenarioId: string) {
     const scenario = scenarios.data?.items.find((item) => item.id === scenarioId)
-    if (!scenario || !document.stages) return
+    if (!scenario?.latestVersionId || !document.stages) return
     const allMembers = allSuiteMembers(document)
     const stage = document.stages[stageIndex]
     if (!stage) return
@@ -485,7 +485,7 @@ export function SuiteDetailPage() {
             isStageMode={isStageMode}
             canWrite={canWrite}
             scenarioNames={scenarioNames}
-            availableScenarios={scenarios.data?.items ?? []}
+            availableScenarios={(scenarios.data?.items ?? []).filter((s) => s.latestVersionId).map((s) => ({ ...s, latestVersionId: s.latestVersionId ?? undefined }))}
             targetAccounts={targetAccounts.data?.items ?? []}
             targetId={suite.targetId}
             selectedMemberId={selectedEntity.type === 'member' ? selectedEntity.memberId : null}

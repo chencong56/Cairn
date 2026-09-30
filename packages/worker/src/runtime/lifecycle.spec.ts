@@ -200,6 +200,8 @@ function stubSessions() {
     reconcileOwn: vi.fn(async () => ({ leasesRevoked: 0, sessionsClosed: 0 })),
     setWorkerInstance: vi.fn(),
     startHeartbeat: vi.fn(),
+    startPrewarmLoop: vi.fn(async () => {}),
+    applyPlatformConfig: vi.fn(),
     stopHeartbeat: vi.fn(),
     shutdown: vi.fn(async () => {}),
     reap: vi.fn(async () => ({ leasesExpired: 0, sessionsClosed: 0 })),
@@ -208,6 +210,7 @@ function stubSessions() {
     attachValidationOperation: vi.fn(async () => {}),
     attachMaintenanceOperation: vi.fn(async () => {}),
     evictIfAtCapacity: vi.fn(async () => false),
+    getPrewarmStatus: vi.fn(() => undefined),
   };
 }
 
@@ -890,6 +893,8 @@ describe("LifecycleService", () => {
     );
     const pending = (svc as unknown as { pump: () => Promise<void> }).pump();
     await vi.waitFor(() => expect(claimRun).toHaveBeenCalledOnce());
+    // Production ticker retains this promise; exercise the bounded shutdown wait too.
+    (svc as unknown as { claimTask?: Promise<void> }).claimTask = pending;
     vi.mocked(markWorkerStopped).mockClear();
     vi.mocked(yieldUnfinishedRun).mockClear();
     await svc.onApplicationShutdown("SIGTERM");

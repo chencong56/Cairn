@@ -3,6 +3,9 @@ import {
   SYSTEM_STEP_TYPES,
   evaluateExpression,
   toStrictNumber,
+  evaluateTableExpectation,
+  TABLE_SAMPLE_PROTOCOL,
+  type TableSample,
   type FixtureStepType,
   type JsonValue,
 } from '@cairn/shared'
@@ -12,6 +15,12 @@ import type {
   StepExecutionOutcome,
   StepExecutor,
 } from './step-executor.js'
+
+function isTableSample(val: unknown): TableSample | null {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return null
+  const candidate = val as { protocol?: unknown }
+  return candidate.protocol === TABLE_SAMPLE_PROTOCOL ? (val as TableSample) : null
+}
 
 export class FixtureStepExecutor implements StepExecutor {
   readonly supportedTypes: readonly string[] = [...FIXTURE_STEP_TYPES, ...SYSTEM_STEP_TYPES]
@@ -139,7 +148,35 @@ export class FixtureStepExecutor implements StepExecutor {
 
       let passed = false
       if (expect.kind === 'non_empty') {
-        passed = val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0)
+        // 表格样本不是普通数组，不能以整个对象"非空"代表表格有数据
+        const tableSample = isTableSample(val)
+        if (tableSample) {
+          if (tableSample.coverage.status !== 'complete') {
+            return {
+              kind: 'failed',
+              output: {
+                passed: false,
+                actual: (val ?? null) as JsonValue,
+                expected: expect as unknown as JsonValue,
+                details: {
+                  code: 'TABLE_FACTS_UNAVAILABLE',
+                  safeMessage: '表格采样覆盖不完整，无法确认表格是否有数据',
+                } as unknown as JsonValue,
+              },
+              error: {
+                code: 'TABLE_FACTS_UNAVAILABLE',
+                category: 'EXECUTOR',
+                retryable: false,
+                safeMessage: '表格采样覆盖不完整，无法确认表格是否有数据',
+              },
+              timedOut: false,
+              aborted: false,
+            }
+          }
+          passed = tableSample.rows.length > 0
+        } else {
+          passed = val !== undefined && val !== null && val !== '' && !(Array.isArray(val) && val.length === 0)
+        }
       } else if (expect.kind === 'text_contains') {
         const strVal = typeof val === 'string' ? val : (val === null || val === undefined ? '' : String(val))
         passed = strVal.includes(expect.value)
@@ -152,6 +189,43 @@ export class FixtureStepExecutor implements StepExecutor {
           else if (expect.op === 'gte') passed = numVal >= expect.value
           else if (expect.op === 'lt') passed = numVal < expect.value
           else if (expect.op === 'lte') passed = numVal <= expect.value
+        }
+      } else if (expect.kind === 'table') {
+        const evalRes = evaluateTableExpectation(val as TableSample, expect.rule)
+        const output = {
+          passed: evalRes.passed,
+          actual: (val ?? null) as JsonValue,
+          expected: expect as unknown as JsonValue,
+          details: evalRes.details as unknown as JsonValue,
+        }
+        if (evalRes.factsUnavailable) {
+          return {
+            kind: 'failed',
+            output,
+            error: {
+              code: 'TABLE_FACTS_UNAVAILABLE',
+              category: 'EXECUTOR',
+              retryable: false,
+              safeMessage: evalRes.reasonMessage ?? '表格事实不可得',
+            },
+            timedOut: false,
+            aborted: false,
+          }
+        }
+        if (evalRes.passed) {
+          return { kind: 'success', output }
+        }
+        return {
+          kind: 'failed',
+          output,
+          error: {
+            code: 'ASSERT_FAILED',
+            category: 'EXECUTOR',
+            retryable: false,
+            safeMessage: evalRes.reasonMessage ?? `表格变量「${key}」断言不成立`,
+          },
+          timedOut: false,
+          aborted: false,
         }
       }
 

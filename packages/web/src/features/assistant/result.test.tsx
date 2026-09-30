@@ -621,6 +621,26 @@ describe('AssistantResultView 功能导览 Guide 紧凑微卡与自适应双列�
     await expect.element(screen.getByTestId('knowledge-source-as-of')).toHaveTextContent(/GMT|UTC/)
   })
 
+  it('历史分析保留查询筛选，计划和数据集来源只跳到实际存在的列表页', async () => {
+    const screen = await render(<AssistantResultView result={{
+      kind: 'knowledge_answer', summary: '没有匹配项', claims: [], missing: [],
+      asOf: '2026-09-30T00:00:00.000Z',
+      analysis: { version: '1.0', intentId: 'recording.collection-summary', ruleVersion: '1',
+        asOf: '2026-09-30T00:00:00.000Z', scope: { search: '不存在的录制', imported: false },
+        coverage: 'complete', findings: [{ id: 'one', code: 'CHECK', message: '检查计划', citationRefs: ['schedule:schedule-1'] }], sampleSize: 0 },
+      sourceManifest: { version: '1.0', asOf: '2026-09-30T00:00:00.000Z', scope: {}, digest: 'test',
+        sources: [{ kind: 'schedule', id: 'schedule-1', requiredPermissions: [] }, { kind: 'dataset', id: 'dataset-1', requiredPermissions: [] }] },
+    }} />)
+    await expect.element(screen.getByTestId('analysis-scope')).toHaveTextContent('搜索「不存在的录制」；已回填「否」')
+    await screen.getByRole('button', { name: '查看计划来源' }).click()
+    expect(navigateMock).toHaveBeenLastCalledWith({ to: '/schedules' })
+    await screen.getByText('查看依据（2 项）').click()
+    await screen.getByRole('button', { name: '计划列表 · schedule' }).click()
+    expect(navigateMock).toHaveBeenLastCalledWith({ to: '/schedules' })
+    await screen.getByRole('button', { name: '数据集列表 · dataset-' }).click()
+    expect(navigateMock).toHaveBeenLastCalledWith({ to: '/datasets' })
+  })
+
   it('旧推断需重新核验时不误显示为权限不足', async () => {
     const screen = await render(<AssistantResultView result={{
       kind: 'inaccessible',

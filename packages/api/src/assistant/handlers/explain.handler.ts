@@ -8,9 +8,10 @@ import {
   normalizeAssistantPageContext,
   parseScenarioDocument,
   scenarioFactsForModel,
+  walkAuthoringNodes,
 } from '@cairn/shared'
 import { compileScenarioDocument, deriveOutcomeManifest } from '@cairn/authoring'
-import { DomainError, getScenario, loadScenarioVersion } from '@cairn/db'
+import { DomainError, expandWithLoader, getScenario, loadScenarioVersion } from '@cairn/db'
 import type { AssistantCapabilityHandlerContext } from '../registry'
 import { buildAuthoringSlice } from '../context-assembler'
 import { generateExplanationText } from '../model-session'
@@ -47,7 +48,7 @@ function asksAboutSuccessCriteria(question: string): boolean {
 }
 
 function asksForStepSequence(question: string): boolean {
-  return /(?:按步骤|逐步|每一步|各步骤|步骤顺序|具体步骤|步骤说明)/.test(question)
+  return /(?:按步骤|逐步|每一步|各步骤|步骤顺序|执行顺序|具体步骤|步骤说明)/.test(question)
 }
 
 const STEP_ACTION_NAMES: Record<string, string> = {
@@ -55,8 +56,17 @@ const STEP_ACTION_NAMES: Record<string, string> = {
   wait: '等待', extract: '提取', ai: 'AI 判断',
 }
 
-function describeStepSequence(document: ScenarioDocument): string {
-  if (document.steps.length === 0) return '当前已保存定义没有步骤，无法按步骤说明。'
+function describeStepSequence(
+  document: ScenarioDocument,
+  authoringDocument?: ScenarioAuthoringDocumentV2 | null,
+): string {
+  if (authoringDocument) {
+    return `已保存结构（按层级和顺序）：${walkAuthoringNodes(authoringDocument).map(({ node, parentId, branchKey }, index) =>
+      `${index + 1}.${parentId ? `${branchKey ?? '内部'}：` : ''}${node.kind === 'step' ? `「${node.step.name}」（${STEP_ACTION_NAMES[node.step.type] ?? node.step.type}）` : node.kind === 'module' ? `「${node.name ?? '动作模块'}」（模块调用）` : `「${node.name}」（${node.control.type}控制块）`}`).join('；').slice(0, 1300)}。`
+  }
+  if (document.steps.length === 0) {
+    return '当前已保存定义没有步骤，无法按步骤说明。'
+  }
   const parts: string[] = []
   let length = 0
   for (const [index, step] of document.steps.entries()) {
@@ -203,13 +213,12 @@ export async function handleScenarioExplain(
   }
 
   // The UI can have a selected step while the user asks about the whole scenario.
-  // Only use the selected-step slice when the question is actually step-focused.
-  const stepFocused = Boolean(stepId && asksAboutSelectedStep(question))
+  // Scenario-wide questions (全流程, 依赖, 逻辑缺漏, 场景验收) do not degrade to single step slice.
+  const asksScenarioWide = /(?:这个|当前|整个|该|本)场景|全流程|场景全貌|依赖|逻辑缺漏|场景验收|全场景/.test(question)
+  const stepFocused = Boolean(stepId && asksAboutSelectedStep(question) && !asksScenarioWide)
   const successQuestion = asksAboutSuccessCriteria(question)
   const sequenceQuestion = asksForStepSequence(question)
-  const scenarioWide = !stepFocused && (
-    /(?:这个|当前|整个|该|本)场景/.test(question) || successQuestion || sequenceQuestion
-  )
+  const scenarioWide = asksScenarioWide || (!stepFocused && (successQuestion || sequenceQuestion))
   const stepSequenceQuestion = scenarioWide && sequenceQuestion
   let workingDoc = document
   if (!scenarioWide && stepId && document.steps.some((s) => s.id === stepId)) {
@@ -219,13 +228,24 @@ export async function handleScenarioExplain(
 
   const outcomeManifest = deriveOutcomeManifest({ authoringDocument, definition: document })
   const outcomes = outcomeManifest?.entries ?? []
-  const compile = compileScenarioDocument(document, {
+  const compile = authoringDocument ? await expandWithLoader(ctx.db, detail.targetId, authoringDocument, 'preview', true) : compileScenarioDocument(document, {
     mode: 'release',
     outcomeManifest: { entries: outcomes },
   })
   const step = !scenarioWide && stepId ? workingDoc.steps.find((item) => item.id === stepId) : undefined
 
-  let summary = `场景「${detail.name}」共 ${document.steps.length} 步，绑定${target?.name ? `目标系统「${target.name}」` : '当前目标系统'}。本轮解释的是已保存${versionNote}。`
+  const modulesInDoc = authoringDocument ? walkAuthoringNodes(authoringDocument).filter((n: any) => n.kind === 'module' || n.node?.kind === 'module') : []
+  const blocksInDoc = authoringDocument ? walkAuthoringNodes(authoringDocument).filter((n: any) => n.kind === 'block' || n.node?.kind === 'block') : []
+  const moduleCount = modulesInDoc.length
+  const blockCount = blocksInDoc.length
+
+  let summary = ''
+  if (document.steps.length === 0 && (moduleCount > 0 || blockCount > 0)) {
+    summary = `场景「${detail.name}」包含 ${moduleCount} 个模块调用${blockCount > 0 ? `与 ${blockCount} 个控制块` : ''}，当前无独立步骤，绑定${target?.name ? `目标系统「${target.name}」` : '当前目标系统'}。本轮解释的是已保存${versionNote}。`
+  } else {
+    const structuralInfo = blockCount > 0 || moduleCount > 0 ? `包含 ${document.steps.length} 个独立步骤、${moduleCount} 个模块调用、${blockCount} 个控制块` : `共 ${document.steps.length} 步`
+    summary = `场景「${detail.name}」${structuralInfo}，绑定${target?.name ? `目标系统「${target.name}」` : '当前目标系统'}。本轮解释的是已保存${versionNote}。`
+  }
   if (outcomes.length > 0 && scenarioWide && successQuestion) {
     summary += ` 已定义 ${outcomes.length} 个成功条件。`
   } else if (outcomes.length > 0) {
@@ -241,7 +261,7 @@ export async function handleScenarioExplain(
   if (unsavedLocalEdit) {
     summary = `${summary} 我只能看到已保存定义，当前画布里未保存的具体修改没有进入助手事实包，因此不能判断那段修改为什么不行。请先保存草稿后再问，或提供具体步骤设置与报错。`.slice(0, 2048)
   } else if (successQuestion || stepSequenceQuestion) {
-    if (stepSequenceQuestion) summary = `${summary} ${describeStepSequence(document)}`.slice(0, 2048)
+    if (stepSequenceQuestion) summary = `${summary} ${describeStepSequence(document, authoringDocument)}`.slice(0, 2048)
     if (successQuestion) {
       const relevantOutcomes = stepFocused && stepId
         ? outcomes.filter((item) => (item.sourceStepId ?? item.stepId) === stepId)
@@ -257,17 +277,18 @@ export async function handleScenarioExplain(
       } else {
         const criteria = relevantOutcomes.map((item) => {
           const source = document.steps.find((candidate) => candidate.id === (item.sourceStepId ?? item.stepId))
-          const sourceText = source ? `关联步骤「${source.name}」（${STEP_ACTION_NAMES[source.type] ?? source.type}）` : '关联步骤未包含在当前已保存定义中'
+          const structureSource = authoringDocument && walkAuthoringNodes(authoringDocument).find((entry) => entry.id === (item.sourceStepId ?? item.stepId))
+          const sourceText = source ? `关联步骤「${source.name}」（${STEP_ACTION_NAMES[source.type] ?? source.type}）` : structureSource?.node.kind === 'module' ? `关联模块「${structureSource.node.name ?? '动作模块'}」` : item.scope === 'scenario' ? '场景级成功条件' : '关联来源未包含在当前已保存定义中'
           const ruleText = item.rule.kind === 'deterministic'
             ? `检查${expectationDescription(item.rule.expect)}`
             : '按已保存的 AI 判断规则检查'
           const violationText = item.onViolation === 'halt' ? '不满足时中止' : '不满足时继续执行并记录结果'
           return `${item.severity}「${item.meaning}」：${sourceText}，${ruleText}，${violationText}。`
         })
-        if (stepFocused && stepSummary) stepSummary = `${stepSummary} ${criteria.join(' ')}`.slice(0, 1024)
-        else summary = `${summary} ${criteria.join(' ')}`.slice(0, 2048)
+        if (stepFocused && stepSummary) stepSummary = `${stepSummary}\n\n${criteria.join('\n')}`.slice(0, 1024)
+        else summary = `${summary}\n\n${criteria.join('\n')}`.slice(0, 2048)
       }
-      summary = `${summary} 以上是已保存定义的判断标准，不代表场景已经运行通过。`.slice(0, 2048)
+      summary = `${summary}\n\n以上是已保存定义的判断标准，不代表场景已经运行通过。`.slice(0, 2048)
     }
   } else if (session && !groundedAdjacentSummary) {
     await onProgress?.('generating', '大模型正在解析场景逻辑...')
@@ -275,7 +296,7 @@ export async function handleScenarioExplain(
       session,
       question,
       {
-        ...scenarioFactsForModel(workingDoc, scenarioWide ? undefined : stepId),
+        ...scenarioFactsForModel(authoringDocument ?? workingDoc, scenarioWide ? undefined : stepId),
         successConditions: outcomes.map((item) => ({
           meaning: item.meaning,
           severity: item.severity,
@@ -289,8 +310,8 @@ export async function handleScenarioExplain(
     )
     const polishedSummary = withoutFalseOutcomeClaim(polished.summary, outcomes.length > 0)
     const polishedStepSummary = withoutFalseOutcomeClaim(polished.stepSummary, outcomes.length > 0)
-    if (polishedSummary) summary = `${summary} ${polishedSummary}`.slice(0, 2048)
-    if (stepSummary && polishedStepSummary) stepSummary = `${stepSummary} ${polishedStepSummary}`.slice(0, 1024)
+    if (polishedSummary) summary = `${summary}\n\n${polishedSummary}`.slice(0, 2048)
+    if (stepSummary && polishedStepSummary) stepSummary = `${stepSummary}\n\n${polishedStepSummary}`.slice(0, 1024)
   }
 
   return {

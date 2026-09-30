@@ -1,5 +1,9 @@
 import {
   assistantCapabilitiesResponseSchema,
+  createRecordingSelectionResultSchema, recordingPreviewResultSchema, createRecordingAdoptionResultSchema,
+  confirmRecordingOutcomeResultSchema, type ConfirmRecordingOutcomeBody,
+  recordingAdoptionReceiptDtoSchema, revertRecordingAdoptionResultSchema,
+  type CreateRecordingSelectionBody, type RecordingPreviewQuery, type CreateRecordingAdoptionBody,
   assistantConversationListSchema,
   assistantConversationSchema,
   assistantTurnListSchema,
@@ -181,4 +185,24 @@ export function observeAssistantTurn(
   return () => {
     controller.abort()
   }
+}
+
+const recordingTurnPath = (conversationId: string, turnId: string) => `/api/assistant/conversations/${conversationId}/turns/${turnId}`
+export function selectRecordingProposal(conversationId: string, turnId: string, body: CreateRecordingSelectionBody) {
+  return apiFetch(`${recordingTurnPath(conversationId, turnId)}/recording-selections`, createRecordingSelectionResultSchema, post(body))
+}
+export function confirmRecordingOutcome(conversationId: string, turnId: string, body: ConfirmRecordingOutcomeBody) {
+  return apiFetch(`${recordingTurnPath(conversationId, turnId)}/recording-outcomes`, confirmRecordingOutcomeResultSchema, post(body))
+}
+export function previewRecordingProposal(conversationId: string, turnId: string, query: RecordingPreviewQuery) {
+  return apiFetch(`${recordingTurnPath(conversationId, turnId)}/recording-preview${toQueryString(query)}`, recordingPreviewResultSchema)
+}
+export function adoptRecordingProposal(conversationId: string, turnId: string, body: CreateRecordingAdoptionBody) {
+  return apiFetch(`${recordingTurnPath(conversationId, turnId)}/recording-adoptions`, createRecordingAdoptionResultSchema, post(body))
+}
+export function fetchRecordingAdoptions(recordingId: string) {
+  return apiFetch(`/api/recordings/${recordingId}/adoptions`, recordingAdoptionReceiptDtoSchema.array())
+}
+export function revertRecordingAdoption(recordingId: string, receiptId: string) {
+  return apiFetch(`/api/recordings/${recordingId}/adoptions/${receiptId}/revert`, revertRecordingAdoptionResultSchema, post({}))
 }

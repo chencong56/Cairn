@@ -17,6 +17,12 @@ import {
   exprSchema,
   validateSafeRegexPattern,
 } from './expression.js'
+import {
+  tableReadPlanSchema,
+  tableExpectRuleSchema,
+  type TableReadPlan,
+  type TableExpectRule,
+} from './table-acceptance.js'
 
 /**
  * 可执行 Step。枚举即注册表：没写进这里的 type 过不了 `stepSchema`。
@@ -227,7 +233,7 @@ export const fillInputSchema = z
   })
 export type FillInput = z.infer<typeof fillInputSchema>
 
-export const extractInputSchema = z
+export const extractStandardInputSchema = z
   .strictObject({
     target: targetDescriptorSchema,
     as: z.enum(['text', 'value', 'attribute']),
@@ -237,6 +243,17 @@ export const extractInputSchema = z
   .refine((input) => input.as !== 'attribute' || Boolean(input.attribute), {
     message: 'extract as=attribute 时必须提供 attribute',
   })
+
+export const extractTableInputSchema = z.strictObject({
+  target: targetDescriptorSchema,
+  as: z.literal('table'),
+  table: tableReadPlanSchema,
+})
+
+export const extractInputSchema = z.union([
+  extractStandardInputSchema,
+  extractTableInputSchema,
+])
 export type ExtractInput = z.infer<typeof extractInputSchema>
 
 export const assertInputSchema = z.strictObject({
@@ -260,11 +277,21 @@ export const fillStepSchema = z.strictObject({
   type: z.literal('fill'),
   input: fillInputSchema,
 })
-export const extractStepSchema = z.strictObject({
-  ...stepCommon,
-  type: z.literal('extract'),
-  input: extractInputSchema,
-})
+export const extractStepSchema = z
+  .strictObject({
+    ...stepCommon,
+    type: z.literal('extract'),
+    input: extractInputSchema,
+  })
+  .superRefine((val, ctx) => {
+    if (val.input.as === 'table' && !val.outputKey) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['outputKey'],
+        message: 'extract as=table 时必须提供 outputKey',
+      })
+    }
+  })
 export const assertStepSchema = z.strictObject({
   ...stepCommon,
   type: z.literal('assert'),
@@ -720,6 +747,10 @@ export const contextExpectSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('text_contains'),
     value: z.string().min(1).max(2048),
+  }),
+  z.strictObject({
+    kind: z.literal('table'),
+    rule: tableExpectRuleSchema,
   }),
 ])
 export type ContextExpect = z.infer<typeof contextExpectSchema>

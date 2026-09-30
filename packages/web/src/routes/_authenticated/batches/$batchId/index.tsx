@@ -4,6 +4,13 @@ import { BatchDetailPage } from '@/features/batches/detail'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/batches/$batchId/')({
+  staticData: {
+    assistant: {
+      routeKey: 'batches.$batchId',
+      pageKind: 'batch',
+      primaryObject: { kind: 'batch', idParam: 'batchId' },
+    },
+  },
   beforeLoad: () => {
     const user = useAuthStore.getState().auth.user
     if (!user || !hasPermission(user.permissions, 'batch:read')) {

@@ -68,6 +68,8 @@ export {
   updateRunDebugOverlay,
   stopRunDebug,
   continueRunDebug,
+  renewRunDebugPresence,
+  loadEvidenceById,
   formatScopePath,
   startIteration,
   startIterationTx,

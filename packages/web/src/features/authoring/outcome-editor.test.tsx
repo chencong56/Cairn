@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import type { OutcomeContract } from '@cairn/shared'
 import { AuthoringObserveProvider } from './observe'
@@ -25,6 +25,15 @@ function EditorHarness() {
 }
 
 describe('OutcomeListEditor', () => {
+  it('AI 条件显示和编辑真实检查要求，不伪装成对象存在规则', async () => {
+    const contract: OutcomeContract = { id: crypto.randomUUID(), scope: 'step', meaning: '分组页面就绪', severity: 'MUST', onViolation: 'halt', provenance: 'generalized', rule: { kind: 'ai', instruction: '页面显示 Groups 分组列表' } }
+    const onChange = vi.fn()
+    const screen = await render(withObserve(<OutcomeListEditor outcomes={[contract]} scope='step' onChange={onChange} />))
+    await expect.element(screen.getByRole('textbox', { name: '成功条件 1 AI 检查要求' })).toHaveValue('页面显示 Groups 分组列表')
+    await expect.element(screen.getByRole('combobox', { name: '成功条件 1 期望' })).not.toBeInTheDocument()
+    await screen.getByRole('textbox', { name: '成功条件 1 AI 检查要求' }).fill('页面显示分组名称与新建入口')
+    expect(onChange).toHaveBeenLastCalledWith([{ ...contract, rule: { kind: 'ai', instruction: '页面显示分组名称与新建入口' } }])
+  })
   it('默认用业务语言，高级区拦住非必须条件停机', async () => {
     const screen = await render(withObserve(<EditorHarness />))
     await expect.element(screen.getByRole('heading', { name: '成功条件' })).toBeInTheDocument()

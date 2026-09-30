@@ -4,6 +4,13 @@ import { RecordingDetailPage } from '@/features/recordings/detail'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/recordings/$recordingId/')({
+  staticData: {
+    assistant: {
+      routeKey: 'recordings.$recordingId',
+      pageKind: 'recording',
+      primaryObject: { kind: 'recording', idParam: 'recordingId' },
+    },
+  },
   beforeLoad: () => {
     const user = useAuthStore.getState().auth.user
     if (!user || !hasPermission(user.permissions, 'workflow:write')) {

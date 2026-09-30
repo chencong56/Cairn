@@ -195,6 +195,8 @@ export const enterRunHolding = operation(impl0.enterRunHolding);
 export const updateRunDebugOverlay = operation(impl0.updateRunDebugOverlay);
 export const stopRunDebug = operation(impl0.stopRunDebug);
 export const continueRunDebug = operation(impl0.continueRunDebug);
+export const renewRunDebugPresence = operation(impl0.renewRunDebugPresence);
+export const loadEvidenceById = operation(impl0.loadEvidenceById);
 export const loadRunIterations = operation(impl0.loadRunIterations);
 export const loadIterationDetail = operation(impl0.loadIterationDetail);
 export const loadLoopFrozenItems = operation(impl0.loadLoopFrozenItems);
@@ -610,9 +612,20 @@ export const continueRecordingMapIngest = operation(
 export const listRecordingDraftExclusions = operation(impl4.listRecordingDraftExclusions);
 export const updateRecordingDraftExclusions = operation(impl4.updateRecordingDraftExclusions);
 export const createScenarioFromRecordingHandoff = operation(impl4.createScenarioFromRecordingHandoff);
+export const adoptAssistantRecordingProposal = operation(impl4.adoptAssistantRecordingProposal);
+export const getAssistantRecordingProposalFacts = operation(impl4.getAssistantRecordingProposalFacts);
+export const revertAssistantRecordingAdoption = operation(impl4.revertAssistantRecordingAdoption);
+export const previewAssistantRecordingAdoption = operation(impl4.previewAssistantRecordingAdoption);
+export const listRecordingAdoptionReceipts = operation(impl4.listRecordingAdoptionReceipts);
+export const getRecordingAdoptionReceipt = operation(impl4.getRecordingAdoptionReceipt);
 export {
   createScenarioHandoffBodySchema,
   type CreateScenarioHandoffBody,
+  type AdoptAssistantRecordingProposalInput,
+  type AdoptAssistantRecordingProposalResult,
+  type RevertAssistantRecordingAdoptionResult,
+  type PreviewAssistantRecordingAdoptionInput,
+  type PreviewAssistantRecordingAdoptionResult,
   RECORDING_MAP_INGEST_SERVICE_ID,
   recordingMapIngestTestHooks,
 } from "./recordings/index.js";
@@ -795,6 +808,9 @@ export const purgeExpiredAssistantBodies = operation(
 );
 export const renewAssistantTurnLease = operation(
   assistant.renewAssistantTurnLease,
+);
+export const createCompletedAssistantTurn = operation(
+  assistant.createCompletedAssistantTurn,
 );
 export * from "./assistant/index.js";
 
@@ -1576,6 +1592,7 @@ export const resumeBatch = operation(batchesImpl.resumeBatch);
 export const cancelBatch = operation(batchesImpl.cancelBatch);
 export const retryFailedBatch = operation(batchesImpl.retryFailedBatch);
 export const getBatch = operation(batchesImpl.getBatch);
+export const getBatchAnalysisFacts = operation(batchesImpl.getBatchAnalysisFacts);
 export const listBatches = operation(batchesImpl.listBatches);
 export const getBatchItems = operation(batchesImpl.getBatchItems);
 export const exportBatchResults = operation(batchesImpl.exportBatchResults);
@@ -1602,6 +1619,8 @@ export const listAssetReliabilityItems = operation(reliabilityImpl.listAssetReli
 export const getIncidentImpactSnapshot = operation(reliabilityImpl.getIncidentImpactSnapshot);
 export const executeMaintenanceBatchUpgrade = operation(reliabilityImpl.executeMaintenanceBatchUpgrade);
 export const getMaintenanceUpgradeJob = operation(reliabilityImpl.getMaintenanceUpgradeJob);
+export const fetchPendingReliabilityReceipts = operation(reliabilityImpl.fetchPendingReliabilityReceipts);
+export const evaluateReliabilityBatch = operation(reliabilityImpl.evaluateReliabilityBatch);
 export * from "./reliability/index.js";
 
 import * as repairImpl from "./repair/index.js";

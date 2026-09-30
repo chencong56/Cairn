@@ -5,6 +5,7 @@ import {
   claimSessionUse,
   createSession,
   conflict,
+  DomainError,
   finishSessionOperation,
   freezeAuthVerificationForRun,
   getSessionOperation,
@@ -15,6 +16,7 @@ import {
   abandonSessionKeepAlive,
   readLiveSessionAuth,
   recordAutoLoginOutcome,
+  recreateSessionForOperation,
   getSessionById,
   loadSecretCiphertext,
   recordCredentialVerification,
@@ -413,23 +415,26 @@ export async function attachMaintenanceOperation(this: SessionManagerContext, in
           await this.finishMaintenance(input.operation.id, key, 'FAILED', undefined, 'SESSION_STOP_UNCONFIRMED')
           return
         }
-        const created = await createSession(db, {
-          key,
-          ownerWorkerId: this.options.workerId,
-          ownerWorkerInstanceId: this.workerInstanceId,
-          reusePolicy: predecessor.reusePolicy,
-          idleTtlSeconds: predecessor.idleTtlSeconds,
-          maxLifetimeSeconds: predecessor.maxLifetimeSeconds,
-          reclaimMode: predecessor.reclaimMode,
-          keepAliveSeconds: predecessor.keepAliveSeconds,
-          authProbeIntervalSeconds: predecessor.authProbeIntervalSeconds,
-          evictionPriority: predecessor.evictionPriority,
-        })
+        // 重启收敛到 DB 重建领域操作：完整保留 accountSlot/profileKey/isolation/
+        // predecessorSessionId 与保留意图，Worker 不再自行拼一份缺字段的新会话。
+        let created: Awaited<ReturnType<typeof recreateSessionForOperation>>
+        try {
+          created = await recreateSessionForOperation(db, {
+            operationId: input.operation.id,
+            workerId: this.options.workerId,
+            instanceId: this.workerInstanceId,
+          })
+        } catch (error) {
+          if (error instanceof DomainError) {
+            await this.finishMaintenance(input.operation.id, key, 'FAILED', undefined, error.code)
+            return
+          }
+          throw error
+        }
         if (!created.ok) {
           await this.finishMaintenance(input.operation.id, key, 'FAILED', undefined, created.code)
           return
         }
-        await adoptSessionRetention(db, { fromSessionId: predecessor.id, toSessionId: created.session.id })
         const launchStartedAt = Date.now()
         const launched = await runWithSessionRestart(created.session.id, () =>
           this.launchAndOpen(created.session, key),
@@ -463,6 +468,8 @@ export async function attachMaintenanceOperation(this: SessionManagerContext, in
           authProbeIntervalSeconds: launched.session.authProbeIntervalSeconds,
           evictionPriority: launched.session.evictionPriority,
           touchLastUsed: false,
+          sessionId: launched.session.id,
+          isolation: launched.session.isolation,
         })
         if (!claimed.ok) {
           await this.finishMaintenance(input.operation.id, key, 'FAILED', undefined, 'SESSION_NOT_CLAIMABLE')

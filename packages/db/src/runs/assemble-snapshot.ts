@@ -2,6 +2,8 @@ import {
   DEFAULT_BROWSER_AI_HANG_WAIT_MS,
   AI_ATOMIC_ACTIONS_PROTOCOL,
   LIST_OUTPUT_PROTOCOL,
+  TABLE_ACCEPTANCE_PROTOCOL,
+  snapshotUsesTableAcceptance,
   IMPORTED_OUTCOME_PROTOCOL,
   FACTORY_PLATFORM_CONFIG,
   MAP_JOB_EVIDENCE_POLICY,
@@ -255,12 +257,14 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
       ? { aiAtomicActionsProtocol: AI_ATOMIC_ACTIONS_PROTOCOL } : {}),
     ...(input.steps.some(
       (step) =>
-        (step.type === 'extract' && Boolean(step.input.many)) ||
+        (step.type === 'extract' && 'many' in step.input && Boolean(step.input.many)) ||
         (step.type === 'ai_extract' && step.input.outputSchema?.kind === 'list'),
     )
       ? { listOutputProtocol: LIST_OUTPUT_PROTOCOL } : {}),
     ...(input.outcomeManifest?.entries.some((entry) => entry.provenance === 'imported' || entry.provenance === 'generalized')
       ? { importedOutcomeProtocol: IMPORTED_OUTCOME_PROTOCOL } : {}),
+    ...(snapshotUsesTableAcceptance(input.steps, input.outcomeManifest)
+      ? { tableAcceptanceProtocol: TABLE_ACCEPTANCE_PROTOCOL } : {}),
     moduleManifest: input.moduleManifest ?? undefined,
     ...(input.moduleManifest?.candidateGroups?.length
       ? { candidateGroups: { groups: input.moduleManifest.candidateGroups } }

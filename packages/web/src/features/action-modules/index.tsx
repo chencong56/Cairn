@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useAssistantCollectionContext } from '@/features/assistant/use-assistant-context-binding'
 import {
   keepPreviousData,
   useQuery,
@@ -160,6 +161,7 @@ export function ActionModulesPage() {
     pagination.pageSize,
   ])
 
+  useAssistantCollectionContext('action-module', queryParam)
   const modulesQuery = useQuery({
     queryKey: ['action-modules', queryParam],
     queryFn: () => fetchActionModules(queryParam),

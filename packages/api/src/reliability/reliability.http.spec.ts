@@ -34,6 +34,7 @@ vi.mock('@cairn/db', async (importOriginal) => {
 const mockIncident: ReliabilityIncidentDto = {
   id: incidentId,
   targetId,
+  ruleVersion: 1,
   groupingKey: `g_test_key`,
   scopeDigest: `target:${targetId}`,
   severity: 'P3',

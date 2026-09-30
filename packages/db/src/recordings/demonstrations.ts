@@ -283,7 +283,21 @@ export async function previewDemonstrationImport(
   return (await loadPreview(db, scenarioId, body, actorId, false)).preview
 }
 
-function receiptDto(row: RecordingImportReceiptRow): RecordingImportReceipt {
+function receiptDto(
+  row: Pick<
+    RecordingImportReceiptRow,
+    | 'id'
+    | 'scenarioId'
+    | 'recordingDraftId'
+    | 'sourceDigest'
+    | 'normalizerVersion'
+    | 'baseRevision'
+    | 'newRevision'
+    | 'sourceMap'
+    | 'demonstration'
+    | 'createdAt'
+  >,
+): RecordingImportReceipt {
   return recordingImportReceiptSchema.parse({
     id: row.id,
     scenarioId: row.scenarioId,

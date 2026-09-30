@@ -1,3 +1,4 @@
+import { RecordingProposal } from './recording-proposal'
 import { useNavigate } from '@tanstack/react-router'
 import {
   TARGET_CONFIG_FORM_FIELDS,
@@ -54,6 +55,34 @@ const FIELD_LABELS: Record<string, string> = {
   effect: '操作影响',
   from: '引用来源',
   fromField: '引用字段',
+}
+
+const ANALYSIS_SCOPE_LABELS: Record<string, string> = {
+  search: '搜索', q: '搜索', targetId: '目标', scenarioId: '场景', suiteId: '场景集',
+  recordingId: '录制', batchId: '批量任务', actionModuleId: '动作模块',
+  hasPending: '仅待处理', imported: '已回填', status: '状态', consumerKey: '任务类型',
+  from: '开始时间', to: '结束时间', revision: '草稿修订',
+  scannedScenarios: '已读取场景', totalSteps: '已读取步骤',
+}
+
+const SOURCE_PATHS: Record<string, string> = { scenario: 'scenarios', suite: 'suites', actionModule: 'action-modules', recording: 'recordings', schedule: 'schedules', batch: 'batches', dataset: 'datasets', run: 'runs', target: 'targets' }
+const SOURCE_LABELS: Record<string, string> = { scenario: '场景', suite: '场景集', actionModule: '动作模块', recording: '录制', schedule: '计划', batch: '批量任务', dataset: '数据集', run: '运行', target: '目标' }
+function sourceHref(kind: string, id: string) {
+  return SOURCE_PATHS[kind] ? `/${SOURCE_PATHS[kind]}${kind === 'schedule' || kind === 'dataset' ? '' : `/${id}`}` : undefined
+}
+
+function AnalysisScope({ scope }: { scope: Record<string, unknown> }) {
+  const entries = Object.keys(ANALYSIS_SCOPE_LABELS).map((key) => [key, scope[key]] as const).filter(([, value]) =>
+    value !== '' && ['string', 'number', 'boolean'].includes(typeof value),
+  )
+  return <p className='break-words text-label text-text-muted' data-testid='analysis-scope'>
+    本次查询范围：{entries.length ? entries.map(([key, value]) => {
+      const display = typeof value === 'boolean' ? (value ? '是' : '否')
+        : (key === 'from' || key === 'to') && typeof value === 'string' ? formatSourceTime(value)
+          : String(value)
+      return `${ANALYSIS_SCOPE_LABELS[key]}「${display}」`
+    }).join('；') : '当前问题的授权范围（未附加筛选）'}
+  </p>
 }
 
 function DiffFieldHeading({ fieldPath }: { fieldPath: string[] }) {
@@ -664,6 +693,8 @@ function getAvailabilityInfo(availability?: string) {
 
 export function AssistantResultView({
   result,
+  conversationId,
+  turnId,
   onAdopt,
   onRollback,
   onPreviewStep,
@@ -676,6 +707,8 @@ export function AssistantResultView({
   canRollback = true,
 }: {
   result: AssistantResult
+  conversationId?: string
+  turnId?: string
   onAdopt?: (proposal: AssistantProposal | AssistantAuthoringProposal | TargetFormProposal) => void
   onRollback?: (proposal: AssistantProposal | AssistantAuthoringProposal | TargetFormProposal) => void
   onPreviewStep?: (stepId: string) => void
@@ -696,6 +729,9 @@ export function AssistantResultView({
     } else {
       onNavigate?.()
     }
+  }
+  if (result.kind === 'recording_proposal') {
+    return conversationId && turnId ? <RecordingProposal key={turnId} result={result} conversationId={conversationId} turnId={turnId} go={go} /> : <p>请在对话中打开录制提案。</p>
   }
   if (result.kind === 'clarify') {
     return (
@@ -1259,6 +1295,25 @@ export function AssistantResultView({
               </p>
             ) : null}
 
+            {result.analysis ? <div className='space-y-2' data-testid='analysis-findings'>
+              <AnalysisScope scope={result.analysis.scope} />
+              <p className='text-label text-text-muted'>{result.analysis.coverage === 'complete' ? '已覆盖当前查询范围' : '部分覆盖，请留意缺失项'}{result.analysis.sampleSize != null ? ` · 样本 ${result.analysis.sampleSize}` : ''}</p>
+              {result.analysis.findings.map((finding, index) => <div key={index} className='rounded-md bg-surface-subtle p-2 text-small'>
+                <span className='font-medium'>{finding.severity === 'error' ? '需要修正' : finding.severity === 'warning' ? '需要核对' : '事实核对'}</span><p className='mt-1 break-words'>{finding.message}</p>
+                <div className='mt-1 flex flex-wrap gap-x-3 gap-y-1'>{finding.citationRefs.map((ref, sourceIndex) => {
+                  const source = result.sourceManifest?.sources.find((item) => `${item.kind}:${item.id}` === ref)
+                  const href = source && sourceHref(source.kind, source.id)
+                  return href && source ? <Button key={ref} variant='link' size='sm' className='h-7 px-0 text-label' onClick={() => go(href)}>查看{SOURCE_LABELS[source.kind]}来源{finding.citationRefs.length > 1 ? ` ${sourceIndex + 1}` : ''}</Button> : null
+                })}</div>
+              </div>)}
+            </div> : null}
+            {result.sourceManifest?.sources.length ? <details className='text-small'><summary className='cursor-pointer text-text-muted'>查看依据（{result.sourceManifest.sources.length} 项）</summary><div className='mt-2 flex flex-wrap gap-2'>
+              {result.sourceManifest.sources.map((source) => {
+                const listOnly = source.kind === 'schedule' || source.kind === 'dataset'
+                const href = sourceHref(source.kind, source.id)
+                return href ? <Button key={`${source.kind}:${source.id}:${source.version ?? ''}`} variant='outline' size='sm' onClick={() => go(href)}>{SOURCE_LABELS[source.kind]}{listOnly ? '列表' : ''} · {source.id.slice(0, 8)}</Button> : <span key={`${source.kind}:${source.id}`} className='text-caption text-text-muted'>辅助依据 · {source.id.slice(0, 8)}</span>
+              })}
+            </div></details> : null}
             {result.claims?.length ? (
               <div className='space-y-2 pt-1' data-testid='knowledge-claims-list'>
                 {result.claims.map((claim, idx) => (

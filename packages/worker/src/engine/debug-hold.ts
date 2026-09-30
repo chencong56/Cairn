@@ -10,12 +10,18 @@ export class DebugHoldRegistry {
     {
       resolve: (value: DebugResumeRequest | 'timeout' | 'cancelled') => void
       timer: ReturnType<typeof setTimeout>
+      holdId?: string
     }
   >()
   private readonly pauseRequested = new Set<string>()
   private readonly stopBeforeStep = new Map<string, string>()
 
-  wait(runId: string, timeoutMs: number, signal?: AbortSignal): Promise<DebugResumeRequest | 'timeout' | 'cancelled'> {
+  wait(
+    runId: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+    holdId?: string,
+  ): Promise<DebugResumeRequest | 'timeout' | 'cancelled'> {
     this.cancel(runId)
     return new Promise((resolve) => {
       const finish = (value: DebugResumeRequest | 'timeout' | 'cancelled') => {
@@ -28,6 +34,7 @@ export class DebugHoldRegistry {
       this.waits.set(runId, {
         resolve: finish,
         timer,
+        holdId,
       })
       if (signal?.aborted) {
         finish('cancelled')
@@ -35,6 +42,18 @@ export class DebugHoldRegistry {
       }
       signal?.addEventListener('abort', onAbort, { once: true })
     })
+  }
+
+  renew(runId: string, holdId: string, newHoldExpiresAt: string): boolean {
+    const wait = this.waits.get(runId)
+    if (!wait) return false
+    if (wait.holdId && wait.holdId !== holdId) return false
+    clearTimeout(wait.timer)
+    const remainingMs = Math.max(0, new Date(newHoldExpiresAt).getTime() - Date.now())
+    wait.timer = setTimeout(() => {
+      wait.resolve('timeout')
+    }, remainingMs)
+    return true
   }
 
   resume(runId: string, action: DebugResumeRequest): boolean {

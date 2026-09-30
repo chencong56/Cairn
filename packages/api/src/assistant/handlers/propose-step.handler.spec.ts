@@ -5,6 +5,7 @@ import {
 } from '@cairn/shared'
 
 vi.mock('@cairn/db', () => ({
+  expandWithLoader: vi.fn(async () => ({ ok: true, diagnostics: [] })),
   getScenario: vi.fn(),
   getTargetKnowledgeContext: vi.fn(),
   getMapAssetDetail: vi.fn(),
@@ -564,5 +565,46 @@ describe('propose-step.handler 场景编排结构化提议', () => {
     expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({
       code: 'MAP_SOURCE_USER_SELECTOR_UNVERIFIED', severity: 'warning',
     })]))
+  })
+
+  it('点击在此步骤后新增步骤未说明业务动作时返回澄清', async () => {
+    const result = await handleScenarioProposeStep(mockContext({
+      question: '在此步骤后新增步骤',
+      slots: {
+        scenarioId: '11111111-2222-3333-4444-555555555555',
+        draftRevision: 2,
+        stepId: '11111111-1111-4111-8111-111111111111',
+      },
+    }))
+    expect(result).toMatchObject({
+      kind: 'clarify',
+      missingFields: ['stepAction'],
+    })
+  })
+
+  it('锚点步骤已在定义中删除时返回澄清而不是静默生成', async () => {
+    const result = await handleScenarioProposeStep(mockContext({
+      question: '在此步骤后打开 https://example.com/new',
+      slots: {
+        scenarioId: '11111111-2222-3333-4444-555555555555',
+        draftRevision: 2,
+        stepId: '99999999-9999-4999-8999-999999999999',
+      },
+    }))
+    expect(result).toMatchObject({
+      kind: 'clarify',
+      missingFields: ['stepId'],
+    })
+  })
+
+  it('追加末尾步骤时正确定位到最后一个顶层节点', async () => {
+    const result = await handleScenarioProposeStep(mockContext({
+      question: '打开 https://example.com/tail',
+    }))
+    expect(result.kind).toBe('authoring_proposal')
+    if (result.kind === 'authoring_proposal') {
+      expect(result.operations[0]!.kind).toBe('insert_step')
+      expect((result.operations[0] as any).anchorStepId).toBe('22222222-2222-4222-8222-222222222222')
+    }
   })
 })

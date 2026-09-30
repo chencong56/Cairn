@@ -195,6 +195,9 @@ export const stepRuns = cairnSchema.table(
     outcomeStatus: text('outcome_status').notNull().default('NOT_EVALUATED').$type<OutcomeStatus>(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
+    moduleId: uuid('module_id'),
+    implementationKey: text('implementation_key'),
+    internalStepId: text('internal_step_id'),
   },
   (t) => [
     uniqueIndex('step_runs_run_step_scope_idx').on(t.runId, t.stepId, t.scopePath),

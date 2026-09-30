@@ -318,6 +318,9 @@ it('同账号并发事件的序号唯一且连续', async () => {
 
 it('受控重启不建立维护租约，并延续保留截止', async () => {
   const s = await idle()
+  // 前任是 SHARED：重建必须延续隔离模式、槽位与前实例身份，不得回落 DEDICATED
+  const { browserSessions: bs } = schemaFor(h.db)
+  await h.db.update(bs).set({ isolation: 'SHARED' }).where(eq(bs.id, s.id))
   await setSessionRetention(h.db, {
     key,
     body: { action: 'set', retainSeconds: 600 },
@@ -356,6 +359,9 @@ it('受控重启不建立维护租约，并延续保留截止', async () => {
   const next = (await getSessionById(h.db, created.session.id))!
   expect(next.retainUntil?.toISOString()).toBe(closing.retainUntil?.toISOString())
   expect(next.generation).toBe(s.generation + 1)
+  expect(next.isolation).toBe('SHARED')
+  expect(next.accountSlot).toBe(s.accountSlot)
+  expect(next.predecessorSessionId ?? null).toBe(s.id)
   expect(await findActiveLeaseRow(h.db, next.id)).toBeNull()
 })
 

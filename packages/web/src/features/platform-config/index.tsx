@@ -38,6 +38,7 @@ import { EvidenceFields } from './evidence-fields'
 import { ExecutionFields } from './execution-fields'
 import { cloneDocument, formatTime } from './helpers'
 import { SOURCE_LABELS } from './labels'
+import { BrowserPrewarmFields } from './browser-prewarm-fields'
 import { PlatformAiFields } from './platform-ai-fields'
 import { RevisionPanel } from './revision-panel'
 import { SessionFields } from './session-fields'
@@ -47,6 +48,7 @@ const TABS = [
   { id: 'platform-ai', title: '平台 AI' },
   { id: 'execution', title: '执行默认值' },
   { id: 'session', title: '会话策略' },
+  { id: 'browser-prewarm', title: '浏览器预热' },
   { id: 'evidence', title: '证据策略' },
   { id: 'revisions', title: '变更记录' },
 ] as const
@@ -453,6 +455,9 @@ export function PlatformConfigPage() {
                   </TabsContent>
                   <TabsContent value='session'>
                     <SessionFields canWrite={canWrite && !busy} />
+                  </TabsContent>
+                  <TabsContent value='browser-prewarm'>
+                    <BrowserPrewarmFields canWrite={canWrite && !busy} control={form.control} />
                   </TabsContent>
                   <TabsContent value='evidence'>
                     <EvidenceFields canWrite={canWrite && !busy} />

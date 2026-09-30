@@ -9,11 +9,14 @@ import {
   authControlInputBodySchema,
   authControlTokenBodySchema,
   debugActionSchema,
+  debugPresenceBodySchema,
   entityIdSchema,
   observeOperationSchema,
   requireInternalSecret,
   resumeAuthBodySchema,
   structureObservationSchema,
+  tableObservationSchema,
+  tableDiscoveryObservationSchema,
   targetObservationSchema,
   verifyInternalHeaders,
   verifyNodeHealthHeaders,
@@ -211,7 +214,11 @@ async function handleRequest(
     const result = await ctx.sessions.observeRun({ runId, actorId, op: body })
     const parsed = body.op === 'structure'
       ? structureObservationSchema.parse(result)
-      : targetObservationSchema.parse(result)
+      : body.op === 'table'
+        ? body.subOp === 'discover'
+          ? tableDiscoveryObservationSchema.parse(result)
+          : tableObservationSchema.parse(result)
+        : targetObservationSchema.parse(result)
     writeJson(res, 200, parsed)
     return
   }
@@ -223,6 +230,15 @@ async function handleRequest(
     const body = debugActionSchema.parse(raw ? JSON.parse(raw) : {})
     ctx.sessions.invalidateObserveGrant(runId)
     writeJson(res, 200, await ctx.engine.resumeDebug(runId, body, actorId))
+    return
+  }
+  if (req.method === 'POST' && url.pathname === workerRunsInternalPath('/debug-presence')) {
+    if (!ctx.engine) {
+      writeJson(res, 503, { code: 'WORKER_UNREACHABLE', message: '执行引擎未就绪' })
+      return
+    }
+    const body = debugPresenceBodySchema.parse(raw ? JSON.parse(raw) : {})
+    writeJson(res, 200, await ctx.engine.renewDebugPresence(runId, body))
     return
   }
   writeJson(res, 404, { code: 'NOT_FOUND', message: '未知内部入口' })

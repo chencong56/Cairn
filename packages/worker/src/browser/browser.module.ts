@@ -28,6 +28,10 @@ import { MAP_OBSERVATION_PORT } from '../engine/ports'
           defaultLeaseTtlSeconds: env.CAIRN_SESSION_LEASE_TTL_SECONDS,
           defaultAuthWaitSeconds: env.CAIRN_SESSION_AUTH_WAIT_SECONDS,
           heartbeatMs: env.CAIRN_SESSION_HEARTBEAT_MS,
+          poolMaxSharedHosts: env.CAIRN_BROWSER_MAX_HOSTS,
+          browserMemoryBudgetMb: env.CAIRN_BROWSER_MEMORY_BUDGET_MB,
+          poolMaxContextsPerHost: env.CAIRN_BROWSER_MAX_CONTEXTS_PER_HOST,
+          poolTargetSpread: env.CAIRN_BROWSER_TARGET_SPREAD,
         }
       },
     },

@@ -375,6 +375,7 @@ export async function runLoop(
       frame: initialFrame,
       bodySteps,
       stepIndices,
+      snapshot,
     })
 
     const currentFrame = { ...(startedIter.iteration.frame as Record<string, JsonValue>) }

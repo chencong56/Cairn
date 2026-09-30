@@ -4,6 +4,7 @@ import {
   isAuthoringDocumentV2,
   normalizeAuthoringDocument,
   walkAuthoringNodes,
+  parseIncidentMemberRef,
   type BatchUpgradeBody,
   type ExecutionActor,
   type ImpactedAssetDto,
@@ -70,31 +71,24 @@ export async function getIncidentImpactSnapshot(
     .orderBy(desc(reliabilityIncidentMembers.joinedAt))
     .limit(20)
 
+  const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
   const memberRunIds: string[] = []
   const memberRunMap = new Map<string, { memberRef: string; joinedAt: Date }>()
-  const memberRunIdByRef = new Map<string, string>()
-  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
   for (const m of memberRows) {
-    const rawRef = m.memberRef
-    let runId = rawRef
-    if (rawRef.startsWith('run:')) {
-      const rest = rawRef.slice(4)
-      runId = rest.includes(':') ? rest.split(':')[0]! : rest
-    } else if (rawRef.includes(':')) {
-      const parts = rawRef.split(':')
-      runId = parts[1] || parts[0] || rawRef
-    }
-    if (UUID_REGEX.test(runId)) {
-      runId = runId.toLowerCase()
-      memberRunIds.push(runId)
-      memberRunMap.set(runId, { memberRef: rawRef, joinedAt: m.joinedAt })
-      memberRunIdByRef.set(rawRef, runId)
+    const parsed = parseIncidentMemberRef(m.memberRef)
+    const runId = parsed?.runId ?? (UUID_REGEX.test(m.memberRef) ? m.memberRef : null)
+    if (runId && UUID_REGEX.test(runId)) {
+      const lower = runId.toLowerCase()
+      memberRunIds.push(lower)
+      memberRunMap.set(lower, { memberRef: m.memberRef, joinedAt: m.joinedAt })
     }
   }
 
   const impactedRuns: IncidentImpactRunDto[] = []
+  const foundRunIds = new Set<string>()
   const foreignRunIds = new Set<string>()
+
   if (memberRunIds.length > 0) {
     const runRows = await db
       .select({
@@ -108,11 +102,13 @@ export async function getIncidentImpactSnapshot(
       .where(inArray(runs.id, memberRunIds))
 
     for (const r of runRows) {
-      const memberInfo = memberRunMap.get(r.id)
+      const lower = r.id.toLowerCase()
+      const memberInfo = memberRunMap.get(lower)
       if (r.targetId !== incident.targetId) {
-        foreignRunIds.add(r.id)
+        foreignRunIds.add(lower)
         continue
       }
+      foundRunIds.add(lower)
       impactedRuns.push({
         runId: r.id,
         occurredAt: (memberInfo?.joinedAt ?? r.createdAt).toISOString(),
@@ -122,24 +118,62 @@ export async function getIncidentImpactSnapshot(
     }
   }
 
-  // If member rows had no matching run rows (e.g. mock members), synthesize entries
-  if (impactedRuns.length === 0 && memberRows.length > 0) {
-    for (const m of memberRows) {
-      if (foreignRunIds.has(memberRunIdByRef.get(m.memberRef) ?? '')) continue
+  // 查不到的成员返回真实状态覆盖缺口，不合成失败 Run (排除外目标成员)
+  for (const m of memberRows) {
+    const parsed = parseIncidentMemberRef(m.memberRef)
+    const runId = parsed?.runId ?? (UUID_REGEX.test(m.memberRef) ? m.memberRef : null)
+    const lower = runId?.toLowerCase()
+    if (lower && foreignRunIds.has(lower)) {
+      continue
+    }
+    if (!lower || !foundRunIds.has(lower)) {
       impactedRuns.push({
         runId: m.memberRef,
         occurredAt: m.joinedAt.toISOString(),
-        executionStatus: 'FAILED',
-        failureReason: '退化异常触发',
+        executionStatus: 'UNKNOWN',
+        failureReason: '历史运行事实已清理或不可用',
       })
     }
   }
 
-  // 3. Find target's modules and their latest versions
+  // 3. 仅对动作模块事件分析下游影响（场景私有步骤和账号域事件不生成模块批量升级建议）
+  // 兼容：旧规则（ruleVersion !== 2 或未定义 assetKind）保留全量扫描
+  const isV2 = incident.ruleVersion === 2
+  if (isV2 && (incident.assetKind !== 'action_module' || !incident.assetId)) {
+    return {
+      incidentId,
+      targetId: incident.targetId,
+      calculatedAt: new Date().toISOString(),
+      impactedRuns,
+      affectedAssets: [],
+      summary: {
+        totalScenarios: 0,
+        confirmedCount: 0,
+        possibleCount: 0,
+        gapsCount: 0,
+        upgradeableCount: 0,
+        blockedCount: 0,
+        alreadyLatestCount: 0,
+      },
+    }
+  }
+
+  // 仅扫描 incident.assetId 对应的模块（旧规则扫描该 target 下所有模块）
+  const moduleCondition = isV2 && incident.assetId
+    ? and(
+        eq(actionModules.id, incident.assetId),
+        eq(actionModules.targetId, incident.targetId),
+        isNull(actionModules.deletedAt),
+      )
+    : and(
+        eq(actionModules.targetId, incident.targetId),
+        isNull(actionModules.deletedAt),
+      )
+
   const targetModules = await db
     .select()
     .from(actionModules)
-    .where(and(eq(actionModules.targetId, incident.targetId), isNull(actionModules.deletedAt)))
+    .where(moduleCondition)
 
   const moduleIds = targetModules.map((m) => m.id)
   const moduleMap = new Map(targetModules.map((m) => [m.id, m]))
@@ -401,7 +435,12 @@ export async function executeMaintenanceBatchUpgrade(
 
   // Verify incident exists
   const [incident] = await db
-    .select({ id: reliabilityIncidents.id, targetId: reliabilityIncidents.targetId })
+    .select({
+      id: reliabilityIncidents.id,
+      targetId: reliabilityIncidents.targetId,
+      assetKind: reliabilityIncidents.assetKind,
+      assetId: reliabilityIncidents.assetId,
+    })
     .from(reliabilityIncidents)
     .where(eq(reliabilityIncidents.id, input.incidentId))
     .limit(1)
@@ -409,14 +448,16 @@ export async function executeMaintenanceBatchUpgrade(
   if (!incident) {
     throw notFound(RELIABILITY_ERROR_CODES.INCIDENT_NOT_FOUND, '未找到指定的可靠性事件')
   }
-  if (input.actorId) await assertTargetPermission(db, input.actorId, incident.targetId, 'reliability:triage')
-
   const [module] = await db.select({ targetId: actionModules.targetId })
     .from(actionModules).where(eq(actionModules.id, input.moduleId)).limit(1)
   if (module && input.actorId) await assertTargetPermission(db, input.actorId, module.targetId, 'reliability:triage')
   if (module && module.targetId !== incident.targetId) {
     throw conflict(RELIABILITY_ERROR_CODES.INCIDENT_TARGET_MISMATCH, '批量升级模块与事件不属于同一目标')
   }
+  if (incident.assetKind !== 'action_module' || (incident.assetId && incident.assetId !== input.moduleId)) {
+    throw conflict(RELIABILITY_ERROR_CODES.INVALID_INCIDENT_ASSET, '批量升级仅支持该事件所关联的动作模块')
+  }
+  if (input.actorId) await assertTargetPermission(db, input.actorId, incident.targetId, 'reliability:triage')
 
   const scenarioRows = input.scenarioIds.length
     ? await db.select({ id: scenarios.id, name: scenarios.name, targetId: scenarios.targetId })

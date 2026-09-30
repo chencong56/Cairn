@@ -10,6 +10,7 @@ import {
   applyStepProposal,
   authoringDocumentDigest,
   authoringSteps,
+  authoringNodeId,
   canonicalJson,
   compareCompileDiagnostics,
   entityIdSchema,
@@ -19,11 +20,13 @@ import {
   parseScenarioDocument,
   scenarioDocumentDigest,
   scenarioFactsForModel,
+  stepSchema,
   targetDescriptorSchema,
   toAuthoringDocumentV2,
+  locateNode,
 } from '@cairn/shared'
 import { applyAuthoringOperations, compileForAssistant } from '@cairn/authoring'
-import { DomainError, getMapAssetDetail, getScenario, getTargetKnowledgeContext, newId } from '@cairn/db'
+import { DomainError, expandWithLoader, getMapAssetDetail, getScenario, getTargetKnowledgeContext, newId } from '@cairn/db'
 import type { AssistantCapabilityHandlerContext } from '../registry.js'
 import { buildAuthoringSlice } from '../context-assembler.js'
 import { generateScenarioAuthoringProposal, generateStepChange } from '../model-session.js'
@@ -376,6 +379,27 @@ export async function handleScenarioProposeStep(
     }
   }
 
+  if (stepId && !locateNode(v2Doc, stepId)) {
+    return {
+      kind: 'clarify',
+      question: `指定的锚点步骤（ID: ${stepId}）在当前已保存定义中不存在，可能已被删除或更新。请重新选择锚点步骤。`,
+      missingFields: ['stepId'],
+    }
+  }
+
+  const pureInsertIntentWithoutAction =
+    /^(?:在(?:此|当前)步骤后)?(?:为场景)?(?:追加末尾|新增)(?:步骤)?$/.test(question.trim()) ||
+    question.trim() === '在此步骤后新增步骤' ||
+    question.trim() === '为场景追加末尾步骤' ||
+    question.trim() === '新增步骤'
+  if (pureInsertIntentWithoutAction) {
+    return {
+      kind: 'clarify',
+      question: '请指明要新增的步骤类型及操作内容（例如打开页面、填写表单、点击元素或设置断言）。',
+      missingFields: ['stepAction'],
+    }
+  }
+
   if (isV2) {
     // V2 结构化编排提议处理
     let rawOps: AuthoringOperation[] = []
@@ -432,21 +456,16 @@ export async function handleScenarioProposeStep(
       }
     } else if (session) {
       await onProgress?.('generating', '大模型正在生成结构化编排操作...')
-      const flatDoc: ScenarioDocument = {
-        schemaVersion: 1,
-        inputs: v2Doc.inputs,
-        steps,
-      }
       const generated = typeof (session as any).generateScenarioAuthoringProposal === 'function'
         ? await (session as any).generateScenarioAuthoringProposal(
             question,
-            { ...scenarioFactsForModel(flatDoc, stepId || undefined), targetKnowledge },
+            { ...scenarioFactsForModel(v2Doc, stepId || undefined), targetKnowledge },
             signal,
           )
         : await generateScenarioAuthoringProposal(
             session,
             question,
-            { ...scenarioFactsForModel(flatDoc, stepId || undefined), targetKnowledge },
+            { ...scenarioFactsForModel(v2Doc, stepId || undefined), targetKnowledge },
             signal,
           )
 
@@ -506,30 +525,30 @@ export async function handleScenarioProposeStep(
             }
           }
         }
-      } else {
-        // 无 stepId 时的模式匹配
-        const urlMatch = /(https?:\/\/[^\s"'<>]+)/.exec(question)
-        if (urlMatch) {
-          rawOps.push({
-            kind: 'insert_step',
+      }
+
+      const urlMatch = /(https?:\/\/[^\s"'<>]+)/.exec(question)
+      if (urlMatch && rawOps.length === 0) {
+        rawOps.push({
+          kind: 'insert_step',
+          id: newId(),
+          anchorStepId: stepId,
+          step: {
             id: newId(),
-            step: {
-              id: newId(),
-              name: '打开指定页面',
-              type: 'navigate',
-              effectType: 'READ_ONLY',
-              input: { url: urlMatch[1]! },
-            },
+            name: '打开指定页面',
+            type: 'navigate',
+            effectType: 'READ_ONLY',
+            input: { url: urlMatch[1]! },
+          },
+        })
+      } else if (!stepId && (question.includes('删') || question.includes('移除') || question.includes('不要')) && question.includes('等待')) {
+        const waitStep = steps.find((s) => s.type === 'wait')
+        if (waitStep) {
+          rawOps.push({
+            kind: 'remove_step',
+            id: newId(),
+            stepId: waitStep.id,
           })
-        } else if ((question.includes('删') || question.includes('移除') || question.includes('不要')) && question.includes('等待')) {
-          const waitStep = steps.find((s) => s.type === 'wait')
-          if (waitStep) {
-            rawOps.push({
-              kind: 'remove_step',
-              id: newId(),
-              stepId: waitStep.id,
-            })
-          }
         }
       }
     }
@@ -586,13 +605,54 @@ export async function handleScenarioProposeStep(
         const isUuid = entityIdSchema.safeParse(rawStepId).success
         const realStepId = isUuid ? rawStepId : newId()
         idMap.set(rawStepId, realStepId)
+
+        let anchorId = op.anchorStepId ? (idMap.get(op.anchorStepId) ?? op.anchorStepId) : undefined
+        let parentBlockId = op.parentBlockId
+        let branchKey = op.branchKey
+
+        const appendToScene = /(?:场景|流程).{0,15}(?:末尾|最后|结尾)|(?:末尾|最后|结尾).{0,10}(?:追加|新增|添加)/.test(question)
+        if (appendToScene && (!op.anchorStepId || !idMap.has(op.anchorStepId))) {
+          anchorId = v2Doc.nodes.length ? authoringNodeId(v2Doc.nodes[v2Doc.nodes.length - 1]!) : undefined
+          parentBlockId = undefined
+          branchKey = undefined
+        } else if (!anchorId && stepId) {
+          anchorId = stepId
+        }
+
+        // If we have an anchorId, locate it in v2Doc to derive parentBlockId and branchKey
+        if (anchorId) {
+          const anchorLoc = locateNode(v2Doc, anchorId)
+          if (anchorLoc) {
+            parentBlockId = anchorLoc.parentId
+            branchKey = anchorLoc.branchKey
+          }
+        } else if (!parentBlockId && v2Doc.nodes.length > 0) {
+          // 追加到场景末尾: 明确解析为顶层节点列表尾部
+          const lastTopNode = v2Doc.nodes[v2Doc.nodes.length - 1]
+          if (lastTopNode) {
+            const lastId =
+              lastTopNode.kind === 'step'
+                ? lastTopNode.step.id
+                : lastTopNode.kind === 'block'
+                ? lastTopNode.blockId
+                : lastTopNode.invocationId
+            anchorId = lastId
+            parentBlockId = undefined
+            branchKey = undefined
+          }
+        }
+
         return {
           ...op,
           id: opId,
+          anchorStepId: anchorId,
+          parentBlockId,
+          branchKey,
           step: {
             ...op.step,
+            effectType: (op.step as { effectType?: string }).effectType ?? (['wait', 'extract', 'assert', 'ai_extract', 'ai_assert'].includes(op.step.type) ? 'READ_ONLY' : 'SIDE_EFFECT'),
             id: realStepId,
-          },
+          } as typeof op.step,
         }
       }
       return {
@@ -606,6 +666,15 @@ export async function handleScenarioProposeStep(
       } as AuthoringOperation
     })
 
+    for (const op of sanitizedOps) {
+      if (op.kind !== 'insert_step') continue
+      const parsed = stepSchema.safeParse(op.step)
+      if (!parsed.success) return {
+        kind: 'clarify', question: '候选步骤缺少有效的动作配置，请补充具体操作或目标后重新生成。', missingFields: ['stepConfiguration'],
+      }
+      op.step = parsed.data
+    }
+
     await onProgress?.('validating', '正在验证结构化草稿原子应用与静态预检...')
     const applied = applyAuthoringOperations(v2Doc, sanitizedOps)
     if (!applied.ok) {
@@ -617,16 +686,8 @@ export async function handleScenarioProposeStep(
     }
 
     // 静态预检与编译器回归比对
-    const baseline = compileForAssistant({
-      schemaVersion: 1,
-      inputs: (v2Doc.inputs ?? []) as any,
-      steps: authoringSteps(v2Doc),
-    })
-    const next = compileForAssistant({
-      schemaVersion: 1,
-      inputs: (applied.document.inputs ?? []) as any,
-      steps: authoringSteps(applied.document),
-    })
+    const baseline = await expandWithLoader(db, detail.targetId, v2Doc, 'preview', true)
+    const next = await expandWithLoader(db, detail.targetId, applied.document, 'preview', true)
     const compared = compareCompileDiagnostics(baseline.diagnostics, next.diagnostics)
 
     if (compared.added.some((d) => d.severity === 'error')) {

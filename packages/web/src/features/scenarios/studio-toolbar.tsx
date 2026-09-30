@@ -23,7 +23,6 @@ import type {
   TargetDto,
 } from '@cairn/shared'
 import { Button } from '@/components/ui/button'
-import { StatusBadge } from '@/components/status-badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -205,34 +204,53 @@ export function StudioToolbar({
   }, [])
 
   // 自适应响应式断点：
-  // 1. 展开快捷按钮门槛：需容纳返回+标题+胶囊(~640px) + 核心操作(~320px) + 2个次要按钮(~180px) ≈ 1140px
-  // 挂载知识助手后容器通常被压缩至 800px~1250px，自动收起快捷操作至「更多」
-  const showExpandedShortcuts = containerWidth >= 1140
-  // 2. 胶囊静态说明文字（"目标系统"、"已发布"、"草稿"）
-  const showDetailedPill = containerWidth >= 1050
-  // 3. 返回按钮文字（过窄时仅留图标）
-  const showBackText = containerWidth >= 840
-  // 4. 上下文状态胶囊（极窄时收起胶囊保障标题和主操作）
-  const showPill = containerWidth >= 600
+  // 上下文状态微徽章（极窄时收起胶囊保障标题和主操作）
+  const showPill = containerWidth >= 540
 
   return (
     <header
       ref={headerRef}
       className='flex h-14 shrink-0 items-center justify-between border-b border-border-divider bg-card px-3 sm:px-4 shadow-sm gap-2 overflow-hidden'
     >
-      {/* 左侧：返回、场景标识与状态胶囊 */}
-      <div className='flex min-w-0 flex-1 items-center gap-2 sm:gap-3 overflow-hidden'>
+      {/* 左侧：返回、目标系统父级面包屑、场景标识与极简微状态徽章 */}
+      <div className='flex min-w-0 flex-1 items-center gap-2 sm:gap-2.5 overflow-hidden'>
         <Link
           to='/scenarios'
-          className='inline-flex shrink-0 items-center gap-1.5 text-body text-muted-foreground hover:text-foreground'
+          className='inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors'
           onClick={onLeave}
           title='返回场景编排'
+          aria-label='返回场景编排'
         >
           <ArrowLeft className='size-4' />
-          {showBackText ? <span>返回场景编排</span> : null}
         </Link>
         <span className='h-4 w-px bg-border-divider shrink-0' />
-        <div className='flex min-w-0 shrink items-center gap-1.5 max-w-[180px] sm:max-w-[240px] md:max-w-[320px] xl:max-w-[420px] 2xl:max-w-[560px]'>
+
+        {/* 目标系统父级面包屑 */}
+        {scenario ? (
+          <div className='flex min-w-0 items-center gap-1.5 shrink-0'>
+            {canReadTarget ? (
+              <Link
+                to='/targets/$targetId'
+                params={{ targetId: scenario.targetId }}
+                className='max-w-[90px] sm:max-w-[130px] md:max-w-[160px] truncate text-label font-medium text-muted-foreground hover:text-link hover:underline transition-colors'
+                title={`目标系统：${target?.name ?? scenario.targetId}`}
+              >
+                {target?.name ?? scenario.targetId}
+              </Link>
+            ) : (
+              <span
+                className='max-w-[90px] sm:max-w-[130px] truncate text-label font-medium text-muted-foreground font-mono'
+                title={`目标系统：${scenario.targetId}`}
+              >
+                {scenario.targetId}
+              </span>
+            )}
+            <span className='text-muted-foreground/40 select-none'>/</span>
+          </div>
+        ) : null}
+
+        {/* 场景名称与重命名 */}
+        <div className='flex min-w-0 shrink items-center gap-1.5 max-w-[150px] sm:max-w-[200px] md:max-w-[260px] xl:max-w-[340px]'>
           {isEditingName ? (
             <div className='flex items-center gap-1 min-w-0'>
               <input
@@ -242,7 +260,7 @@ export function StudioToolbar({
                 maxLength={100}
                 disabled={savingName}
                 aria-label='场景名称输入'
-                className='h-7 w-40 sm:w-48 md:w-64 rounded-md border border-control bg-surface-control px-2 text-body font-semibold text-foreground shadow-control-focus outline-none focus:border-primary'
+                className='h-7 w-36 sm:w-48 md:w-56 rounded-md border border-control bg-surface-control px-2 text-body font-semibold text-foreground shadow-control-focus outline-none focus:border-primary'
                 onChange={(e) => setTempName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -293,49 +311,42 @@ export function StudioToolbar({
           )}
         </div>
 
-        {/* 紧凑上下文胶囊：目标系统、版本、草稿、状态 */}
+        {/* 现代微状态胶囊：版本、草稿、编译、启用指示灯 */}
         {scenario && showPill ? (
-          <div className='flex items-center gap-2 rounded-full border border-border-default bg-surface-subtle px-2.5 py-1 text-label whitespace-nowrap shrink overflow-hidden min-w-0'>
-            <div className='flex items-center gap-1 min-w-0 overflow-hidden'>
-              {showDetailedPill ? (
-                <span className='text-muted-foreground shrink-0'>目标系统</span>
-              ) : null}
-              {canReadTarget ? (
-                <Link
-                  to='/targets/$targetId'
-                  params={{ targetId: scenario.targetId }}
-                  className='max-w-[100px] md:max-w-[140px] xl:max-w-[180px] truncate font-medium text-link hover:underline'
-                  title={target?.name ?? scenario.targetId}
-                >
-                  {target?.name ?? scenario.targetId}
-                </Link>
-              ) : (
-                <span className='max-w-[90px] truncate font-mono'>{scenario.targetId}</span>
-              )}
-            </div>
-            <span className='h-3 w-px bg-border-divider shrink-0' />
-            <div className='flex items-center gap-1 shrink-0'>
-              {showDetailedPill ? (
-                <span className='text-muted-foreground'>已发布</span>
-              ) : null}
-              <span className='font-medium'>v{scenario.latestVersionNo}</span>
-            </div>
-            <span className='h-3 w-px bg-border-divider shrink-0' />
-            <div className='flex items-center gap-1 shrink-0'>
-              {showDetailedPill ? (
-                <span className='text-muted-foreground'>草稿</span>
-              ) : null}
-              <span className='font-medium'>r{revision}</span>
-            </div>
-            <StatusBadge tone={dirty || hasDraftDirty ? 'warning' : 'success'} className='shrink-0'>
-              {dirty ? '未保存' : hasDraftDirty ? '未发布' : '已同步'}
-            </StatusBadge>
+          <div
+            className='flex items-center gap-1.5 rounded-full border border-border-default/80 bg-surface-subtle px-2 py-0.5 text-caption whitespace-nowrap shrink-0 select-none'
+            title={`${scenario.latestVersionNo ? `已发布版本 v${scenario.latestVersionNo}` : '尚未发布'} · 本地草稿修订号 r${revision}${dirty ? '（未保存修改）' : hasDraftDirty ? '（未发布草稿）' : '（已同步）'}${scenario.status === 'active' ? ' · 已启用' : ' · 已停用'}`}
+            data-testid='studio-micro-badge'
+          >
+            <span className='font-mono font-medium text-foreground' title={`${scenario.latestVersionNo ? `已发布版本 v${scenario.latestVersionNo}` : '尚未发布'}`}>
+              {scenario.latestVersionNo ? `v${scenario.latestVersionNo}` : '未发布'}
+            </span>
+            <span className='text-muted-foreground/30'>·</span>
+            <span
+              className={cn('font-mono font-medium', (dirty || hasDraftDirty) && 'text-status-warning-foreground')}
+              title={`本地草稿修订号 r${revision}${dirty ? '（未保存修改）' : hasDraftDirty ? '（未发布草稿）' : ''}`}
+            >
+              r{revision}{dirty || hasDraftDirty ? '*' : ''}
+            </span>
             {compileOk === false ? (
-              <StatusBadge tone='error' className='shrink-0'>编译失败</StatusBadge>
+              <>
+                <span className='text-muted-foreground/30'>·</span>
+                <span className='text-status-error font-medium'>编译失败</span>
+              </>
             ) : null}
-            <StatusBadge tone={scenario.status === 'active' ? 'success' : 'neutral'} className='shrink-0'>
-              {SCENARIO_STATUS_LABELS[scenario.status]}
-            </StatusBadge>
+            <span className='text-muted-foreground/30'>·</span>
+            <span className='inline-flex items-center gap-1 font-medium'>
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  scenario.status === 'active' ? 'bg-status-success' : 'bg-muted-foreground/40',
+                )}
+                aria-hidden='true'
+              />
+              <span className={scenario.status === 'active' ? 'text-status-success-foreground' : 'text-muted-foreground'}>
+                {SCENARIO_STATUS_LABELS[scenario.status]}
+              </span>
+            </span>
           </div>
         ) : null}
       </div>
@@ -343,27 +354,6 @@ export function StudioToolbar({
       {/* 右侧：主次动作 */}
       {scenario ? (
         <div className='flex shrink-0 items-center gap-1.5 sm:gap-2'>
-          {/* 大屏且容器空间宽裕时快捷操作展开为独立按钮 */}
-          {showExpandedShortcuts ? (
-            <>
-              <ObjectSchedules
-                size='sm'
-                context={{
-                  type: 'scenario_run',
-                  targetId: scenario.targetId,
-                  objectId: scenario.id,
-                  name: scenario.name,
-                  versionId: scenario.latestVersionId,
-                }}
-              />
-              <Button variant='outline' size='sm' asChild>
-                <Link to='/outbound' search={{ tab: 'results', scenarioId: scenario.id }}>
-                  <Send className='size-3.5 mr-1' />
-                  结果推送
-                </Link>
-              </Button>
-            </>
-          ) : null}
 
           {onOpenAcceptance ? (
             <Button
@@ -545,33 +535,29 @@ export function StudioToolbar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align='end' className='w-52'>
-              {/* 空间不足时（如挂载侧边栏或小屏）收纳进菜单的操作 */}
-              {!showExpandedShortcuts ? (
-                <>
-                  <ObjectSchedules
-                    context={{
-                      type: 'scenario_run',
-                      targetId: scenario.targetId,
-                      objectId: scenario.id,
-                      name: scenario.name,
-                      versionId: scenario.latestVersionId,
-                    }}
-                    trigger={({ onClick }) => (
-                      <DropdownMenuItem onSelect={onClick}>
-                        <CalendarClock className='mr-2 size-3.5 shrink-0' />
-                        <span className='whitespace-nowrap'>定时任务</span>
-                      </DropdownMenuItem>
-                    )}
-                  />
-                  <DropdownMenuItem asChild>
-                    <Link to='/outbound' search={{ tab: 'results', scenarioId: scenario.id }}>
-                      <Send className='mr-2 size-3.5 shrink-0' />
-                      <span className='whitespace-nowrap'>结果推送</span>
-                    </Link>
+              {/* 运维与外部触发入口（常驻收纳，保障顶栏专注流水线编排） */}
+              <ObjectSchedules
+                context={{
+                  type: 'scenario_run',
+                  targetId: scenario.targetId,
+                  objectId: scenario.id,
+                  name: scenario.name,
+                  versionId: scenario.latestVersionId ?? undefined,
+                }}
+                trigger={({ onClick }) => (
+                  <DropdownMenuItem onSelect={onClick}>
+                    <CalendarClock className='mr-2 size-3.5 shrink-0' />
+                    <span className='whitespace-nowrap'>定时任务</span>
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              ) : null}
+                )}
+              />
+              <DropdownMenuItem asChild>
+                <Link to='/outbound' search={{ tab: 'results', scenarioId: scenario.id }}>
+                  <Send className='mr-2 size-3.5 shrink-0' />
+                  <span className='whitespace-nowrap'>结果推送</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
 
               {/* 常规操作项（场景配置在顶栏已有常驻入口，此处不再重复呈现） */}
               {canWrite && !dirty && !unpublishedDraft ? (

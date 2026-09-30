@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useAssistantCollectionContext } from '@/features/assistant/use-assistant-context-binding'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
@@ -67,6 +68,7 @@ export function BatchesPage() {
     [scenarioFilter, page.pageSize, page.cursor]
   )
 
+  useAssistantCollectionContext('batch', filters)
   const batchesQuery = useQuery({
     queryKey: ['batches', filters],
     queryFn: () => fetchBatches(filters),

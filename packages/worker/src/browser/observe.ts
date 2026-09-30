@@ -20,6 +20,7 @@ type PickedElement = {
   box?: { x: number; y: number; width: number; height: number }
   framePath: Array<{ urlPattern?: string; name?: string; selector?: string }>
   anchor?: { withinText: string; scope: 'row' | 'nearest' }
+  enclosingTable?: TargetDescriptor
 }
 
 export async function highlightOnPage(page: Page, target: TargetDescriptor): Promise<TargetObservation> {
@@ -149,6 +150,20 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
               ? `${tag}[name="${cssAttr(name)}"]`
               : shortCss(el)
           const semantic = Boolean(testId || (role && accessibleName) || label || text)
+          const tableEl = el.closest('table, [role="table"], [role="grid"], .ant-table, .el-table')
+          let enclosingTable: PickedElement['enclosingTable'] = undefined
+          if (tableEl && tableEl !== el) {
+            const tId = attr(tableEl, 'id')
+            const tSelector = tId ? `#${cssIdent(tId)}` : shortCss(tableEl)
+            const tName = attr(tableEl, 'aria-label') || undefined
+            enclosingTable = {
+              framePath: [],
+              candidates: [
+                { by: 'css', value: tSelector },
+              ],
+              ...(tName ? { semantic: tName } : {}),
+            }
+          }
           return {
             testId: testId || undefined,
             role: role || undefined,
@@ -162,6 +177,7 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
             box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
             framePath: framePathOf(el),
             anchor: nearestAnchor(el, text),
+            ...(enclosingTable ? { enclosingTable } : {}),
           }
         }
 
@@ -352,11 +368,13 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
       : undefined
 
   const unique = observation.diagnostics.candidatesTried.find((item) => item.matches === 1)
-  if (unique?.by !== 'css') return { ...observation, preview, ...(disambiguation ? { disambiguation } : {}) }
+  const enclosing = picked.enclosingTable ? { enclosingTable: picked.enclosingTable } : {}
+  if (unique?.by !== 'css') return { ...observation, preview, ...(disambiguation ? { disambiguation } : {}), ...enclosing }
   return {
     ...observation,
     preview,
     ...(disambiguation ? { disambiguation } : {}),
+    ...enclosing,
     diagnostics: {
       ...observation.diagnostics,
       framePathResolved: [...(observation.diagnostics.framePathResolved ?? []), 'fragile-css'],

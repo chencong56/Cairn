@@ -3,18 +3,25 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { Link, getRouteApi, useNavigate } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import {
+  Activity,
   AlertTriangle,
   ArrowLeft,
   Ban,
   CheckCircle2,
+  Cpu,
+  Layers,
+  Server,
   Trash2,
+  Zap,
 } from 'lucide-react'
-import type { WorkerSummary } from '@cairn/shared'
+import type { PrewarmStatusDto, WorkerSummary } from '@cairn/shared'
+import { PREWARM_MODE_LABELS } from '@/features/platform-config/labels'
 import {
   disableWorker,
   disposeWorkerSession,
   enableWorker,
   fetchWorker,
+  fetchWorkerNodeHealth,
   removeWorker,
 } from '@/lib/workers-api'
 import { useCursorPage } from '@/hooks/use-cursor-page'
@@ -70,6 +77,14 @@ export function WorkerDetailPage() {
     queryFn: () => fetchWorker(workerId, filters),
     placeholderData: keepPreviousData,
   })
+
+  const nodeHealthQuery = useQuery({
+    queryKey: ['worker-node-health', workerId],
+    queryFn: () => fetchWorkerNodeHealth(workerId),
+    refetchInterval: 15_000,
+    retry: false,
+  })
+  const prewarm = nodeHealthQuery.data?.health?.browserPrewarm
 
   const dispose = useMutation({
     mutationFn: (sessionId: string) => disposeWorkerSession(sessionId, { note: note.trim() || undefined }),
@@ -253,6 +268,9 @@ export function WorkerDetailPage() {
                 ) : null}
               </dl>
             </section>
+            {prewarm ? (
+              <WorkerPrewarmSection prewarm={prewarm} isRefreshing={nodeHealthQuery.isFetching} />
+            ) : null}
             <section className='overflow-hidden rounded-lg border border-border-card bg-card shadow-card'>
               <div className='border-b border-border-divider p-4'>
                 <h2 className='text-section font-semibold'>未关闭占用</h2>
@@ -476,4 +494,151 @@ function RemoveWorkerDialog({
     />
   )
 }
+
+export function WorkerPrewarmSection({
+  prewarm,
+  isRefreshing,
+}: {
+  prewarm: PrewarmStatusDto
+  isRefreshing?: boolean
+}) {
+  const totalStarts = prewarm.warmHits + prewarm.coldMisses
+  const hitRate = totalStarts > 0 ? Math.round((prewarm.warmHits / totalStarts) * 100) : null
+  const rssMb = prewarm.managedRssBytes != null ? Math.round(prewarm.managedRssBytes / (1024 * 1024)) : null
+
+  return (
+    <section className='overflow-hidden rounded-xl border border-border-card bg-card shadow-card transition-all'>
+      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-border-divider p-5'>
+        <div className='flex items-center gap-2.5'>
+          <div className='flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary'>
+            <Zap className='size-4' />
+          </div>
+          <div>
+            <h2 className='text-section font-semibold flex items-center gap-2'>
+              浏览器宿主池与预热
+              {isRefreshing ? (
+                <span className='inline-block size-1.5 rounded-full bg-primary animate-ping' title='数据刷新中' />
+              ) : null}
+            </h2>
+            <p className='mt-0.5 text-label text-muted-foreground'>
+              Chromium 共享宿主常驻纳管，提前保有空闲浏览器减少新会话冷启动等待。
+            </p>
+          </div>
+        </div>
+        <div className='flex flex-wrap items-center gap-2'>
+          <StatusBadge tone={prewarm.mode === 'off' ? 'neutral' : 'info'}>
+            策略：{PREWARM_MODE_LABELS[prewarm.mode] ?? prewarm.mode}
+            {prewarm.policyRevision > 0 ? ` (r${prewarm.policyRevision})` : ''}
+          </StatusBadge>
+          {prewarm.underMemoryPressure ? (
+            <StatusBadge tone='warning'>⚠️ 内存压力受控 (空闲已回收)</StatusBadge>
+          ) : null}
+          {prewarm.lastPrewarmSkipReason ? (
+            <StatusBadge tone='warning' title={prewarm.lastPrewarmSkipReason}>
+              达到宿主预算上限
+            </StatusBadge>
+          ) : null}
+        </div>
+      </div>
+
+      <div className='grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4'>
+        {/* Bento 1: 预热备用 */}
+        <div className='rounded-lg border border-border-card/60 bg-muted/30 p-3.5 flex flex-col justify-between'>
+          <div className='flex items-center justify-between text-label text-muted-foreground'>
+            <span>预热备用 (空闲)</span>
+            <Layers className='size-3.5' />
+          </div>
+          <div className='my-2'>
+            <div className='flex items-baseline gap-1.5 font-mono'>
+              <span className='text-2xl font-bold tracking-tight text-foreground'>{prewarm.actualIdleCount}</span>
+              <span className='text-small text-muted-foreground'>/ {prewarm.configuredTarget} 目标</span>
+            </div>
+          </div>
+          <div className='text-label text-muted-foreground'>
+            资源允许：{prewarm.effectiveTarget} 宿主
+          </div>
+        </div>
+
+        {/* Bento 2: 宿主池规模 */}
+        <div className='rounded-lg border border-border-card/60 bg-muted/30 p-3.5 flex flex-col justify-between'>
+          <div className='flex items-center justify-between text-label text-muted-foreground'>
+            <span>宿主池规模</span>
+            <Server className='size-3.5' />
+          </div>
+          <div className='my-2'>
+            <div className='flex items-baseline gap-1.5 font-mono'>
+              <span className='text-2xl font-bold tracking-tight text-foreground'>{prewarm.activeCount}</span>
+              <span className='text-small text-muted-foreground'>活跃宿主</span>
+            </div>
+          </div>
+          <div className='text-label text-muted-foreground'>
+            {prewarm.startingCount > 0 ? `${prewarm.startingCount} 启动中 · ` : ''}
+            {prewarm.contextsCount} 个在用会话
+          </div>
+        </div>
+
+        {/* Bento 3: 运行命中收益 */}
+        <div className='rounded-lg border border-border-card/60 bg-muted/30 p-3.5 flex flex-col justify-between'>
+          <div className='flex items-center justify-between text-label text-muted-foreground'>
+            <span>运行命中效率</span>
+            <Activity className='size-3.5' />
+          </div>
+          <div className='my-2'>
+            <div className='flex items-baseline gap-1.5 font-mono'>
+              <span className='text-2xl font-bold tracking-tight text-foreground'>
+                {hitRate !== null ? `${hitRate}%` : '—'}
+              </span>
+              <span className='text-small text-muted-foreground'>
+                {totalStarts > 0 ? '命中率' : '暂无请求'}
+              </span>
+            </div>
+          </div>
+          <div className='text-label text-muted-foreground flex items-center gap-1.5'>
+            <span className='text-status-success-foreground font-medium'>⚡{prewarm.warmHits}</span>
+            <span>·</span>
+            <span>❄️{prewarm.coldMisses}</span>
+            <span>·</span>
+            <span>🔁{prewarm.reuseHits}</span>
+          </div>
+        </div>
+
+        {/* Bento 4: 内存与预算 */}
+        <div className='rounded-lg border border-border-card/60 bg-muted/30 p-3.5 flex flex-col justify-between'>
+          <div className='flex items-center justify-between text-label text-muted-foreground'>
+            <span>受管进程内存</span>
+            <Cpu className='size-3.5' />
+          </div>
+          <div className='my-2'>
+            <div className='flex items-baseline gap-1.5 font-mono'>
+              <span className='text-2xl font-bold tracking-tight text-foreground'>
+                {rssMb !== null ? `${rssMb} MB` : '未采样'}
+              </span>
+            </div>
+          </div>
+          <div className='text-label text-muted-foreground truncate' title={prewarm.memoryBudgetMb > 0 ? `预算上限: ${prewarm.memoryBudgetMb} MB` : '未设硬性预算上限'}>
+            {prewarm.memoryBudgetMb > 0 ? `预算上限 ${prewarm.memoryBudgetMb} MB` : '未设硬性预算上限'}
+          </div>
+        </div>
+      </div>
+
+      {prewarm.lastAdjustmentReason || prewarm.lastPrewarmError ? (
+        <div className='border-t border-border-divider/70 bg-muted/20 px-5 py-2.5 text-label text-muted-foreground flex flex-wrap items-center gap-4'>
+          {prewarm.lastAdjustmentReason ? (
+            <div className='flex items-center gap-1.5'>
+              <span className='font-medium text-foreground'>💡 调度依据:</span>
+              <span>{prewarm.lastAdjustmentReason}</span>
+            </div>
+          ) : null}
+          {prewarm.lastPrewarmError ? (
+            <div className='flex items-center gap-1.5 text-destructive'>
+              <span className='font-medium'>⚠️ 异常:</span>
+              <span>{prewarm.lastPrewarmError}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 

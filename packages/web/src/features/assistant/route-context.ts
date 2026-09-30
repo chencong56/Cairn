@@ -20,6 +20,10 @@ export interface AssistantRouteContext {
   scenarioId?: string
   targetId?: string
   targetAccountId?: string
+  suiteId?: string
+  actionModuleId?: string
+  recordingId?: string
+  batchId?: string
 }
 
 /** 当前叶路由的匹配信息：路由声明的助手元数据与路径参数。 */
@@ -28,11 +32,15 @@ export interface RouteMatchInfo {
   params: Record<string, string>
 }
 
-const REF_FIELD: Partial<Record<AssistantObjectRefKind, 'runId' | 'scenarioId' | 'targetId' | 'targetAccountId'>> = {
+const REF_FIELD: Partial<Record<AssistantObjectRefKind, 'runId' | 'scenarioId' | 'targetId' | 'targetAccountId' | 'suiteId' | 'actionModuleId' | 'recordingId' | 'batchId'>> = {
   run: 'runId',
   scenario: 'scenarioId',
   target: 'targetId',
   account: 'targetAccountId',
+  suite: 'suiteId',
+  actionModule: 'actionModuleId',
+  recording: 'recordingId',
+  batch: 'batchId',
 }
 
 /**
@@ -59,7 +67,7 @@ type RouteRule = {
   description?: string
 }
 
-// 映射已有页面枚举：run、scenario、studio、target、session、schedule、dataset、platform-config、home、other
+// 映射已有页面枚举：run、scenario、studio、target、session、schedule、dataset、platform-config、suite、action-module、recording、batch、home、other
 const ROUTE_PAGE_MAP: Record<string, AssistantPageKind> = {
   '/': 'home',
   '/scenarios': 'scenario',
@@ -69,6 +77,10 @@ const ROUTE_PAGE_MAP: Record<string, AssistantPageKind> = {
   '/schedules': 'schedule',
   '/datasets': 'dataset',
   '/platform-config': 'platform-config',
+  '/suites': 'suite',
+  '/action-modules': 'action-module',
+  '/recordings': 'recording',
+  '/batches': 'batch',
 }
 
 // 未在 MENU_CATALOG 中收录的已登录合法路由兜底
@@ -160,6 +172,10 @@ export function toPageContext(
     targetId?: string
     targetAccountId?: string
     sessionId?: string
+    suiteId?: string
+    actionModuleId?: string
+    recordingId?: string
+    batchId?: string
     selectedStepId?: string
     draftRevision?: number
     versionId?: string
@@ -172,6 +188,10 @@ export function toPageContext(
   const runId = context.runId ?? (context.page === 'run' ? context.entityId : undefined)
   const scenarioId = context.scenarioId ?? (context.page === 'studio' ? context.entityId : undefined)
   const targetId = context.targetId ?? (context.page === 'target' ? context.entityId : undefined)
+  const suiteId = context.suiteId ?? (context.page === 'suite' ? context.entityId : undefined)
+  const actionModuleId = context.actionModuleId ?? (context.page === 'action-module' ? context.entityId : undefined)
+  const recordingId = context.recordingId ?? (context.page === 'recording' ? context.entityId : undefined)
+  const batchId = context.batchId ?? (context.page === 'batch' ? context.entityId : undefined)
   // A session page can represent an account with no live Session. Its
   // entityId then names the account, so only an explicit sessionId may bind
   // a Session fact or historical citation.
@@ -183,7 +203,7 @@ export function toPageContext(
       : undefined
 
   let primaryRef:
-    | { kind: 'run' | 'scenario' | 'target' | 'session' | 'schedule' | 'dataset' | 'account'; id: string }
+    | { kind: AssistantObjectRefKind; id: string }
     | undefined
   if (context.page === 'run' && runId) {
     primaryRef = { kind: 'run', id: runId }
@@ -201,6 +221,14 @@ export function toPageContext(
     primaryRef = { kind: 'schedule', id: context.entityId }
   } else if (context.page === 'dataset' && context.entityId) {
     primaryRef = { kind: 'dataset', id: context.entityId }
+  } else if (context.page === 'suite' && suiteId) {
+    primaryRef = { kind: 'suite', id: suiteId }
+  } else if (context.page === 'action-module' && actionModuleId) {
+    primaryRef = { kind: 'actionModule', id: actionModuleId }
+  } else if (context.page === 'recording' && recordingId) {
+    primaryRef = { kind: 'recording', id: recordingId }
+  } else if (context.page === 'batch' && batchId) {
+    primaryRef = { kind: 'batch', id: batchId }
   }
 
   const scopeRefs: Array<{ kind: 'target' | 'account'; id: string }> = []

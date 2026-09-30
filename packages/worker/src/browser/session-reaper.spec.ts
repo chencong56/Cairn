@@ -36,6 +36,7 @@ function context() {
     workerInstanceId: 'i',
     ownerScope: () => ({ workerId: 'w', ownerWorkerInstanceId: 'i' }),
     dropDisposedHandles: vi.fn(async () => 0),
+    sampleBrowserMemory: vi.fn(async () => {}),
     close: vi.fn(async () => 'stopped' as const),
     lives: new Map([['s', live]]),
     leaseToSession: new Map([['lease-1', 's']]),

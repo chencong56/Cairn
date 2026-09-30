@@ -7,6 +7,7 @@ import {
   loadTargetForExecution,
   occupyAutoLoginBudget,
   recordAutoLoginOutcome,
+  recreateSessionForOperation,
   setSessionAuthSummary,
   setSessionStatus,
   transitionSessionUse,
@@ -42,6 +43,7 @@ vi.mock('@cairn/db', async (load) => ({
   setSessionAuthSummary: vi.fn(async () => true),
   setSessionProbe: vi.fn(async () => true),
   createSession: vi.fn(),
+  recreateSessionForOperation: vi.fn(),
   claimSessionUse: vi.fn(),
   releaseSessionUse: vi.fn(async () => {}),
   adoptSessionRetention: vi.fn(async () => {}),
@@ -1078,6 +1080,8 @@ it('RESTART 成功路径在新实例 MAINTENANCE 占用内核验', async () => {
     keepAliveSeconds: 1800,
     authProbeIntervalSeconds: 900,
     evictionPriority: 2,
+    accountSlot: 2,
+    isolation: 'SHARED',
   }
   manager.close = vi.fn(async () => 'stopped')
   manager.launchAndOpen = vi.fn(async (session: typeof newSession) => ({ ok: true, session }))
@@ -1101,7 +1105,7 @@ it('RESTART 成功路径在新实例 MAINTENANCE 占用内核验', async () => {
     screencasts: new Map(),
     screencastObservers: new Map(),
   })
-  vi.mocked(createSession).mockResolvedValue({ ok: true, session: newSession } as any)
+  vi.mocked(recreateSessionForOperation).mockResolvedValue({ ok: true, session: newSession } as any)
   const predecessor = {
     id: 's',
     status: 'OPEN' as const,
@@ -1113,6 +1117,8 @@ it('RESTART 成功路径在新实例 MAINTENANCE 占用内核验', async () => {
     keepAliveSeconds: 1800,
     authProbeIntervalSeconds: 900,
     evictionPriority: 2,
+    accountSlot: 2,
+    isolation: 'SHARED' as const,
   }
   vi.mocked(claimSessionUse).mockResolvedValue({
     ok: true,
@@ -1140,13 +1146,12 @@ it('RESTART 成功路径在新实例 MAINTENANCE 占用内核验', async () => {
     grant: null,
     reusedRunId: null,
   })
-  expect(createSession).toHaveBeenCalledWith(
+  expect(recreateSessionForOperation).toHaveBeenCalledWith(
     expect.anything(),
     expect.objectContaining({
-      reclaimMode: 'AUTH_DRIVEN',
-      keepAliveSeconds: 1800,
-      authProbeIntervalSeconds: 900,
-      evictionPriority: 2,
+      operationId: 'op',
+      workerId: expect.anything(),
+      instanceId: expect.anything(),
     }),
   )
   expect(manager.finishMaintenance).toHaveBeenCalledWith(
@@ -1166,6 +1171,8 @@ it('RESTART 成功路径在新实例 MAINTENANCE 占用内核验', async () => {
       keepAliveSeconds: 1800,
       authProbeIntervalSeconds: 900,
       evictionPriority: 2,
+      sessionId: 'new',
+      isolation: 'SHARED',
     }),
   )
 })

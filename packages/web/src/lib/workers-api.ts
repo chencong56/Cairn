@@ -3,17 +3,23 @@ import {
   sessionDtoSchema,
   workerDetailResponseSchema,
   workerListResponseSchema,
+  workerNodeHealthProbeSchema,
   type DisposeSessionBody,
   type SessionDto,
   type WorkerDetailResponse,
   type WorkerListQuery,
   type WorkerListResponse,
+  type WorkerNodeHealthProbe,
   type WorkerSessionListQuery,
 } from '@cairn/shared'
 import { apiFetch, toQueryString } from '@/lib/api-client'
 
 export function fetchWorkers(query: WorkerListQuery): Promise<WorkerListResponse> {
   return apiFetch(`/api/workers${toQueryString(query)}`, workerListResponseSchema)
+}
+
+export function fetchWorkerNodeHealth(workerId: string): Promise<WorkerNodeHealthProbe> {
+  return apiFetch(`/api/workers/${encodeURIComponent(workerId)}/node-health`, workerNodeHealthProbeSchema)
 }
 
 export function fetchWorker(
@@ -58,4 +64,3 @@ export function purgeStaleWorkers(): Promise<{ purgedCount: number; purgedWorker
     },
   )
 }
-

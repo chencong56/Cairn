@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type HTMLAttributes } from 'react'
+import { useEffect, useMemo, useRef, useState, type HTMLAttributes } from 'react'
 import type {
   AssistantCapabilityId,
   AssistantCapabilitiesResponse,
@@ -30,6 +30,8 @@ import { AssistantResultView } from './result'
 import { PromptCards } from './prompt-cards'
 import { HistoryDrawer } from './history-drawer'
 import { ThinkingProcessBlock } from './components/thinking-process'
+import { resolveContextRecommendations, type AssistantRecommendationChip } from './recommendation-engine'
+import type { AssistantRouteContext } from './route-context'
 
 function contextLabel(context: AssistantPageContext | null): string {
   if (!context) return '全局上下文 · 识途通用助理'
@@ -45,40 +47,77 @@ function contextLabel(context: AssistantPageContext | null): string {
   return '当前页面'
 }
 
+function hasSubstantiveBinding(context: AssistantBoundContext | AssistantRouteContext | null | undefined): boolean {
+  if (!context) return false
+  if ('entityId' in context && context.entityId) return true
+  if (context.scenarioId || context.runId || context.targetId) return true
+  if ('selectedStepId' in context && context.selectedStepId) return true
+  if ('activeForm' in context && context.activeForm) return true
+  if ('isDirty' in context && context.isDirty) return true
+  if ('statusTone' in context && context.statusTone === 'error') return true
+  if ('filters' in context && context.filters && typeof context.filters === 'object') {
+    const filterKeys = Object.keys(context.filters).filter(
+      (k) => k !== 'cursor' && k !== 'pageSize' && k !== 'limit' && k !== 'page'
+    )
+    if (filterKeys.some((k) => {
+      const val = (context.filters as Record<string, unknown>)[k]
+      return val !== undefined && val !== null && val !== ''
+    })) {
+      return true
+    }
+  }
+  return false
+}
+
+function getFocusTitle(
+  boundContext: AssistantBoundContext | AssistantRouteContext | null,
+  pageContext: AssistantPageContext | null,
+): string {
+  // Studio 恒定使用“已连接场景”口径
+  if (boundContext?.page === 'studio' || pageContext?.page === 'studio') {
+    return '已连接场景'
+  }
+  if (boundContext && 'activeForm' in boundContext && boundContext.activeForm?.mode === 'create') {
+    return '已连接新建目标'
+  }
+  if (boundContext && 'activeForm' in boundContext && boundContext.activeForm?.mode === 'edit') {
+    return '已连接目标配置'
+  }
+  if ((boundContext && 'selectedStepId' in boundContext && boundContext.selectedStepId) || pageContext?.stepId) {
+    return '已连接当前步骤'
+  }
+  if (boundContext?.scenarioId || pageContext?.scenarioId) {
+    return '已连接场景'
+  }
+  if (boundContext?.runId || pageContext?.runId || boundContext?.page === 'run') {
+    return '已连接运行记录'
+  }
+  if (boundContext?.targetId || pageContext?.targetId || boundContext?.page === 'target') {
+    return '已连接目标系统'
+  }
+  return '已连接当前上下文'
+}
+
 function ContextCapsule({
   boundContext,
+  chips,
   capabilities,
+  canAssist,
+  isSpecificContext,
   onChipClick,
   className,
 }: {
-  boundContext: AssistantBoundContext | null
+  boundContext: AssistantBoundContext | AssistantRouteContext | null
+  chips: AssistantRecommendationChip[]
   capabilities: AssistantCapabilitiesResponse | null
+  canAssist: boolean
+  isSpecificContext: boolean
   onChipClick: (question: string, capabilityHint?: AssistantCapabilityId) => void
   className?: string
 }) {
-  const canAssist = useCan('ai:assist')
-  const canWrite = useCan('workflow:write')
-
-  // 仅在存在实体绑定且有实质性业务信息时才展示次级胶囊：
-  // 1. 存在具体实体 ID (entityId)
-  // 2. 或处于报错诊断状态 (statusTone === 'error')
-  // 3. 或存在未保存本地草稿 (isDirty)
-  // 4. 或带有专属操作推荐 Chips
-  // 普通列表页无实体聚焦的通用描述（如“运行记录与执行历史列表”）不作为次级胶囊展示，避免重复废话
-  const hasSubstantiveDetail =
-    Boolean(boundContext?.entityId) ||
-    Boolean(boundContext?.isDirty) ||
-    boundContext?.statusTone === 'error' ||
-    Boolean(boundContext?.chips && boundContext.chips.length > 0)
-
-  if (!boundContext || !hasSubstantiveDetail) {
+  if (!isSpecificContext || !boundContext) {
     return null
   }
-
-  const chips = (boundContext.chips ?? []).filter((chip) => {
-    if (chip.capabilityHint === 'scenario.propose-step' && !canWrite) return false
-    return true
-  })
 
   return (
     <div
@@ -95,8 +134,9 @@ function ContextCapsule({
         <div className='flex flex-wrap gap-1.5 pt-0.5'>
           {chips.map((chip) => (
             <button
-              key={chip.label}
+              key={chip.id || chip.label}
               type='button'
+              data-testid={chip.id ? `prompt-card-${chip.id}` : undefined}
               onClick={() => onChipClick(chip.question, chip.capabilityHint)}
               className='inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface-card px-2.5 py-1 text-label text-text-secondary shadow-2xs transition-colors hover:border-primary-400 hover:text-text-primary'
             >
@@ -159,6 +199,73 @@ export function AssistantPanel({
   const [adopting, setAdopting] = useState(false)
   const [capabilitiesLoadError, setCapabilitiesLoadError] = useState(false)
   const conversationRef = useRef<HTMLDivElement>(null)
+
+  const canAssist = useCan('ai:assist')
+  const canWrite = useCan('workflow:write')
+  const canWriteTarget = useCan('target:write')
+  const canReadTarget = useCan('target:read')
+  const canReadSession = useCan('session:read')
+  const canReadSchedule = useCan('schedule:read')
+  const canReadRun = useCan('run:read')
+
+  const effectiveContext = boundContext ?? effectiveBoundContext
+
+  const activeChips = useMemo<AssistantRecommendationChip[]>(() => {
+    if (!capabilities?.modelEnabled || !canAssist || !effectiveContext) return []
+    let raw: AssistantRecommendationChip[] = []
+    if ('chips' in effectiveContext && Array.isArray(effectiveContext.chips)) {
+      raw = (effectiveContext.chips as Array<{
+        id?: string
+        label: string
+        question: string
+        priority?: number
+        capabilityHint?: AssistantCapabilityId
+      }>).map((c, idx) => ({
+        id: c.id ?? `chip-${idx}`,
+        label: c.label,
+        question: c.question,
+        priority: c.priority ?? 100 - idx,
+        capabilityHint: c.capabilityHint,
+      }))
+    }
+    if (raw.length === 0) {
+      raw = resolveContextRecommendations({
+        boundContext: effectiveContext,
+        pageContext: pageContext ?? null,
+        capabilities,
+        permissions: {
+          canAssist,
+          canWrite,
+          canWriteTarget,
+          canReadTarget,
+          canReadSession,
+          canReadSchedule,
+          canReadRun,
+        },
+      })
+    }
+    return raw.filter((chip) => {
+      if (chip.capabilityHint === 'scenario.propose-step' && !canWrite) return false
+      return true
+    })
+  }, [
+    effectiveContext,
+    pageContext,
+    capabilities,
+    canAssist,
+    canWrite,
+    canWriteTarget,
+    canReadTarget,
+    canReadSession,
+    canReadSchedule,
+    canReadRun,
+  ])
+
+  const isSpecificContext = useMemo(() => {
+    return hasSubstantiveBinding(effectiveContext) || activeChips.length > 0
+  }, [effectiveContext, activeChips])
+
+  const hasActionableChips = activeChips.length > 0 && Boolean(capabilities?.modelEnabled) && canAssist
 
   useEffect(() => {
     void loadCapabilities().catch(() => setCapabilitiesLoadError(true))
@@ -329,8 +436,11 @@ export function AssistantPanel({
       {/* 停靠侧栏模式下保持吸顶 */}
       {isDocked ? (
         <ContextCapsule
-          boundContext={boundContext}
+          boundContext={effectiveContext}
+          chips={activeChips}
           capabilities={capabilities}
+          canAssist={canAssist}
+          isSpecificContext={isSpecificContext}
           onChipClick={handlePromptSelect}
         />
       ) : null}
@@ -343,19 +453,41 @@ export function AssistantPanel({
         {/* 悬浮窗模式下置于滚动流顶部，不抢占宝贵的垂直固定视口 */}
         {!isDocked ? (
           <ContextCapsule
-            boundContext={boundContext}
+            boundContext={effectiveContext}
+            chips={activeChips}
             capabilities={capabilities}
+            canAssist={canAssist}
+            isSpecificContext={isSpecificContext}
             onChipClick={handlePromptSelect}
             className='-mx-5 -mt-4 mb-4 rounded-b-lg border-b'
           />
         ) : null}
         {turns.length === 0 && !busy && capabilities?.modelEnabled ? (
-          <PromptCards
-            pageContext={pageContext}
-            boundContext={effectiveBoundContext}
-            capabilities={capabilities}
-            onSelectPrompt={handlePromptSelect}
-          />
+          isSpecificContext ? (
+            <div
+              data-testid='context-focus-indicator'
+              className='my-auto flex flex-col items-center justify-center py-10 px-4 text-center select-none'
+            >
+              <div className='flex size-10 items-center justify-center rounded-full bg-surface-subtle text-primary mb-3 border border-border-default/60 shadow-2xs'>
+                <Sparkles className='size-5 text-primary-600' aria-hidden='true' />
+              </div>
+              <p className='text-body font-medium text-text-primary tracking-tight'>
+                {getFocusTitle(effectiveContext, pageContext)}
+              </p>
+              <p className='mt-1 text-label text-text-muted max-w-xs leading-relaxed'>
+                {hasActionableChips
+                  ? '可直接在下方输入框提问，或点击上方感知建议快捷操作'
+                  : '可直接在下方输入框中描述你的需求向助手发问'}
+              </p>
+            </div>
+          ) : (
+            <PromptCards
+              pageContext={pageContext}
+              boundContext={effectiveContext}
+              capabilities={capabilities}
+              onSelectPrompt={handlePromptSelect}
+            />
+          )
         ) : null}
         {turns.length === 0 && !busy && !capabilities && (
           <div className='my-auto text-center text-label text-text-muted'>
@@ -413,6 +545,8 @@ export function AssistantPanel({
                         {turn.result ? (
                           <AssistantResultView
                             result={turn.result}
+                            conversationId={turn.conversationId}
+                            turnId={turn.id}
                             adopting={adopting}
                             onNavigate={onClose}
                             onPreviewStep={

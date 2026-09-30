@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { resolveStepPolicy } from '../policy.js'
 import {
   FACTORY_BROWSER_AI_ENDPOINT,
+  FACTORY_BROWSER_PREWARM,
   FACTORY_PLATFORM_CONFIG,
   PLATFORM_AI_PROVIDER_REQUIRED_MESSAGE,
   PLATFORM_AI_THINKING_UNSUPPORTED_MESSAGE,
@@ -12,6 +13,7 @@ import {
   platformConfigDiff,
   platformConfigDocumentSchema,
   platformConfigWriteDocumentSchema,
+  platformBrowserPrewarmSchema,
   modelServiceOrigin,
   overridesCompatible,
   resolvePlatformEvidencePolicy,
@@ -232,7 +234,7 @@ describe('平台配置文档版本升级', () => {
       schemaVersion: 5,
       sessionAuth,
     })
-    expect(upgraded.schemaVersion).toBe(6)
+    expect(upgraded.schemaVersion).toBe(PLATFORM_CONFIG_SCHEMA_VERSION)
     expect(upgraded.sessionAuth.landingSettleBudgetMs).toBe(
       FACTORY_PLATFORM_CONFIG.sessionAuth.landingSettleBudgetMs,
     )
@@ -242,6 +244,44 @@ describe('平台配置文档版本升级', () => {
     expect(upgraded.sessionAuth.landingSettleMaxDismissals).toBe(
       FACTORY_PLATFORM_CONFIG.sessionAuth.landingSettleMaxDismissals,
     )
+  })
+
+  it('A19: schemaVersion 6 升到 7：补全 browserPrewarm 且出厂策略保持 off / fixedIdle=1 / 自动范围 1-5', () => {
+    const { browserPrewarm: _ignored, ...rest } = FACTORY_PLATFORM_CONFIG
+    const upgraded = upgradePlatformConfigDocument({
+      ...rest,
+      schemaVersion: 6,
+    })
+    expect(upgraded.schemaVersion).toBe(PLATFORM_CONFIG_SCHEMA_VERSION)
+    expect(upgraded.browserPrewarm).toEqual(FACTORY_BROWSER_PREWARM)
+    expect(upgraded.browserPrewarm.mode).toBe('off')
+    expect(upgraded.browserPrewarm.fixedIdle).toBe(1)
+    expect(upgraded.browserPrewarm.minIdle).toBe(1)
+    expect(upgraded.browserPrewarm.maxIdle).toBe(5)
+  })
+
+  it('A19: browserPrewarm 校验规则：minIdle 不能大于 maxIdle，fixedIdle 为正整数', () => {
+    expect(() =>
+      platformBrowserPrewarmSchema.parse({
+        mode: 'adaptive',
+        fixedIdle: 1,
+        minIdle: 3,
+        maxIdle: 2,
+      }),
+    ).toThrowError(/minIdle 不能大于 maxIdle/)
+
+    expect(() =>
+      platformBrowserPrewarmSchema.parse({
+        mode: 'fixed',
+        fixedIdle: 0,
+      }),
+    ).toThrowError()
+
+    const valid = platformBrowserPrewarmSchema.parse({
+      mode: 'fixed',
+      fixedIdle: 2,
+    })
+    expect(valid.fixedIdle).toBe(2)
   })
 
   it('写入契约：启用助手或分析必须有提供商；千问不能开思考', () => {

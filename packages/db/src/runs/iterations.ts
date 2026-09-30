@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, inArray, sql } from 'drizzle-orm'
 import {
   type ExecutionError,
   type JsonValue,
+  type RunSnapshot,
   type Step,
   type StepIterationDetailDto,
   type StepIterationDto,
@@ -14,6 +15,7 @@ import type { Db } from '../client.js'
 import { schemaFor } from '../native.js'
 import type { StepIterationRow, StepRunRow } from '../schema/execution.js'
 import { appendRunEvents } from '../observe/events.js'
+import { resolveStepModuleIdentity } from './step-module-identity.js'
 
 export function formatScopePath(headerOrdinal: number, iterationIndex: number): string {
   return `L${headerOrdinal}#${iterationIndex}`
@@ -29,6 +31,7 @@ export type StartIterationInput = {
   frame: Record<string, unknown>
   bodySteps: Step[]
   stepIndices: Map<string, number>
+  snapshot?: RunSnapshot | null
 }
 
 export type StartIterationResult = {
@@ -42,9 +45,15 @@ export async function startIterationTx(
   tx: Db,
   input: StartIterationInput,
 ): Promise<StartIterationResult> {
-  const { stepIterations, stepRuns } = schemaFor(tx)
+  const { runs, stepIterations, stepRuns } = schemaFor(tx)
   const now = new Date()
   const scopePath = formatScopePath(input.headerOrdinal, input.iterationIndex)
+
+  let snapshot = input.snapshot
+  if (!snapshot) {
+    const [runRow] = await tx.select({ snapshot: runs.snapshot }).from(runs).where(eq(runs.id, input.runId)).limit(1)
+    snapshot = (runRow?.snapshot as RunSnapshot | null) ?? null
+  }
 
   // 幂等检查：是否已存在本项迭代记录
   const [existing] = await tx
@@ -128,6 +137,7 @@ export async function startIterationTx(
   if (input.bodySteps.length > 0) {
     const rows = input.bodySteps.map((step) => {
       const ordinal = input.stepIndices.get(step.id) ?? 0
+      const modId = resolveStepModuleIdentity(step.id, snapshot)
       return {
         id: newId(),
         runId: input.runId,
@@ -142,6 +152,9 @@ export async function startIterationTx(
         finishedAt: step.disabled ? now : null,
         createdAt: now,
         updatedAt: now,
+        moduleId: modId.moduleId,
+        implementationKey: modId.implementationKey,
+        internalStepId: modId.internalStepId,
       }
     })
     await tx.insert(stepRuns).values(rows)

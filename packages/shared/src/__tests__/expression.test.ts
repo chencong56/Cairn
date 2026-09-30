@@ -220,6 +220,55 @@ describe('expression.ts - CF-B 受控表达式引擎', () => {
       if (res.ok) expect(res.value).toBe(100)
     })
 
+    it('mul() 乘法计算', () => {
+      const expr: Expr = {
+        kind: 'call',
+        fn: 'mul',
+        args: [
+          { kind: 'literal', value: 12.5 },
+          { kind: 'literal', value: 4 },
+        ],
+      }
+      const res = evaluateExpression(expr, {})
+      expect(res.ok).toBe(true)
+      if (res.ok) expect(res.value).toBe(50)
+
+      // 错误类型
+      const invalid: Expr = {
+        kind: 'call',
+        fn: 'mul',
+        args: [
+          { kind: 'literal', value: '12' },
+          { kind: 'literal', value: 4 },
+        ],
+      }
+      expect(evaluateExpression(invalid, {}).ok).toBe(false)
+    })
+
+    it('compare 节点带有 numericPolicy (tolerance / fixed)', () => {
+      const compareTolerance: Expr = {
+        kind: 'compare',
+        op: 'eq',
+        left: { kind: 'literal', value: 10.05 },
+        right: { kind: 'literal', value: 10.0 },
+        numericPolicy: { mode: 'tolerance', numberDelta: 0.1 },
+      }
+      const res1 = evaluateExpression(compareTolerance, {})
+      expect(res1.ok).toBe(true)
+      if (res1.ok) expect(res1.value).toBe(true)
+
+      const compareFixed: Expr = {
+        kind: 'compare',
+        op: 'eq',
+        left: { kind: 'literal', value: 1.005 },
+        right: { kind: 'literal', value: 1.01 },
+        numericPolicy: { mode: 'fixed', scale: 2, rounding: 'half_away_from_zero' },
+      }
+      const res2 = evaluateExpression(compareFixed, {})
+      expect(res2.ok).toBe(true)
+      if (res2.ok) expect(res2.value).toBe(true)
+    })
+
     it('matches 正则比较操作符', () => {
       const expr: Expr = {
         kind: 'compare',

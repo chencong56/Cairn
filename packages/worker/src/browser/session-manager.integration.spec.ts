@@ -7,6 +7,7 @@ import type { Step } from '@cairn/shared'
 import {
   claimRun,
   claimSessionUse,
+  findLiveSessions,
   enterRunWaitingForAuth,
   findAuthWaitLeaseForRun,
   createRunWithSnapshot,
@@ -1538,5 +1539,195 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
     })
     manager.setWorkerInstance(WORKER_INSTANCE)
+  })
+
+  it('A07: 同账号有 LOST 会话时，并发槽位仍可用，不因一条坏会话阻塞整个账号', async () => {
+    const account = await makeAccount('password', 'a07-concurrent')
+    await handle.pool.query(
+      `UPDATE targets SET session_policy = jsonb_build_object('accountSessionMode', 'concurrent') WHERE id = $1`,
+      [targetId],
+    )
+    await handle.pool.query(
+      `UPDATE target_accounts SET max_concurrent_sessions = 3 WHERE id = $1`,
+      [account],
+    )
+    // 插入一条 LOST 会话（占用槽位 1）
+    const lostSessionId = newId()
+    await handle.pool.query(
+      `INSERT INTO browser_sessions (
+         id, target_id, target_account_id, owner_worker_id, owner_worker_instance_id,
+         status, close_reason, account_slot, generation, profile_key,
+         reuse_policy, idle_ttl_seconds, max_lifetime_seconds, expires_at
+       ) VALUES ($1, $2, $3, $4, $5, 'LOST', 'test_crash', 1, 1, 'slot-1', 'NEW_PAGE', 600, 3600, now() + interval '1 hour')`,
+      [lostSessionId, targetId, account, WORKER, WORKER_INSTANCE],
+    )
+
+    manager.resolveCredential = async () => ({ username: 'alice', password: 'x' })
+    manager.launchOverride = async (dir) => stubBrowserHandle(dir)
+
+    // Run 1 申请：在槽位 2 成功建会话，不受 LOST 坏会话影响
+    const run1 = await makeRunningSnapshot({ targetId, accountId: account })
+    const held1 = await manager.acquire(run1.snapshot, run1.grant)
+    expect(held1.ok).toBe(true)
+    if (held1.ok) {
+      expect(held1.grant.sessionId).not.toBe(lostSessionId)
+      expect((await getSessionById(handle.db, held1.grant.sessionId))?.accountSlot).toBe(2)
+    }
+
+    // Run 2 并发申请：在槽位 3 成功建会话
+    const run2 = await makeRunningSnapshot({ targetId, accountId: account })
+    const held2 = await manager.acquire(run2.snapshot, run2.grant)
+    expect(held2.ok).toBe(true)
+    if (held2.ok) {
+      expect(held2.grant.sessionId).not.toBe(lostSessionId)
+      expect((await getSessionById(handle.db, held2.grant.sessionId))?.accountSlot).toBe(3)
+    }
+
+    if (held1.ok) await manager.release(held1.grant.leaseId, 'test')
+    if (held2.ok) await manager.release(held2.grant.leaseId, 'test')
+    await handle.pool.query(`UPDATE targets SET session_policy = NULL WHERE id = $1`, [targetId])
+    manager.launchOverride = undefined
+    manager.resolveCredential = undefined
+  })
+
+  it('A08: 同一占用身份去重，不同 Run 同账号并发通过且无孤儿租约', async () => {
+    const account = await makeAccount('password', 'a08-identity')
+    await handle.pool.query(
+      `UPDATE targets SET session_policy = jsonb_build_object('accountSessionMode', 'concurrent') WHERE id = $1`,
+      [targetId],
+    )
+    await handle.pool.query(
+      `UPDATE target_accounts SET max_concurrent_sessions = 3 WHERE id = $1`,
+      [account],
+    )
+
+    manager.resolveCredential = async () => ({ username: 'alice', password: 'x' })
+    manager.launchOverride = async (dir) => {
+      await new Promise((r) => setTimeout(r, 30))
+      return stubBrowserHandle(dir)
+    }
+
+    const run1 = await makeRunningSnapshot({ targetId, accountId: account })
+    const run2 = await makeRunningSnapshot({ targetId, accountId: account })
+
+    // 1. 同一 Run 重复调用 manager.acquire：由于 key = run:${runId}，第二次被拒，不重复启动
+    const [res1, dupRes] = await Promise.all([
+      manager.acquire(run1.snapshot, run1.grant),
+      manager.acquire(run1.snapshot, run1.grant),
+    ])
+    const successOne = res1.ok ? res1 : dupRes
+    const duplicateOne = !res1.ok ? res1 : dupRes
+    expect(successOne.ok).toBe(true)
+    expect(duplicateOne).toMatchObject({ ok: false, code: 'SESSION_BUSY', message: '同一运行正在获取会话' })
+
+    // 2. 不同 Run 并发调用：顺利获取独立租约与会话
+    const res2 = await manager.acquire(run2.snapshot, run2.grant)
+    expect(res2.ok).toBe(true)
+    if (successOne.ok && res2.ok) {
+      expect(successOne.grant.leaseId).not.toBe(res2.grant.leaseId)
+      expect(successOne.grant.sessionId).not.toBe(res2.grant.sessionId)
+    }
+
+    if (successOne.ok) await manager.release(successOne.grant.leaseId, 'test')
+    if (res2.ok) await manager.release(res2.grant.leaseId, 'test')
+    await handle.pool.query(`UPDATE targets SET session_policy = NULL WHERE id = $1`, [targetId])
+    manager.launchOverride = undefined
+    manager.resolveCredential = undefined
+  })
+
+  it('A22(收敛): 排空退役的 CLOSING 会话由 reaper 收尾到 CLOSED，账号恢复领取', async () => {
+    const account = await makeAccount('password', 'a22-drain-converge')
+    await handle.pool.query(
+      `UPDATE targets SET session_policy = jsonb_build_object('accountSessionMode', 'concurrent') WHERE id = $1`,
+      [targetId],
+    )
+    await handle.pool.query(
+      `UPDATE target_accounts SET max_concurrent_sessions = 3 WHERE id = $1`,
+      [account],
+    )
+
+    manager.resolveCredential = async () => ({ username: 'alice', password: 'x' })
+    manager.launchOverride = async (dir) => stubBrowserHandle(dir)
+
+    // 建两条空闲会话：acquire 后释放租约，句柄保留在本进程（空闲保留语义）
+    const run1 = await makeRunningSnapshot({ targetId, accountId: account })
+    const held1 = await manager.acquire(run1.snapshot, run1.grant)
+    expect(held1.ok).toBe(true)
+    const run2 = await makeRunningSnapshot({ targetId, accountId: account })
+    const held2 = await manager.acquire(run2.snapshot, run2.grant)
+    expect(held2.ok).toBe(true)
+    if (held1.ok) await manager.release(held1.grant.leaseId, 'test')
+    if (held2.ok) await manager.release(held2.grant.leaseId, 'test')
+
+    // 目标降为 exclusive：新占用被拒并触发超限退役（lives 2 > cap 1）。
+    // 不经 claimRun（同账号在途 run 会被调度资格排除），用 db 层领取触发同一领域判定。
+    await handle.pool.query(
+      `UPDATE targets SET session_policy = jsonb_build_object('accountSessionMode', 'exclusive') WHERE id = $1`,
+      [targetId],
+    )
+    const scenario3 = await createScenarioWithVersion(handle.db, {
+      targetId,
+      name: `r-${newId()}`,
+      steps: [echoStep],
+      actor: { id: actorId },
+    })
+    const created3 = await createRunWithSnapshot(handle.db, {
+      scenarioId: scenario3.id,
+      targetAccountId: account,
+      actor: { id: actorId },
+    })
+    const busy = await claimSessionUse(handle.db, {
+      key: { targetId, targetAccountId: account },
+      owner: { kind: 'RUN', runId: created3.detail.id, runFencingToken: 1 },
+      purpose: 'EXECUTION',
+      holderWorkerId: WORKER,
+      holderInstanceId: WORKER_INSTANCE,
+      leaseTtlSeconds: 60,
+      reusePolicy: 'NEW_PAGE',
+      idleTtlSeconds: 600,
+      maxLifetimeSeconds: 3600,
+    })
+    expect(busy.ok).toBe(false)
+    if (!busy.ok) expect(busy.code).toBe('SESSION_BUSY')
+
+    const closing = (await findLiveSessions(handle.db, { targetId, targetAccountId: account })).filter(
+      (s) => s.closeReason === 'draining_concurrency_cap',
+    )
+    expect(closing).toHaveLength(1)
+    expect(closing[0]!.status).toBe('CLOSING')
+
+    // 关键回归：reaper 必须把退役会话收尾到 CLOSED（释放浏览器句柄），
+    // 而不是停在 CLOSING 让账号被永久拒绝。
+    await manager.reap()
+    const after = await findLiveSessions(handle.db, { targetId, targetAccountId: account })
+    expect(after).toHaveLength(1)
+    expect(after[0]!.status).toBe('OPEN')
+
+    // 收敛后恢复领取：db 层复用剩余会话，不新建
+    const reuse = await claimSessionUse(handle.db, {
+      key: { targetId, targetAccountId: account },
+      owner: { kind: 'RUN', runId: created3.detail.id, runFencingToken: 1 },
+      purpose: 'EXECUTION',
+      holderWorkerId: WORKER,
+      holderInstanceId: WORKER_INSTANCE,
+      leaseTtlSeconds: 60,
+      reusePolicy: 'NEW_PAGE',
+      idleTtlSeconds: 600,
+      maxLifetimeSeconds: 3600,
+    })
+    expect(reuse.ok).toBe(true)
+    if (reuse.ok) {
+      expect(reuse.created).toBe(false)
+      expect(reuse.session.id).toBe(after[0]!.id)
+      await releaseSessionUse(handle.db, {
+        leaseId: reuse.grant.leaseId,
+        holderWorkerId: WORKER,
+        reason: 'test',
+      })
+    }
+
+    await handle.pool.query(`UPDATE targets SET session_policy = NULL WHERE id = $1`, [targetId])
+    manager.launchOverride = undefined
+    manager.resolveCredential = undefined
   })
 })

@@ -1019,6 +1019,17 @@ export async function getBatch(db: Db, batchId: string, actorId?: string): Promi
   }
 }
 
+/** Read-only assistant facts; bindings stay behind the domain boundary. */
+export async function getBatchAnalysisFacts(db: Db, batchId: string, actorId: string) {
+  const batch = await getBatch(db, batchId, actorId)
+  if (!batch) throw notFound('BATCH_NOT_FOUND', '批量任务不存在')
+  await assertBatchScenarioPermission(db, batch.scenarioId, actorId, 'workflow:read')
+  const { batches } = schemaFor(db)
+  const [row] = await db.select({ binding: batches.dataBindings }).from(batches).where(eq(batches.id, batchId)).limit(1)
+  if (!row) throw notFound('BATCH_NOT_FOUND', '批量任务不存在')
+  return { batch, binding: (row.binding ?? {}) as DataBinding }
+}
+
 export async function listBatches(
   db: Db,
   query: { scenarioId?: string; datasetId?: string; limit?: number; cursor?: string },

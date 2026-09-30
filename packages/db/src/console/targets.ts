@@ -353,6 +353,38 @@ export class TargetsStore {
         })
       }
     }
+    if (resolved.accountSessionMode === 'exclusive') {
+      const { browserSessions, targetAccounts } = schemaFor(this.db)
+      const activeRows = await this.db
+        .select({
+          accountId: browserSessions.targetAccountId,
+          sessionId: browserSessions.id,
+        })
+        .from(browserSessions)
+        .innerJoin(targetAccounts, eq(targetAccounts.id, browserSessions.targetAccountId))
+        .where(
+          and(
+            eq(browserSessions.targetId, id),
+            isNull(targetAccounts.deletedAt),
+            inArray(browserSessions.status, ['OPEN', 'CREATING']),
+          ),
+        )
+      const countByAccount = new Map<string, string[]>()
+      for (const row of activeRows) {
+        if (!row.accountId) continue
+        const list = countByAccount.get(row.accountId) ?? []
+        list.push(row.sessionId)
+        countByAccount.set(row.accountId, list)
+      }
+      for (const [, sids] of countByAccount.entries()) {
+        if (sids.length > 1) {
+          throw failure('conflict', {
+            code: 'ACCOUNT_CAP_REDUCTION_BLOCKED',
+            message: `目标下有账号当前活动会话数 (${sids.length}) 超过独占模式上限 (1)，请先关闭多余会话后再调整为独占模式`,
+          })
+        }
+      }
+    }
     const now = new Date()
     await this.db.transaction(async (tx) => {
       await tx
@@ -923,8 +955,9 @@ export class TargetsStore {
     query: TargetAccountListQuery = {},
   ): Promise<TargetAccountListResponse> {
     const target = await this.loadTarget(targetId)
+    const platformDefaults = await this.platformSessionDefaults()
     const accountSessionMode = resolveSessionPolicyLayers({
-      platformDefault: sessionPolicyFromPlatform(FACTORY_PLATFORM_CONFIG.session),
+      platformDefault: platformDefaults,
       targetOverride: target.sessionPolicy as never,
     }).accountSessionMode
     const parsed = targetAccountListQuerySchema.parse(query)
@@ -1035,19 +1068,38 @@ export class TargetsStore {
           await assertTargetPermission(tx, actor.id, targetId, 'credential:write')
           await assertTargetPermission(tx, actor.id, targetId, 'credential:read')
         }
-        const { credentials } = schemaFor(tx)
+        const { credentials, browserSessions } = schemaFor(tx)
         const [catalog] = await tx.select().from(credentials).where(eq(credentials.id, accountId)).for('update')
         if (body.expectedRevision !== undefined && catalog?.revision !== body.expectedRevision) throw failure('conflict', { code: 'CREDENTIAL_REVISION_CONFLICT', message: '账号已被他人更新，请重新核对' })
         if (body.maxConcurrentSessions != null && body.maxConcurrentSessions > 1) {
           const [targetRow] = await tx.select({ sessionPolicy: targets.sessionPolicy }).from(targets).where(eq(targets.id, targetId)).limit(1)
+          const platformDefaults = await this.platformSessionDefaults()
           const mode = resolveSessionPolicyLayers({
-            platformDefault: sessionPolicyFromPlatform(FACTORY_PLATFORM_CONFIG.session),
+            platformDefault: platformDefaults,
             targetOverride: targetRow?.sessionPolicy as never,
           }).accountSessionMode
           if (mode !== 'concurrent') {
             throw failure('conflict', {
               code: 'SESSION_CONCURRENCY_UNSUPPORTED',
               message: '目标未开启同账号多会话，不能把并发上限设为大于 1',
+            })
+          }
+        }
+        if (body.maxConcurrentSessions != null && body.maxConcurrentSessions < current.maxConcurrentSessions) {
+          const activeSessions = await tx
+            .select({ id: browserSessions.id })
+            .from(browserSessions)
+            .where(
+              and(
+                eq(browserSessions.targetId, targetId),
+                eq(browserSessions.targetAccountId, accountId),
+                inArray(browserSessions.status, ['OPEN', 'CREATING']),
+              ),
+            )
+          if (activeSessions.length > body.maxConcurrentSessions) {
+            throw failure('conflict', {
+              code: 'ACCOUNT_CAP_REDUCTION_BLOCKED',
+              message: `当前账号仍有 ${activeSessions.length} 个活动会话，超过新上限 ${body.maxConcurrentSessions}，请先关闭多余会话后再降低上限`,
             })
           }
         }
@@ -1282,8 +1334,9 @@ export class TargetsStore {
     const profile = await loadCurrentAuthProfile(this.db, targetId)
     const extras = await loadAccountAuthDisplay(this.db, [accountId])
     const target = await this.loadTarget(targetId)
+    const platformDefaults = await this.platformSessionDefaults()
     const accountSessionMode = resolveSessionPolicyLayers({
-      platformDefault: sessionPolicyFromPlatform(FACTORY_PLATFORM_CONFIG.session),
+      platformDefault: platformDefaults,
       targetOverride: target.sessionPolicy as never,
     }).accountSessionMode
     const snapshotSummary = await readSessionStateSnapshotSummary(this.db, {
@@ -1394,8 +1447,9 @@ export class TargetsStore {
     }
     if (body.maxConcurrentSessions != null && body.maxConcurrentSessions > 1) {
       const [targetRow] = await tx.select({ sessionPolicy: targets.sessionPolicy }).from(targets).where(eq(targets.id, targetId)).limit(1)
+      const platformDefaults = await this.platformSessionDefaults()
       const mode = resolveSessionPolicyLayers({
-        platformDefault: sessionPolicyFromPlatform(FACTORY_PLATFORM_CONFIG.session),
+        platformDefault: platformDefaults,
         targetOverride: targetRow?.sessionPolicy as never,
       }).accountSessionMode
       if (mode !== 'concurrent') {

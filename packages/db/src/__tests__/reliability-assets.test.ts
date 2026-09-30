@@ -69,6 +69,9 @@ describe.each(DRIVERS)('%s reliability assets and signals domain operations', (d
     await handle.db.insert(t.reliabilityIncidents).values({
       id: incidentId,
       targetId,
+      assetKind: 'scenario',
+      assetId: scenarioId,
+      ruleVersion: 2,
       groupingKey,
       scopeDigest: `target:${targetId}`,
       severity: 'P2',

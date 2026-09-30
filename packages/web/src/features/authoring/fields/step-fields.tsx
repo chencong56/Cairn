@@ -687,35 +687,35 @@ export function StepFields({
     )
   }
   if (step.type === 'extract') {
-    return (
-      <div className='space-y-3'>
-        <TargetFields
-          {...policyHandlers(step, onChange)}
-          target={step.input.target}
-          disabled={disabled}
-          onChange={(target) =>
-            onChange({ ...step, input: { ...step.input, target } })
-          }
-        />
-        <div className='grid gap-3 sm:grid-cols-2'>
+    const extractStep = step
+    if (extractStep.input.as === 'table') {
+      const tableInput = extractStep.input
+      return (
+        <div className='space-y-3'>
+          <TargetFields
+            {...policyHandlers(extractStep, onChange)}
+            target={tableInput.target}
+            disabled={disabled}
+            onChange={(target) =>
+              onChange({ ...extractStep, input: { ...tableInput, target } })
+            }
+          />
           <div className='space-y-2'>
             <Label>提取类型</Label>
             <Select
-              value={step.input.as}
+              value='table'
               disabled={disabled}
-              onValueChange={(value) =>
-                onChange({
-                  ...step,
-                  input: {
-                    ...step.input,
-                    as: value as 'text' | 'value' | 'attribute',
-                    attribute:
-                      value === 'attribute'
-                        ? (step.input.attribute ?? 'value')
-                        : undefined,
-                  },
-                })
-              }
+              onValueChange={(value) => {
+                if (value !== 'table') {
+                  onChange({
+                    ...extractStep,
+                    input: {
+                      target: tableInput.target,
+                      as: value as 'text' | 'value' | 'attribute',
+                    },
+                  })
+                }
+              }}
             >
               <SelectTrigger className='w-full' aria-label='提取类型'>
                 <SelectValue />
@@ -724,20 +724,89 @@ export function StepFields({
                 <SelectItem value='text'>文本</SelectItem>
                 <SelectItem value='value'>输入值</SelectItem>
                 <SelectItem value='attribute'>元素属性</SelectItem>
+                <SelectItem value='table'>表格数据</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {step.input.as === 'attribute' ? (
+        </div>
+      )
+    }
+
+    const standardInput = extractStep.input
+    return (
+      <div className='space-y-3'>
+        <TargetFields
+          {...policyHandlers(extractStep, onChange)}
+          target={standardInput.target}
+          disabled={disabled}
+          onChange={(target) =>
+            onChange({ ...extractStep, input: { ...standardInput, target } })
+          }
+        />
+        <div className='grid gap-3 sm:grid-cols-2'>
+          <div className='space-y-2'>
+            <Label>提取类型</Label>
+            <Select
+              value={standardInput.as}
+              disabled={disabled}
+              onValueChange={(value) => {
+                if (value === 'table') {
+                  onChange({
+                    ...extractStep,
+                    input: {
+                      target: standardInput.target,
+                      as: 'table',
+                      table: {
+                        protocol: 'table.read@1',
+                        target: standardInput.target,
+                        scope: 'current_page',
+                        columns: [{ key: 'col_1', name: '数据列', valueType: 'text' }],
+                        limits: { maxRows: 200, maxCols: 32 },
+                      },
+                    },
+                  })
+                } else if (value === 'attribute') {
+                  onChange({
+                    ...extractStep,
+                    input: {
+                      target: standardInput.target,
+                      as: 'attribute',
+                      attribute: 'attribute' in standardInput ? standardInput.attribute : 'value',
+                    },
+                  })
+                } else {
+                  onChange({
+                    ...extractStep,
+                    input: {
+                      target: standardInput.target,
+                      as: value as 'text' | 'value',
+                    },
+                  })
+                }
+              }}
+            >
+              <SelectTrigger className='w-full' aria-label='提取类型'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='text'>文本</SelectItem>
+                <SelectItem value='value'>输入值</SelectItem>
+                <SelectItem value='attribute'>元素属性</SelectItem>
+                <SelectItem value='table'>表格数据</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {standardInput.as === 'attribute' ? (
             <div className='space-y-2'>
-              <Label htmlFor={`step-attr-${step.id}`}>属性名</Label>
+              <Label htmlFor={`step-attr-${extractStep.id}`}>属性名</Label>
               <Input
-                id={`step-attr-${step.id}`}
-                value={step.input.attribute ?? ''}
+                id={`step-attr-${extractStep.id}`}
+                value={standardInput.attribute ?? ''}
                 disabled={disabled}
                 onChange={(event) =>
                   onChange({
-                    ...step,
-                    input: { ...step.input, attribute: event.target.value },
+                    ...extractStep,
+                    input: { ...standardInput, as: 'attribute', attribute: event.target.value },
                   })
                 }
               />
@@ -746,41 +815,44 @@ export function StepFields({
         </div>
         <div className='flex items-center justify-between gap-3'>
           <div className='flex items-center gap-1.5'>
-            <Label htmlFor={`step-many-${step.id}`}>提取全部匹配</Label>
+            <Label htmlFor={`step-many-${extractStep.id}`}>提取全部匹配</Label>
             <FieldHelp label='提取全部匹配'>
               开启后提取所有匹配元素的内容并输出为数组列表；未开启时仅提取首个匹配项。
             </FieldHelp>
           </div>
           <Switch
-            id={`step-many-${step.id}`}
-            checked={Boolean(step.input.many)}
+            id={`step-many-${extractStep.id}`}
+            checked={Boolean(standardInput.many)}
             disabled={disabled}
             onCheckedChange={(checked) =>
               onChange({
-                ...step,
+                ...extractStep,
                 input: {
-                  ...step.input,
-                  many: checked ? { maxItems: step.input.many?.maxItems ?? 50 } : undefined,
+                  ...standardInput,
+                  many: checked ? { maxItems: standardInput.many?.maxItems ?? 50 } : undefined,
                 },
               })
             }
           />
         </div>
-        {step.input.many ? (
+        {standardInput.many ? (
           <div className='space-y-2'>
-            <Label htmlFor={`step-many-max-${step.id}`}>上限</Label>
+            <Label htmlFor={`step-many-max-${extractStep.id}`}>上限</Label>
             <Input
-              id={`step-many-max-${step.id}`}
+              id={`step-many-max-${extractStep.id}`}
               type='number'
               min={1}
               max={1000}
               disabled={disabled}
-              value={step.input.many.maxItems}
+              value={standardInput.many.maxItems}
               onChange={(event) => {
                 const maxItems = Math.min(1000, Math.max(1, Number(event.target.value) || 1))
                 onChange({
-                  ...step,
-                  input: { ...step.input, many: { ...step.input.many, maxItems } },
+                  ...extractStep,
+                  input: {
+                    ...standardInput,
+                    many: { maxItems },
+                  },
                 })
               }}
             />

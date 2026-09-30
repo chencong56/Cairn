@@ -7,6 +7,7 @@ import { atomic, clockNow, databaseNow, insertRows, locked, schemaFor, updateRow
 import { appendRunEvents } from '../observe/events.js'
 import { countFailedRecoveries, lockRunRow, releaseRunLeaseTx } from '../leases/leases.js'
 import { skipRemainingStepRunsTx, skippedStepRunEvents } from '../runs/step-status.js'
+import { enqueueReliabilityReceiptTx } from '../reliability/receipts.js'
 import type { SessionLeaseRow } from '../records.js'
 import { lockOperationRow, lockSession } from './occupancy-tx.js'
 import { getSessionOperation } from './occupancy-read.js'
@@ -241,6 +242,11 @@ export async function expireAuthWaitDeadline(tx: Db, lease: SessionLeaseRow, now
         and(eq(runs.id, lease.runId), eq(runs.status, 'WAITING_FOR_AUTH')),
       )
       if (moved) {
+        await enqueueReliabilityReceiptTx(tx, {
+          runId: lease.runId,
+          targetId: run.targetId,
+          finishedAt: now,
+        })
         await tx.insert(evidences).values({
           id: newId(),
           runId: lease.runId,

@@ -24,6 +24,12 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 
 let lastTurnId = 1
 vi.mock('@/lib/assistant-api', () => ({
+  adoptRecordingProposal: vi.fn(),
+  previewRecordingProposal: vi.fn(),
+  selectRecordingProposal: vi.fn(),
+  confirmRecordingOutcome: vi.fn(),
+  fetchRecordingAdoptions: vi.fn(async () => []),
+  revertRecordingAdoption: vi.fn(),
   fetchAssistantCapabilities: vi.fn(async () => ({
     items: [
       { id: 'platform.guide', label: '功能导览', available: true, missingPermissions: [], requiredContext: [] },
@@ -294,7 +300,7 @@ describe('普通用户视角：跨菜单页面识途助手端到端正反例与 
       await expect.element(page.getByText('订单处理与开票全流程 (v3 草稿已修改)')).toBeVisible()
 
       // 推荐 Chips 巡检
-      const explainScenarioChip = page.getByRole('button', { name: '💡 解释场景全貌', exact: true })
+      const explainScenarioChip = page.getByRole('button', { name: '解释场景全貌与依赖', exact: true })
       await expect.element(explainScenarioChip).toBeVisible()
       await expect.element(page.getByRole('button', { name: '📝 审查未保存改动', exact: true })).not.toBeInTheDocument()
       await expect.element(page.getByText('当前有未保存修改。助手会依据已保存版本回答；要分析刚才的编辑，请先保存草稿。')).toBeVisible()
@@ -318,11 +324,11 @@ describe('普通用户视角：跨菜单页面识途助手端到端正反例与 
       const input = page.getByRole('textbox', { name: '向助手提问' })
       await userEvent.fill(input, '请结合财务部门规范，')
 
-      const explainChip = page.getByRole('button', { name: '💡 解释场景全貌', exact: true })
+      const explainChip = page.getByRole('button', { name: '解释场景全貌与依赖', exact: true })
       await userEvent.click(explainChip)
 
       // 输入框内容安全保留手写前缀，追加了 Chip 的提问文本，且绝不意外清空或覆盖
-      await expect.element(input).toHaveValue('请结合财务部门规范，\n请解释当前场景的业务流程、步骤时序与全局契约。')
+      await expect.element(input).toHaveValue('请结合财务部门规范，\n解释场景全貌与依赖')
     })
   })
 

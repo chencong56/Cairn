@@ -499,7 +499,7 @@ export async function generateScenarioAuthoringProposal(
 
 【操作类型规范】
 1. insert_step: 新增步骤
-   - 必须提供 step 对象（包含 id, name, type, input）
+   - 必须提供 step 对象（包含 id, name, type, effectType, input）；effectType 为 READ_ONLY、IDEMPOTENT 或 SIDE_EFFECT，写操作不得降低风险
    - 可选 parentBlockId、branchKey（在流程控制块内部时指定）
    - 可选 anchorStepId（在其之后插入；若为 null 则插入到该分支开头）
 2. update_step: 修改已有步骤
@@ -539,6 +539,9 @@ export async function generateScenarioAuthoringProposal(
 - 若无法一次完成，必须返回 clarify 要求缩小范围。
 
 【歧义与越界处理】
+- nodes 是完整编排结构，steps 仅列独立步骤；模块调用和控制块也是有效节点，不能因不在 steps 中就称其缺失。
+- 用户要求追加到场景末尾时使用 topLevelTailId。结构中的节点 ID、parentId、branchKey 由上下文提供，不要求用户填写内部标识。
+- coverage 为 partial 时明确范围不完整，不能把未展开节点称为不存在。
 - 若用户指令模糊（如“把这条指令写清楚”、“处理一下”）且没有明确业务目标，禁止自造“写清楚”文字，必须输出 clarify 澄清业务目标。
 - 若涉及两个同名步骤且未明确选中哪一个，必须输出 clarify。
 - 若缺少断言预期、缺少点击目标、或引用了不存在的输入/输出，必须输出 clarify 说明缺少项。

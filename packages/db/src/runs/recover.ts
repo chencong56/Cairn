@@ -1,5 +1,6 @@
 import { databaseNow, schemaFor } from '../native.js'
 import { updateRows } from '../native.js'
+import { enqueueReliabilityReceiptTx } from '../reliability/receipts.js'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
   CANCELLED_ATTEMPT_ERROR,
@@ -87,6 +88,11 @@ export async function settleLeaselessRun(
         .update(runs)
         .set({ status: 'FAILED', finishedAt: databaseNow(tx), updatedAt: now })
         .where(eq(runs.id, input.runId))
+      await enqueueReliabilityReceiptTx(tx as unknown as Db, {
+        runId: input.runId,
+        targetId: run.targetId,
+        finishedAt: now,
+      })
       const debugWorkerLostError: ExecutionError = {
         code: 'DEBUG_WORKER_LOST',
         category: 'INFRASTRUCTURE',
@@ -387,8 +393,13 @@ export async function settleRunCancellationTx(
   const { runs, stepRuns, stepIterations } = schemaFor(tx)
   await tx.update(runs).set({ status: 'CANCELLED', finishedAt: databaseNow(tx), updatedAt: now })
     .where(eq(runs.id, runId))
-  const [cancelledRun] = await tx.select({ snapshot: runs.snapshot }).from(runs).where(eq(runs.id, runId)).limit(1)
+  const [cancelledRun] = await tx.select({ targetId: runs.targetId, snapshot: runs.snapshot }).from(runs).where(eq(runs.id, runId)).limit(1)
   if (cancelledRun) {
+    await enqueueReliabilityReceiptTx(tx, {
+      runId,
+      targetId: cancelledRun.targetId,
+      finishedAt: now,
+    })
     await recalculateRunOutcomeTx(tx, runId, cancelledRun.snapshot as RunSnapshot, now)
   }
   // Orphan attempts are now closed. A read-only orphan can still have a RUNNING StepRun.
@@ -419,6 +430,11 @@ export async function reviewRun(
       .update(runs)
       .set({ status, finishedAt: databaseNow(tx), updatedAt: now })
       .where(eq(runs.id, input.runId))
+    await enqueueReliabilityReceiptTx(tx as unknown as Db, {
+      runId: input.runId,
+      targetId: run.targetId,
+      finishedAt: now,
+    })
     const [runRow] = await tx.select({ snapshot: runs.snapshot }).from(runs).where(eq(runs.id, input.runId)).limit(1)
     if (runRow) {
       await recalculateRunOutcomeTx(tx as unknown as Db, input.runId, runRow.snapshot as RunSnapshot, now)

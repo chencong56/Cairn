@@ -40,6 +40,12 @@ export class WorkersController {
     return this.workers.get(workerId, query, actor.permissions)
   }
 
+  @Get(':workerId/node-health')
+  @RequirePermissions('session:read')
+  nodeHealth(@Param('workerId') workerId: string) {
+    return this.workers.nodeHealth(workerId)
+  }
+
   @Post(':workerId/disable')
   @RequirePermissions('session:manage')
   disable(@Param('workerId') workerId: string) {

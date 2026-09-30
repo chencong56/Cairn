@@ -53,7 +53,7 @@ describe('PromptCards 能力与承诺', () => {
     expect(screen.container.innerHTML).toBe('')
   })
 
-  it('M3: 当提供 boundContext（如 Studio 选中单步）时，首帧卡片置顶展示「场景推荐」并支持点击发问', async () => {
+  it('单一呈现模型：PromptCards 严格展示标准分类，不复制专属推荐标签「场景推荐」', async () => {
     const onSelectPrompt = vi.fn()
     const screen = await render(
       <PromptCards
@@ -62,68 +62,32 @@ describe('PromptCards 能力与承诺', () => {
           page: 'studio',
           scenarioId: 'sc-1',
           selectedStepId: 'step-1',
-          chips: [
-            {
-              id: 'studio-step-propose',
-              label: '✏️ 修改建议',
-              question: '请对当前选中的步骤给出编写与配置优化建议。',
-              capabilityHint: 'scenario.explain',
-            },
-          ],
         }}
         capabilities={capabilities(['scenario.explain'])}
         onSelectPrompt={onSelectPrompt}
       />,
     )
 
-    // 推荐分类标签存在且置顶激活
-    const recTab = screen.getByRole('tab', { name: '场景推荐' })
-    await expect.element(recTab).toBeInTheDocument()
-    await expect.element(recTab).toHaveAttribute('aria-selected', 'true')
+    // 不存在重复的场景推荐 tab
+    await expect.element(screen.getByRole('tab', { name: '场景推荐' })).not.toBeInTheDocument()
 
-    // 推荐大卡片展示并能响应点击发问
-    const recCard = screen.getByTestId('prompt-card-studio-step-propose')
-    await expect.element(recCard).toBeInTheDocument()
-    await expect.element(screen.getByText('✏️ 修改建议')).toBeInTheDocument()
-    await recCard.click()
-    expect(onSelectPrompt).toHaveBeenCalledWith(
-      '请对当前选中的步骤给出编写与配置优化建议。',
-      'scenario.explain',
-    )
+    // 默认展示标准分类（场景编排）
+    const authTab = screen.getByRole('tab', { name: '场景编排' })
+    await expect.element(authTab).toBeInTheDocument()
+    await expect.element(authTab).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('M3: 当运行失败且选中报错步骤时，首帧卡片推荐当前步骤诊断与失败根因', async () => {
+  it('运行页泛化态：PromptCards 仅展示标准排障卡片，不复制单步诊断专有卡片', async () => {
     const screen = await render(
       <PromptCards
-        pageContext={{ page: 'run', runId: 'run-fail', stepId: 'step-err' }}
-        boundContext={{
-          page: 'run',
-          runId: 'run-fail',
-          selectedStepId: 'step-err',
-          selectedStepFailed: true,
-          statusTone: 'error',
-          chips: [
-            {
-              id: 'run-step-diagnose',
-              label: '🔎 排查当前步骤报错',
-              question: '当前步骤记录了什么错误？我应该先核对哪份运行证据？',
-              capabilityHint: 'run.diagnose',
-            },
-            {
-              id: 'run-diagnose-rca',
-              label: '🚨 排查本次失败',
-              question: '这次运行哪里失败？请根据已记录的步骤和错误信息说明先核对什么；证据不足时请指出缺口。',
-              capabilityHint: 'run.diagnose',
-            },
-          ],
-        }}
+        pageContext={{ page: 'run', runId: 'run-fail' }}
         capabilities={capabilities(['run.diagnose'])}
         onSelectPrompt={vi.fn()}
       />,
     )
 
-    await expect.element(screen.getByTestId('prompt-card-run-step-diagnose')).toBeInTheDocument()
-    await expect.element(screen.getByTestId('prompt-card-run-diagnose-rca')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('prompt-card-diag-rootcause')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('prompt-card-run-step-diagnose')).not.toBeInTheDocument()
   })
 
   it('方案B气泡流：提示词胶囊具备 tooltip 说明且类名符合紧凑药丸规范', async () => {

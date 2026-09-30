@@ -1,3 +1,4 @@
+import { RecordingAdoptionReceipts } from '@/features/assistant/recording-proposal'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
@@ -66,6 +67,7 @@ export function RecordingDetailPage() {
   const [handoffOpen, setHandoffOpen] = useState(false)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   const [showFacts, setShowFacts] = useState(false)
+  const [showAdoptionReceipts, setShowAdoptionReceipts] = useState(false)
 
   // 标题行内编辑状态
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -494,6 +496,7 @@ export function RecordingDetailPage() {
             ) : null}
           </div>
         )}
+        {canWrite ? <section aria-label='助手采纳回执' className='space-y-2'><Button variant='ghost' size='sm' aria-expanded={showAdoptionReceipts} onClick={() => setShowAdoptionReceipts((open) => !open)}>助手采纳回执</Button>{showAdoptionReceipts ? <RecordingAdoptionReceipts recordingId={recordingId} go={(href) => { void navigate({ to: href }) }} /> : null}</section> : null}
       </Main>
 
       {/* 重命名弹窗 */}

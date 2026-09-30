@@ -422,7 +422,7 @@ describe('验收意图（三期）：历史洞察与批量巡检持久化', () =
       for (let i = 0; i < 10; i++) {
         const runRes = await createRunWithSnapshot(handle.db, {
           scenarioId: scenario.id,
-          scenarioVersionId: published.latestVersionId,
+          scenarioVersionId: published.published!.versionId,
           debugMode: 'runThrough',
           actor: { kind: 'console', id: adminId },
         })

@@ -23,6 +23,12 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 })
 
 vi.mock('@/lib/assistant-api', () => ({
+  adoptRecordingProposal: vi.fn(),
+  previewRecordingProposal: vi.fn(),
+  selectRecordingProposal: vi.fn(),
+  confirmRecordingOutcome: vi.fn(),
+  fetchRecordingAdoptions: vi.fn(async () => []),
+  revertRecordingAdoption: vi.fn(),
   fetchAssistantCapabilities: vi.fn(async () => ({
     items: [
       {
@@ -204,17 +210,17 @@ describe('Assistant Recommendation Engine E2E (Positive & Negative Test Suite)',
       render(<AssistantHost />)
 
       // 1. 验证 ContextCapsule 渲染了推荐 Chips
-      const proposeChip = page.getByRole('button', { name: '✏️ 修改建议', exact: true })
-      const selectorChip = page.getByRole('button', { name: '🎯 诊断选择器稳定性', exact: true })
-      const explainChip = page.getByRole('button', { name: '📖 解释此步骤', exact: true })
+      const proposeChip = page.getByRole('button', { name: '在此步骤后新增步骤', exact: true })
+      const optimizeChip = page.getByRole('button', { name: '优化当前步骤配置', exact: true })
+      const explainChip = page.getByRole('button', { name: '检查全流程结构与依赖', exact: true })
 
       await expect.element(proposeChip).toBeVisible()
-      await expect.element(selectorChip).toBeVisible()
+      await expect.element(optimizeChip).toBeVisible()
       await expect.element(explainChip).toBeVisible()
 
-      // 2. 验证 PromptCards 出现“场景推荐”置顶分组
-      const recommendTab = page.getByRole('tab', { name: '场景推荐' })
-      await expect.element(recommendTab).toBeVisible()
+      // 2. 验证场景感知互斥去重：主视口隐藏重复的 PromptCards 矩阵，展示情境连接指示器
+      await expect.element(page.getByTestId('assistant-prompt-cards')).not.toBeInTheDocument()
+      await expect.element(page.getByTestId('context-focus-indicator')).toBeVisible()
 
       // 3. 点击 Chip 闭环：输入框为空时一键触发对话提问
       await userEvent.click(proposeChip)
@@ -222,7 +228,7 @@ describe('Assistant Recommendation Engine E2E (Positive & Negative Test Suite)',
       expect(createAssistantTurn).toHaveBeenCalledWith(
         'conv-e2e-1',
         expect.objectContaining({
-          question: expect.stringContaining('优化建议'),
+          question: '在此步骤后新增步骤',
           capabilityHint: 'scenario.propose-step',
         })
       )
@@ -306,12 +312,12 @@ describe('Assistant Recommendation Engine E2E (Positive & Negative Test Suite)',
 
       render(<AssistantHost />)
 
-      // ✏️ 修改建议 与 🎯 优化选择器 依赖 scenario.propose-step (需要 workflow:write) 应被过滤
-      const proposeChip = page.getByRole('button', { name: '✏️ 修改建议', exact: true })
+      // 在此步骤后新增步骤 与 优化当前步骤配置 依赖 scenario.propose-step (需要 workflow:write) 应被过滤
+      const proposeChip = page.getByRole('button', { name: '在此步骤后新增步骤', exact: true })
       await expect.element(proposeChip).not.toBeInTheDocument()
 
-      // 只读可用的 📖 解释此步骤 仍然保留
-      const explainChip = page.getByRole('button', { name: '📖 解释此步骤', exact: true })
+      // 只读可用的 检查全流程结构与依赖 仍然保留
+      const explainChip = page.getByRole('button', { name: '检查全流程结构与依赖', exact: true })
       await expect.element(explainChip).toBeVisible()
     })
   })
@@ -336,7 +342,7 @@ describe('Assistant Recommendation Engine E2E (Positive & Negative Test Suite)',
 
       render(<AssistantHost />)
 
-      const proposeChip = page.getByRole('button', { name: '✏️ 修改建议', exact: true })
+      const proposeChip = page.getByRole('button', { name: '在此步骤后新增步骤', exact: true })
       await expect.element(proposeChip).not.toBeInTheDocument()
     })
   })
@@ -372,10 +378,10 @@ describe('Assistant Recommendation Engine E2E (Positive & Negative Test Suite)',
 
       render(<AssistantHost />)
 
-      const proposeChip = page.getByRole('button', { name: '✏️ 修改建议', exact: true })
+      const proposeChip = page.getByRole('button', { name: '在此步骤后新增步骤', exact: true })
       await expect.element(proposeChip).not.toBeInTheDocument()
 
-      const explainChip = page.getByRole('button', { name: '📖 解释此步骤', exact: true })
+      const explainChip = page.getByRole('button', { name: '检查全流程结构与依赖', exact: true })
       await expect.element(explainChip).toBeVisible()
     })
   })
@@ -392,11 +398,11 @@ describe('Assistant Recommendation Engine E2E (Positive & Negative Test Suite)',
 
       render(<AssistantHost />)
 
-      const proposeChip = page.getByRole('button', { name: '✏️ 修改建议', exact: true })
+      const proposeChip = page.getByRole('button', { name: '在此步骤后新增步骤', exact: true })
       await expect.element(proposeChip).not.toBeInTheDocument()
 
-      const scenarioExplainChip = page.getByRole('button', { name: '💡 解释场景全貌', exact: true })
-      const inspectChip = page.getByRole('button', { name: '🔍 检查逻辑完整性', exact: true })
+      const scenarioExplainChip = page.getByRole('button', { name: '解释场景全貌与依赖', exact: true })
+      const inspectChip = page.getByRole('button', { name: '检查潜在逻辑缺漏', exact: true })
       await expect.element(scenarioExplainChip).toBeVisible()
       await expect.element(inspectChip).toBeVisible()
     })

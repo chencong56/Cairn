@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import type { JsonValue } from './wire.js'
 import type { OutputShape } from './output-schema.js'
+import {
+  numericComparisonPolicySchema,
+  compareWithNumericPolicy,
+  type NumericComparisonPolicy,
+} from './numeric-policy.js'
 
 // ---------------------------------------------------------------------------
 // Constants & Limits
@@ -32,6 +37,7 @@ export const EXPR_FUNCTIONS = [
   'max',
   'sum',
   'diff',
+  'mul',
   // 判空与缺省
   'exists',
   'isEmpty',
@@ -91,6 +97,7 @@ export type ExprCompare = {
   op: ExprCompareOp
   left: Expr
   right: Expr
+  numericPolicy?: NumericComparisonPolicy
 }
 
 export type ExprLogic = {
@@ -146,6 +153,7 @@ export const exprSchema: z.ZodType<Expr> = z.lazy(() =>
       op: exprCompareOpSchema,
       left: exprSchema,
       right: exprSchema,
+      numericPolicy: numericComparisonPolicySchema.optional(),
     }),
     z.strictObject({
       kind: z.literal('logic'),
@@ -355,6 +363,9 @@ export function validateExpression(
     }
 
     if (node.kind === 'call') {
+      if (node.fn === 'mul' && node.args.length !== 2) {
+        return { valid: false, code: 'EXPR_PARAM_INVALID', message: 'mul 函数恰好需要两个参数' }
+      }
       if (node.fn === 'regexExtract') {
         const patternNode = node.args[1]
         if (patternNode && patternNode.kind === 'literal' && typeof patternNode.value === 'string') {
@@ -567,6 +578,12 @@ function evalInner(
       const left = evalInner(expr.left, context, operands)
       const right = evalInner(expr.right, context, operands)
 
+      if (expr.numericPolicy) {
+        const res = compareWithNumericPolicy(left, right, expr.op, expr.numericPolicy)
+        if (res.error) throw new Error(res.error)
+        return res.matched
+      }
+
       switch (expr.op) {
         case 'eq':
           return left === right
@@ -749,6 +766,21 @@ function evalCall(
       const b = Number(evaluated[1] ?? 0)
       return a - b
     }
+    case 'mul': {
+      if (evaluated.length !== 2) {
+        throw new Error('mul 函数恰好需要两个参数')
+      }
+      const a = evaluated[0]
+      const b = evaluated[1]
+      if (typeof a !== 'number' || typeof b !== 'number' || !Number.isFinite(a) || !Number.isFinite(b)) {
+        throw new Error('mul 函数要求两个有限数字参数，禁止字符串/布尔隐式转换')
+      }
+      const res = a * b
+      if (!Number.isFinite(res)) {
+        throw new Error('mul 计算结果溢出或非有限数')
+      }
+      return res
+    }
 
     // 判空
     case 'isEmpty': {
@@ -864,6 +896,7 @@ export function inferExpressionShape(
         case 'max':
         case 'sum':
         case 'diff':
+        case 'mul':
         case 'length':
           return { kind: 'scalar', type: 'number' }
 

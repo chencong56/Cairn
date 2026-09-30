@@ -108,6 +108,21 @@ describe('意图草稿', () => {
         severity: 'MUST',
       },
     })
+
+    // table_acceptance
+    const tblDraft = newIntentDraft('table_acceptance', STEP, 'k6')
+    expect(toIntentRequest(tblDraft)).toEqual({
+      ok: true,
+      value: {
+        key: 'k6',
+        kind: 'table_acceptance',
+        stepId: STEP,
+        metricName: '数据表',
+        rules: [{ rule: 'row_count', op: 'gte', value: 1 }],
+        severity: 'MUST',
+      },
+    })
+    expect(toIntentRequest({ ...tblDraft, stepId: undefined }).ok).toBe(false)
   })
 })
 

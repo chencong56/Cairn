@@ -13,6 +13,9 @@ import {
   renameRecordingDraft,
   updateRecordingDraftExclusions,
   createScenarioFromRecordingHandoff,
+  listRecordingAdoptionReceipts,
+  getRecordingAdoptionReceipt,
+  revertAssistantRecordingAdoption,
   type CreateScenarioHandoffBody,
   type DbHandle,
   type ChangeHintBus,
@@ -159,6 +162,30 @@ export class RecordingsService {
       const result = await createScenarioFromRecordingHandoff(this.db, recordingDraftId, body, actor)
       await this.publishHint(recordingDraftId)
       return result
+    } catch (error) {
+      rethrowDomain(error)
+    }
+  }
+
+  async listAdoptions(recordingId: string, actor: RequestAccount) {
+    try {
+      return await listRecordingAdoptionReceipts(this.db, recordingId, actor.id)
+    } catch (error) {
+      rethrowDomain(error)
+    }
+  }
+
+  async getAdoption(recordingId: string, receiptId: string, actor: RequestAccount) {
+    try {
+      return await getRecordingAdoptionReceipt(this.db, recordingId, receiptId, actor.id)
+    } catch (error) {
+      rethrowDomain(error)
+    }
+  }
+
+  async revertAdoption(recordingId: string, receiptId: string, actor: RequestAccount) {
+    try {
+      return await revertAssistantRecordingAdoption(this.db, recordingId, receiptId, { id: actor.id })
     } catch (error) {
       rethrowDomain(error)
     }

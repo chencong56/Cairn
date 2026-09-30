@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { suggestDemonstration } from '@cairn/authoring'
 import type { DemonstrationDetail, RecordingEvent, RecordingItem } from '@cairn/shared'
 import {
   AlertCircle,
@@ -72,8 +73,13 @@ export function RecordingStepInspector({
   const hasSnapshots = Boolean(
     relatedFact && (relatedFact.before?.screenshotAssetId || relatedFact.after?.screenshotAssetId),
   )
+  const suggestion = demonstrationDetail && relatedFact
+    ? suggestDemonstration(demonstrationDetail.source).find((entry) => entry.sourceIds.includes(relatedFact.id))
+    : undefined
+  const candidateStepType = item.candidateStepType ?? suggestion?.step?.type
 
-  const inputObj = item.input && typeof item.input === 'object' ? (item.input as Record<string, unknown>) : null
+  const candidateInput = item.input ?? suggestion?.step?.input
+  const inputObj = candidateInput && typeof candidateInput === 'object' ? (candidateInput as Record<string, unknown>) : null
   const selector = typeof inputObj?.selector === 'string' ? inputObj.selector : null
 
   const handleCopySelector = () => {
@@ -213,11 +219,11 @@ export function RecordingStepInspector({
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-2'>
               <span className='text-label text-muted-foreground'>目标 DSL 类型:</span>
-              {item.candidateStepType ? (
+              {candidateStepType ? (
                 <code className='rounded bg-primary-100 px-1.5 py-0.5 text-label font-mono font-semibold text-primary-700'>
-                  {STEP_TYPE_LABELS[item.candidateStepType] ?? item.candidateStepType}
+                  {STEP_TYPE_LABELS[candidateStepType] ?? candidateStepType}
                 </code>
-              ) : item.status === 'mapped' ? (
+              ) : suggestion?.outcome ? (
                 <span className='inline-flex items-center gap-1 rounded bg-status-success-background px-1.5 py-0.5 text-label font-medium text-status-success-foreground'>
                   <CheckCircle2 className='size-3' />
                   流程成功条件 (Assertion Rule)

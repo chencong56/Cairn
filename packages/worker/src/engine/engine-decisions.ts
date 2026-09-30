@@ -83,6 +83,11 @@ export function checkpointOf(input: {
   url?: string
   /** 循环体内挂起时的作用域；恢复校验按它找本项的步骤记录。 */
   scopePath?: string
+  holdId?: string
+  heldAt?: string
+  holdExpiresAt?: string
+  holdHardExpiresAt?: string
+  lastAuthoringActivityAt?: string
 }): DebugCheckpoint {
   return {
     mode: input.debugMode === 'holdAfterEach' ? 'holdAfterEach' : 'holdOnFailure',
@@ -96,6 +101,11 @@ export function checkpointOf(input: {
     sessionGeneration: input.sessionGrant?.generation ?? 0,
     fencingToken: String(input.grant.fencingToken),
     overlayRevision: input.overlay?.revision ?? 0,
+    ...(input.holdId ? { holdId: input.holdId } : {}),
+    ...(input.heldAt ? { heldAt: input.heldAt } : {}),
+    ...(input.holdExpiresAt ? { holdExpiresAt: input.holdExpiresAt } : {}),
+    ...(input.holdHardExpiresAt ? { holdHardExpiresAt: input.holdHardExpiresAt } : {}),
+    ...(input.lastAuthoringActivityAt ? { lastAuthoringActivityAt: input.lastAuthoringActivityAt } : {}),
   }
 }
 

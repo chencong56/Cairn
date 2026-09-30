@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   resumeRunAuth: vi.fn(),
   subscribeBrowserFrames: vi.fn(),
   navigate: vi.fn(),
+  fetchPlatformConfig: vi.fn(),
   useSearch: vi.fn(() => ({}) as { view?: 'stream' | 'systems'; targetId?: string }),
 }))
 
@@ -41,6 +42,9 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
     Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
   }
 })
+vi.mock('@/lib/platform-config-api', () => ({
+  fetchPlatformConfig: (...args: unknown[]) => mocks.fetchPlatformConfig(...args),
+}))
 vi.mock('@/lib/workers-api', () => ({ disposeWorkerSession: vi.fn() }))
 vi.mock('@/lib/targets-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/targets-api')>()
@@ -77,6 +81,19 @@ describe('SessionsPage', () => {
     await page.viewport(1440, 900)
     signIn()
     mocks.useSearch.mockReturnValue({})
+    mocks.fetchPlatformConfig.mockResolvedValue({
+      revision: 1,
+      document: {
+        browserPrewarm: {
+          mode: 'fixed',
+          fixedCount: 1,
+        },
+      },
+      updatedAt: '2026-09-30T00:00:00.000Z',
+      updatedByAccountId: null,
+      reason: 'init',
+      source: 'system',
+    })
     mocks.fetchSessionSystemOverview.mockResolvedValue({
       items: [
         {
@@ -401,6 +418,8 @@ describe('SessionsPage', () => {
           ownerWorkerLabel: 'worker-node-alpha',
           ownerWorkerOnline: true,
           authState: 'AUTHENTICATED',
+          isolation: 'SHARED',
+          hostId: 'host-123456789',
         },
         {
           id: 'inst-2',
@@ -411,6 +430,8 @@ describe('SessionsPage', () => {
           ownerWorkerLabel: 'worker-node-beta',
           ownerWorkerOnline: true,
           authState: 'AUTHENTICATED',
+          isolation: 'DEDICATED',
+          hostId: null,
         },
       ],
       actions: [],
@@ -430,7 +451,10 @@ describe('SessionsPage', () => {
     await screen.getByRole('button', { name: '展开实例' }).click()
     await expect.element(screen.getByText('并发会话实例 (2 个)')).toBeInTheDocument()
     await expect.element(screen.getByText('槽位 #1')).toBeInTheDocument()
+    await expect.element(screen.getByText('共享')).toBeInTheDocument()
+    await expect.element(screen.getByText('host-123')).toBeInTheDocument()
     await expect.element(screen.getByText('槽位 #2')).toBeInTheDocument()
+    await expect.element(screen.getByText('独占')).toBeInTheDocument()
   })
 
   it('按目标系统视图支持原地展开系统账号', async () => {
@@ -512,5 +536,18 @@ describe('SessionsPage', () => {
         ),
       )
       .toBe(true)
+  })
+
+  it('当平台开启浏览器预热时，页头描述呈现预热就绪胶囊', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const screen = await render(
+      <ThemeProvider>
+        <QueryClientProvider client={client}>
+          <SessionsPage />
+        </QueryClientProvider>
+      </ThemeProvider>,
+    )
+
+    await expect.element(screen.getByText('预热就绪')).toBeInTheDocument()
   })
 })

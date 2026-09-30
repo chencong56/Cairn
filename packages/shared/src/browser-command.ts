@@ -6,6 +6,7 @@ import { objectContentTypeSchema, objectDigestSchema, objectKeySchema } from './
 import { pageAfterSchema } from './managed-browser.js'
 import { locatorCandidateSchema, targetDescriptorSchema } from './target-descriptor.js'
 import { healingPatchSchema } from './healer.js'
+import { tableReadPlanSchema } from './table-acceptance.js'
 import { jsonValueSchema, utcInstantSchema } from './wire.js'
 
 export const RESOLVER_OUTCOMES = [
@@ -63,7 +64,7 @@ export const extractManySchema = z
   )
 export type ExtractMany = z.infer<typeof extractManySchema>
 
-export const EXTRACT_AS = ['text', 'value', 'attribute'] as const
+export const EXTRACT_AS = ['text', 'value', 'attribute', 'table'] as const
 export type ExtractAs = (typeof EXTRACT_AS)[number]
 
 export const ASSERT_KINDS = ['exists', 'visible', 'text_equals', 'text_contains', 'text_absent', 'number_compare', 'aria_snapshot'] as const
@@ -170,6 +171,7 @@ export const browserCommandSchema = z.discriminatedUnion('type', [
     as: z.enum(EXTRACT_AS),
     attribute: z.string().trim().min(1).max(128).optional(),
     many: extractManySchema.optional(),
+    table: tableReadPlanSchema.optional(),
     timeoutMs: z.number().int().positive().optional(),
   }),
   z.strictObject({

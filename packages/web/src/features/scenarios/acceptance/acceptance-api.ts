@@ -6,6 +6,10 @@ import {
   type AssistantTurn,
   scenarioAcceptanceHistoryResponseSchema,
   type ScenarioAcceptanceHistoryResponse,
+  acceptancePreviewRequestBodySchema,
+  acceptancePreviewResponseSchema,
+  type AcceptancePreviewRequestBody,
+  type AcceptancePreviewResponse,
 } from '@cairn/shared'
 import {
   createAssistantConversation,
@@ -186,3 +190,15 @@ export async function fetchScenarioAcceptanceHistory(
   const query = toQueryString(params)
   return apiFetch(`/api/scenarios/${scenarioId}/acceptance-history${query}`, scenarioAcceptanceHistoryResponseSchema)
 }
+
+export async function previewAcceptance(
+  scenarioId: string,
+  body: AcceptancePreviewRequestBody,
+): Promise<AcceptancePreviewResponse> {
+  return apiFetch(`/api/scenarios/${scenarioId}/acceptance/preview`, acceptancePreviewResponseSchema, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(acceptancePreviewRequestBodySchema.parse(body)),
+  })
+}
+

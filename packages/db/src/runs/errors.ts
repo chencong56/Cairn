@@ -67,6 +67,8 @@ export function constraintName(error: unknown): string | undefined {
           'recording_import_receipts_scenario_draft_idx',
         'recording_import_receipts.created_by_console_account_id,recording_import_receipts.idempotency_key':
           'recording_import_receipts_actor_idempotency_idx',
+        'recording_import_receipts.created_by_console_account_id,recording_import_receipts.proposal_family_id':
+          'recording_import_receipts_actor_proposal_family_idx',
         'targets.code': 'targets_code_idx',
         'target_accounts.target_id,target_accounts.username': 'target_accounts_target_username_idx',
         'evidences.run_id': 'evidences_run_incomplete_idx',
@@ -118,6 +120,9 @@ export function mapRestriction(
     }
     if (name.includes('recording_import_receipts_actor_idempotency')) {
       return conflict('RECORDING_IMPORT_CONFLICT', '相同幂等键对应不同的导入请求')
+    }
+    if (name.includes('recording_import_receipts_actor_proposal_family')) {
+      return conflict('RECORDING_PROPOSAL_ALREADY_ADOPTED', '该提案族已采纳过，不能重复采纳')
     }
   }
   if (isForeignKeyViolation(error)) {

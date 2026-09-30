@@ -179,9 +179,15 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
       return originalSelect.apply(handle.db, args)
     }) as typeof originalSelect
     try {
+      const single = await listAccountSessionOverview(handle.db, { search: `${label}-ready`, limit: 20 })
+      expect(single.items).toHaveLength(1)
+      const singleAccountSelects = selects
+      selects = 0
       const overview = await listAccountSessionOverview(handle.db, { search: label, limit: 20 })
       expect(selects).toBeGreaterThanOrEqual(4)
-      expect(selects).toBeLessThanOrEqual(8)
+      // 并发容量增加一次平台配置读取；核心约束仍是 1 与 13 个账号查询数相同。
+      expect(selects).toBeLessThanOrEqual(9)
+      expect(selects).toBe(singleAccountSelects)
       const byAccount = new Map(overview.items.map((item) => [item.targetAccountId, item]))
       expect(byAccount.get(unprepared)?.status).toBe('unprepared')
       expect(byAccount.get(ready)?.status).toBe('ready')

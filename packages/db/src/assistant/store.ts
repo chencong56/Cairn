@@ -9,9 +9,12 @@ import {
   packAssistantResultEnvelope,
   unpackAssistantResultEnvelope,
   unpackAssistantResultEnvelopeDetailed,
+  canonicalJson,
+  syncSha256,
   type AssistantConversation,
   type AssistantConversationList,
   type AssistantResult,
+  type AssistantResultEnvelope,
   type AssistantTurn,
   type AssistantTurnList,
   type AssistantTurnStatus,
@@ -821,4 +824,58 @@ export async function purgeExpiredAssistantBodies(db: Db, now = new Date()) {
       await db.delete(assistantConversations).where(eq(assistantConversations.id, row.id))
     }
   }
+}
+
+export async function createCompletedAssistantTurn(
+  db: Db,
+  input: {
+    conversationId: string
+    ownerAccountId: string
+    parentTurnId?: string | null
+    clientTurnId?: string
+    question: string
+    capabilityId?: string | null
+    result: AssistantResultEnvelope
+    slots?: Record<string, unknown> | null
+  },
+): Promise<AssistantTurn> {
+  const { assistantTurns, assistantConversations } = schemaFor(db)
+  const now = new Date()
+  const id = newId()
+  const clientTurnId = input.clientTurnId || newId()
+  const deadlineAt = new Date(now.getTime() + 60_000)
+  const requestDigest = syncSha256(canonicalJson(input.result))
+  const processingToken = newId()
+
+  await db.insert(assistantTurns).values({
+    id,
+    conversationId: input.conversationId,
+    ownerAccountId: input.ownerAccountId,
+    clientTurnId,
+    parentTurnId: input.parentTurnId ?? null,
+    requestDigest,
+    question: input.question,
+    capabilityId: input.capabilityId ?? null,
+    slots: input.slots ?? null,
+    requestPayload: null,
+    status: 'COMPLETED',
+    deadlineAt,
+    processingToken,
+    result: input.result,
+    stage: 'persisting',
+    eventSeq: 1,
+    queuePosition: null,
+    stopReason: 'completed',
+    epoch: 1,
+    createdAt: now,
+    updatedAt: now,
+  })
+
+  await db
+    .update(assistantConversations)
+    .set({ lastActiveAt: now, updatedAt: now })
+    .where(eq(assistantConversations.id, input.conversationId))
+
+  const [row] = await db.select().from(assistantTurns).where(eq(assistantTurns.id, id)).limit(1)
+  return toTurn(row!)
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useAssistantCollectionContext } from '@/features/assistant/use-assistant-context-binding'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { canExecuteRun, hasPermission, type SuiteSummaryDto } from '@cairn/shared'
@@ -111,6 +112,7 @@ export function SuitesPage() {
     [search, targetId, status, page.pageSize, page.cursor],
   )
 
+  useAssistantCollectionContext('suite', filters)
   const query = useQuery({
     queryKey: ['suites', filters],
     queryFn: () => fetchSuites(filters),

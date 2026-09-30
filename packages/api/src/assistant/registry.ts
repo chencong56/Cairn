@@ -19,6 +19,7 @@ import {
   assistantClarifySchema,
   operationsActionProposalSchema,
   targetFormProposalSchema,
+  assistantRecordingProposalResultSchema,
 } from '@cairn/shared'
 import { z } from 'zod'
 import type { DbHandle } from '@cairn/db'
@@ -352,7 +353,7 @@ export class AssistantCapabilityRegistry {
         return handleScenarioExplain(ctx)
       },
       promptTemplates: {
-        v1: '用中文解释已保存的场景定义。不要编造定位器或未出现的步骤。输出 JSON {"summary":"...","stepSummary":"..."}。',
+        v1: '用中文解释已保存的场景定义。不要编造定位器或未出现的步骤。输出排版清晰的 Markdown 格式（空行分段，涉及步骤流程时使用编号列表，关键实体加粗）。输出 JSON {"summary":"...","stepSummary":"..."}。',
       },
     })
 
@@ -929,6 +930,51 @@ export class AssistantCapabilityRegistry {
           './handlers/target-propose-form.handler.js'
         )
         return handleTargetProposeForm(ctx)
+      },
+    })
+
+    // 15. recording.propose-scenario
+    this.register({
+      descriptor: {
+        id: 'recording.propose-scenario',
+        version: '1.0.0',
+        label: '录制清洗与场景提案',
+        purpose: '对录制内容进行清洗、定位/断言提议，并生成可检查修改的场景草稿提案',
+        notApplicable: ['直接执行录制', '未授权录制'],
+        requiredPermissions: ['ai:assist', 'workflow:write'],
+        inputSchemaRef: 'recordingProposeScenarioInputSchema',
+        outputSchemaRef: 'assistantRecordingProposalResultSchema',
+        contextProfileRef: 'recording_propose_scenario:v1',
+        executionMode: 'single_turn',
+        sideEffect: 'read_only',
+        allowedTools: [],
+        policyRef: 'recording_propose_scenario_policy:v1',
+        promptRef: null,
+        validatorRefs: ['schema_validator'],
+        intentMatchers: [
+          { kind: 'keyword', pattern: '清洗' },
+          { kind: 'keyword', pattern: '生成场景' },
+          { kind: 'keyword', pattern: '录制提案' },
+          { kind: 'keyword', pattern: '改进定位' },
+          { kind: 'keyword', pattern: '补充断言' },
+        ],
+        slotBindings: [
+          { slot: 'question', from: 'question', key: 'question', required: true },
+          { slot: 'recordingId', from: 'pageContext', key: 'recordingId', required: false },
+          { slot: 'proposalFamilyId', from: 'pageContext', key: 'proposalFamilyId', required: false },
+        ],
+        requiredContextKeys: [],
+      },
+      inputSchema: z.strictObject({
+        question: z.string().optional(),
+        recordingId: z.string().optional(),
+        proposalFamilyId: z.string().optional(),
+      }),
+      outputSchema: assistantRecordingProposalResultSchema,
+      handler: async (ctx) => {
+        const handlerPath = './handlers/recording-propose-scenario.handler.js'
+        const { handleRecordingProposeScenario } = await import(handlerPath)
+        return handleRecordingProposeScenario(ctx)
       },
     })
   }

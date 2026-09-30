@@ -143,8 +143,33 @@ export function AccountInstancesSubtable({
 
               return (
                 <TableRow key={inst.id} className="h-10 text-small">
-                  <TableCell className="font-mono text-label">
-                    槽位 #{inst.accountSlot ?? 1}
+                  <TableCell>
+                    <div className="flex items-center gap-1.5 font-mono text-label">
+                      <span>槽位 #{inst.accountSlot ?? 1}</span>
+                      {inst.isolation === 'SHARED' ? (
+                        <span
+                          className="rounded bg-secondary/80 px-1.5 py-0.5 text-caption font-sans font-medium text-muted-foreground"
+                          title={inst.hostId ? `共享宿主: ${inst.hostId}` : '共享浏览器宿主'}
+                        >
+                          共享
+                        </span>
+                      ) : inst.isolation === 'DEDICATED' ? (
+                        <span
+                          className="rounded bg-primary/10 px-1.5 py-0.5 text-caption font-sans font-medium text-primary"
+                          title={inst.hostId ? `独占宿主: ${inst.hostId}` : '独占浏览器宿主'}
+                        >
+                          独占
+                        </span>
+                      ) : null}
+                      {inst.hostId ? (
+                        <span
+                          className="text-caption text-muted-foreground"
+                          title={`宿主 ID: ${inst.hostId}`}
+                        >
+                          {inst.hostId.slice(0, 8)}
+                        </span>
+                      ) : null}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <StatusBadge tone={tone}>{statusText}</StatusBadge>

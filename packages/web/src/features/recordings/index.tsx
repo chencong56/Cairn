@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useAssistantCollectionContext } from '@/features/assistant/use-assistant-context-binding'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Edit2, Search, Trash2 } from 'lucide-react'
@@ -78,6 +79,7 @@ export function RecordingsPage() {
     }
   }, [search, targetId, hasPending, imported, range, page.pageSize, page.cursor])
 
+  useAssistantCollectionContext('recording', filters)
   const query = useQuery({
     queryKey: ['recordings', filters],
     queryFn: () => fetchRecordings(filters),

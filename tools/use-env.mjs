@@ -11,7 +11,7 @@
  */
 import { existsSync, lstatSync, readFileSync, readlinkSync, symlinkSync, unlinkSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const EXAMPLE = join(root, '.env.example')
@@ -23,8 +23,26 @@ function die(message) {
   process.exit(1)
 }
 
-function keysOf(text) {
-  return new Set([...text.matchAll(/^[A-Z][A-Z0-9_]*(?==)/gm)].map((match) => match[0]))
+/**
+ * 键集口径：未注释的 `KEY=` 与注释掉的 `# KEY=` 都算一个键。
+ * 一致性约束的是参数菜单本身——画像与 .env.example 的键必须完全一致，
+ * 差异只允许在取值与是否启用。注释项不计键会让 example 新增可选键时
+ * 画像悄悄缺位，漂移到要用的那一刻才发现不了。
+ */
+const KEY_LINE = /^[ \t]*#?[ \t]*([A-Z][A-Z0-9_]*)[ \t]*=/gm
+
+export function keysOf(text) {
+  return new Set([...text.matchAll(KEY_LINE)].map((match) => match[1]))
+}
+
+/** 对齐检查的纯函数入口：返回画像相对 example 的缺键与多键。 */
+export function alignText(exampleText, profileText) {
+  const exampleKeys = keysOf(exampleText)
+  const profileKeys = keysOf(profileText)
+  return {
+    missing: [...exampleKeys].filter((key) => !profileKeys.has(key)),
+    extra: [...profileKeys].filter((key) => !exampleKeys.has(key)),
+  }
 }
 
 function profilePath(name) {
@@ -41,12 +59,7 @@ function assignmentValue(text, key) {
 }
 
 function align(profileFile) {
-  const exampleKeys = keysOf(readFileSync(EXAMPLE, 'utf8'))
-  const profileKeys = keysOf(readFileSync(profileFile, 'utf8'))
-  return {
-    missing: [...exampleKeys].filter((key) => !profileKeys.has(key)),
-    extra: [...profileKeys].filter((key) => !exampleKeys.has(key)),
-  }
+  return alignText(readFileSync(EXAMPLE, 'utf8'), readFileSync(profileFile, 'utf8'))
 }
 
 function assertAligned(profileFile, name) {
@@ -112,13 +125,18 @@ function status() {
   }
 }
 
-const [command, name] = process.argv.slice(2)
-if (command === 'status' || command === undefined) {
-  status()
-} else if (command === 'use' && name) {
-  useProfile(name)
-} else if (command && !name && /^[a-z][a-z0-9-]*$/.test(command)) {
-  useProfile(command)
-} else {
-  die('用法: pnpm env:use local|remote   或   pnpm env:status')
+// 仅作为 CLI 直接执行时才分发命令；被测试 import 时 argv[1] 不是本文件，跳过。
+const invokedAsCli =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
+if (invokedAsCli) {
+  const [command, name] = process.argv.slice(2)
+  if (command === 'status' || command === undefined) {
+    status()
+  } else if (command === 'use' && name) {
+    useProfile(name)
+  } else if (command && !name && /^[a-z][a-z0-9-]*$/.test(command)) {
+    useProfile(command)
+  } else {
+    die('用法: pnpm env:use local|remote   或   pnpm env:status')
+  }
 }

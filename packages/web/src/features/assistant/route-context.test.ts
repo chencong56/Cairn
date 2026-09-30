@@ -107,6 +107,10 @@ describe('resolveRouteContext (路由级页面感知底座)', () => {
       'schedule',
       'dataset',
       'platform-config',
+      'suite',
+      'action-module',
+      'recording',
+      'batch',
       'home',
       'other',
     ])

@@ -14,6 +14,8 @@ import {
   type ScenarioMetricDecl,
   type Step,
   type TargetDescriptor,
+  type TableExpectRule,
+  type TableReadPlan,
   AUTHORING_OPERATION_LIMITS,
   MAX_ACCEPTANCE_INTENTS,
   acceptanceIntentNeedsTarget,
@@ -25,6 +27,8 @@ import {
   isAuthoringDocumentV2,
   parseScenarioDocument,
   targetDescriptorSchema,
+  tableExpectRuleSchema,
+  validateTableExpectRuleAgainstPlan,
   toAuthoringDocumentV2,
   walkAuthoringNodes,
 } from '@cairn/shared'
@@ -55,6 +59,7 @@ const INTENT_LABELS: Record<AcceptanceIntentRequest['kind'], string> = {
   page_reachable: '页面可达',
   page_duration: '页面耗时',
   table_non_empty: '列表非空',
+  table_acceptance: '表格验收',
   number_range: '数值在范围',
   text_present_or_absent: '文字出现/不出现',
   extract_to_report: '取值进报告',
@@ -71,7 +76,7 @@ const COMPARE_LABELS: Record<string, string> = {
   lte: '不大于',
 }
 
-type IntentTarget = {
+export type IntentTarget = {
   target: TargetDescriptor
   source: 'manual' | 'model'
   headerRows: number
@@ -80,10 +85,10 @@ type IntentTarget = {
   evidenceId?: string
 }
 
-type BuiltCard = { card: AcceptanceProposalCard; ops: AuthoringOperation[] }
+export type BuiltCard = { card: AcceptanceProposalCard; ops: AuthoringOperation[] }
 
 /** 步骤所在的分支；在其后插入取数步骤时必须落在同一分支。 */
-type StepPlacement = { parentBlockId?: string; branchKey?: 'then' | 'else' | 'body' }
+export type StepPlacement = { parentBlockId?: string; branchKey?: 'then' | 'else' | 'body' }
 
 /** 新写入的上下文键与指标键共用：小写字母开头，满足两边的格式要求。 */
 function contextKey(prefix: string): string {
@@ -529,6 +534,97 @@ export function buildAcceptanceCard(
         ],
       )
     }
+    case 'table_acceptance': {
+      const resolvedTarget = requireTarget()
+      const label = intent.metricName ?? resolvedTarget.label ?? '表格'
+      const tableOutputKey = contextKey('tbl')
+      const plan = (intent as any).tablePlan as TableReadPlan | undefined
+      const tableTarget = plan?.target ?? resolvedTarget.target
+      const tablePlan: TableReadPlan = plan ?? {
+        protocol: 'table.read@1',
+        target: tableTarget,
+        scope: 'current_page',
+        columns: [{ key: 'col_1', name: '数据列', valueType: 'text' as const }],
+        limits: { maxRows: 200, maxCols: 32 },
+      }
+
+      const extractStepDef: Step = {
+        id: newId(),
+        type: 'extract',
+        name: `提取「${label}」数据`,
+        effectType: 'READ_ONLY',
+        input: {
+          as: 'table',
+          target: tableTarget,
+          table: tablePlan,
+        },
+        outputKey: tableOutputKey,
+      }
+
+      const rawRules = (intent as any).rules as TableExpectRule[] | undefined
+      let rules: TableExpectRule[] = rawRules && rawRules.length > 0
+        ? rawRules
+        : [{ rule: 'row_count' as const, op: 'gt' as const, value: 0 }]
+      // AI 提案同样要在生成侧拦截非法/与读取计划列类型不符的规则，不能等运行时冒充 FAIL
+      rules = rules
+        .map((raw) => {
+          const parsed = tableExpectRuleSchema.safeParse(raw)
+          return parsed.success ? parsed.data : null
+        })
+        .filter((r): r is TableExpectRule => r !== null)
+      if (rules.length === 0) {
+        rules = [{ rule: 'row_count', op: 'gt', value: 0 }]
+      }
+      for (const rule of rules) {
+        const crossCheck = validateTableExpectRuleAgainstPlan(rule, tablePlan.columns)
+        if (!crossCheck.valid) {
+          throw new Error(`表格验收规则非法：${crossCheck.message}`)
+        }
+      }
+
+      const ops: AuthoringOperation[] = [
+        insertAfter(extractStepDef, step.id),
+      ]
+      let lastStepId = extractStepDef.id
+
+      for (let rIdx = 0; rIdx < rules.length; rIdx++) {
+        const rule = rules[rIdx]!
+        const checkStep: Step = {
+          id: newId(),
+          type: 'check_context',
+          name: `验证「${label}」规则 ${rIdx + 1}`,
+          effectType: 'READ_ONLY',
+          input: {
+            key: tableOutputKey,
+            expect: { kind: 'table', rule },
+          },
+        }
+        ops.push(insertAfter(checkStep, lastStepId))
+        lastStepId = checkStep.id
+
+        const meaning = `「${label}」满足数据验收规则 ${rIdx + 1}`
+        ops.push(
+          outcomeOp(
+            checkStep.id,
+            meaning,
+            { kind: 'context', key: tableOutputKey, expect: { kind: 'table', rule } },
+            intent.severity,
+          ),
+        )
+      }
+
+      const meaning = `「${label}」数据验收（共 ${rules.length} 条规则）`
+      return withOps(
+        {
+          ...base,
+          meaning,
+          testResult: 'UNTESTED',
+          expectsMany: true,
+          config: { ruleKind: 'table', stepName: step.name },
+        },
+        ops,
+      )
+    }
     case 'number_range': {
       const resolvedTarget = requireTarget()
       const label = intent.metricName ?? resolvedTarget.label ?? describeTarget(resolvedTarget.target, '数值')
@@ -589,6 +685,7 @@ export function buildAcceptanceCard(
     case 'value_consistency':
       throw new Error('value_consistency intent must be built via buildValueConsistencyCard')
   }
+  throw new Error(`验收意图 ${(intent as any).kind} 尚未接入提案生成`)
 }
 
 /** clarify 追问里带上「哪些部分暂不支持」，避免拆解失败时 unsupported 信息丢失。 */

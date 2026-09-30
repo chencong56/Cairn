@@ -9,6 +9,8 @@ import { ensureFrozenAccessPolicyTx } from '../map/access.js'
 import { expireRunDeadlines } from './deadline.js'
 import { settleRunCancellationTx } from './recover.js'
 import { lockRunAccountScope } from './lock-scope.js'
+import { resolveStepModuleIdentity } from './step-module-identity.js'
+import { enqueueReliabilityReceiptTx } from '../reliability/receipts.js'
 import { atomic, databaseNow, locked, schemaFor, updateRows } from '../native.js'
 import { and, asc, count, desc, eq, exists, inArray, isNotNull, isNull, max, ne, notExists, or, sql, type SQL } from 'drizzle-orm'
 import { applyPatchToDocument, computeDigestManifest, computeTargetDigest, evaluatePatchGuards, findStepInDocument } from '@cairn/authoring'
@@ -113,7 +115,7 @@ import type { Db } from '../client.js'
 import { cancelPendingStepRunsTx, skipRemainingStepRunsTx, skipStepRunsTx, skippedStepRunEvents } from './step-status.js'
 import { newId } from '../id.js'
 import { runCleanupObjectScope } from '../reports/cleanup.js'
-import { attempts, evidences, runs, scenarios, stepRuns } from '../schema/execution.js'
+import { attempts, evidences, runs, scenarios, stepRuns, type EvidenceRow } from '../schema/execution.js'
 import { targetAccounts, targets } from '../schema/targets.js'
 import { getPlatformConfig } from '../platform-config/store.js'
 import { assertAccountAllowsBusiness } from '../console/account-usage.js'
@@ -1372,18 +1374,24 @@ export async function writeRunWithSnapshot(
 
         if (initialSteps.length > 0) {
           await tx.insert(stepRuns).values(
-            initialSteps.map(({ step, ordinal }) => ({
-              id: newId(),
-              runId,
-              stepId: step.id,
-              name: step.name,
-              ordinal,
-              scopePath: '',
-              // 停用步骤不会执行，建 Run 时就落为跳过：最后一个启用步骤成功即可在同一事务里收尾。
-              status: step.disabled ? ('SKIPPED' as const) : ('PENDING' as const),
-              skipReason: step.disabled ? ('disabled' as const) : null,
-              finishedAt: step.disabled ? now : null,
-            })),
+            initialSteps.map(({ step, ordinal }) => {
+              const modId = resolveStepModuleIdentity(step.id, snapshot)
+              return {
+                id: newId(),
+                runId,
+                stepId: step.id,
+                name: step.name,
+                ordinal,
+                scopePath: '',
+                // 停用步骤不会执行，建 Run 时就落为跳过：最后一个启用步骤成功即可在同一事务里收尾。
+                status: step.disabled ? ('SKIPPED' as const) : ('PENDING' as const),
+                skipReason: step.disabled ? ('disabled' as const) : null,
+                finishedAt: step.disabled ? now : null,
+                moduleId: modId.moduleId,
+                implementationKey: modId.implementationKey,
+                internalStepId: modId.internalStepId,
+              }
+            }),
           )
         }
       }
@@ -2144,6 +2152,13 @@ export async function finishAttemptTx(
         ...(input.authCheckpoint !== undefined ? { authCheckpoint: input.authCheckpoint } : {}),
       })
       .where(eq(runs.id, input.runId))
+    if (isFinishedRunStatus(finalRunStatus)) {
+      await enqueueReliabilityReceiptTx(tx, {
+        runId: input.runId,
+        targetId: run.targetId,
+        finishedAt: now,
+      })
+    }
     let calculatedOutcome: OutcomeStatus | undefined
     if (isHaltedRunStatus(finalRunStatus) || input.authCheckpoint) {
       calculatedOutcome = await recalculateRunOutcomeTx(tx, input.runId, run.snapshot as RunSnapshot, now)
@@ -2412,6 +2427,11 @@ export async function finishRunIfDrained(db: Db, grant: RunGrant): Promise<{ fin
     const [run] = await tx.select().from(runs).where(eq(runs.id, grant.runId)).limit(1)
     let calculatedOutcome: OutcomeStatus | undefined
     if (run) {
+      await enqueueReliabilityReceiptTx(tx, {
+        runId: grant.runId,
+        targetId: run.targetId,
+        finishedAt: now,
+      })
       calculatedOutcome = await recalculateRunOutcomeTx(tx as unknown as Db, grant.runId, run.snapshot as RunSnapshot, now)
     }
     await releaseRunLeaseTx(tx as unknown as Db, grant, 'run_halted')
@@ -2547,6 +2567,13 @@ export async function failRunValidation(
       .update(runs)
       .set({ status, ...(status === 'FAILED' ? { finishedAt: databaseNow(tx) } : {}), ...(checkpoint ? { authCheckpoint: checkpoint } : {}), updatedAt: now })
       .where(eq(runs.id, runId))
+    if (status === 'FAILED') {
+      await enqueueReliabilityReceiptTx(tx, {
+        runId,
+        targetId: run.targetId,
+        finishedAt: now,
+      })
+    }
     const calculatedOutcome = await recalculateRunOutcomeTx(tx as unknown as Db, runId, run.snapshot as RunSnapshot, now)
     const validationSubject = (run.snapshot as any)?.validationSubject
     if (validationSubject?.candidateId) {
@@ -2757,6 +2784,12 @@ export async function stopRunDebug(
         updatedAt: now,
       })
       .where(eq(runs.id, runId))
+
+    await enqueueReliabilityReceiptTx(tx, {
+      runId,
+      targetId: run.targetId,
+      finishedAt: now,
+    })
 
     const activeLease = await findActiveLeaseForRun(tx as unknown as Db, runId)
     if (activeLease) {
@@ -3142,6 +3175,93 @@ export async function loadRunFailureSummaries(
   }
 
   return result
+}
+
+export async function renewRunDebugPresence(
+  db: Db,
+  runId: string,
+  input: {
+    holdId: string
+    fencingToken: string
+    sessionGeneration: number
+    timeoutMs?: number
+  },
+): Promise<{ serverTime: string; holdExpiresAt: string; holdHardExpiresAt: string }> {
+  const { runs } = schemaFor(db)
+  const now = new Date()
+  return atomic(db, async (tx) => {
+    const run = await lockRunRow(tx as unknown as Db, runId)
+    if (!run) throw notFound('RUN_NOT_FOUND', '运行不存在')
+    if (run.status !== 'HOLDING') {
+      throw conflict('RUN_NOT_HOLDING', '仅处于调试挂起中的运行允许刷新活跃状态')
+    }
+    if (run.cancelRequestedAt) {
+      throw conflict('RUN_CANCELLED', '运行已取消')
+    }
+    const [rowWithCheckpoint] = await tx
+      .select({ checkpoint: runs.checkpoint })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1)
+    const checkpoint = rowWithCheckpoint?.checkpoint
+    if (!checkpoint) {
+      throw conflict('CHECKPOINT_MISSING', '运行无有效调试检查点')
+    }
+    if (!checkpoint.holdId) {
+      throw conflict('HOLD_METADATA_MISSING', '历史检查点缺少 holdId，不接受编写期续期')
+    }
+    if (checkpoint.holdId !== input.holdId) {
+      throw conflict('HOLD_ID_MISMATCH', '检查点 holdId 不匹配或已失效')
+    }
+    if (checkpoint.fencingToken !== input.fencingToken) {
+      throw conflict('FENCING_TOKEN_MISMATCH', '检查点 fencingToken 不匹配')
+    }
+    if (checkpoint.sessionGeneration !== input.sessionGeneration) {
+      throw conflict('SESSION_GENERATION_MISMATCH', '会话代次不匹配')
+    }
+
+    if (checkpoint.holdExpiresAt && now.getTime() >= new Date(checkpoint.holdExpiresAt).getTime()) {
+      throw conflict('HOLD_EXPIRED', '挂起等待已超时，无法续期')
+    }
+    if (checkpoint.holdHardExpiresAt && now.getTime() >= new Date(checkpoint.holdHardExpiresAt).getTime()) {
+      throw conflict('HOLD_HARD_LIMIT_REACHED', '已达到挂起最大保留时间')
+    }
+
+    const waitWindowMs = input.timeoutMs ?? 15 * 60 * 1000
+    let nextExpiresMs = now.getTime() + waitWindowMs
+    if (checkpoint.holdHardExpiresAt) {
+      nextExpiresMs = Math.min(nextExpiresMs, new Date(checkpoint.holdHardExpiresAt).getTime())
+    }
+    const newHoldExpiresAt = new Date(nextExpiresMs).toISOString()
+    const hardExpiresAt = checkpoint.holdHardExpiresAt ?? newHoldExpiresAt
+
+    const updatedCheckpoint: DebugCheckpoint = {
+      ...checkpoint,
+      lastAuthoringActivityAt: now.toISOString(),
+      holdExpiresAt: newHoldExpiresAt,
+      holdHardExpiresAt: hardExpiresAt,
+    }
+
+    await tx
+      .update(runs)
+      .set({
+        checkpoint: updatedCheckpoint,
+        updatedAt: now,
+      })
+      .where(eq(runs.id, runId))
+
+    return {
+      serverTime: now.toISOString(),
+      holdExpiresAt: newHoldExpiresAt,
+      holdHardExpiresAt: hardExpiresAt,
+    }
+  })
+}
+
+export async function loadEvidenceById(db: Db, evidenceId: string): Promise<EvidenceRow | null> {
+  const { evidences } = schemaFor(db)
+  const [row] = await db.select().from(evidences).where(eq(evidences.id, evidenceId)).limit(1)
+  return row ?? null
 }
 
 export {

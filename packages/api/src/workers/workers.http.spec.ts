@@ -4,6 +4,7 @@ import {
   type CanActivate,
   type ExecutionContext,
 } from '@nestjs/common'
+import { WorkerNodeHealthClient } from './node-health.client.js'
 import { APP_FILTER, APP_GUARD, Reflector } from '@nestjs/core'
 import { Test } from '@nestjs/testing'
 import request from 'supertest'
@@ -120,6 +121,7 @@ async function buildApp(account: RequestAccount | null) {
     providers: [
       Reflector,
       WorkersService,
+      WorkerNodeHealthClient,
       { provide: DB_HANDLE, useValue: { driver: 'postgres' } },
       { provide: APP_GUARD, useValue: new StaticAuthGuard(account) },
       { provide: APP_GUARD, useClass: PermissionsGuard },

@@ -18,6 +18,8 @@ import {
   Server,
   Zap,
 } from 'lucide-react'
+import { fetchPlatformConfig } from '@/lib/platform-config-api'
+import { PREWARM_MODE_LABELS } from '@/features/platform-config/labels'
 import { fetchSessionOverview, fetchSessionSystemOverview } from '@/lib/sessions-api'
 import { fetchTarget } from '@/lib/targets-api'
 import { useCursorPage } from '@/hooks/use-cursor-page'
@@ -354,6 +356,15 @@ export function SessionsPage() {
         ? SECONDARY_FILTER_OPTIONS.busy
         : null
 
+  const platformConfigQuery = useQuery({
+    queryKey: ['platform-config'],
+    queryFn: fetchPlatformConfig,
+    staleTime: 60_000,
+    retry: false,
+  })
+  const prewarmMode = platformConfigQuery.data?.document?.browserPrewarm?.mode
+  const prewarmActive = prewarmMode && prewarmMode !== 'off'
+
   return (
     <>
       {!activeSession && view === 'systems' && searchParams.targetId &&
@@ -367,11 +378,24 @@ export function SessionsPage() {
         <PageHeader
           title="账号会话"
           description={
-            view === 'stream'
-              ? streamSummary
-                ? `${streamSummary.available} 就绪 · ${streamProblemCount} 有问题 · ${streamSummary.unprepared} 未准备 · ${streamBusyCount} 占用中`
-                : '全局会话工作台：接管会话、处理登录与巡检。'
-              : '按目标系统统筹查看会话健康度与容量配额。'
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <span>
+                {view === 'stream'
+                  ? streamSummary
+                    ? `${streamSummary.available} 就绪 · ${streamProblemCount} 有问题 · ${streamSummary.unprepared} 未准备 · ${streamBusyCount} 占用中`
+                    : '全局会话工作台：接管会话、处理登录与巡检。'
+                  : '按目标系统统筹查看会话健康度与容量配额。'}
+              </span>
+              {prewarmActive ? (
+                <span
+                  title={`平台浏览器预热已开启 (${PREWARM_MODE_LABELS[prewarmMode]})，空闲浏览器就绪承接任务会话`}
+                  className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-caption font-medium text-primary select-none"
+                >
+                  <Zap className="size-3" />
+                  预热就绪
+                </span>
+              ) : null}
+            </span>
           }
           actions={
             <div className="flex items-center rounded-lg border border-border-divider bg-muted/50 p-0.5">

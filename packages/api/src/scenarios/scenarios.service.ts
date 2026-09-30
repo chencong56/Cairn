@@ -64,8 +64,11 @@ import {
   type ModuleUpgradePreviewBody,
   type ModuleResolveAcceptBody,
   type AcceptanceHistoryQuery,
+  type AcceptancePreviewRequestBody,
+  type AcceptancePreviewResponse,
   type ScenarioAcceptanceHistoryResponse,
 } from '@cairn/shared'
+import { compileAcceptancePreview } from './table-acceptance-preview.js'
 import { composeScenarioKnowledge } from './knowledge-operations'
 import { requireProposalAccess } from '../map/knowledge-access'
 import { publicApiOrigin } from '../recordings/recordings.service'
@@ -350,5 +353,9 @@ export class ScenariosService {
       limit: query.limit,
       since: query.since ? new Date(query.since) : undefined,
     }).catch(rethrowDomain)
+  }
+
+  previewAcceptance(id: string, body: AcceptancePreviewRequestBody, actor: RequestAccount): Promise<AcceptancePreviewResponse> {
+    return compileAcceptancePreview(this.db, id, body, actor.id).catch(rethrowDomain)
   }
 }

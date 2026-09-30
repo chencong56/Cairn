@@ -165,86 +165,28 @@ export async function acquireExclusive(this: SessionManagerContext, run: RunSnap
     const key = { targetId: run.targetId, targetAccountId: run.targetAccountId }
     const db = this.dbHandle
 
-    const lives = await findLiveSessions(db, key)
-    let live =
-      lives.find(
+    if (shouldRecreateSession(policy.reuse)) {
+      const lives = await findLiveSessions(db, key)
+      const idle = lives.find(
         (row) =>
           row.ownerWorkerId === this.options.workerId &&
           row.ownerWorkerInstanceId === this.workerInstanceId &&
           row.status === 'OPEN',
-      ) ??
-      lives.find((row) => row.ownerWorkerId === this.options.workerId) ??
-      null
-    if (live && (live.status === 'CLOSING' || live.status === 'LOST')) {
-      return {
-        ok: false,
-        code: live.closeReason === 'resource_deleted' ? 'SESSION_TARGET_MISSING' : 'SESSION_BUSY',
-        message:
-          live.closeReason === 'resource_deleted' ? '目标系统或账号不存在' : '会话正在关闭或已失联',
+      )
+      if (idle) {
+        await this.close(idle.id, 'recreate_session')
       }
     }
 
-    if (shouldRecreateSession(policy.reuse) && live) {
-      if (live.ownerWorkerId === this.options.workerId) {
-        await this.close(live.id, 'recreate_session')
-        live = null
-      } else {
-        return {
-          ok: false,
-          code: 'SESSION_BUSY',
-          message: '会话由其他 Worker 持有，无法 RECREATE',
-        }
-      }
-    }
-
-    if (!live) {
-      let openCount = await countOpenSessionsForWorker(db, this.options.workerId)
+    let openCount = await countOpenSessionsForWorker(db, this.options.workerId)
+    if (openCount >= this.options.maxSessions) {
+      await this.evictIfAtCapacity()
+      openCount = await countOpenSessionsForWorker(db, this.options.workerId)
       if (openCount >= this.options.maxSessions) {
-        await this.evictIfAtCapacity()
-        openCount = await countOpenSessionsForWorker(db, this.options.workerId)
-        if (openCount >= this.options.maxSessions) {
-          return {
-            ok: false,
-            code: 'SESSION_CAPACITY_EXCEEDED',
-            message: `本 Worker 会话数已达上限 ${this.options.maxSessions}`,
-          }
-        }
-      }
-
-      if (this.browserUnavailable) {
         return {
           ok: false,
-          code: this.browserUnavailableCode,
-          message: '本机浏览器不可用，已暂停新建会话',
-        }
-      }
-    } else {
-      if (live.ownerWorkerId !== this.options.workerId) {
-        return {
-          ok: false,
-          code: 'SESSION_BUSY',
-          message: `会话 owner 为 ${live.ownerWorkerId}`,
-        }
-      }
-      if (!live.ownerWorkerInstanceId || live.ownerWorkerInstanceId !== this.workerInstanceId) {
-        return {
-          ok: false,
-          code: 'SESSION_NOT_CLAIMABLE',
-          message: '会话归属实例未知或已更换，禁止复用',
-        }
-      }
-      if (live.status !== 'OPEN' || live.health === 'UNHEALTHY') {
-        return {
-          ok: false,
-          code: 'SESSION_NOT_CLAIMABLE',
-          message: `会话不可领取 status=${live.status} health=${live.health}`,
-        }
-      }
-      if (!this.lives.has(live.id)) {
-        return {
-          ok: false,
-          code: 'SESSION_NOT_CLAIMABLE',
-          message: '本进程无会话句柄，请等待自愈或重建',
+          code: 'SESSION_CAPACITY_EXCEEDED',
+          message: `本 Worker 会话数已达上限 ${this.options.maxSessions}`,
         }
       }
     }
@@ -263,6 +205,7 @@ export async function acquireExclusive(this: SessionManagerContext, run: RunSnap
       keepAliveSeconds: policy.keepAliveSeconds,
       authProbeIntervalSeconds: policy.authProbeIntervalSeconds,
       evictionPriority: policy.evictionPriority,
+      isolation: policy.browserIsolation,
     })
     if (!claimed.ok) {
       return { ok: false, code: claimed.code, message: claimed.message ?? '会话不可领取' }
@@ -294,7 +237,15 @@ export async function finishClaimedAcquire(this: SessionManagerContext,
     signal?: AbortSignal,
   ): Promise<SessionAcquireResult> {
     let live = session
-    if (created || !this.lives.has(session.id)) {
+    if (created) {
+      if (this.browserUnavailable) {
+        await this.abandonOccupancy(grant.leaseId, 'browser_unavailable')
+        return {
+          ok: false,
+          code: this.browserUnavailableCode,
+          message: '本机浏览器不可用，已暂停新建会话',
+        }
+      }
       const launched = await this.launchAndOpen(session, {
         targetId: run.targetId,
         targetAccountId: run.targetAccountId!,
@@ -314,6 +265,38 @@ export async function finishClaimedAcquire(this: SessionManagerContext,
         'session.created',
       )
     } else {
+      if (session.ownerWorkerId !== this.options.workerId) {
+        await this.abandonOccupancy(grant.leaseId, 'foreign_worker')
+        return {
+          ok: false,
+          code: 'SESSION_BUSY',
+          message: `会话 owner 为 ${session.ownerWorkerId}`,
+        }
+      }
+      if (!session.ownerWorkerInstanceId || session.ownerWorkerInstanceId !== this.workerInstanceId) {
+        await this.abandonOccupancy(grant.leaseId, 'instance_mismatch')
+        return {
+          ok: false,
+          code: 'SESSION_NOT_CLAIMABLE',
+          message: '会话归属实例未知或已更换，禁止复用',
+        }
+      }
+      if (session.status !== 'OPEN' || session.health === 'UNHEALTHY') {
+        await this.abandonOccupancy(grant.leaseId, 'unhealthy')
+        return {
+          ok: false,
+          code: 'SESSION_NOT_CLAIMABLE',
+          message: `会话不可领取 status=${session.status} health=${session.health}`,
+        }
+      }
+      if (!this.lives.has(session.id)) {
+        await this.abandonOccupancy(grant.leaseId, 'no_live_handle')
+        return {
+          ok: false,
+          code: 'SESSION_NOT_CLAIMABLE',
+          message: '本进程无会话句柄，请等待自愈或重建',
+        }
+      }
       this.logger.log(
         {
           sessionId: live.id,

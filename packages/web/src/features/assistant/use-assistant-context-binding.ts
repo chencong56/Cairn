@@ -63,6 +63,23 @@ export function useAssistantContextBinding(
   }, [unbindPageContext, ownerToken])
 }
 
+export function useAssistantCollectionContext(
+  page: AssistantBoundContext['page'],
+  filters: Record<string, string | number | boolean | undefined>,
+) {
+  const routeContext = useAssistantStore((s) => s.routeContext)
+  const currentRoute = routeContext?.page === page ? routeContext : null
+  useAssistantContextBinding({ page,
+    routeKey: currentRoute?.routeKey,
+    statusLabel: currentRoute?.statusLabel,
+    statusTone: currentRoute?.statusTone,
+    summaryText: currentRoute?.summaryText,
+    filters: Object.fromEntries(
+    Object.entries(filters).filter((entry): entry is [string, string | number | boolean] =>
+      entry[1] !== undefined && !['cursor', 'page', 'pageSize', 'limit'].includes(entry[0])),
+  ) })
+}
+
 /**
  * 监听路由变更，自动清除失效的跨页面 Quote
  */

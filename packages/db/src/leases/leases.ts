@@ -18,6 +18,7 @@ import {
   LOCATOR_RESOLUTION_PROTOCOL,
   CONTROL_FLOW_PROTOCOL,
   CONTROL_FLOW_PROTOCOL_V2,
+  TABLE_ACCEPTANCE_PROTOCOL,
   SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   registrationRequiresOccupancy,
@@ -619,6 +620,7 @@ export async function lockRunRow(tx: Db, runId: string) {
     tx
       .select({
         id: runs.id,
+        targetId: runs.targetId,
         status: runs.status,
         cancelRequestedAt: runs.cancelRequestedAt,
         updatedAt: runs.updatedAt,
@@ -827,6 +829,9 @@ function claimEligiblePredicate(
           isNull(jsonText(tx, runs.snapshot, ['resolution', 'protocol'])),
           not(jsonTextEquals(tx, runs.snapshot, ['resolution', 'protocol'], LOCATOR_RESOLUTION_PROTOCOL)),
         ),
+    worker.protocolCapabilities?.includes(TABLE_ACCEPTANCE_PROTOCOL)
+      ? undefined
+      : not(jsonHasKey(tx, runs.snapshot, 'tableAcceptanceProtocol')),
     worker.protocolCapabilities?.includes(CONTROL_FLOW_PROTOCOL_V2)
       ? undefined
       : worker.protocolCapabilities?.includes(CONTROL_FLOW_PROTOCOL)
@@ -1014,10 +1019,11 @@ export async function claimRunWithCursor(
         .from(runs).where(and(inArray(runs.targetId, targetIds), eq(runs.status, 'RUNNING'), isNull(runs.deletedAt)))
         .groupBy(runs.targetId)
       const counts = new Map(runningCounts.map((row) => [row.targetId, Number(row.count)]))
+      // Preserve the database's timestamp/id order, including sub-millisecond precision.
+      const windowOrder = new Map(window.map((row, index) => [row.id, index]))
       candidateRuns.sort((a, b) =>
         (counts.get(a.targetId) ?? 0) - (counts.get(b.targetId) ?? 0)
-        || a.createdAt.getTime() - b.createdAt.getTime()
-        || a.id.localeCompare(b.id))
+        || windowOrder.get(a.id)! - windowOrder.get(b.id)!)
       for (const candidate of candidateRuns) {
         const attempt = await db.transaction(async (transaction) => {
           const tx = transaction as unknown as Db

@@ -6,15 +6,21 @@ import {
 } from '@nestjs/common'
 import type { Request, Response } from 'express'
 import {
+  ASSISTANT_BUSINESS_INTENTS,
   assistantFocusSchema,
+  assistantRecordingSelectionError,
+  confirmRecordingOutcomeBodySchema,
+  recordingInsertAnchorSchema,
   assistantGuideTopicSchema,
   assistantQuoteContextSchema,
   availableAssistantCapabilities,
+  resolveAvailableContextFeatures,
   canonicalJson,
   createAssistantTurnBodySchema,
   hasAllPermissions,
   isTargetDeletionGuideQuestion,
   sha256Hex,
+  syncSha256,
   quoteTargetSystemId,
   unpackAssistantResultEnvelope,
   authoringOperationLimitsFor,
@@ -29,6 +35,16 @@ import {
   type SubmitAccepted,
   type CancelResult,
   type ModelInvocationRecord,
+  packAssistantResultEnvelope,
+  type CreateRecordingSelectionBody,
+  type CreateRecordingSelectionResult,
+  type RecordingPreviewQuery,
+  type RecordingPreviewResult,
+  type CreateRecordingAdoptionBody,
+  type CreateRecordingAdoptionResult,
+  type AssistantRecordingProposalResult,
+  type ConfirmRecordingOutcomeBody,
+  type ConfirmRecordingOutcomeResult,
 } from '@cairn/shared'
 import { applyAuthoringOperations } from '@cairn/authoring'
 import {
@@ -51,6 +67,10 @@ import {
   listAssistantTurnEvents,
   listAssistantTurnRecords,
   listPlatformAiCalls,
+  adoptAssistantRecordingProposal,
+  getAssistantRecordingProposalFacts,
+  previewAssistantRecordingAdoption,
+  createCompletedAssistantTurn,
   type ChangeHintBus,
   type DbHandle,
 } from '@cairn/db'
@@ -126,6 +146,7 @@ export class AssistantService implements OnModuleInit {
     return {
       items: availableAssistantCapabilities(actor.permissions),
       modelEnabled: access !== null,
+      contextFeatures: resolveAvailableContextFeatures(actor.permissions),
     }
   }
 
@@ -490,6 +511,256 @@ export class AssistantService implements OnModuleInit {
     }
   }
 
+  async createRecordingSelection(
+    actor: Actor,
+    conversationId: string,
+    turnId: string,
+    body: CreateRecordingSelectionBody,
+  ): Promise<CreateRecordingSelectionResult> {
+    this.requireAssist(actor)
+    if (!hasAllPermissions(actor.permissions, ['workflow:write', 'target:read'])) {
+      throw new DomainError('forbidden', 'PERMISSION_DENIED', '缺少 workflow:write 或 target:read 权限')
+    }
+
+    const record = await getAssistantTurnRecord(this.db, turnId, actor.id).catch(rethrowDomain)
+    if (record.turn.conversationId !== conversationId) {
+      throw new DomainError('not_found', 'ASSISTANT_TURN_NOT_FOUND', '轮次不存在')
+    }
+
+    const result = unpackAssistantResultEnvelope(record.turn.result)
+    if (!result || result.kind !== 'recording_proposal') {
+      throw new DomainError('bad_request', 'PROPOSAL_NOT_FOUND', '当前轮次不包含可选择的录制提案')
+    }
+
+    const proposal = result as AssistantRecordingProposalResult
+    await this.requireVisibleTarget(actor, proposal.targetId)
+
+    if (
+      !proposal.candidateDigest || body.proposalDigest !== proposal.candidateDigest
+    ) {
+      throw new DomainError('conflict', 'PROPOSAL_DIGEST_MISMATCH', '提案摘要与当前轮次不一致')
+    }
+
+    const facts = await getAssistantRecordingProposalFacts(this.db, proposal.recordingId, actor.id).catch(rethrowDomain)
+    if (facts.recordingDigest !== proposal.recordingDigest) throw new DomainError('conflict', 'RECORDING_IMPORT_STALE', '录制已变化，请重新生成提案')
+    const selectedSet = new Set(body.selectedItemIds)
+    if (proposal.needsOutcomeConfirmation) throw new DomainError('bad_request', 'RECORDING_OUTCOME_UNCONFIRMED', '请先确认业务预期并生成新的提案')
+    const selectionError = assistantRecordingSelectionError(proposal.decisions, body.selectedItemIds)
+    if (selectionError) throw new DomainError('bad_request', 'RECORDING_SELECTION_INVALID', selectionError)
+    const filteredDecisions = proposal.decisions.filter((d) => selectedSet.has(d.itemId))
+    const excludedItemIds = proposal.decisions
+      .map((d) => d.itemId)
+      .filter((id) => !selectedSet.has(id))
+
+    if (filteredDecisions.length === 0) {
+      throw new DomainError('bad_request', 'EMPTY_SELECTION', '至少需要保留一项提案内容')
+    }
+
+    const newProposalId = syncSha256(canonicalJson({
+      familyId: proposal.proposalFamilyId,
+      selectedItemIds: body.selectedItemIds,
+      timestamp: Date.now(),
+    })).slice(0, 32)
+
+    const newCandidateDigest = syncSha256(
+      canonicalJson({
+        protocolVersion: proposal.protocolVersion,
+        recordingId: proposal.recordingId,
+        recordingDigest: proposal.recordingDigest,
+        decisions: filteredDecisions,
+      }),
+    )
+
+    const selectionSummary = `已选择 ${filteredDecisions.length} 项提案内容`
+
+    const subProposal: AssistantRecordingProposalResult = {
+      ...proposal,
+      proposalId: newProposalId,
+      decisions: filteredDecisions,
+      excludedItemIds,
+      proposalSummary: selectionSummary,
+      candidateDigest: newCandidateDigest,
+    }
+
+    const newTurn = await createCompletedAssistantTurn(this.db, {
+      conversationId,
+      ownerAccountId: actor.id,
+      parentTurnId: turnId,
+      question: selectionSummary,
+      capabilityId: 'recording.propose-scenario',
+      result: packAssistantResultEnvelope(subProposal),
+      slots: {
+        recordingId: proposal.recordingId,
+        targetId: proposal.targetId,
+        proposalId: newProposalId,
+        proposalFamilyId: proposal.proposalFamilyId,
+      },
+    }).catch(rethrowDomain)
+
+    return {
+      turnId: newTurn.id,
+      proposalId: newProposalId,
+      proposalFamilyId: proposal.proposalFamilyId,
+      proposalDigest: newCandidateDigest,
+      selectionSummary,
+    }
+  }
+
+  async confirmRecordingOutcome(actor: Actor, conversationId: string, turnId: string, input: ConfirmRecordingOutcomeBody): Promise<ConfirmRecordingOutcomeResult> {
+    this.requireAssist(actor)
+    if (!hasAllPermissions(actor.permissions, ['workflow:write', 'target:read'])) throw new DomainError('forbidden', 'PERMISSION_DENIED', '缺少录制编写权限')
+    const body = confirmRecordingOutcomeBodySchema.parse(input)
+    const record = await getAssistantTurnRecord(this.db, turnId, actor.id).catch(rethrowDomain)
+    if (record.turn.conversationId !== conversationId) throw new DomainError('not_found', 'ASSISTANT_TURN_NOT_FOUND', '轮次不存在')
+    const proposal = unpackAssistantResultEnvelope(record.turn.result)
+    if (proposal?.kind !== 'recording_proposal' || proposal.intent !== 'outcome' || !proposal.needsOutcomeConfirmation) throw new DomainError('bad_request', 'PROPOSAL_NOT_FOUND', '请从待确认的成功条件提案继续')
+    await this.requireVisibleTarget(actor, proposal.targetId)
+    if (body.proposalDigest !== proposal.candidateDigest) throw new DomainError('conflict', 'PROPOSAL_DIGEST_MISMATCH', '提案已变化，请重新生成')
+    const facts = await getAssistantRecordingProposalFacts(this.db, proposal.recordingId, actor.id).catch(rethrowDomain)
+    if (facts.recordingDigest !== proposal.recordingDigest) throw new DomainError('conflict', 'RECORDING_IMPORT_STALE', '录制已变化，请重新生成提案')
+    const outcome = body.outcome
+    const recorded = outcome.kind === 'recorded' ? facts.outcomeOptions.find((option) => option.itemId === outcome.itemId) : undefined
+    const sourceItemId = outcome.kind === 'custom' ? outcome.afterItemId : recorded?.afterItemId
+    const source = proposal.decisions.find((item) => item.itemId === sourceItemId && item.action === 'keep')
+    if (!source || !facts.decisions.some((item) => item.itemId === sourceItemId && item.action === 'keep')) throw new DomainError('bad_request', 'RECORDING_SELECTION_INVALID', '请选择可导入的前序录制动作')
+    const meaning = outcome.kind === 'custom' ? outcome.expectedOutcome : recorded!.meaning
+    if (outcome.kind === 'custom' && /^(?:成功|操作成功|执行成功|正常|没问题|通过|都对了)[。！!\s]*$/.test(meaning)) throw new DomainError('bad_request', 'RECORDING_OUTCOME_VAGUE', '请描述页面上能核对的具体结果，例如显示的文字或列表内容')
+    const proposalId = syncSha256(canonicalJson({ parent: proposal.proposalId, actorId: actor.id, outcome, source: facts.recordingDigest })).slice(0, 32)
+    const decisions: AssistantRecordingProposalResult['decisions'] = [...proposal.decisions, {
+      itemId: `outcome:${proposalId}`, action: 'modify', label: `成功条件：${meaning}`.slice(0, 256),
+      reason: `用户已确认在「${source.label ?? '对应动作'}」之后检查；${recorded ? '沿用录制中的断言规则' : '用 AI 核对页面预期'}，尚未执行验证。`,
+      change: { kind: 'outcome', sourceItemId: source.itemId, meaning,
+        rule: recorded?.rule ?? { kind: 'ai', instruction: meaning }, confirmedBy: actor.id,
+        ...(recorded ? { recordedItemId: recorded.itemId } : {}) },
+    }]
+    const result: AssistantRecordingProposalResult = { ...proposal, proposalId, decisions, needsOutcomeConfirmation: false, applicable: true,
+      proposalSummary: `已确认在「${source.label ?? '对应动作'}」之后核对：${meaning}。请检查所选动作与成功条件，再预览采纳。`.slice(0, 1024),
+      missingConfirmations: [], candidateDigest: syncSha256(canonicalJson({ recordingDigest: facts.recordingDigest, decisions })) }
+    const turn = await createCompletedAssistantTurn(this.db, { conversationId, ownerAccountId: actor.id, parentTurnId: turnId,
+      question: `确认成功条件：${meaning}`, capabilityId: 'recording.propose-scenario', result: packAssistantResultEnvelope(result),
+      slots: { recordingId: proposal.recordingId, targetId: proposal.targetId, proposalId, proposalFamilyId: proposal.proposalFamilyId },
+    }).catch(rethrowDomain)
+    return { turnId: turn.id, proposal: result }
+  }
+
+  async getRecordingPreview(
+    actor: Actor,
+    conversationId: string,
+    turnId: string,
+    query: RecordingPreviewQuery,
+  ): Promise<RecordingPreviewResult> {
+    this.requireAssist(actor)
+    if (!hasAllPermissions(actor.permissions, ['workflow:write', 'target:read'])) {
+      throw new DomainError('forbidden', 'PERMISSION_DENIED', '缺少 workflow:write 或 target:read 权限')
+    }
+
+    const record = await getAssistantTurnRecord(this.db, turnId, actor.id).catch(rethrowDomain)
+    if (record.turn.conversationId !== conversationId) {
+      throw new DomainError('not_found', 'ASSISTANT_TURN_NOT_FOUND', '轮次不存在')
+    }
+
+    const result = unpackAssistantResultEnvelope(record.turn.result)
+    if (!result || result.kind !== 'recording_proposal') {
+      throw new DomainError('bad_request', 'PROPOSAL_NOT_FOUND', '当前轮次不包含可预览的录制提案')
+    }
+
+    const proposal = result as AssistantRecordingProposalResult
+    await this.requireVisibleTarget(actor, proposal.targetId)
+
+    if (!proposal.applicable || proposal.needsOutcomeConfirmation || !proposal.candidateDigest) throw new DomainError('conflict', 'PROPOSAL_NOT_APPLICABLE', '请先确认业务预期或重新生成可采纳的提案')
+    if (query.proposalId && query.proposalId !== proposal.proposalId) throw new DomainError('conflict', 'PROPOSAL_DIGEST_MISMATCH', '提案已变化')
+    let insertAnchor
+    if (query.insertAnchor) {
+      try { insertAnchor = recordingInsertAnchorSchema.parse(JSON.parse(query.insertAnchor)) }
+      catch { throw new DomainError('bad_request', 'INVALID_INSERT_ANCHOR', '插入位置无效') }
+    }
+    const destinationScenarioId = query.destinationScenarioId
+    if (destinationScenarioId) {
+      await authorizeTargetRequest(this.db, actor.id, {
+        scenarioId: destinationScenarioId,
+        permissions: ['workflow:write'],
+      }).catch(rethrowDomain)
+    }
+
+    return previewAssistantRecordingAdoption(
+      this.db,
+      {
+        recordingId: proposal.recordingId,
+        proposalId: proposal.proposalId,
+        recordingDigest: proposal.recordingDigest,
+        selectedItemIds: proposal.decisions.filter((d) => d.action !== 'exclude').map((d) => d.itemId),
+        decisions: proposal.decisions,
+        insertAnchor,
+        destinationScenarioId,
+      },
+      actor.id,
+    ).catch(rethrowDomain)
+  }
+
+  async adoptRecordingProposal(
+    actor: Actor,
+    conversationId: string,
+    turnId: string,
+    body: CreateRecordingAdoptionBody,
+  ): Promise<CreateRecordingAdoptionResult> {
+    this.requireAssist(actor)
+    if (!hasAllPermissions(actor.permissions, ['workflow:write', 'target:read'])) {
+      throw new DomainError('forbidden', 'PERMISSION_DENIED', '缺少 workflow:write 或 target:read 权限')
+    }
+
+    const record = await getAssistantTurnRecord(this.db, turnId, actor.id).catch(rethrowDomain)
+    if (record.turn.conversationId !== conversationId) {
+      throw new DomainError('not_found', 'ASSISTANT_TURN_NOT_FOUND', '轮次不存在')
+    }
+
+    const result = unpackAssistantResultEnvelope(record.turn.result)
+    if (!result || result.kind !== 'recording_proposal') {
+      throw new DomainError('bad_request', 'PROPOSAL_NOT_FOUND', '当前轮次不包含可采纳的录制提案')
+    }
+
+    const proposal = result as AssistantRecordingProposalResult
+    await this.requireVisibleTarget(actor, proposal.targetId)
+
+    if (!proposal.applicable || proposal.needsOutcomeConfirmation) throw new DomainError('conflict', 'PROPOSAL_NOT_APPLICABLE', '请先确认业务预期或重新生成可采纳的提案')
+
+    if (
+      !proposal.candidateDigest || body.proposalDigest !== proposal.candidateDigest
+    ) {
+      throw new DomainError('conflict', 'PROPOSAL_DIGEST_MISMATCH', '提案摘要与当前轮次不一致')
+    }
+
+    if (body.destinationScenarioId) {
+      await authorizeTargetRequest(this.db, actor.id, {
+        scenarioId: body.destinationScenarioId,
+        permissions: ['workflow:write'],
+      }).catch(rethrowDomain)
+    }
+
+    return adoptAssistantRecordingProposal(
+      this.db,
+      {
+        recordingId: proposal.recordingId,
+        proposalId: proposal.proposalId,
+        proposalFamilyId: proposal.proposalFamilyId,
+        recordingDigest: proposal.recordingDigest,
+        selectedItemIds: proposal.decisions.filter((d) => d.action !== 'exclude').map((d) => d.itemId),
+        decisions: proposal.decisions,
+        insertAnchor: body.insertAnchor,
+        proposalDigest: body.proposalDigest,
+        candidateDigest: body.candidateDigest,
+        proposalSummary: proposal.proposalSummary,
+        sourceProtocol: proposal.protocolVersion,
+        idempotencyKey: body.idempotencyKey,
+        destinationScenarioId: body.destinationScenarioId,
+        newScenarioName: body.newScenarioName,
+        expectedRevision: body.expectedRevision,
+        expectedDigest: body.expectedDigest,
+      },
+      { id: actor.id },
+    ).catch(rethrowDomain)
+  }
+
+
   private requireAssist(actor: Actor) {
     if (!hasAllPermissions(actor.permissions, ['ai:assist'])) {
       rethrowDomain(new DomainError('forbidden', 'ASSISTANT_FORBIDDEN', '当前角色不能使用平台助手'))
@@ -585,6 +856,46 @@ export class AssistantService implements OnModuleInit {
         if (!datasetId || !hasAllPermissions(actor.permissions, ['dataset:read'])) return false
         return Boolean(await getDataset(this.db, datasetId, actor.id))
       }
+      if (citation.startsWith('suite:')) {
+        const suiteId = citation.slice('suite:'.length)
+        if (!suiteId || !hasAllPermissions(actor.permissions, ['suite:read'])) return false
+        const { getSuite } = await import('@cairn/db')
+        return Boolean(await getSuite(this.db, suiteId, actor.id))
+      }
+      if (citation.startsWith('suiteRun:')) {
+        const suiteRunId = citation.slice('suiteRun:'.length)
+        if (!suiteRunId || !hasAllPermissions(actor.permissions, ['suite:read', 'run:read'])) return false
+        const { getSuiteRunObservation } = await import('@cairn/db')
+        return Boolean(await getSuiteRunObservation(this.db, suiteRunId, actor.id))
+      }
+      if (citation.startsWith('actionModule:')) {
+        const moduleId = citation.slice('actionModule:'.length)
+        if (!moduleId || !hasAllPermissions(actor.permissions, ['module:read'])) return false
+        const { getActionModule } = await import('@cairn/db')
+        const mod = await getActionModule(this.db, moduleId, actor.id)
+        if (!mod) return false
+        await this.requireVisibleTarget(actor, mod.targetId)
+        return true
+      }
+      if (citation.startsWith('recording:')) {
+        const recordingId = citation.slice('recording:'.length)
+        if (!recordingId || !hasAllPermissions(actor.permissions, ['workflow:write'])) return false
+        const { getRecordingDraft } = await import('@cairn/db')
+        const rec = await getRecordingDraft(this.db, recordingId, actor.id)
+        if (!rec) return false
+        if (rec.createdBy.id !== actor.id && !actor.permissions.includes('admin')) return false
+        await this.requireVisibleTarget(actor, rec.targetId)
+        return true
+      }
+      if (citation.startsWith('batch:')) {
+        const batchId = citation.slice('batch:'.length)
+        if (!batchId || !hasAllPermissions(actor.permissions, ['batch:read'])) return false
+        const { getBatch } = await import('@cairn/db')
+        return Boolean(await getBatch(this.db, batchId, actor.id))
+      }
+      if (citation.startsWith('analysis:')) {
+        return true
+      }
     } catch {
       return false
     }
@@ -598,6 +909,75 @@ export class AssistantService implements OnModuleInit {
     result: Extract<NonNullable<Awaited<ReturnType<typeof getAssistantTurnRecord>>['turn']['result']>, { kind: 'knowledge_answer' }>,
     slots: Record<string, unknown> | null,
   ): Promise<boolean> {
+    if (result.analysis || result.sourceManifest) {
+      if (!result.sourceManifest) return false
+      const manifest = result.sourceManifest
+      if (!manifest.sources) return false
+      if (manifest.sources.length === 0) {
+        const intent = ASSISTANT_BUSINESS_INTENTS.find((item) => item.id === result.analysis?.intentId)
+        return manifest.scope.ownerAccountId === actor.id && Boolean(intent && hasAllPermissions(actor.permissions, intent.requiredPermissions))
+      }
+      try {
+        for (const source of manifest.sources) {
+          if (!hasAllPermissions(actor.permissions, source.requiredPermissions)) return false
+          if (source.kind === 'target') {
+            await this.requireVisibleTarget(actor, source.id)
+          } else if (source.kind === 'scenario' || source.kind === 'workflow') {
+            const scenario = await getScenario(this.db, source.id)
+            await this.requireVisibleTarget(actor, scenario.targetId)
+            if (source.version) { const { loadScenarioVersion } = await import('@cairn/db'); await loadScenarioVersion(this.db, source.id, String(source.version)) }
+          } else if (source.kind === 'run') {
+            const run = await getRun(this.db, source.id, actor.id)
+            await this.requireVisibleTarget(actor, run.targetId)
+          } else if (source.kind === 'suite') {
+            const { getSuite } = await import('@cairn/db')
+            const suite = await getSuite(this.db, source.id, actor.id)
+            if (!suite) return false
+          } else if (source.kind === 'suiteRun') {
+            const { getSuiteRunObservation } = await import('@cairn/db')
+            const suiteRun = await getSuiteRunObservation(this.db, source.id, actor.id)
+            if (!suiteRun) return false
+          } else if (source.kind === 'actionModule') {
+            const { getActionModule } = await import('@cairn/db')
+            const mod = await getActionModule(this.db, source.id, actor.id)
+            if (!mod) return false
+            await this.requireVisibleTarget(actor, mod.targetId)
+          } else if (source.kind === 'recording') {
+            const { getRecordingDraft } = await import('@cairn/db')
+            const rec = await getRecordingDraft(this.db, source.id, actor.id)
+            if (!rec) return false
+            if (rec.createdBy.id !== actor.id && !actor.permissions.includes('admin')) return false
+            await this.requireVisibleTarget(actor, rec.targetId)
+          } else if (source.kind === 'batch') {
+            const { getBatch } = await import('@cairn/db')
+            const batch = await getBatch(this.db, source.id, actor.id)
+            if (!batch) return false
+          } else if (source.kind === 'schedule') {
+            const schedule = await getSchedule(this.db, source.id, actor.id)
+            if (!schedule) return false
+            await this.requireVisibleTarget(actor, schedule.targetId)
+          } else if (source.kind === 'dataset') {
+            const dataset = await getDataset(this.db, source.id, actor.id)
+            if (!dataset) return false
+          } else if (source.kind === 'scheduleOccurrence') {
+            if (!await getScheduleOccurrence(this.db, source.id, actor.id)) return false
+          } else if (source.kind === 'account') {
+            if (!source.targetId) return false
+            await assertTargetPermission(this.db, actor.id, source.targetId, 'session:read')
+            const { getAccountSessionDetail } = await import('@cairn/db')
+            await getAccountSessionDetail(this.db, { targetId: source.targetId, targetAccountId: source.id })
+          } else return false
+          if (source.targetId) {
+            await this.requireVisibleTarget(actor, source.targetId)
+            for (const permission of source.requiredPermissions) await assertTargetPermission(this.db, actor.id, source.targetId, permission as Parameters<typeof assertTargetPermission>[3])
+          }
+        }
+      } catch {
+        return false
+      }
+      return true
+    }
+
     const digestClaims = result.claims.filter((claim) =>
       claim.citations.includes(RUN_FAILURE_DIGEST_CITATION))
     if (digestClaims.length > 0) {
@@ -634,7 +1014,18 @@ export class AssistantService implements OnModuleInit {
       ...(result.nextActions ?? []).flatMap((action) => action.citations),
     ]
     if (citations.length === 0 || result.claims.some((claim) => claim.citations.length === 0)) return false
-    const staticRoutes = new Set(['/scenarios', '/runs', '/targets', '/platform-config', '/datasets', '/schedules'])
+    const staticRoutes = new Set([
+      '/scenarios',
+      '/runs',
+      '/targets',
+      '/platform-config',
+      '/datasets',
+      '/schedules',
+      '/suites',
+      '/action-modules',
+      '/recordings',
+      '/batches',
+    ])
     if (result.nextActions?.some((action) => action.citations.length === 0 && !staticRoutes.has(action.href))) return false
     for (const citation of new Set(citations)) {
       if (!(await this.canReadStoredKnowledgeSource(actor, citation, slots))) return false
@@ -948,6 +1339,33 @@ export class AssistantService implements OnModuleInit {
         await this.requireVisibleTarget(actor, detail.targetId)
       } catch {
         return { ...turn, result: { kind: 'inaccessible' as const, message: '相关场景或目标已不可访问' } }
+      }
+    }
+
+    if (unpackedResult.kind === 'recording_proposal') {
+      try {
+        if (!hasAllPermissions(actor.permissions, ['ai:assist', 'workflow:write', 'target:read'])) {
+          return { ...turn, thinkingText: undefined, result: { kind: 'inaccessible' as const, message: '缺乏录制提案所需权限' } }
+        }
+        const { getRecordingDraft } = await import('@cairn/db')
+        const rec = await getRecordingDraft(this.db, unpackedResult.recordingId, actor.id)
+        if (!rec) {
+          return { ...turn, thinkingText: undefined, result: { kind: 'inaccessible' as const, message: '录制草稿已删除或不可访问' } }
+        }
+        if (rec.createdBy.id !== actor.id && !actor.permissions.includes('admin')) {
+          return { ...turn, thinkingText: undefined, result: { kind: 'inaccessible' as const, message: '无权访问此录制草稿' } }
+        }
+        await this.requireVisibleTarget(actor, unpackedResult.targetId)
+        if (unpackedResult.targetScenarioId) {
+          const scenario = await getScenario(this.db, unpackedResult.targetScenarioId)
+          await this.requireVisibleTarget(actor, scenario.targetId)
+          await authorizeTargetRequest(this.db, actor.id, {
+            scenarioId: unpackedResult.targetScenarioId,
+            permissions: ['workflow:write'],
+          })
+        }
+      } catch {
+        return { ...turn, thinkingText: undefined, result: { kind: 'inaccessible' as const, message: '录制或目标场景已不可访问' } }
       }
     }
 

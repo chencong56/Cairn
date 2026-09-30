@@ -33,6 +33,8 @@ import {
   DEFAULT_SESSION_LOST_DISPOSITION,
   DEFAULT_ACCOUNT_SESSION_MODE,
   accountSessionModeSchema,
+  DEFAULT_BROWSER_ISOLATION,
+  browserIsolationSchema,
   resolveSessionPolicyLayers,
   sessionPolicySchema,
   sessionReclaimModeSchema,
@@ -64,7 +66,7 @@ import {
 import { FACTORY_ALERTING, alertRuleSchema, credentialMaintenanceAlertingSchema } from './alerting.js'
 import { FACTORY_OUTBOUND, platformOutboundSchema } from './outbound.js'
 
-export const PLATFORM_CONFIG_SCHEMA_VERSION = 6 as const
+export const PLATFORM_CONFIG_SCHEMA_VERSION = 7 as const
 /** 仍能被本版本读取的最早文档版本。低于它的存量文档必须先跑数据迁移。 */
 export const PLATFORM_CONFIG_MIN_SCHEMA_VERSION = 1 as const
 export const PLATFORM_CONFIG_SCHEMA_UNSUPPORTED = 'PLATFORM_CONFIG_SCHEMA_UNSUPPORTED' as const
@@ -132,6 +134,7 @@ export const platformSessionDefaultsSchema = z
     evictionPriority: z.number().int().min(-1000).max(1000).default(DEFAULT_SESSION_EVICTION_PRIORITY),
     lostDisposition: sessionLostDispositionSchema.default(DEFAULT_SESSION_LOST_DISPOSITION),
     accountSessionMode: accountSessionModeSchema.default(DEFAULT_ACCOUNT_SESSION_MODE),
+    browserIsolation: browserIsolationSchema.default(DEFAULT_BROWSER_ISOLATION),
   })
   .superRefine((session, ctx) => {
     if (session.maxLifetimeSeconds <= session.idleTtlSeconds) {
@@ -346,6 +349,50 @@ export type PlatformModuleFallback = z.infer<typeof platformModuleFallbackSchema
 export { FACTORY_AI_PATH_LEARNING, platformAiPathLearningSchema, type PlatformAiPathLearning } from './ai-path-learning.js'
 import { FACTORY_AI_PATH_LEARNING, platformAiPathLearningSchema } from './ai-path-learning.js'
 
+export const BROWSER_PREWARM_MODES = ['off', 'fixed', 'adaptive'] as const
+export type BrowserPrewarmMode = (typeof BROWSER_PREWARM_MODES)[number]
+export const browserPrewarmModeSchema = z.enum(BROWSER_PREWARM_MODES)
+
+export const FACTORY_BROWSER_PREWARM = {
+  mode: 'off' as const,
+  fixedIdle: 1,
+  minIdle: 1,
+  maxIdle: 5,
+} as const
+
+export const platformBrowserPrewarmSchema = z
+  .strictObject({
+    mode: browserPrewarmModeSchema.default(FACTORY_BROWSER_PREWARM.mode),
+    fixedIdle: z
+      .number()
+      .int('固定备用数量须为整数')
+      .positive('固定备用数量至少为 1')
+      .max(16, '固定备用数量不能超过 16')
+      .default(FACTORY_BROWSER_PREWARM.fixedIdle),
+    minIdle: z
+      .number()
+      .int('自动下限须为整数')
+      .min(0, '自动下限不能为负')
+      .max(16, '自动下限不能超过 16')
+      .default(FACTORY_BROWSER_PREWARM.minIdle),
+    maxIdle: z
+      .number()
+      .int('自动上限须为整数')
+      .min(1, '自动上限至少为 1')
+      .max(16, '自动上限不能超过 16')
+      .default(FACTORY_BROWSER_PREWARM.maxIdle),
+  })
+  .superRefine((val, ctx) => {
+    if (val.minIdle > val.maxIdle) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['minIdle'],
+        message: 'minIdle 不能大于 maxIdle',
+      })
+    }
+  })
+export type PlatformBrowserPrewarm = z.infer<typeof platformBrowserPrewarmSchema>
+
 /** 已下线能力的开关：存量文档与历史修订里可能仍带着，读取时丢弃。 */
 const RETIRED_PLATFORM_CONFIG_KEYS = ['mapExplorationEnabled'] as const
 
@@ -386,6 +433,7 @@ const platformConfigDocumentObjectSchema = z
       credentialMaintenance: credentialMaintenanceAlertingSchema.default({ enabled: false, channelIds: [] }),
     }).default({ rules: FACTORY_ALERTING.rules, credentialMaintenance: FACTORY_ALERTING.credentialMaintenance }),
     outbound: platformOutboundSchema.default(FACTORY_OUTBOUND),
+    browserPrewarm: platformBrowserPrewarmSchema.default(FACTORY_BROWSER_PREWARM),
   })
   .superRefine((document, ctx) => {
     const ids = new Set(document.outbound.channels.map(c => c.id))
@@ -488,6 +536,7 @@ export const FACTORY_PLATFORM_CONFIG: PlatformConfigDocument = {
     evictionPriority: DEFAULT_SESSION_EVICTION_PRIORITY,
     lostDisposition: DEFAULT_SESSION_LOST_DISPOSITION,
     accountSessionMode: DEFAULT_ACCOUNT_SESSION_MODE,
+    browserIsolation: DEFAULT_BROWSER_ISOLATION,
   },
   evidence: {
     screenshot: 'always',
@@ -527,6 +576,7 @@ export const FACTORY_PLATFORM_CONFIG: PlatformConfigDocument = {
   runtimeInvariants: FACTORY_RUNTIME_INVARIANT_DEFAULTS,
   alerting: { rules: FACTORY_ALERTING.rules, credentialMaintenance: FACTORY_ALERTING.credentialMaintenance },
   outbound: FACTORY_OUTBOUND,
+  browserPrewarm: FACTORY_BROWSER_PREWARM,
 }
 
 /**
@@ -608,6 +658,13 @@ const PLATFORM_CONFIG_UPGRADES = new Map<number, PlatformConfigUpgrade>([
         landingSettleMaxDismissals:
           sessionAuth.landingSettleMaxDismissals ?? FACTORY_SESSION_AUTH.landingSettleMaxDismissals,
       },
+    }
+  }],
+  [6, raw => {
+    return {
+      ...raw,
+      schemaVersion: 7,
+      browserPrewarm: raw.browserPrewarm ?? FACTORY_BROWSER_PREWARM,
     }
   }],
 ])
@@ -831,6 +888,7 @@ export function sessionPolicyFromPlatform(session: PlatformSessionDefaults): Ses
     evictionPriority: session.evictionPriority,
     lostDisposition: session.lostDisposition,
     accountSessionMode: session.accountSessionMode,
+    browserIsolation: session.browserIsolation,
   })
 }
 

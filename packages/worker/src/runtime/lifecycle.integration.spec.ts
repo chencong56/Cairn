@@ -78,6 +78,8 @@ describe('LifecycleService（集成）', { timeout: 60_000 }, () => {
     const noSessions = {
       reconcileOwn: async () => ({ leasesRevoked: 0, sessionsClosed: 0 }),
       setWorkerInstance: () => {},
+      startPrewarmLoop: async () => {},
+      applyPlatformConfig: () => {},
       startHeartbeat: () => {},
       stopHeartbeat: () => {},
       shutdown: async () => {},
@@ -104,7 +106,7 @@ describe('LifecycleService（集成）', { timeout: 60_000 }, () => {
       })
       const { promise: ticked, resolve: tick } = Promise.withResolvers<void>()
       setTimeout(tick, 50)
-      await tick
+      await ticked
 
       // 在途 pump 还没结束，停机就必须还没返回——否则这条 Run 会被留在 RUNNING。
       expect(shutdownSettled).toBe(false)

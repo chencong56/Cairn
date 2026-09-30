@@ -19,6 +19,8 @@ export type BrowserSessionManagerOptions = {
   poolHostMaxAgeSeconds?: number
   poolHostRssHighWatermarkMb?: number
   poolTargetSpread?: 'strict' | 'prefer'
+  poolMaxSharedHosts?: number
+  browserMemoryBudgetMb?: number
 }
 
 export type SessionAcquireResult =

@@ -258,7 +258,7 @@ describe('AM-D: 编写期模块映射', { timeout: 30_000 }, () => {
     const beforeDef = before.items[0]
     const firstRun = await api.createRunWithSnapshot(db, {
       scenarioId: scenario.id,
-      scenarioVersionId: publishedScenario.published?.versionId ?? publishedScenario.latestVersionId,
+      scenarioVersionId: publishedScenario.published!.versionId,
       actor: { id: account.id },
     })
     const firstSnapshot = {
@@ -279,7 +279,7 @@ describe('AM-D: 编写期模块映射', { timeout: 30_000 }, () => {
 
     const secondRun = await api.createRunWithSnapshot(db, {
       scenarioId: scenario.id,
-      scenarioVersionId: publishedScenario.published?.versionId ?? publishedScenario.latestVersionId,
+      scenarioVersionId: publishedScenario.published!.versionId,
       actor: { id: account.id },
     })
     expect(secondRun.detail.snapshot.steps).toEqual(firstSnapshot.steps)

@@ -554,8 +554,9 @@ describe('RunLease / fencing（集成）', { timeout: RF06_FULL ? 180_000 : 120_
     await expireStaleRunLeases(handle.db, { limit: 10, maxRecoveries: 3 })
     const newWorker = await seedWorker(handle, 'stale-new')
 
-    const [claimResult, finishResult] = await Promise.all([
-      claimThisRun(newWorker, created.detail.id),
+    await cancelOtherClaimable(created.detail.id)
+    const [firstClaim, finishResult] = await Promise.all([
+      claimRun(handle, { workerId: newWorker.workerId, instanceId: newWorker.instanceId, leaseTtlSeconds: 30 }),
       finishAttempt(handle.db, {
         runId: created.detail.id,
         attemptId: started!.attemptId,
@@ -567,6 +568,10 @@ describe('RunLease / fencing（集成）', { timeout: RF06_FULL ? 180_000 : 120_
         grant: oldGrant,
       }),
     ])
+    // 旧持有者校验租约时可能短暂锁住 Run，SKIP LOCKED 允许本轮暂时未领到；
+    // 等并发提交结束后按正常 Worker 下一轮领取，仍必须得到新的 fencing token。
+    const claimResult = firstClaim ?? await claimThisRun(newWorker, created.detail.id)
+    expect(claimResult.runId).toBe(created.detail.id)
     expect(claimResult.fencingToken).toBeGreaterThan(oldGrant.fencingToken)
     expect(finishResult.updated).toBe(false)
     expect((await getRun(handle.db, created.detail.id)).status).toBe('RUNNING')

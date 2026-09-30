@@ -24,10 +24,23 @@ import {
   createAssistantTurnBodySchema,
   deleteAssistantConversationResultSchema,
   submitAcceptedSchema,
+  createRecordingSelectionBodySchema,
+  createRecordingSelectionResultSchema,
+  confirmRecordingOutcomeBodySchema,
+  confirmRecordingOutcomeResultSchema,
+  type ConfirmRecordingOutcomeBody,
+  recordingPreviewQuerySchema,
+  recordingPreviewResultSchema,
+  createRecordingAdoptionBodySchema,
+  createRecordingAdoptionResultSchema,
   type CreateAssistantConversationBody,
   type CreateAssistantTurnBody,
+  type CreateRecordingSelectionBody,
+  type RecordingPreviewQuery,
+  type CreateRecordingAdoptionBody,
 } from '@cairn/shared'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
+import { rethrowDomain } from '../common/domain-error'
 import { CurrentAccount } from '../rbac/current-account.decorator'
 import { RequirePermissions } from '../rbac/require-permission.decorator'
 import type { RequestAccount } from '../common/request-account'
@@ -103,6 +116,56 @@ export class AssistantController {
     @CurrentAccount() actor: RequestAccount,
   ) {
     return await this.assistant.getProposalPreview(actor, id, turnId)
+  }
+
+  @Post('conversations/:id/turns/:turnId/recording-selections')
+  @RequirePermissions('ai:assist', 'workflow:write', 'target:read')
+  async createRecordingSelection(
+    @Param('id') conversationId: string,
+    @Param('turnId') turnId: string,
+    @Body(new ZodValidationPipe(createRecordingSelectionBodySchema)) body: CreateRecordingSelectionBody,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return createRecordingSelectionResultSchema.parse(
+      await this.assistant.createRecordingSelection(actor, conversationId, turnId, body).catch(rethrowDomain),
+    )
+  }
+
+  @Post('conversations/:id/turns/:turnId/recording-outcomes')
+  @RequirePermissions('ai:assist', 'workflow:write', 'target:read')
+  async confirmRecordingOutcome(
+    @Param('id') conversationId: string,
+    @Param('turnId') turnId: string,
+    @Body(new ZodValidationPipe(confirmRecordingOutcomeBodySchema)) body: ConfirmRecordingOutcomeBody,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return confirmRecordingOutcomeResultSchema.parse(await this.assistant.confirmRecordingOutcome(actor, conversationId, turnId, body).catch(rethrowDomain))
+  }
+
+  @Get('conversations/:id/turns/:turnId/recording-preview')
+  @RequirePermissions('ai:assist', 'workflow:write', 'target:read')
+  async getRecordingPreview(
+    @Param('id') conversationId: string,
+    @Param('turnId') turnId: string,
+    @Query(new ZodValidationPipe(recordingPreviewQuerySchema)) query: RecordingPreviewQuery,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return recordingPreviewResultSchema.parse(
+      await this.assistant.getRecordingPreview(actor, conversationId, turnId, query).catch(rethrowDomain),
+    )
+  }
+
+  @Post('conversations/:id/turns/:turnId/recording-adoptions')
+  @RequirePermissions('ai:assist', 'workflow:write', 'target:read')
+  async adoptRecordingProposal(
+    @Param('id') conversationId: string,
+    @Param('turnId') turnId: string,
+    @Body(new ZodValidationPipe(createRecordingAdoptionBodySchema)) body: CreateRecordingAdoptionBody,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return createRecordingAdoptionResultSchema.parse(
+      await this.assistant.adoptRecordingProposal(actor, conversationId, turnId, body).catch(rethrowDomain),
+    )
   }
 
   @Post('conversations/:id/turns')

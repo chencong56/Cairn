@@ -67,9 +67,19 @@ import {
   type AiTaskListQuery,
   type AiTaskListResponse,
   type CreateSolidificationDraftResponse,
+  debugPresenceBodySchema,
+  debugPresenceResponseSchema,
+  tableObservationSchema,
+  tableDiscoveryObservationSchema,
+  structureObservationSchema,
+  type DebugPresenceBody,
+  type DebugPresenceResponse,
+  type TableObservation,
+  type StructureObservation,
+  type TableDiscoveryObservation,
   REQUEST_ID_HEADER,
 } from '@cairn/shared'
-import { z } from 'zod'
+import { z, type ZodType } from 'zod'
 import { apiFetch, apiFetchBlob, toQueryString } from '@/lib/api-client'
 import { useAuthStore } from '@/stores/auth-store'
 import { assertSseResponseOk, newSseRequestId, parseJson, readSseStream } from '@/lib/sse'
@@ -232,11 +242,33 @@ export function reviewRun(id: string, body: ReviewRunBody): Promise<RunDetailDto
   })
 }
 
-export function observeRun(id: string, body: ObserveOperation): Promise<TargetObservation> {
-  return apiFetch(`/api/runs/${id}/observe`, targetObservationSchema, {
+export function observeRun(id: string, body: Extract<ObserveOperation, { op: 'table'; subOp: 'discover' }>): Promise<TableDiscoveryObservation>
+export function observeRun(id: string, body: Extract<ObserveOperation, { op: 'table'; subOp: 'sample' }>): Promise<TableObservation>
+export function observeRun(id: string, body: Extract<ObserveOperation, { op: 'table' }>): Promise<TableDiscoveryObservation | TableObservation>
+export function observeRun(id: string, body: Extract<ObserveOperation, { op: 'structure' }>): Promise<StructureObservation>
+export function observeRun(id: string, body: Exclude<ObserveOperation, { op: 'table' | 'structure' }>): Promise<TargetObservation>
+export function observeRun(id: string, body: ObserveOperation): Promise<TargetObservation | TableDiscoveryObservation | TableObservation>
+export function observeRun(id: string, body: ObserveOperation): Promise<TargetObservation | TableDiscoveryObservation | TableObservation | StructureObservation> {
+  const schema =
+    body.op === 'table'
+      ? body.subOp === 'discover'
+        ? tableDiscoveryObservationSchema
+        : tableObservationSchema
+      : body.op === 'structure'
+        ? structureObservationSchema
+        : targetObservationSchema
+  return apiFetch(`/api/runs/${id}/observe`, schema as ZodType<TargetObservation | TableDiscoveryObservation | TableObservation | StructureObservation>, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(observeOperationSchema.parse(body)),
+  })
+}
+
+export function renewDebugPresence(id: string, body: DebugPresenceBody): Promise<DebugPresenceResponse> {
+  return apiFetch(`/api/runs/${id}/debug/presence`, debugPresenceResponseSchema, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(debugPresenceBodySchema.parse(body)),
   })
 }
 

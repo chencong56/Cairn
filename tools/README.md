@@ -12,7 +12,7 @@
 | `check-menu-reconciliation.mjs` | `pnpm check:menus` | 菜单目录、助手导览与侧栏单源对账；读 `packages/shared/dist`，改了菜单契约需先构建 |
 | `check-spec-governance.mjs` | `pnpm check:specs` | 活跃方案 ≤ 15 篇、已闭环方案须归档；`docs/spec/` 不进仓库，只在本机手动跑，不进 `pnpm check` / CI |
 | `check-stack.mjs` | `pnpm check:stack` | 本机 api / worker / web 进程探活；不启动进程，也不进 CI |
-| `use-env.mjs` | `pnpm env:use local\|remote`、`pnpm env:status` | 开发连接画像：`.env.local` / `.env.remote` 与 `.env.example` 键集必须对齐；`.env` 只是当前生效指针 |
+| `use-env.mjs` | `pnpm env:use local\|remote`、`pnpm env:status` | 开发连接画像：`.env.local` / `.env.remote` 与 `.env.example` 键集必须对齐（注释形态的可选项也算键，差异只允许取值与是否启用）；`.env` 只是当前生效指针 |
 | `probe-demonstration-files.mjs` | `node tools/probe-demonstration-files.mjs` | 本机 Web／API／对象存储的 JSON、YAML 文件导入、图片审查、参数／成功条件回填与单步重教；含 390px 窄屏检查 |
 | `verify-changed.mjs` | `pnpm verify:changed` | 智能分层验证：根据改动影响半径智能选择 L1 局部验证或 L2 全量升级，提示 L3 专项领域测试；支持 `--dry-run` 与 `--files` |
 

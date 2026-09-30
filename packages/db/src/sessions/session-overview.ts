@@ -20,10 +20,14 @@ import {
   type SessionSystemOverviewResponse,
   type AccountSessionDetail,
   retentionQuota,
+  type AccountSessionMode,
+  platformConfigDocumentSchema,
+  FACTORY_PLATFORM_CONFIG,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { clockNow, databaseNow, schemaFor } from '../native.js'
 import { badRequest, notFound } from '../runs/errors.js'
+import { getPlatformConfig } from '../platform-config/store.js'
 import { readRetentionConfig } from './session-retention.js'
 import { parseTargetSessionPolicyOverride } from './session-policy.js'
 import { readAccountSessionCap } from './account-session-concurrency.js'
@@ -558,10 +562,19 @@ function isRetained(facts: OccupancyFacts, now: Date) {
   )
 }
 
-function capFromAccount(account: Pick<OverviewAccountRow, 'maxConcurrentSessions' | 'targetSessionPolicy'>) {
+async function loadPlatformSessionMode(db: Db): Promise<AccountSessionMode> {
+  const current = await getPlatformConfig(db)
+  const document = current ? platformConfigDocumentSchema.parse(current.document) : FACTORY_PLATFORM_CONFIG
+  return document.session.accountSessionMode
+}
+
+function capFromAccount(
+  account: Pick<OverviewAccountRow, 'maxConcurrentSessions' | 'targetSessionPolicy'>,
+  platformSessionMode?: AccountSessionMode,
+) {
   const override = parseTargetSessionPolicyOverride(account.targetSessionPolicy)
   return effectiveAccountSessionCap({
-    accountSessionMode: override?.accountSessionMode,
+    accountSessionMode: override?.accountSessionMode ?? platformSessionMode,
     maxConcurrentSessions: account.maxConcurrentSessions,
   })
 }
@@ -580,6 +593,7 @@ function toAccountOverviewItem(
   facts: OccupancyFacts,
   now: Date,
   workerMap?: Map<string, { label: string; online: boolean }>,
+  platformSessionMode?: AccountSessionMode,
 ): AccountSessionOverviewItem {
   const status = statusFromFacts(facts)
   const mainWorkerId = facts.live?.ownerWorkerId ?? null
@@ -618,7 +632,7 @@ function toAccountOverviewItem(
     liveWorkerCount: liveWorkerIds.size,
     primaryAction: primaryAction(status),
     liveCount: facts.instances.length,
-    effectiveCap: capFromAccount(account),
+    effectiveCap: capFromAccount(account, platformSessionMode),
   }
 }
 
@@ -682,6 +696,7 @@ function addAccountToSystem(
   account: OverviewAccountRow,
   facts: OccupancyFacts,
   now: Date,
+  platformSessionMode?: AccountSessionMode,
 ) {
   const status = statusFromFacts(facts)
   const retained = isRetained(facts, now)
@@ -701,13 +716,13 @@ function addAccountToSystem(
       retainedCount: retained ? 1 : 0,
       worstStatus: status,
       liveSessionCount: facts.instances.length,
-      sessionCapTotal: capFromAccount(account as OverviewAccountRow),
+      sessionCapTotal: capFromAccount(account as OverviewAccountRow, platformSessionMode),
     })
     return
   }
   current.accountTotal += 1
   current.liveSessionCount += facts.instances.length
-  current.sessionCapTotal += capFromAccount(account as OverviewAccountRow)
+  current.sessionCapTotal += capFromAccount(account as OverviewAccountRow, platformSessionMode)
   if (bucket === 'ready') current.readyCount += 1
   if (bucket === 'problem') current.problemCount += 1
   if (bucket === 'unprepared') current.unpreparedCount += 1
@@ -771,6 +786,7 @@ export async function listAccountSessionOverview(
   const offset = parseOffsetCursor(input.cursor)
   const scoped = Boolean(input.targetId)
   const now = await clockNow(db)
+  const platformSessionMode = await loadPlatformSessionMode(db)
 
   if (input.bucket && input.filter) {
     if (!isFilterAllowedInBucket(input.bucket, input.filter)) {
@@ -812,6 +828,7 @@ export async function listAccountSessionOverview(
         factsByAccount.get(accountFactKey(account.targetId, account.targetAccountId)) ?? emptyOccupancy(),
         now,
         workerMap,
+        platformSessionMode,
       ),
     )
     return {
@@ -849,6 +866,7 @@ export async function listAccountSessionOverview(
       factsByAccount.get(accountFactKey(account.targetId, account.targetAccountId)) ?? emptyOccupancy(),
       now,
       workerMap,
+      platformSessionMode,
     ),
   )
   return {
@@ -879,12 +897,13 @@ export async function listSessionSystemOverview(
   const limit = input.limit ?? 20
   const offset = parseOffsetCursor(input.cursor)
   const now = await clockNow(db)
+  const platformSessionMode = await loadPlatformSessionMode(db)
   const targetIds = actorId ? await readableSessionTargets(db, actorId) : undefined
   if (targetIds) {
     const accounts = await loadOverviewAccounts(db, { targetIds })
     const facts = await loadOccupancyFactsForAccounts(db, accounts)
     const systems = new Map<string, SessionSystemOverviewItem>()
-    for (const account of accounts) addAccountToSystem(systems, account, facts.get(accountFactKey(account.targetId, account.targetAccountId)) ?? emptyOccupancy(), now)
+    for (const account of accounts) addAccountToSystem(systems, account, facts.get(accountFactKey(account.targetId, account.targetAccountId)) ?? emptyOccupancy(), now, platformSessionMode)
     const needle = input.search?.trim().toLowerCase()
     const filtered = [...systems.values()].filter((item) => (!needle || item.targetName.toLowerCase().includes(needle) || item.targetCode.toLowerCase().includes(needle)) && matchesSystemOverviewFilter(item, input.filter)).sort(compareSystemRow)
     return { items: filtered.slice(offset, offset + limit), nextCursor: nextOffsetCursor(offset, limit, offset + limit < filtered.length),
@@ -899,7 +918,7 @@ export async function listSessionSystemOverview(
     const systems = new Map<string, SessionSystemOverviewItem>()
     for (const account of accounts) {
       const facts = activeFacts.get(accountFactKey(account.targetId, account.targetAccountId)) ?? emptyOccupancy()
-      addAccountToSystem(systems, account, facts, now)
+      addAccountToSystem(systems, account, facts, now, platformSessionMode)
     }
     const needle = input.search?.trim().toLowerCase()
     const filtered = [...systems.values()]
@@ -934,7 +953,7 @@ export async function listSessionSystemOverview(
   const systems = new Map<string, SessionSystemOverviewItem>()
   for (const account of accounts) {
     const facts = factsByAccount.get(accountFactKey(account.targetId, account.targetAccountId)) ?? emptyOccupancy()
-    addAccountToSystem(systems, account, facts, now)
+    addAccountToSystem(systems, account, facts, now, platformSessionMode)
   }
   return {
     items: pageTargets.flatMap((target) => {

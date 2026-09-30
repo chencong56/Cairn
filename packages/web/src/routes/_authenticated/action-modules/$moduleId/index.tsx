@@ -4,6 +4,13 @@ import { ActionModuleDetailPage } from '@/features/action-modules/detail'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/action-modules/$moduleId/')({
+  staticData: {
+    assistant: {
+      routeKey: 'actionModules.$moduleId',
+      pageKind: 'action-module',
+      primaryObject: { kind: 'actionModule', idParam: 'moduleId' },
+    },
+  },
   beforeLoad: () => {
     const user = useAuthStore.getState().auth.user
     if (!user || !hasPermission(user.permissions, 'module:read')) {

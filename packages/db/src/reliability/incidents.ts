@@ -22,6 +22,7 @@ export interface ListIncidentsQuery {
   severity?: IncidentSeverity
   assetKind?: 'scenario' | 'action_module'
   assetId?: string
+  ruleVersion?: number
   search?: string
   cursor?: string
   limit?: number
@@ -45,7 +46,9 @@ export async function listIncidents(
     query.status ? eq(reliabilityIncidents.status, query.status) : undefined,
     query.statuses?.length ? inArray(reliabilityIncidents.status, query.statuses) : undefined,
     query.severity ? eq(reliabilityIncidents.severity, query.severity) : undefined,
-    query.assetId ? sql`${reliabilityIncidents.groupingKey} LIKE ${'%' + query.assetId + '%'}` : undefined,
+    query.assetKind ? eq(reliabilityIncidents.assetKind, query.assetKind) : undefined,
+    query.assetId ? eq(reliabilityIncidents.assetId, query.assetId) : undefined,
+    query.ruleVersion !== undefined ? eq(reliabilityIncidents.ruleVersion, query.ruleVersion) : undefined,
     query.search
       ? sql`(${reliabilityIncidents.title} LIKE ${'%' + query.search + '%'} OR ${reliabilityIncidents.summary} LIKE ${'%' + query.search + '%'} OR ${reliabilityIncidents.groupingKey} LIKE ${'%' + query.search + '%'})`
       : undefined,
@@ -96,6 +99,16 @@ export async function listIncidents(
     dismissedReason: r.dismissedReason ?? undefined,
     lineage: (r.lineage as IncidentLineage) ?? undefined,
     revision: r.revision,
+    ruleVersion: r.ruleVersion,
+    assetKind: (r.assetKind as 'scenario' | 'action_module' | null) ?? undefined,
+    assetId: r.assetId ?? undefined,
+    stepId: r.stepId ?? undefined,
+    implementationKey: r.implementationKey ?? undefined,
+    accountId: r.accountId ?? undefined,
+    observingStartedAt: r.observingStartedAt?.toISOString(),
+    observingStartedOrdinal: r.observingStartedOrdinal != null ? Number(r.observingStartedOrdinal) : undefined,
+    closedAt: r.closedAt?.toISOString(),
+    closedEvaluationOrdinal: r.closedEvaluationOrdinal != null ? Number(r.closedEvaluationOrdinal) : undefined,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   }))
@@ -143,6 +156,16 @@ export async function getIncidentDetail(
     dismissedReason: row.dismissedReason ?? undefined,
     lineage: (row.lineage as IncidentLineage) ?? undefined,
     revision: row.revision,
+    ruleVersion: row.ruleVersion,
+    assetKind: (row.assetKind as 'scenario' | 'action_module' | null) ?? undefined,
+    assetId: row.assetId ?? undefined,
+    stepId: row.stepId ?? undefined,
+    implementationKey: row.implementationKey ?? undefined,
+    accountId: row.accountId ?? undefined,
+    observingStartedAt: row.observingStartedAt?.toISOString(),
+    observingStartedOrdinal: row.observingStartedOrdinal != null ? Number(row.observingStartedOrdinal) : undefined,
+    closedAt: row.closedAt?.toISOString(),
+    closedEvaluationOrdinal: row.closedEvaluationOrdinal != null ? Number(row.closedEvaluationOrdinal) : undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }

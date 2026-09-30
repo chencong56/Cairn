@@ -136,7 +136,7 @@ export async function listAssetReliabilityItems(
   actorId?: string,
 ): Promise<AssetReliabilityListResponse> {
   const parsed = assetReliabilityQuerySchema.parse(query)
-  const { scenarios, actionModules, targets, featureWindows, reliabilityIncidents } = schemaFor(db)
+  const { scenarios, actionModules, targets, featureWindows, reliabilityIncidents, reliabilityRunSamples } = schemaFor(db)
   const limit = Math.min(parsed.limit, 100)
   const grants = actorId ? await loadAccountGrants(db, actorId) : undefined
   const scope = grants
@@ -227,14 +227,14 @@ export async function listAssetReliabilityItems(
     return { items: [], nextCursor: null, total: 0 }
   }
 
-  // 4. Fetch active incidents
+  // 4. Fetch active incidents using structured asset identity
   const activeIncidents = await db
     .select({
       id: reliabilityIncidents.id,
       targetId: reliabilityIncidents.targetId,
-      groupingKey: reliabilityIncidents.groupingKey,
+      assetKind: reliabilityIncidents.assetKind,
+      assetId: reliabilityIncidents.assetId,
       severity: reliabilityIncidents.severity,
-      lineage: reliabilityIncidents.lineage,
     })
     .from(reliabilityIncidents)
     .where(
@@ -245,18 +245,35 @@ export async function listAssetReliabilityItems(
       ),
     )
 
-  // 5. Fetch recent feature windows
-  const recentWindows = await db
-    .select()
-    .from(featureWindows)
-    .where(and(parsed.targetId ? eq(featureWindows.targetId, parsed.targetId) : undefined, scope && targetScopeFilter(featureWindows.targetId, scope)))
-    .orderBy(desc(featureWindows.windowEnd))
-    .limit(200)
+  // 5. Fetch recent samples per asset from reliabilityRunSamples
+  const sampleRows = await db
+    .select({
+      targetId: reliabilityRunSamples.targetId,
+      assetKind: reliabilityRunSamples.assetKind,
+      assetId: reliabilityRunSamples.assetId,
+      executionConclusion: reliabilityRunSamples.executionConclusion,
+      durationMs: reliabilityRunSamples.durationMs,
+      occurredAt: reliabilityRunSamples.occurredAt,
+      evaluationOrdinal: reliabilityRunSamples.evaluationOrdinal,
+    })
+    .from(reliabilityRunSamples)
+    .where(
+      and(
+        parsed.targetId ? eq(reliabilityRunSamples.targetId, parsed.targetId) : undefined,
+        eq(reliabilityRunSamples.ruleVersion, 2),
+      ),
+    )
+    .orderBy(desc(reliabilityRunSamples.evaluationOrdinal))
 
-  const windowByTarget = new Map<string, typeof recentWindows[0]>()
-  for (const w of recentWindows) {
-    if (!windowByTarget.has(w.targetId)) {
-      windowByTarget.set(w.targetId, w)
+  // Group up to 30 recent samples per asset
+  const samplesByAssetKey = new Map<string, typeof sampleRows>()
+  for (const s of sampleRows) {
+    if (!s.assetKind || !s.assetId) continue
+    const key = `${s.targetId}:${s.assetKind}:${s.assetId}`
+    const list = samplesByAssetKey.get(key) ?? []
+    if (list.length < 30) {
+      list.push(s)
+      samplesByAssetKey.set(key, list)
     }
   }
 
@@ -264,10 +281,13 @@ export async function listAssetReliabilityItems(
   const severityRank: Record<string, number> = { P1: 4, P2: 3, P3: 2, P4: 1 }
 
   let combined: AssetReliabilityItemDto[] = allAssets.map((asset) => {
+    // 严格匹配 assetKind 和 assetId
     const matchingIncidents = activeIncidents.filter((inc) => {
-      if (inc.targetId !== asset.targetId) return false
-      if (inc.groupingKey && inc.groupingKey.includes(asset.assetId)) return true
-      return false
+      return (
+        inc.targetId === asset.targetId &&
+        inc.assetKind === asset.assetType &&
+        inc.assetId === asset.assetId
+      )
     })
 
     let highestSeverity: IncidentSeverity | null = null
@@ -280,16 +300,32 @@ export async function listAssetReliabilityItems(
       }
     }
 
-    const targetWin = windowByTarget.get(asset.targetId)
-    const sampleCount = targetWin?.sampleCount ?? 0
-    const ewmaSuccessRate = targetWin && targetWin.sampleCount > 0 ? (targetWin.ewmaSuccessRate ?? null) : null
-    const p95DurationMs = targetWin && targetWin.sampleCount > 0 ? (((targetWin.stats as any)?.p95LatencyMs as number | undefined) ?? (targetWin.ewmaLatencyMs || null)) : null
-    const lastEvaluatedAt = targetWin?.windowEnd?.toISOString() ?? nowStr
+    const assetKey = `${asset.targetId}:${asset.assetType}:${asset.assetId}`
+    const assetSamples = samplesByAssetKey.get(assetKey) ?? []
+
+    const sampleCount = assetSamples.length
+    let ewmaSuccessRate: number | null = null
+    let p95DurationMs: number | null = null
+    let lastEvaluatedAt = nowStr
+
+    if (sampleCount > 0) {
+      const successCount = assetSamples.filter((s) => s.executionConclusion === 'SUCCEEDED').length
+      ewmaSuccessRate = successCount / sampleCount
+      const durations = assetSamples
+        .filter((s) => s.durationMs !== null && s.durationMs !== undefined)
+        .map((s) => s.durationMs!)
+        .sort((a, b) => a - b)
+      if (durations.length > 0) {
+        const p95Idx = Math.min(durations.length - 1, Math.floor(durations.length * 0.95))
+        p95DurationMs = durations[p95Idx] ?? null
+      }
+      lastEvaluatedAt = assetSamples[0]!.occurredAt.toISOString()
+    }
 
     let status: 'healthy' | 'degraded' | 'insufficient_data' = 'healthy'
-    if (matchingIncidents.length > 0 || (ewmaSuccessRate !== null && ewmaSuccessRate < 0.85)) {
+    if (matchingIncidents.length > 0 || (sampleCount >= 10 && ewmaSuccessRate !== null && ewmaSuccessRate < 0.85)) {
       status = 'degraded'
-    } else if (sampleCount < 5) {
+    } else if (sampleCount < 10) {
       status = 'insufficient_data'
     }
 

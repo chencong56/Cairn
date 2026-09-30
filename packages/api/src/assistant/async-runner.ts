@@ -580,6 +580,14 @@ export class AssistantAsyncRunner implements OnModuleInit, OnModuleDestroy {
         decision = { type: 'dispatch', capabilityId: 'knowledge.answer', slots: {} }
       }
 
+      // Entity/collection analyzers have authoritative page scope; resolve their
+      // natural-language questions before the supervisor can mistake e.g. a suite for a scenario.
+      if (!decision && !body.capabilityHint &&
+        ['suite', 'action-module', 'recording', 'schedule', 'batch'].includes(normalizeAssistantPageContext(body.pageContext)?.pageKind ?? '')) {
+        const scopedRoute = routeAssistantTurn({ question, pageContext: body.pageContext, available: availableIds })
+        if (scopedRoute.type === 'dispatch' && ['knowledge.answer', 'recording.propose-scenario'].includes(scopedRoute.capabilityId)) decision = scopedRoute
+      }
+
       // 1. If explicit capabilityHint provided or parent clarify selected, route directly
       if (!decision && body.capabilityHint) {
         decision = routeAssistantTurn({

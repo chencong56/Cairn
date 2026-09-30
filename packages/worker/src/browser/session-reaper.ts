@@ -16,6 +16,7 @@ import {
 } from '@cairn/db'
 import { DEFAULT_SESSION_POLICY, type SessionPolicy } from '@cairn/shared'
 import { closePage, probeHealth, stopSession } from './runtime'
+import { scanManagedBrowserProcesses } from '../runtime/browser-processes.js'
 import { SessionLeaseError, type SessionManagerContext } from './session-live.js'
 import { captureSessionSnapshot } from './session-maintenance-runtime.js'
 
@@ -232,14 +233,16 @@ export async function close(this: SessionManagerContext, sessionId: string, reas
   }
 
 export async function reap(
-    this: SessionManagerContext,
-    options?: { includeGlobalLeases?: boolean },
-  ): Promise<{
-    leasesExpired: number
-    sessionsClosed: number
-  }> {
-    this.browserUnavailable = false
-    const db = this.dbHandle
+  this: SessionManagerContext,
+  options?: { includeGlobalLeases?: boolean },
+): Promise<{
+  leasesExpired: number
+  sessionsClosed: number
+}> {
+  this.browserUnavailable = false
+  const db = this.dbHandle
+  // 周期推送受管进程树 RSS：预算或高水位配置存在时才采样，节流避免每轮 reap 都 ps
+  await this.sampleBrowserMemory()
     let leasesExpired = 0
     if (options?.includeGlobalLeases !== false) {
       const reaped = await reapSessionLeases(db)
@@ -294,6 +297,33 @@ export async function reap(
     )
     return { leasesExpired, sessionsClosed }
   }
+
+export async function sampleBrowserMemory(
+  this: SessionManagerContext,
+): Promise<void> {
+  const budgetEnabled =
+    (this.options.browserMemoryBudgetMb ?? 0) > 0 || (this.options.poolHostRssHighWatermarkMb ?? 0) > 0
+  if (!budgetEnabled) return
+  const now = Date.now()
+  if (now - (this.lastMemorySampleAt ?? 0) < 20_000) return
+  this.lastMemorySampleAt = now
+  const stats = await scanManagedBrowserProcesses({
+    workerId: this.options.workerId,
+    workerInstanceId: this.workerInstanceId,
+    profileDir: this.options.profileRoot,
+  }).catch(() => null)
+  if (!stats) return
+  const perHostRssBytes = new Map<string, number>()
+  for (const root of stats.roots) {
+    if (!root.hostId) continue
+    perHostRssBytes.set(root.hostId, (perHostRssBytes.get(root.hostId) ?? 0) + root.rssBytes)
+  }
+  this.hostPool.updateMemorySample({
+    sampledAt: now,
+    totalRssBytes: stats.rssBytes,
+    perHostRssBytes,
+  })
+}
 
 export async function dropDisposedHandles(this: SessionManagerContext): Promise<number> {
     const db = this.dbHandle

@@ -36,3 +36,16 @@ export {
   createScenarioHandoffBodySchema,
   type CreateScenarioHandoffBody,
 } from './handoff.js'
+export {
+  getAssistantRecordingProposalFacts,
+  adoptAssistantRecordingProposal,
+  revertAssistantRecordingAdoption,
+  previewAssistantRecordingAdoption,
+  listRecordingAdoptionReceipts,
+  getRecordingAdoptionReceipt,
+  type AdoptAssistantRecordingProposalInput,
+  type AdoptAssistantRecordingProposalResult,
+  type RevertAssistantRecordingAdoptionResult,
+  type PreviewAssistantRecordingAdoptionInput,
+  type PreviewAssistantRecordingAdoptionResult,
+} from './assistant-adoptions.js'

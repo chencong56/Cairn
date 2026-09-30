@@ -147,7 +147,7 @@ function publishedVersionNo(row: ScenarioVersionRow): number {
   return row.versionNo
 }
 
-async function latestPublishedVersion(db: Db, scenarioId: string) {
+async function findLatestPublishedVersion(db: Db, scenarioId: string) {
   const { scenarioVersions } = schemaFor(db)
   const [row] = await db
     .select()
@@ -155,7 +155,12 @@ async function latestPublishedVersion(db: Db, scenarioId: string) {
     .where(and(eq(scenarioVersions.scenarioId, scenarioId), eq(scenarioVersions.kind, 'published')))
     .orderBy(desc(scenarioVersions.versionNo))
     .limit(1)
-  if (!row) throw notFound('SCENARIO_VERSION_NOT_FOUND', '场景版本不存在')
+  return row
+}
+
+async function latestPublishedVersion(db: Db, scenarioId: string) {
+  const row = await findLatestPublishedVersion(db, scenarioId)
+  if (!row) throw notFound('SCENARIO_VERSION_NOT_FOUND', '场景尚未发布，请先发布版本')
   return row
 }
 
@@ -438,9 +443,10 @@ export async function syncScenarioModuleRefsTx(
 
 function toScenarioDto(
   row: ScenarioRow,
-  latest: ScenarioVersionRow,
+  latest: ScenarioVersionRow | undefined,
   draftDirty: boolean,
   extras?: {
+    draftStepCount?: number
     createdByName?: string | null
     latestRun?: ScenarioLatestRun | null
     schedule?: ScenarioScheduleSummary | null
@@ -452,9 +458,9 @@ function toScenarioDto(
     name: row.name,
     status: row.status,
     purpose: row.purpose ?? 'user',
-    latestVersionId: latest.id,
-    latestVersionNo: publishedVersionNo(latest),
-    stepCount: latest.definition.steps.length,
+    latestVersionId: latest?.id ?? null,
+    latestVersionNo: latest ? publishedVersionNo(latest) : null,
+    stepCount: latest?.definition.steps.length ?? extras?.draftStepCount ?? 0,
     draftDirty,
     createdByName: extras?.createdByName ?? null,
     latestRun: extras?.latestRun ?? null,
@@ -489,13 +495,13 @@ function isV2Document(doc: unknown): boolean {
 async function toDetailDto(
   db: Db,
   row: ScenarioRow,
-  latest: ScenarioVersionRow,
+  latest: ScenarioVersionRow | undefined,
   options?: ScenarioCompileOptions,
 ): Promise<ScenarioDetailDto> {
   const draft = await loadDraft(db, row.id)
   const target = await loadTargetContext(db, row.targetId)
   const authoringDoc = normalizeAuthoringDocument(
-    draft?.document ?? latest.authoringDocument ?? latest.definition,
+    draft?.document ?? latest?.authoringDocument ?? latest?.definition,
   )
   let compiled: CompileResult
   const hasModuleInvocations = authoringHasModuleInvocations(authoringDoc)
@@ -528,11 +534,11 @@ async function toDetailDto(
       deriveOutcomeManifest({ authoringDocument: authoringDoc }) ?? { entries: [] },
     )
   }
-  const dirty = draft ? isDraftDirty(draft.document, latest.definition, latest.authoringDocument) : false
+  const dirty = draft ? !latest || isDraftDirty(draft.document, latest.definition, latest.authoringDocument) : false
   return scenarioDetailSchema.parse({
-    ...toScenarioDto(row, latest, dirty),
-    steps: latest.definition.steps,
-    published: {
+    ...toScenarioDto(row, latest, dirty, { draftStepCount: authoringSteps(authoringDoc).length }),
+    steps: latest?.definition.steps ?? [],
+    published: latest ? {
       versionId: latest.id,
       versionNo: publishedVersionNo(latest),
       definition: latest.definition,
@@ -540,7 +546,7 @@ async function toDetailDto(
       authoringDocument: latest.authoringDocument ?? undefined,
       moduleManifest: latest.moduleManifest ?? undefined,
       createdAt: iso(latest.createdAt),
-    },
+    } : undefined,
     draft: draft
       ? {
           revision: draft.revision,
@@ -569,7 +575,7 @@ export async function getScenario(
     .where(and(eq(scenarios.id, scenarioId), isNull(scenarios.deletedAt)))
     .limit(1)
   if (!row) throw notFound('SCENARIO_NOT_FOUND', '场景不存在')
-  const latest = await latestPublishedVersion(db, scenarioId)
+  const latest = await findLatestPublishedVersion(db, scenarioId)
   return toDetailDto(db, row, latest, options)
 }
 
@@ -752,14 +758,14 @@ export async function listScenarios(
   const items: ScenarioDto[] = []
   for (const row of paginated.items) {
     const latest = latestByScenario.get(row.id)
-    if (!latest) throw notFound('SCENARIO_VERSION_NOT_FOUND', '场景版本不存在')
     const draft = draftById.get(row.id)
     items.push(
       toScenarioDto(
         row,
         latest,
-        draft ? isDraftDirty(draft.document, latest.definition, latest.authoringDocument) : false,
+        draft ? !latest || isDraftDirty(draft.document, latest.definition, latest.authoringDocument) : false,
         {
+          draftStepCount: draft ? authoringSteps(draft.document).length : 0,
           createdByName: creatorNameById.get(row.createdByConsoleAccountId) ?? null,
           latestRun: latestRunByScenario.get(row.id) ?? null,
           schedule: scheduleByScenario.get(row.id) ?? null,
@@ -808,7 +814,7 @@ export async function createScenarioWithVersion(
     compileMode?: 'save' | 'release'
     executableTypes?: readonly string[]
   },
-): Promise<ScenarioDetailDto> {
+): Promise<ScenarioDetailDto & { latestVersionId: string; latestVersionNo: number }> {
   const { scenarioDrafts, scenarioVersions, scenarios } = schemaFor(db)
   const document = parseDocument(scenarioDefinitionFromSteps(input.steps, input.inputs ?? [], input.outputs))
   const target = await loadTargetContext(db, input.targetId)
@@ -876,7 +882,9 @@ export async function createScenarioWithVersion(
     }
     rethrow(error)
   }
-  return getScenario(db, id, input)
+  const detail = await getScenario(db, id, input)
+  if (!detail.latestVersionId || !detail.latestVersionNo) throw notFound('SCENARIO_VERSION_NOT_FOUND', '新建发布版本不可读取')
+  return { ...detail, latestVersionId: detail.latestVersionId, latestVersionNo: detail.latestVersionNo }
 }
 
 export async function updateScenarioMeta(
@@ -958,8 +966,8 @@ export async function appendScenarioVersion(
           resolution: await compileResolutionFromPlatform(tx as unknown as Db, current.targetId),
         }),
       )
-      const latest = await latestPublishedVersion(tx as unknown as Db, scenarioId)
-      const versionNo = publishedVersionNo(latest) + 1
+      const latest = await findLatestPublishedVersion(tx as unknown as Db, scenarioId)
+      const versionNo = latest ? publishedVersionNo(latest) + 1 : 1
       const versionId = newId()
       await tx.insert(scenarioVersions).values({
         id: versionId,
@@ -1125,12 +1133,12 @@ export async function publishScenarioDraft(
           expandResult.outcomeManifest ?? { entries: [] },
         ),
       )
-      const latest = await latestPublishedVersion(tx as unknown as Db, scenarioId)
+      const latest = await findLatestPublishedVersion(tx as unknown as Db, scenarioId)
       const validationDigest = await draftValidationSubject(tx as unknown as Db, current.targetId, scenarioId, authoringDoc, expandResult)
       const { scenarioValidationSubjects } = schemaFor(tx)
-      const [latestSubject] = await tx.select().from(scenarioValidationSubjects).where(eq(scenarioValidationSubjects.scenarioVersionId, latest.id)).limit(1)
+      const [latestSubject] = latest ? await tx.select().from(scenarioValidationSubjects).where(eq(scenarioValidationSubjects.scenarioVersionId, latest.id)).limit(1) : []
       if (
-        latestSubject?.subjectDigest === validationDigest &&
+        latest && latestSubject?.subjectDigest === validationDigest &&
         sourceDocumentDigest(compiled.definition) === sourceDocumentDigest(latest.definition) &&
         authoringExtrasDigest({ authoringDocument: authoringDoc, definition: compiled.definition }) ===
           authoringExtrasDigest({
@@ -1140,7 +1148,7 @@ export async function publishScenarioDraft(
       ) {
         return
       }
-      const versionNo = publishedVersionNo(latest) + 1
+      const versionNo = latest ? publishedVersionNo(latest) + 1 : 1
       const versionId = newId()
       const digest =
         expandResult.manifest.entries.length > 0

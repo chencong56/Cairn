@@ -506,6 +506,7 @@ export function BrowserView({
   const holding = runStatus === 'HOLDING'
   const picking = observe.pickMode && (holding || (sessionMode && observe.livePage))
   const highlightBox = observe.highlight?.preview?.box
+  const tableMarkers = observe.tableMarkers
   const controlling = Boolean(token && canControl)
   const connecting = isBrowserViewConnecting({
     open,
@@ -1073,6 +1074,47 @@ export function BrowserView({
                       strokeWidth={2}
                     />
                   </svg>
+                ) : null}
+                {tableMarkers?.tables?.length ? (
+                  <div className='absolute inset-0' aria-label='探测到的表格'>
+                    {tableMarkers.tables.map((tbl, i) =>
+                      tbl.box ? (
+                        <div
+                          key={i}
+                          role='button'
+                          tabIndex={0}
+                          aria-label={`选择表格 ${i + 1}`}
+                          className={
+                            'absolute cursor-pointer rounded-sm border-2 transition-colors ' +
+                            (i === tableMarkers.activeIndex
+                              ? 'border-action-primary bg-action-primary/15'
+                              : 'border-blue-500/80 bg-blue-500/5 hover:bg-blue-500/15')
+                          }
+                          style={{
+                            left: `${(tbl.box.x / frame.width) * 100}%`,
+                            top: `${(tbl.box.y / frame.height) * 100}%`,
+                            width: `${(tbl.box.width / frame.width) * 100}%`,
+                            height: `${(tbl.box.height / frame.height) * 100}%`,
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            tableMarkers?.onPick?.(i)
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              tableMarkers?.onPick?.(i)
+                            }
+                          }}
+                        >
+                          <span className='absolute -top-5 left-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium leading-none text-white shadow-sm'>
+                            表格 {i + 1}
+                          </span>
+                        </div>
+                      ) : null,
+                    )}
+                  </div>
                 ) : null}
               </button>
             </div>

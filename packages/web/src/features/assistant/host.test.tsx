@@ -15,6 +15,12 @@ const { navigate } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/assistant-api', () => ({
+  adoptRecordingProposal: vi.fn(),
+  previewRecordingProposal: vi.fn(),
+  selectRecordingProposal: vi.fn(),
+  confirmRecordingOutcome: vi.fn(),
+  fetchRecordingAdoptions: vi.fn(async () => []),
+  revertRecordingAdoption: vi.fn(),
   fetchAssistantCapabilities: vi.fn(async () => ({
     items: [
       {
@@ -622,4 +628,3 @@ describe('AssistantHost', () => {
       .toBe(480)
   })
 })
-

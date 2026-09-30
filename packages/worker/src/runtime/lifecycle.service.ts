@@ -199,6 +199,8 @@ export class LifecycleService
   private cleanupTick: NodeJS.Timeout | undefined;
   private workspaceCleanupTick: NodeJS.Timeout | undefined;
   private workspaceCleanupTask: Promise<void> | undefined;
+  private platformConfigRefreshTick: NodeJS.Timeout | undefined;
+  private lastAppliedPlatformConfigRevision = 0;
   private reaperTick: NodeJS.Timeout | undefined;
   private outboundTick: NodeJS.Timeout | undefined;
   private outboundTask: Promise<void> | undefined;
@@ -299,8 +301,10 @@ export class LifecycleService
       await this.beat();
       if (this.shutdownCalled || this.stopped) return;
       if (roles.executor) {
+        void this.sessions.startPrewarmLoop();
         this.startClaiming();
         this.startWorkspaceCleanup();
+        this.startPlatformConfigRefresh();
         this.claimTask = this.pump();
         void this.pumpOperation();
         this.videoMediaTick = setInterval(
@@ -470,6 +474,30 @@ export class LifecycleService
     return this.workspaceCleanupTask;
   }
 
+  private startPlatformConfigRefresh(): void {
+    if (this.platformConfigRefreshTick || this.shutdownCalled) return;
+    this.platformConfigRefreshTick = setInterval(() => {
+      void this.refreshPlatformConfig();
+    }, timerJitter(30_000));
+  }
+
+  private async refreshPlatformConfig(): Promise<void> {
+    if (this.stopped || this.shutdownCalled) return;
+    try {
+      const current = await getOrCreatePlatformConfig(this.handle);
+      if (current.revision !== this.lastAppliedPlatformConfigRevision) {
+        this.lastAppliedPlatformConfigRevision = current.revision;
+        const document = platformConfigDocumentSchema.parse(current.document);
+        this.sessions.applyPlatformConfig(document, current.revision);
+      }
+    } catch (err) {
+      this.logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        '平台配置刷新失败',
+      );
+    }
+  }
+
   private startMaintenance(): void {
     if (this.maintenanceTick || this.shutdownCalled) return;
     this.maintenanceTick = setInterval(() => {
@@ -635,6 +663,10 @@ export class LifecycleService
       clearInterval(this.videoMediaTick);
       this.videoMediaTick = undefined;
     }
+    if (this.platformConfigRefreshTick) {
+      clearInterval(this.platformConfigRefreshTick);
+      this.platformConfigRefreshTick = undefined;
+    }
     this.outboundAbort.abort();
     for (const item of this.inFlight.values()) item.controller.abort();
     const auxiliaryClose = this.auxiliaryTasks.close();
@@ -686,13 +718,14 @@ export class LifecycleService
     for (const item of owned) {
       await yieldUnfinishedRun(this.handle, item.grant).catch(() => undefined);
     }
-    // 在途 DB claim 返回后会在 pump() 里检查 stopped 并交回 grant；
-    // 停机不能为等待它而卡住，若连接未能关闭则领取 watchdog 会让进程退出。
+    // 在途 DB claim 返回后会在 pump() 里检查 stopped 并交回 grant。
+    // 纳入下方有界等待，避免正常领取尚未交回就关闭连接；卡死领取仍不能阻塞停机。
     // 自愈可能正在重新注册：等它结束，别让停机与注册交错。
     await this.healing?.catch(() => undefined);
     // 后台工作不得拖住 Run 租约交回。给予短暂收尾时间后继续停机；
     // 未完成的数据库领取由进程退出和租约超时恢复。
     const background = Promise.allSettled([
+      this.claimTask,
       this.scheduleTask,
       this.analysisTask,
       this.reliabilityTask,
@@ -1583,6 +1616,10 @@ export class LifecycleService
         liveHandleCount: this.liveHandleCount() ?? 0,
         shuttingDown: this.shutdownCalled,
       },
+      // 预热只属于执行角色；其他角色与旧消费者不感知该字段
+      ...(this.roles().executor
+        ? { browserPrewarm: this.sessions.getPrewarmStatus() }
+        : {}),
     });
   }
 

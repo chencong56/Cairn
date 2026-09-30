@@ -15,9 +15,42 @@ vi.mock('@tanstack/react-router', async (importOriginal) => ({
 }))
 vi.mock('@/lib/workers-api', () => ({
   fetchWorker: (...args: unknown[]) => fetchWorker(...args),
+  fetchWorkerNodeHealth: vi.fn().mockResolvedValue({
+    reachable: true,
+    health: {
+      status: 'ok',
+      service: 'cairn-worker',
+      uptimeSeconds: 120,
+      checks: { database: 'up' },
+      node: {
+        workerId: 'worker-a',
+        instanceId: '11111111-1111-4111-8111-111111111111',
+        lastTickAt: '2026-09-14T00:00:00.000Z',
+        loopAlive: true,
+        runningRunCount: 0,
+        liveHandleCount: 0,
+        shuttingDown: false,
+      },
+      browserPrewarm: {
+        mode: 'fixed',
+        policyRevision: 25,
+        configuredTarget: 2,
+        effectiveTarget: 2,
+        actualIdleCount: 2,
+        startingCount: 0,
+        activeCount: 2,
+        drainingCount: 0,
+        contextsCount: 0,
+        warmHits: 10,
+        coldMisses: 2,
+        reuseHits: 5,
+        underMemoryPressure: false,
+        memoryBudgetMb: 2048,
+        managedRssBytes: 157286400,
+      },
+    },
+  }),
   disposeWorkerSession: vi.fn(),
-  // 详情页引入的其余节点管理接口：本用例只看展示，不触发它们，但 mock 必须列全，
-  // 否则整个测试文件会在加载阶段就因「模块没有提供这个导出」而失败。
   disableWorker: vi.fn(),
   enableWorker: vi.fn(),
   removeWorker: vi.fn(),
@@ -112,8 +145,15 @@ it('详情展示内部入口与可处置占用，页头不用会话', async () =
   await expect.element(screen.getByText('http://127.0.0.1:8091')).toBeInTheDocument()
   await expect.element(screen.getByText('测试系统 · 管理员账号')).toBeInTheDocument()
   await expect.element(screen.getByText('槽位 #1 · 会话失联 · 代次 #1')).toBeInTheDocument()
-  await expect.element(screen.getByText('会话失联', { exact: true })).toBeInTheDocument()
   await expect.element(screen.getByRole('button', { name: '处置' })).toBeInTheDocument()
+
+  // 验证浏览器宿主池与预热卡片正常渲染且包含关键指标
+  await expect.element(screen.getByText('浏览器宿主池与预热')).toBeInTheDocument()
+  await expect.element(screen.getByText('策略：固定备用 (r25)')).toBeInTheDocument()
+  await expect.element(screen.getByText('预热备用 (空闲)')).toBeInTheDocument()
+  await expect.element(screen.getByText('83%')).toBeInTheDocument()
+  await expect.element(screen.getByText('150 MB')).toBeInTheDocument()
+
   const headings = [...screen.container.querySelectorAll('h1, h2')].map((node) => node.textContent ?? '')
   expect(headings.join('')).not.toContain('会话')
   useAuthStore.getState().auth.reset()

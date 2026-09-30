@@ -8,6 +8,7 @@ import {
 import {
   getRun,
   getWorkerById,
+  getPlatformConfig,
   type DbHandle,
   type LeaseRecord,
   type SessionRecord
@@ -34,11 +35,15 @@ import {
   type RunGrant,
   type TargetObservation,
   type StructureObservation,
+  type TableObservation,
+  type TableDiscoveryObservation,
   type RunSnapshot,
   type SessionErrorCode,
   type SessionEventType,
   type SessionGrant,
-  type SessionPolicy
+  type SessionPolicy,
+  type PlatformConfigDocument,
+  type PlatformBrowserPrewarm
 } from '@cairn/shared'
 import type { LocalSecretProvider } from '@cairn/secret'
 import { ObjectService } from '../objects/object.service'
@@ -51,7 +56,7 @@ import {
   type BrowserHandle,
   type TargetAuthInfo
 } from './runtime'
-import { BrowserHostPool, DEFAULT_HOST_POOL_CONFIG, type HostPoolConfig } from './host-pool.js'
+import { BrowserHostPool, DEFAULT_HOST_POOL_CONFIG, type HostPoolConfig, type PrewarmStatus } from './host-pool.js'
 import { type ManagedPageEntry } from './page-identity'
 import {
   emptyLive,
@@ -80,7 +85,7 @@ import {
   type SealedRunVideo,
 } from './run-video.js'
 import { assertOwnLiveRegistration, assertSessionOwnedHere, authWindowStatus, buildMeta, describeHoldPage, describeRunBrowser, dropScreencastObserver, invalidateObserveGrant, liveSessionIdForRun, lookupRunSession, observeRun, pageForView, pipeFrames, probeErrorSurface, registrationLive, requireLiveAuthSession, sampleMapConditions, sessionOwnedHere, subscribeRunFrames } from './session-observe-runtime.js'
-import { close, dropDisposedHandles, dropLocalHandle, ownerScope, platformDefaultPolicy, reap, reconcileOwn, release, renew, renewAll, shutdown, stopAllLocal } from './session-reaper.js'
+import { close, dropDisposedHandles, dropLocalHandle, ownerScope, platformDefaultPolicy, reap, reconcileOwn, release, renew, renewAll, sampleBrowserMemory, shutdown, stopAllLocal } from './session-reaper.js'
 
 export const BROWSER_SESSION_OPTIONS = Symbol('BROWSER_SESSION_OPTIONS')
 import { SECRET_PROVIDER } from '../tokens.js'
@@ -125,6 +130,8 @@ export class BrowserSessionManager {
   browserUnavailable = false
   browserUnavailableCode: 'BROWSER_UNAVAILABLE' | 'BROWSER_LAUNCH_FAILED' = 'BROWSER_UNAVAILABLE'
   workerInstanceId: string
+  /** 上次 RSS 采样时间（reap 周期内节流） */
+  lastMemorySampleAt?: number
   /** 测试钩子：覆盖默认 launch。 */
   launchOverride?: typeof launchSession
 
@@ -162,6 +169,16 @@ export class BrowserSessionManager {
       hostRssHighWatermarkMb: options.poolHostRssHighWatermarkMb ?? DEFAULT_HOST_POOL_CONFIG.hostRssHighWatermarkMb,
       targetSpread: options.poolTargetSpread ?? DEFAULT_HOST_POOL_CONFIG.targetSpread,
       idleCloseDelayMs: DEFAULT_HOST_POOL_CONFIG.idleCloseDelayMs,
+      maxBrowserHosts: options.poolMaxSharedHosts,
+      browserMemoryBudgetMb: options.browserMemoryBudgetMb,
+      // 独占会话的宿主不在池内，但计入 maxBrowserHosts 总预算（hostId 为空即独占）
+      dedicatedHostCountProvider: () => {
+        let count = 0
+        for (const live of this.lives.values()) {
+          if (!live.hostId) count += 1
+        }
+        return count
+      },
     }
     this.hostPool = new BrowserHostPool(
       options.workerId,
@@ -187,7 +204,37 @@ export class BrowserSessionManager {
         headless: options.headless,
         executablePath: options.executablePath,
       },
+      this.workerInstanceId,
     )
+  }
+
+  getPrewarmStatus(): PrewarmStatus {
+    return this.hostPool.getPrewarmStatus()
+  }
+
+  setPrewarmPolicy(policy: PlatformBrowserPrewarm, revision?: number): void {
+    this.hostPool.setPrewarmPolicy(policy, revision)
+  }
+
+  setMemoryPressure(underPressure: boolean): void {
+    this.hostPool.setMemoryPressure(underPressure)
+  }
+
+  applyPlatformConfig(document: PlatformConfigDocument, revision: number): void {
+    if (document.browserPrewarm) {
+      this.hostPool.setPrewarmPolicy(document.browserPrewarm, revision)
+    }
+  }
+
+  async startPrewarmLoop(): Promise<void> {
+    try {
+      const current = await getPlatformConfig(this.dbHandle)
+      if (current?.document?.browserPrewarm) {
+        this.applyPlatformConfig(current.document, current.revision)
+      }
+    } catch (err) {
+      this.logger.warn({ err }, 'failed to read platform config for prewarm, keeping default off')
+    }
   }
 
   startHeartbeat(): void {
@@ -219,8 +266,8 @@ export class BrowserSessionManager {
   }
 
   async acquire(run: RunSnapshot, runGrant: RunGrant, signal?: AbortSignal): Promise<SessionAcquireResult> {
-    const key = `${run.targetId}:${run.targetAccountId ?? ''}`
-    if (this.acquiring.has(key)) return { ok: false, code: 'SESSION_BUSY', message: '同一目标账号正在获取会话' }
+    const key = `run:${run.runId}`
+    if (this.acquiring.has(key)) return { ok: false, code: 'SESSION_BUSY', message: '同一运行正在获取会话' }
     this.acquiring.add(key)
     try { return await this.acquireExclusive(run, runGrant, signal) }
     finally { this.acquiring.delete(key) }
@@ -613,6 +660,10 @@ export class BrowserSessionManager {
     return reap.call(this, options)
   }
 
+  async sampleBrowserMemory(): Promise<void> {
+    return sampleBrowserMemory.call(this)
+  }
+
   /**
    * 丢弃已不由本进程拥有的会话句柄：行已 CLOSED、已消失，或 owner 换了人。
    *
@@ -858,7 +909,7 @@ export class BrowserSessionManager {
     return describeHoldPage.call(this, runId)
   }
 
-  async observeRun(input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation> {
+  async observeRun(input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation> {
     return observeRun.call(this, input)
   }
 

@@ -14,6 +14,8 @@ export function AssistantDockSidebar({
   onClose: () => void
   onReturnFocus?: () => void
 }) {
+  const workspacePage = useAssistantStore((s) => s.boundContext?.page ?? s.routeContext?.page)
+  const minimumWorkspaceWidth = workspacePage === 'studio' || workspacePage === 'suite' ? 960 : 640
   const dockWidth = useAssistantStore((s) => s.dockWidth)
   const setDockWidth = useAssistantStore((s) => s.setDockWidth)
   const [resizing, setResizing] = useState(false)
@@ -39,7 +41,7 @@ export function AssistantDockSidebar({
   }, [])
 
   const sidebarWidth = isMobile ? 0 : sidebarState === 'collapsed' ? 72 : 208
-  const shouldOverlay = isMobile || windowWidth < 768 || windowWidth - sidebarWidth - dockWidth < 640
+  const shouldOverlay = isMobile || windowWidth < 768 || windowWidth - sidebarWidth - dockWidth < minimumWorkspaceWidth
 
   // 初始打开焦点管理
   useEffect(() => {
@@ -146,7 +148,7 @@ export function AssistantDockSidebar({
 
   if (!open) return null
 
-  // 主区不足 640px 或移动端时，以覆盖式抽屉保留工作区宽度。
+  // 主区低于页面所需宽度或移动端时，以覆盖式抽屉保留工作区宽度。
   if (shouldOverlay) {
     return createPortal(
       <div

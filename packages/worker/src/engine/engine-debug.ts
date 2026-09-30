@@ -9,6 +9,8 @@ import {
   loadRunDetail,
   loadRunRow,
   markRunCancelled,
+  newId,
+  renewRunDebugPresence,
   stopRunDebug,
   type DbHandle,
 } from '@cairn/db'
@@ -20,6 +22,8 @@ import {
   type DebugCheckpointReason,
   type DebugMode,
   type DebugOverlay,
+  type DebugPresenceBody,
+  type DebugPresenceResponse,
   type ProcessLogExit,
   type RunGrant,
   type RunSnapshot,
@@ -89,8 +93,20 @@ export async function awaitHold(
     sessionGrant?: SessionGrant
   },
 ): Promise<'retry' | 'continue' | 'stop'> {
-  const result = await this.holds.wait(input.runId, config.CAIRN_DEBUG_HOLD_TIMEOUT_MS, input.stop)
+  const row = await loadRunRow(this.handle, input.runId)
+  const holdId = row?.checkpoint?.holdId
+  const result = await this.holds.wait(
+    input.runId,
+    config.CAIRN_DEBUG_HOLD_TIMEOUT_MS,
+    input.stop,
+    holdId,
+  )
   if (result === 'timeout') {
+    const freshRow = await loadRunRow(this.handle, input.runId)
+    const expiresAt = freshRow?.checkpoint?.holdExpiresAt
+    if (expiresAt && new Date(expiresAt).getTime() > Date.now()) {
+      return this.awaitHold(input)
+    }
     await failRunValidation(
       this.handle,
       input.runId,
@@ -212,7 +228,44 @@ export async function buildCheckpoint(
   },
 ): Promise<DebugCheckpoint> {
   const page = await this.browser?.describeHold?.(input.runId)
-  return checkpointOf({ ...input, pageRef: page?.pageRef, url: page?.url })
+  const now = new Date()
+  const heldAt = now.toISOString()
+  const holdId = newId()
+  const waitWindowMs = config.CAIRN_DEBUG_HOLD_TIMEOUT_MS ?? 15 * 60 * 1000
+
+  let hardLimitMs = now.getTime() + 60 * 60 * 1000
+  const row = await loadRunRow(this.handle, input.runId)
+  if (row?.deadlineAt) {
+    hardLimitMs = Math.min(hardLimitMs, new Date(row.deadlineAt).getTime())
+  }
+  const holdHardExpiresAt = new Date(hardLimitMs).toISOString()
+  const holdExpiresAt = new Date(Math.min(now.getTime() + waitWindowMs, hardLimitMs)).toISOString()
+
+  return checkpointOf({
+    ...input,
+    pageRef: page?.pageRef,
+    url: page?.url,
+    holdId,
+    heldAt,
+    holdExpiresAt,
+    holdHardExpiresAt,
+    lastAuthoringActivityAt: heldAt,
+  })
+}
+
+export async function renewDebugPresence(
+  this: ExecutionEngine,
+  runId: string,
+  body: DebugPresenceBody,
+): Promise<DebugPresenceResponse> {
+  const renewed = await renewRunDebugPresence(this.handle, runId, {
+    holdId: body.holdId,
+    fencingToken: body.fencingToken,
+    sessionGeneration: body.sessionGeneration ?? 0,
+    timeoutMs: config.CAIRN_DEBUG_HOLD_TIMEOUT_MS,
+  })
+  this.holds.renew(runId, body.holdId, renewed.holdExpiresAt)
+  return renewed
 }
 
 function loopScopedKeys(snapshot: RunSnapshot): Set<string> {

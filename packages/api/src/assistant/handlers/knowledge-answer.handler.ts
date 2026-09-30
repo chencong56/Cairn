@@ -443,6 +443,16 @@ export async function handleKnowledgeAnswer(
   await onProgress?.('loading_facts', '正在检索相关知识与上下文事实...')
 
   const pageContext = normalizeAssistantPageContext(body.pageContext)
+
+  // 15 Deterministic Business Analyzers Check
+  const analyzerPath = '../analyzers/analyzer-dispatcher.js'
+  const { detectBusinessIntent, dispatchBusinessAnalyzer } = await import(analyzerPath)
+  const matchedIntent = detectBusinessIntent(pageContext ?? undefined, question, body.capabilityHint, slots)
+  if (matchedIntent) {
+    await onProgress?.('loading_facts', `正在执行「${matchedIntent}」确定性分析...`)
+    return dispatchBusinessAnalyzer(ctx, matchedIntent)
+  }
+
   const currentScenarioId = pageContext?.scenarioId ?? (typeof slots.scenarioId === 'string' ? slots.scenarioId : undefined)
   if (currentScenarioId && !pageContext?.runId && isScenarioRunResultQuestion(question)) {
     if (!hasAllPermissions(actor.permissions, ['workflow:read', 'run:read', 'target:read'])) {

@@ -79,7 +79,6 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAssistantStore } from '@/stores/assistant-store'
 import { useAssistantContextBinding } from '@/features/assistant/use-assistant-context-binding'
-import { resolveContextRecommendations } from '@/features/assistant/recommendation-engine'
 import { useCan } from '@/hooks/use-permissions'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
@@ -269,9 +268,7 @@ export function ScenarioDetailPage() {
   const canReadTarget = useCan('target:read')
   const canWrite = useCan('workflow:write')
   const canDelete = useCan('workflow:delete')
-  const canAssist = useCan('ai:assist')
   const canReadRun = useCan('run:read')
-  const capabilities = useAssistantStore((state) => state.capabilities)
   const registerAdoptHandler = useAssistantStore((state) => state.registerAdoptHandler)
   const registerRollbackHandler = useAssistantStore((state) => state.registerRollbackHandler)
   const setLastAdopted = useAssistantStore((state) => state.setLastAdopted)
@@ -337,40 +334,6 @@ export function ScenarioDetailPage() {
     stepTargetDescriptor(draft.selected)?.candidates.some((c) => c.by === 'css'),
   )
 
-  const studioChips = useMemo(() => {
-    return resolveContextRecommendations({
-      boundContext: {
-        page: 'studio',
-        scenarioId,
-        selectedStepId: draft.selected?.id,
-        hasCssSelector,
-        isDirty: draft.dirty,
-      },
-      pageContext: {
-        page: 'studio',
-        scenarioId,
-        stepId: draft.selected?.id,
-      },
-      capabilities,
-      permissions: {
-        canAssist,
-        canWrite,
-        canReadTarget,
-        canReadRun,
-      },
-    })
-  }, [
-    scenarioId,
-    draft.selected?.id,
-    hasCssSelector,
-    draft.dirty,
-    capabilities,
-    canAssist,
-    canWrite,
-    canReadTarget,
-    canReadRun,
-  ])
-
   useAssistantContextBinding(
     scenario
       ? {
@@ -379,19 +342,25 @@ export function ScenarioDetailPage() {
           targetId: scenario.targetId,
           selectedStepId: draft.selected?.id,
           hasCssSelector,
-          chips: studioChips,
-          statusLabel: draft.selected
-            ? `当前步骤 · ${(() => {
-                const steps = authoringSteps(draft.v2Document)
-                const idx = steps.findIndex((s) => s.id === draft.selected?.id)
-                const prefix = idx >= 0 ? `第 ${idx + 1} 步 · ` : ''
-                return `${prefix}${draft.selected.name || '未命名步骤'}`
-              })()}`
-            : `当前场景 · ${scenario.name}`,
-          statusSummary: `${scenario.name} (草稿 r${draft.baseline?.revision ?? scenario.draft?.revision ?? 1})`,
-          summaryText: draft.selected
-            ? `已聚焦步骤「${draft.selected.name || '未命名步骤'}」，可向助手提问选择器诊断、断言编写或逻辑解释。`
-            : `场景「${scenario.name}」草稿编辑中，共 ${authoringSteps(draft.v2Document).length} 个步骤。`,
+          statusLabel: `当前场景 · ${scenario.name}`,
+          statusSummary: draft.selected
+            ? `当前定位：第 ${(() => {
+                const nodes = draft.v2Document ? walkAuthoringNodes(draft.v2Document) : []
+                const idx = nodes.findIndex((item) => item.id === draft.selected?.id)
+                return idx >= 0 ? `${idx + 1}` : '?'
+              })()} 项 · ${draft.selected.name || '未命名步骤'}`
+            : `${scenario.name} (草稿 r${draft.baseline?.revision ?? scenario.draft?.revision ?? 1})`,
+          summaryText: (() => {
+            const nodes = draft.v2Document ? walkAuthoringNodes(draft.v2Document) : []
+            const blocks = nodes.filter(({ node }) => node.kind === 'block').length
+            const modules = nodes.filter(({ node }) => node.kind === 'module').length
+            const nodeDetails = blocks > 0 || modules > 0 ? `（含 ${blocks} 个控制块、${modules} 个模块调用）` : ''
+            if (draft.selected) {
+              const idx = nodes.findIndex((item) => item.id === draft.selected?.id)
+              return `当前定位：第 ${idx >= 0 ? idx + 1 : '?'} 项 · ${draft.selected.name || '未命名步骤'}。流程共 ${nodes.length} 项${nodeDetails}。`
+            }
+            return `场景「${scenario.name}」共 ${nodes.length} 项${nodeDetails}。`
+          })(),
           isDirty: draft.dirty,
           ...(scenario.draft && scenario.draft.revision >= 1
             ? { draftRevision: scenario.draft.revision }
@@ -402,7 +371,6 @@ export function ScenarioDetailPage() {
       : {
           page: 'studio',
           scenarioId,
-          chips: studioChips,
           statusLabel: '当前场景 · 加载中...',
           statusSummary: '加载中...',
         }
@@ -2769,7 +2737,7 @@ export function ScenarioDetailPage() {
                   right={renderInspectorHost()}
                 />
               )}
-            <div className='hidden lg:flex h-7 shrink-0 items-center justify-between border-t border-border-divider bg-surface-header px-4 text-label text-muted-foreground'>
+            <div className='hidden lg:flex relative h-7 shrink-0 items-center justify-between border-t border-border-divider bg-surface-header px-4 text-label text-muted-foreground'>
               <div className='flex items-center gap-3'>
                 <span>快捷键：Alt + ↑ / Alt + ↓ 调整步骤顺序</span>
                 {viewPreset === 'pipeline' && (
@@ -2784,6 +2752,9 @@ export function ScenarioDetailPage() {
                     <span>恢复受管画面</span>
                   </button>
                 )}
+              </div>
+              <div className='absolute left-1/2 -translate-x-1/2 pointer-events-none flex items-center gap-2 text-caption text-muted-foreground select-none'>
+                <span>共 {draft.nodes.length} 个步骤</span>
               </div>
               <div className='flex items-center gap-4'>
                 <div className='flex items-center gap-1 rounded border border-border-divider bg-card px-1 py-0.5 text-caption'>

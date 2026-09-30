@@ -11,6 +11,13 @@ import {
   type AcceptanceHistoryInsight,
   type AcceptanceTuningSuggestion,
   type AcceptanceTuningPatch,
+  type TableExpectRule,
+  type TableReadPlan,
+  type TablePredicate,
+  type TableSample,
+  type TargetDescriptor,
+  type AcceptancePreviewResponse,
+  type TableDiscoveredItem,
 } from '@cairn/shared'
 import {
   AlertTriangle,
@@ -19,6 +26,7 @@ import {
   ChevronDown,
   ChevronRight,
   History,
+  Layers,
   ListChecks,
   MousePointerClick,
   Play,
@@ -32,7 +40,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
-import { debugRun } from '@/lib/runs-api'
+import { debugRun, observeRun, renewDebugPresence } from '@/lib/runs-api'
 import { useAssistantStore } from '@/stores/assistant-store'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -42,6 +50,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -61,7 +70,7 @@ import {
   type CardVerification,
   type IntentDraft,
 } from './acceptance-model'
-import { requestAcceptanceAudit, requestAcceptanceProposal, fetchScenarioAcceptanceHistory } from './acceptance-api'
+import { requestAcceptanceAudit, requestAcceptanceProposal, fetchScenarioAcceptanceHistory, previewAcceptance } from './acceptance-api'
 
 export type AcceptanceStep = {
   id: string
@@ -107,6 +116,9 @@ const TEST_LABELS: Record<AcceptanceProposalCard['testResult'], string> = {
   NOT_FOUND: '页面上没找到',
   SURFACE_LOST: '页面已不可用',
   UNTESTED: '待实测',
+  PASSED: '已通过',
+  VIOLATED: '未满足',
+  FACTS_UNAVAILABLE: '事实不可用',
   NOT_REQUIRED: '无需实测',
 }
 
@@ -204,6 +216,83 @@ export function AcceptanceWorkbench({
   const holdingStepId = observe.holding && baselineRun ? observe.checkpointStepId : undefined
   const firstSideEffect = steps.find((step) => step.effectType === 'SIDE_EFFECT')
 
+  const [presenceInfo, setPresenceInfo] = useState<{
+    holdExpiresAt?: string
+    holdHardExpiresAt?: string
+  }>()
+
+  // P0: 挂起心跳 (<= 15s)
+  useEffect(() => {
+    const runId = baselineRun?.id
+    const holdId = baselineRun?.checkpoint?.holdId
+    if (!observe.holding || !runId || !holdId || disabled) {
+      // 离开挂起状态后不再展示旧的续期截止时间
+      setPresenceInfo((prev) => (prev === undefined ? prev : undefined))
+      return
+    }
+
+    let timer: ReturnType<typeof setInterval> | null = null
+    let stopped = false
+
+    const sendHeartbeat = async () => {
+      if (stopped || document.visibilityState === 'hidden') return
+      try {
+        const res = await renewDebugPresence(runId, {
+          holdId,
+          fencingToken: baselineRun.checkpoint?.fencingToken ?? '',
+          sessionGeneration: baselineRun.checkpoint?.sessionGeneration ?? 0,
+        })
+        setPresenceInfo({
+          holdExpiresAt: res.holdExpiresAt,
+          holdHardExpiresAt: res.holdHardExpiresAt,
+        })
+      } catch (err) {
+        if (
+          err instanceof ApiRequestError &&
+          (err.status === 409 || err.status === 404 || err.status === 400 || err.status === 401 || err.status === 403)
+        ) {
+          stopped = true
+          if (timer) clearInterval(timer)
+          toast.warning(
+            err.status === 401 || err.status === 403
+              ? '没有继续该调试挂起的权限，已停止心跳'
+              : '调试会话已超时或已失效',
+          )
+        }
+      }
+    }
+
+    void sendHeartbeat()
+
+    timer = setInterval(() => {
+      void sendHeartbeat()
+    }, 15000)
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (timer) {
+          clearInterval(timer)
+          timer = null
+        }
+      } else if (!stopped) {
+        void sendHeartbeat()
+        if (!timer) {
+          timer = setInterval(() => {
+            void sendHeartbeat()
+          }, 15000)
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      stopped = true
+      if (timer) clearInterval(timer)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [baselineRun?.id, baselineRun?.checkpoint?.holdId, observe.holding, disabled])
+
   // 基线停到某步时，自动实测挂在这一步上的卡。
   useEffect(() => {
     if (!proposal || !holdingStepId) return
@@ -281,6 +370,36 @@ export function AcceptanceWorkbench({
     if (Object.keys(errors).length > 0) return
     const revision = await ensureDraftSaved()
     if (revision === null) return
+
+    // 模型关闭：结构化意图走人工预览端点（共用生成器，模型调用为 0）；自由描述必须依赖模型。
+    const modelEnabled = useAssistantStore.getState().capabilities?.modelEnabled !== false
+    if (!modelEnabled) {
+      if (requests.length === 0) {
+        setMessage('当前未配置模型，自由描述生成不可用；请改用下方的结构化意图卡配置验收要求。')
+        return
+      }
+      setGenerating(true)
+      setMessage(undefined)
+      try {
+        const res = await previewAcceptance(scenarioId, {
+          revision,
+          intents: requests,
+          ...(baselineRunId ? { baselineRunId } : {}),
+        })
+        setProposal(res.proposal)
+        setAdopted(null)
+        setCardStates(Object.fromEntries((res.proposal.cards ?? []).map((card) => [card.id, initialCardState(card)])))
+        setClarify(null)
+        setClarifyAnswer('')
+        toast.success(`已按 ${requests.length} 项结构化意图生成确定性验收方案（未调用模型）`)
+      } catch (err) {
+        setMessage(err instanceof ApiRequestError ? err.message : '生成失败')
+      } finally {
+        setGenerating(false)
+      }
+      return
+    }
+
     setGenerating(true)
     setMessage(undefined)
     setStage(undefined)
@@ -505,7 +624,16 @@ export function AcceptanceWorkbench({
         <div className='space-y-2 rounded-md border border-border-default p-3'>
           <div className='flex items-center justify-between gap-2'>
             <h3 className='text-small font-semibold'>① 基线运行</h3>
-            {baselineRun ? <Badge variant='outline'>{runStatusText(baselineRun, stepName)}</Badge> : null}
+            {baselineRun ? (
+              <div className='flex items-center gap-1.5'>
+                {presenceInfo?.holdExpiresAt ? (
+                  <Badge variant='outline' className='text-xs text-muted-foreground'>
+                    挂起至 {new Date(presenceInfo.holdExpiresAt).toLocaleTimeString()}
+                  </Badge>
+                ) : null}
+                <Badge variant='outline'>{runStatusText(baselineRun, stepName)}</Badge>
+              </div>
+            ) : null}
           </div>
           {!baselineRun ? (
             <>
@@ -632,6 +760,12 @@ export function AcceptanceWorkbench({
                   <IntentEditor
                     draft={draft}
                     steps={steps}
+                    scenarioId={scenarioId}
+                    baselineRunId={baselineRun?.id}
+                    holding={observe.holding}
+                    enclosingTable={observe.enclosingTable}
+                    onSelectEnclosingTable={observe.pickEnclosingTable}
+                    ensureDraftSaved={ensureDraftSaved}
                     disabled={disabled}
                     error={intentErrors[draft.key]}
                     picking={pickingKey === draft.key && observe.pickMode}
@@ -849,9 +983,637 @@ function CardVerificationLine({ result, started }: { result: CardVerification; s
   return <p className={cn('pl-6 text-label font-medium', TONE_CLASS[tone])}>复跑：{text}</p>
 }
 
+function TableAcceptanceEditor({
+  draft,
+  steps,
+  scenarioId,
+  baselineRunId,
+  holding,
+  disabled,
+  ensureDraftSaved,
+  onPatch,
+}: {
+  draft: IntentDraft
+  steps: AcceptanceStep[]
+  scenarioId: string
+  baselineRunId?: string
+  holding?: boolean
+  disabled?: boolean
+  ensureDraftSaved?: () => Promise<number | null>
+  onPatch: (patch: Partial<IntentDraft>) => void
+}) {
+  const observe = useAuthoringObserve()
+  const autoDiscoveredFor = useRef<string | undefined>(undefined)
+  const [discovering, setDiscovering] = useState(false)
+  const [discoveredTables, setDiscoveredTables] = useState<TableDiscoveredItem[] | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [sample, setSample] = useState<TableSample | null>(null)
+  const [previewResult, setPreviewResult] = useState<AcceptancePreviewResponse | null>(null)
+
+  const rules: TableExpectRule[] = draft.rules && draft.rules.length > 0
+    ? draft.rules
+    : [{ rule: 'row_count', op: 'gte', value: 1 }]
+
+  const handleDiscover = async () => {
+    if (!baselineRunId || !holding) {
+      toast.message('需要在基线挂起状态下才能探测页面表格')
+      return
+    }
+    setDiscovering(true)
+    try {
+      const res = await observeRun(baselineRunId, { op: 'table', subOp: 'discover' })
+      if (res.outcome === 'FOUND' && res.tables?.length) {
+        setDiscoveredTables(res.tables)
+        // 画布线框：多表以编号并存展示，点击线框即选用该表（与右侧列表一致）
+        observe.setTableMarkers({
+          tables: res.tables,
+          onPick: (index) => {
+            const item = res.tables[index]
+            if (item) handleSelectDiscoveredTable(item)
+          },
+        })
+        toast.success(`探测到 ${res.tables.length} 个表格，画布已标注包围盒`)
+      } else {
+        setDiscoveredTables([])
+        observe.setTableMarkers(null)
+        toast.message('当前页面未探测到明显表格结构')
+      }
+    } catch (err) {
+      toast.error(err instanceof ApiRequestError ? err.message : '探测表格失败')
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  const handleSelectDiscoveredTable = (item: TableDiscoveredItem) => {
+    const tablePlan: TableReadPlan = {
+      protocol: 'table.read@1',
+      target: item.target,
+      scope: 'current_page',
+      columns: item.columns?.length
+        ? item.columns.slice(0, 32).map((c) => ({
+            key: c.key,
+            name: c.name,
+            valueType: c.valueType ?? ('text' as const),
+            ...(c.valueType === 'number' && c.numericKind ? { numericKind: c.numericKind } : {}),
+          }))
+        : [{ key: 'col_1', name: '数据列', valueType: 'text' as const }],
+      limits: { maxRows: 200, maxCols: 32 },
+    }
+    onPatch({ target: item.target, tablePlan })
+    setDiscoveredTables(null)
+    observe.setTableMarkers(null)
+    toast.success(`已选用该表格（检测到 ${item.rowCountHint ?? 0} 行）`)
+  }
+
+  /** 列类型可修正：自动探测必有误判（如日期、编号），必须留人工纠错口。 */
+  const updateColumnType = (colIdx: number, kind: 'text' | 'integer' | 'decimal' | 'boolean') => {
+    if (!draft.tablePlan) return
+    const columns = draft.tablePlan.columns.map((col, idx) => {
+      if (idx !== colIdx) return col
+      if (kind === 'text') return { key: col.key, name: col.name, valueType: 'text' as const }
+      if (kind === 'boolean') return { key: col.key, name: col.name, valueType: 'boolean' as const }
+      return {
+        key: col.key,
+        name: col.name,
+        valueType: 'number' as const,
+        numericKind: (kind === 'integer' ? 'integer' : 'decimal') as 'integer' | 'decimal',
+      }
+    })
+    onPatch({ tablePlan: { ...draft.tablePlan, columns } })
+  }
+
+  // §9 时序闭环：表格目标一经锁定（点选所属表格/从画面点选），自动触发整页发现并上线框
+  useEffect(() => {
+    if (disabled || !holding || !baselineRunId) return
+    if (draft.tablePlan || !draft.target) return
+    const key = draft.target.candidates[0]?.value
+    if (!key || autoDiscoveredFor.current === key) return
+    autoDiscoveredFor.current = key
+    void handleDiscover()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.target, draft.tablePlan, holding, baselineRunId, disabled])
+
+  // 离开表格编辑时收掉画布线框
+  useEffect(() => () => observe.setTableMarkers(null), [observe])
+
+  const updateRule = (index: number, updated: TableExpectRule) => {
+    const next = [...rules]
+    next[index] = updated
+    onPatch({ rules: next })
+  }
+
+  /** 人工路径采纳：不经过助手轮次，直接把预览返回的操作套进本地草稿（复用注册的采纳通道，含撤销）。 */
+  async function handleAdoptPreview() {
+    if (!previewResult) return
+    if (!previewResult.acceptable) {
+      toast.warning('采样已过期（OBSERVATION_STALE），请重新采样后再采纳')
+      return
+    }
+    const adopt = useAssistantStore.getState().adoptHandler
+    if (!adopt) {
+      toast.error('当前页面未注册草稿采纳通道，请在场景工作台内操作')
+      return
+    }
+    const result = await adopt(previewResult.proposal)
+    if (!result.ok) {
+      toast.error(result.reason)
+      return
+    }
+    toast.success('已采纳表格验收方案，保存草稿后可复跑验证')
+  }
+
+  const addRule = () => {
+    if (rules.length >= 10) {
+      toast.message('单张表格最多配置 10 条规则')
+      return
+    }
+    onPatch({
+      rules: [
+        ...rules,
+        {
+          rule: 'all_rows',
+          column: '',
+          predicate: { op: 'neq', value: '' },
+          allowEmpty: false,
+        },
+      ],
+    })
+  }
+
+  const removeRule = (index: number) => {
+    if (rules.length <= 1) return
+    onPatch({ rules: rules.filter((_, i) => i !== index) })
+  }
+
+  const handlePreview = async () => {
+    if (!draft.target || !baselineRunId) {
+      toast.message('请先点选或选择一个表格目标，并确保基线运行处于挂起状态')
+      return
+    }
+    setPreviewing(true)
+    setPreviewResult(null)
+    setSample(null)
+    try {
+      const target = draft.target
+      const tablePlan: TableReadPlan = draft.tablePlan ?? {
+        protocol: 'table.read@1',
+        target,
+        scope: 'current_page',
+        columns: [{ key: 'col_1', name: '数据列', valueType: 'text' }],
+        limits: { maxRows: 200, maxCols: 32 },
+      }
+      const activeRules = rules
+
+      const savedRev = ensureDraftSaved ? await ensureDraftSaved() : 1
+      if (savedRev === null || savedRev === undefined) {
+        toast.error('草稿保存失败，无法发起验收预览；请先保存草稿后重试')
+        return
+      }
+      const revision = savedRev
+
+      // 1. Worker 页面稳定采样
+      const sampleObs = await observeRun(baselineRunId, { op: 'table', subOp: 'sample', plan: tablePlan })
+      setSample(sampleObs.sample)
+
+      const intentReq = toIntentRequest({
+        ...draft,
+        kind: 'table_acceptance',
+        stepId: draft.stepId ?? steps[0]?.id,
+        tablePlan,
+        rules: activeRules,
+      })
+      if (!intentReq.ok) {
+        toast.error(intentReq.message)
+        return
+      }
+
+      // 2. 调用服务端规则预检端点
+      const res = await previewAcceptance(scenarioId, {
+        revision,
+        evidenceId: sampleObs.evidenceId,
+        intents: [intentReq.value],
+        plan: tablePlan,
+      })
+      setPreviewResult(res)
+      if (res.testResult === 'FACTS_UNAVAILABLE') {
+        toast.warning('表格事实不可用 (TABLE_FACTS_UNAVAILABLE)')
+      } else if (res.testResult === 'PASSED') {
+        toast.success('规则预览校验通过')
+      } else {
+        toast.error('规则预览校验未通过')
+      }
+    } catch (err) {
+      const msg = err instanceof ApiRequestError ? err.message : '验收预览失败'
+      toast.error(msg)
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  return (
+    <div className='space-y-3 @xs:col-span-2 pt-1'>
+      {/* 探测表格按钮及发现列表 */}
+      <div className='flex items-center gap-2'>
+        <Button
+          type='button'
+          size='sm'
+          variant='outline'
+          className='h-7 text-xs'
+          disabled={disabled || discovering || !holding || !baselineRunId}
+          onClick={() => void handleDiscover()}
+        >
+          <Sparkles className='mr-1 size-3 text-primary' />
+          {discovering ? '正在探测表格…' : '探测页面表格'}
+        </Button>
+      </div>
+
+      {discoveredTables !== null ? (
+        <div className='rounded border border-border-default p-2 text-xs space-y-1.5 bg-muted/20'>
+          <div className='flex items-center justify-between'>
+            <span className='font-medium'>探测到的页面表格 ({discoveredTables.length})</span>
+            <Button
+              type='button'
+              size='sm'
+              variant='ghost'
+              className='h-5 px-1 text-xs'
+              onClick={() => setDiscoveredTables(null)}
+            >
+              收起
+            </Button>
+          </div>
+          {discoveredTables.length === 0 ? (
+            <p className='text-muted-foreground'>未发现结构化表格</p>
+          ) : (
+            <div className='space-y-1 max-h-36 overflow-y-auto'>
+              {discoveredTables.map((tbl, i) => (
+                <div
+                  key={i}
+                  className='flex items-center justify-between gap-2 rounded bg-card p-1.5 border border-border-divider'
+                >
+                  <div className='min-w-0'>
+                    <div className='font-mono text-muted-foreground truncate'>
+                      {tbl.target.semantic || tbl.target.candidates[0]?.value || `表格 #${tbl.index + 1}`}
+                    </div>
+                    <div className='text-[11px] text-muted-foreground'>
+                      行数预估: {tbl.rowCountHint ?? '未知'}，列数: {tbl.columns.length}
+                      {tbl.columns.length ? ` (${tbl.columns.map((c) => c.name || c.key).slice(0, 3).join(', ')}...)` : ''}
+                    </div>
+                  </div>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    className='h-6 text-[11px] shrink-0'
+                    onClick={() => handleSelectDiscoveredTable(tbl)}
+                  >
+                    选用
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* 列类型编辑：探测建议可在此修正（自动探测对日期、编号类文本会误判） */}
+      {draft.tablePlan?.columns?.length ? (
+        <div className='rounded border border-border-default p-2 text-xs space-y-1.5 bg-muted/20'>
+          <div className='flex items-center justify-between'>
+            <span className='font-medium'>列与类型 ({draft.tablePlan.columns.length})</span>
+            <span className='text-[11px] text-muted-foreground'>修改类型后需重新采样</span>
+          </div>
+          <div className='space-y-1 max-h-32 overflow-y-auto'>
+            {draft.tablePlan.columns.map((col, idx) => (
+              <div key={col.key} className='flex items-center justify-between gap-2 rounded bg-card p-1.5 border border-border-divider'>
+                <span className='min-w-0 truncate'>
+                  {col.name || col.key}
+                  <span className='ml-1 font-mono text-[10px] text-muted-foreground'>{col.key}</span>
+                </span>
+                <Select
+                  value={col.valueType === 'number' ? (col.numericKind === 'integer' ? 'integer' : 'decimal') : col.valueType}
+                  disabled={disabled}
+                  onValueChange={(v) => updateColumnType(idx, v as 'text' | 'integer' | 'decimal' | 'boolean')}
+                >
+                  <SelectTrigger size='sm' className='w-20 h-6 text-[11px]'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='text'>文本</SelectItem>
+                    <SelectItem value='integer'>整数</SelectItem>
+                    <SelectItem value='decimal'>小数</SelectItem>
+                    <SelectItem value='boolean'>布尔</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* 规则编辑区 */}
+      <div className='space-y-2 border-t border-border-divider pt-2'>
+        <div className='flex items-center justify-between'>
+          <Label className='text-label font-medium'>表格验收规则 ({rules.length})</Label>
+          <Button
+            type='button'
+            size='sm'
+            variant='ghost'
+            className='h-6 text-xs gap-1'
+            disabled={disabled || rules.length >= 10}
+            onClick={addRule}
+          >
+            <Plus className='size-3' />
+            添加规则
+          </Button>
+        </div>
+
+        <div className='space-y-2'>
+          {rules.map((rule, idx) => (
+            <div key={idx} className='flex items-start gap-2 rounded bg-muted/20 p-2 border border-border-divider'>
+              <div className='flex-1 space-y-2'>
+                <div className='flex items-center gap-2'>
+                  <Select
+                    value={rule.rule}
+                    disabled={disabled}
+                    onValueChange={(val) => {
+                      if (val === 'row_count') {
+                        updateRule(idx, { rule: 'row_count', op: 'gte', value: 1 })
+                      } else if (val === 'all_rows') {
+                        updateRule(idx, { rule: 'all_rows', column: '', predicate: { op: 'neq', value: '' }, allowEmpty: false })
+                      } else if (val === 'any_row') {
+                        updateRule(idx, { rule: 'any_row', column: '', predicate: { op: 'neq', value: '' } })
+                      } else if (val === 'row_expression') {
+                        updateRule(idx, {
+                          rule: 'row_expression',
+                          quantifier: 'all',
+                          expression: {
+                            kind: 'compare',
+                            op: 'eq',
+                            left: { kind: 'ref', key: 'col_1' },
+                            right: { kind: 'literal', value: 0 },
+                          },
+                          allowEmpty: false,
+                        })
+                      }
+                    }}
+                  >
+                    <SelectTrigger size='sm' className='w-32 h-7 text-xs'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value='row_count'>行数检查</SelectItem>
+                      <SelectItem value='all_rows'>全行满足</SelectItem>
+                      <SelectItem value='any_row'>任一行满足</SelectItem>
+                      <SelectItem value='row_expression'>行计算表达式</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {rule.rule === 'row_count' ? (
+                    <div className='flex items-center gap-1.5 flex-1'>
+                      <Select
+                        value={rule.op}
+                        disabled={disabled}
+                        onValueChange={(op) => updateRule(idx, { ...rule, op: op as typeof rule.op })}
+                      >
+                        <SelectTrigger size='sm' className='w-24 h-7 text-xs'>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {COMPARE_OPTIONS.map((o) => (
+                            <SelectItem key={o.op} value={o.op}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        value={String(rule.value)}
+                        inputMode='numeric'
+                        className='h-7 text-xs w-20'
+                        disabled={disabled}
+                        onChange={(e) => updateRule(idx, { ...rule, value: parseInt(e.target.value, 10) || 0 })}
+                      />
+                      <span className='text-xs text-muted-foreground'>行</span>
+                    </div>
+                  ) : rule.rule === 'all_rows' || rule.rule === 'any_row' ? (
+                    <div className='flex items-center gap-1.5 flex-1 flex-wrap'>
+                      <Input
+                        value={rule.column}
+                        placeholder='列标识/列名'
+                        className='h-7 text-xs w-28'
+                        disabled={disabled}
+                        onChange={(e) => updateRule(idx, { ...rule, column: e.target.value })}
+                      />
+                      <Select
+                        value={rule.predicate.op}
+                        disabled={disabled}
+                        onValueChange={(op) => {
+                          const currentVal = 'value' in rule.predicate ? rule.predicate.value : ''
+                          updateRule(idx, {
+                            ...rule,
+                            predicate: { op, value: currentVal } as TablePredicate,
+                          })
+                        }}
+                      >
+                        <SelectTrigger size='sm' className='w-24 h-7 text-xs'>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {COMPARE_OPTIONS.map((o) => (
+                            <SelectItem key={o.op} value={o.op}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value='contains'>包含</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        value={'value' in rule.predicate && rule.predicate.value !== undefined ? String(rule.predicate.value) : ''}
+                        placeholder='期望值'
+                        className='h-7 text-xs flex-1 min-w-[70px]'
+                        disabled={disabled}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          const op = rule.predicate.op
+                          // 大小比较只接受数字；表单边界处把数字文本转成数字，避免以字符串提交被契约拒绝
+                          const needsNumber = op === 'gt' || op === 'gte' || op === 'lt' || op === 'lte'
+                          const trimmed = val.trim()
+                          const coerced =
+                            needsNumber && trimmed !== '' && Number.isFinite(Number(trimmed))
+                              ? Number(trimmed)
+                              : val
+                          updateRule(idx, {
+                            ...rule,
+                            predicate: { op, value: coerced } as TablePredicate,
+                          })
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className='flex items-center gap-1.5 flex-1'>
+                      <Input
+                        value={
+                          rule.expression.kind === 'compare' &&
+                          rule.expression.left.kind === 'ref' &&
+                          rule.expression.right.kind === 'ref'
+                            ? `${rule.expression.left.field ?? ''} == ${rule.expression.right.field ?? ''}`
+                            : ''
+                        }
+                        placeholder='表达式，如 col_a == col_b'
+                        className='h-7 text-xs flex-1'
+                        disabled={disabled}
+                        onChange={(e) => {
+                          const formulaText = e.target.value
+                          const parts = formulaText.split('==')
+                          const leftKey = parts[0]?.trim() || 'col_1'
+                          const rightKey = parts[1]?.trim() || 'col_2'
+                          updateRule(idx, {
+                            ...rule,
+                            expression: {
+                              kind: 'compare',
+                              op: 'eq',
+                              left: { kind: 'ref', key: 'row', field: leftKey },
+                              right: { kind: 'ref', key: 'row', field: rightKey },
+                            },
+                          })
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {rules.length > 1 ? (
+                <Button
+                  type='button'
+                  size='icon'
+                  variant='ghost'
+                  className='h-7 w-7 text-muted-foreground'
+                  disabled={disabled}
+                  onClick={() => removeRule(idx)}
+                >
+                  <X className='size-3.5' />
+                </Button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 测试验收规则 (Manual Acceptance Preview) */}
+      <div className='border-t border-border-divider pt-2 space-y-2'>
+        <div className='flex items-center justify-between'>
+          <Button
+            type='button'
+            size='sm'
+            variant='secondary'
+            className='h-7 text-xs'
+            disabled={disabled || previewing || !draft.target || !baselineRunId}
+            onClick={() => void handlePreview()}
+          >
+            <Play className='mr-1 size-3' />
+            {previewing ? '正在测试验收规则…' : '测试验收规则'}
+          </Button>
+
+          {previewResult ? (
+            <>
+              <Badge
+                variant='outline'
+                className={cn(
+                  'text-xs',
+                  previewResult.testResult === 'FACTS_UNAVAILABLE'
+                    ? 'border-status-warning-foreground/30 text-status-warning-foreground'
+                    : previewResult.testResult === 'PASSED'
+                      ? 'border-status-success-foreground/30 text-status-success-foreground'
+                      : 'border-status-error-foreground/30 text-status-error-foreground'
+                )}
+              >
+                {previewResult.testResult === 'FACTS_UNAVAILABLE'
+                  ? '事实不可用 (TABLE_FACTS_UNAVAILABLE)'
+                  : previewResult.testResult === 'PASSED'
+                    ? '预览通过'
+                    : '预览未通过'}
+              </Badge>
+              <Button
+                size='sm'
+                variant='outline'
+                disabled={disabled || !previewResult.acceptable}
+                onClick={() => void handleAdoptPreview()}
+              >
+                采纳到草稿
+              </Button>
+            </>
+          ) : null}
+        </div>
+
+        {sample ? (
+          <div className='rounded border border-border-divider bg-card p-2 space-y-2 text-xs'>
+            <div>
+              <p className='font-medium text-muted-foreground mb-1'>
+                采样数据（展示前 {Math.min(sample.presentation?.previewCount ?? 20, sample.rows.length)} 行 / 采样共 {sample.rowCount} 行
+                {sample.rows.length > (sample.presentation?.previewCount ?? 20) ? '，展示有省略' : ''}）
+              </p>
+              <div className='max-h-36 overflow-auto rounded border border-border-divider'>
+                <Table className='text-[11px]'>
+                  <TableHeader>
+                    <TableRow>
+                      {sample.columns.map((c) => (
+                        <TableHead key={c.key} className='h-6 px-2 text-[11px]'>
+                          {c.name || c.key}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sample.rows.slice(0, sample.presentation?.previewCount ?? 20).map((row, rIdx) => (
+                      <TableRow key={rIdx} className='h-6'>
+                        {sample.columns.map((c) => (
+                          <TableCell key={c.key} className='px-2 py-0.5 font-mono text-[11px]'>
+                            {String(row[c.key]?.value ?? '')}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            {previewResult?.diagnostics?.length ? (
+              <div className='space-y-1 pt-1'>
+                <p className='font-medium text-muted-foreground'>规则判定明细</p>
+                {previewResult.diagnostics.map((diag, i) => (
+                  <div key={i} className='flex items-center justify-between text-[11px]'>
+                    <span className='flex items-center gap-1'>
+                      {previewResult.testResult === 'PASSED' ? (
+                        <CheckCircle2 className='size-3 text-status-success-foreground' />
+                      ) : (
+                        <AlertTriangle className='size-3 text-status-error-foreground' />
+                      )}
+                      规则 {i + 1}
+                    </span>
+                    <span className='text-muted-foreground'>{diag}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function IntentEditor({
   draft,
   steps,
+  scenarioId,
+  baselineRunId,
+  holding,
+  enclosingTable,
+  onSelectEnclosingTable,
+  ensureDraftSaved,
   disabled,
   error,
   picking,
@@ -862,6 +1624,12 @@ function IntentEditor({
 }: {
   draft: IntentDraft
   steps: AcceptanceStep[]
+  scenarioId?: string
+  baselineRunId?: string
+  holding?: boolean
+  enclosingTable?: TargetDescriptor
+  onSelectEnclosingTable?: () => void
+  ensureDraftSaved?: () => Promise<number | null>
   disabled?: boolean
   error?: string
   picking: boolean
@@ -1018,13 +1786,13 @@ function IntentEditor({
             <Input value={draft.value ?? ''} inputMode='decimal' aria-label='比较值' disabled={disabled} onChange={(event) => onPatch({ value: event.target.value })} />
           </div>
         ) : null}
-        {draft.kind === 'table_non_empty' || draft.kind === 'number_range' || draft.kind === 'extract_to_report' || draft.kind === 'value_consistency' ? (
+        {draft.kind === 'table_non_empty' || draft.kind === 'table_acceptance' || draft.kind === 'number_range' || draft.kind === 'extract_to_report' || draft.kind === 'value_consistency' ? (
           <div className='space-y-1'>
             <Label className='text-label'>{draft.kind === 'extract_to_report' ? '报告指标名' : '报告指标名（可选）'}</Label>
             <Input
               value={draft.metricName ?? ''}
               disabled={disabled}
-              placeholder={draft.kind === 'table_non_empty' ? '如：今日订单数' : draft.kind === 'value_consistency' ? '如：余额对账差额' : '如：库存数量'}
+              placeholder={draft.kind === 'table_acceptance' ? '如：销售明细表' : draft.kind === 'table_non_empty' ? '如：今日订单数' : draft.kind === 'value_consistency' ? '如：余额对账差额' : '如：库存数量'}
               onChange={(event) => onPatch({ metricName: event.target.value })}
             />
           </div>
@@ -1043,12 +1811,39 @@ function IntentEditor({
             <MousePointerClick className='mr-1 size-3.5' />
             {picking ? '请在画面上点选…' : '从页面点选'}
           </Button>
+          {enclosingTable && (!draft.target || draft.target !== enclosingTable) ? (
+            <Button
+              type='button'
+              size='sm'
+              variant='secondary'
+              disabled={disabled}
+              onClick={() => {
+                if (onSelectEnclosingTable) onSelectEnclosingTable()
+                onPatch({ target: enclosingTable, tablePlan: undefined })
+              }}
+            >
+              <Layers className='mr-1 size-3.5' />
+              选用外层表格
+            </Button>
+          ) : null}
           {picked ? (
             <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={() => onPatch({ target: undefined })}>
               清除
             </Button>
           ) : null}
         </div>
+      ) : null}
+      {draft.kind === 'table_acceptance' && scenarioId ? (
+        <TableAcceptanceEditor
+          draft={draft}
+          steps={steps}
+          scenarioId={scenarioId}
+          baselineRunId={baselineRunId}
+          holding={holding}
+          disabled={disabled}
+          ensureDraftSaved={ensureDraftSaved}
+          onPatch={onPatch}
+        />
       ) : null}
       {error ? <p className='text-label text-status-error-foreground'>{error}</p> : null}
     </div>

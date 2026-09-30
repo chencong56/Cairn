@@ -25,6 +25,8 @@ import {
   type AuthControlTokenBody,
   type CreateRunBody,
   type DebugAction,
+  debugPresenceBodySchema,
+  type DebugPresenceBody,
   type ObserveOperation,
   type ResumeAuthBody,
   type ReviewRunBody,
@@ -382,6 +384,17 @@ export class RunsController {
     @CurrentAccount() actor: RequestAccount,
   ) {
     return this.browser.debug(runId, body, actor)
+  }
+
+  @Post(':runId/debug/presence')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('run:read', 'workflow:write')
+  debugPresence(
+    @Param('runId') runId: string,
+    @Body(new ZodValidationPipe(debugPresenceBodySchema)) body: DebugPresenceBody,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return this.browser.debugPresence(runId, body, actor)
   }
 
   @Post(':runId/resume-auth')

@@ -14,10 +14,12 @@ import {
   Server,
   Trash2,
   AlertTriangle,
+  Zap,
 } from 'lucide-react'
 import {
   disableWorker,
   enableWorker,
+  fetchWorkerNodeHealth,
   fetchWorkers,
   purgeStaleWorkers,
   removeWorker,
@@ -57,6 +59,7 @@ import {
   WORKER_STATUS_FILTER_LABELS,
   workerLifecycle,
 } from './labels'
+import { PREWARM_MODE_LABELS } from '@/features/platform-config/labels'
 
 const STATUS_FILTERS = ['all', 'READY', 'DISABLED', 'DRAINING', 'STOPPED', 'LOST'] as const
 const FRESH_FILTERS = ['all', 'fresh', 'stale'] as const
@@ -599,6 +602,14 @@ function WorkerOverview({
   onRemove: () => void
 }) {
   const life = workerLifecycle(worker)
+  const healthQuery = useQuery({
+    queryKey: ['workers', worker.workerId, 'health'],
+    queryFn: () => fetchWorkerNodeHealth(worker.workerId),
+    staleTime: 5_000,
+    retry: false,
+  })
+  const prewarm = healthQuery.data?.health?.browserPrewarm
+
   return (
     <aside
       id='worker-overview'
@@ -659,6 +670,42 @@ function WorkerOverview({
           </div>
         ) : null}
       </dl>
+
+      {prewarm && prewarm.mode !== 'off' ? (
+        <div className='border-t border-border-divider p-5 space-y-3'>
+          <div className='flex items-center justify-between'>
+            <span className='text-label font-medium text-muted-foreground flex items-center gap-1.5'>
+              <Zap className='size-3.5 text-warning' />
+              宿主池与预热
+            </span>
+            <span className='text-caption px-2 py-0.5 rounded-full bg-secondary/80 font-medium text-foreground'>
+              {PREWARM_MODE_LABELS[prewarm.mode]}
+            </span>
+          </div>
+          <div className='grid grid-cols-2 gap-2 text-small'>
+            <div className='rounded-md border border-border-divider/50 bg-secondary/30 p-2.5'>
+              <p className='text-caption text-muted-foreground'>就绪空闲 / 宿主总数</p>
+              <p className='mt-1 font-semibold tabular-nums text-foreground'>
+                {prewarm.actualIdleCount} <span className='text-muted-foreground font-normal text-caption'>/ {prewarm.activeCount}</span>
+              </p>
+            </div>
+            <div className='rounded-md border border-border-divider/50 bg-secondary/30 p-2.5'>
+              <p className='text-caption text-muted-foreground'>预热命中率</p>
+              <p className='mt-1 font-semibold tabular-nums text-foreground'>
+                {prewarm.warmHits + prewarm.coldMisses > 0
+                  ? `${Math.round((prewarm.warmHits / (prewarm.warmHits + prewarm.coldMisses)) * 100)}%`
+                  : '—'}
+              </p>
+            </div>
+          </div>
+          {prewarm.underMemoryPressure ? (
+            <p className='text-caption text-warning flex items-center gap-1 mt-1'>
+              <AlertTriangle className='size-3' />
+              宿主内存受压，预热已阶梯降级
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <Can permission='session:manage'>
         <div className='border-t border-border-divider p-4 flex flex-col gap-2'>

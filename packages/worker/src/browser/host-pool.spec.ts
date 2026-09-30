@@ -328,4 +328,410 @@ describe('Host Pool Pure Placement & Logic (§8.1)', () => {
     expect(pool.getHostLostCount()).toBe(1)
     expect(pool.getContextCount()).toBe(0)
   })
+
+  it('A09: 慢宿主启动不被长锁串行阻塞，并发启动时间重叠且 strict 保持独立宿主', async () => {
+    let launch1Start = 0
+    let launch1End = 0
+    let launch2Start = 0
+    let launch2End = 0
+    let hostIndex = 0
+
+    const pool = new BrowserHostPool(
+      'worker-a09-test',
+      {
+        maxContextsPerHost: 6,
+        hostMaxAgeSeconds: 14400,
+        hostRssHighWatermarkMb: 0,
+        targetSpread: 'strict',
+        idleCloseDelayMs: 60000,
+      },
+      async (hostId) => {
+        const idx = ++hostIndex
+        if (idx === 1) {
+          launch1Start = Date.now()
+          await new Promise((r) => setTimeout(r, 60))
+          launch1End = Date.now()
+        } else {
+          launch2Start = Date.now()
+          await new Promise((r) => setTimeout(r, 60))
+          launch2End = Date.now()
+        }
+        return {
+          hostId,
+          isConnected: () => true,
+          close: async () => {},
+          on: () => {},
+          newContext: async () => ({
+            newPage: async () => ({}),
+            on: () => {},
+            close: async () => {},
+          }),
+        } as any
+      },
+    )
+
+    const t0 = Date.now()
+    const [h1, h2] = await Promise.all([
+      withTestOccupancy(() =>
+        pool.acquireContext('session-1', ['target:sysA'], { headless: true }, 0, 5),
+      ),
+      withTestOccupancy(() =>
+        pool.acquireContext('session-2', ['target:sysA'], { headless: true }, 1, 5),
+      ),
+    ])
+    const totalElapsed = Date.now() - t0
+
+    expect(h1.hostId).not.toBe(h2.hostId)
+    expect(pool.getHostCount()).toBe(2)
+    expect(pool.getContextCount()).toBe(2)
+
+    // Parallel overlapping: total elapsed time should be < 110ms (rather than 60 + 60 = 120ms+)
+    expect(totalElapsed).toBeLessThan(110)
+    // Launch 2 started before launch 1 finished
+    expect(launch2Start).toBeLessThan(launch1End + 15)
+  })
+
+  it('A23: 启动前取消立即拒绝且不创建宿主；启动中取消回滚预约并安全关闭宿主，不影响其它并发会话', async () => {
+    let hostClosed = false
+    let hostCreated = false
+
+    const pool = new BrowserHostPool(
+      'worker-a23-test',
+      {
+        maxContextsPerHost: 6,
+        hostMaxAgeSeconds: 14400,
+        hostRssHighWatermarkMb: 0,
+        targetSpread: 'strict',
+        idleCloseDelayMs: 60000,
+      },
+      async (hostId) => {
+        hostCreated = true
+        await new Promise((r) => setTimeout(r, 50))
+        return {
+          hostId,
+          isConnected: () => true,
+          close: async () => {
+            hostClosed = true
+          },
+          on: () => {},
+          newContext: async () => ({
+            newPage: async () => ({}),
+            on: () => {},
+            close: async () => {},
+          }),
+        } as any
+      },
+    )
+
+    // Case 1: Pre-aborted signal throws immediately without creating a host
+    const preAborted = new AbortController()
+    preAborted.abort()
+    await expect(
+      withTestOccupancy(() =>
+        pool.acquireContext('sess-pre-abort', ['t1'], { headless: true }, 0, 5, preAborted.signal),
+      ),
+    ).rejects.toThrow()
+    expect(hostCreated).toBe(false)
+    expect(pool.getHostCount()).toBe(0)
+
+    // Case 2: In-flight abort during host launch: reservation rolls back and host closes
+    const inFlight = new AbortController()
+    setTimeout(() => inFlight.abort(), 15)
+
+    const abortPromise = withTestOccupancy(() =>
+      pool.acquireContext('sess-in-flight', ['t2'], { headless: true }, 0, 5, inFlight.signal),
+    )
+    await expect(abortPromise).rejects.toThrow()
+
+    // Allow out-of-lock cleanup to finish
+    await new Promise((r) => setTimeout(r, 70))
+    expect(hostClosed).toBe(true)
+    expect(pool.getHostCount()).toBe(0)
+    expect(pool.getContextCount()).toBe(0)
+
+    // Case 3: Concurrent session that was not aborted succeeds cleanly
+    const hNormal = await withTestOccupancy(() =>
+      pool.acquireContext('sess-normal', ['t3'], { headless: true }, 0, 5),
+    )
+    expect(hNormal.hostId).toBeDefined()
+    expect(hNormal.handle).toBeDefined()
+    expect(pool.getHostCount()).toBe(1)
+    expect(pool.getContextCount()).toBe(1)
+  })
+
+  it('A15: 固定预热冷热命中对比：启动自动补齐预热宿主、会话命中无进程冷启动、命中后后台自动补齐且受预算上限约束', async () => {
+    let launchCount = 0
+    const pool = new BrowserHostPool(
+      'worker-a15-test',
+      {
+        maxContextsPerHost: 6,
+        hostMaxAgeSeconds: 14400,
+        hostRssHighWatermarkMb: 0,
+        targetSpread: 'strict',
+        idleCloseDelayMs: 60000,
+        maxBrowserHosts: 2,
+        prewarmPolicy: {
+          mode: 'fixed',
+          fixedIdle: 1,
+          minIdle: 1,
+          maxIdle: 5,
+        },
+      },
+      async (hostId) => {
+        launchCount++
+        return {
+          hostId,
+          isConnected: () => true,
+          close: async () => {},
+          on: () => {},
+          newContext: async () => ({
+            newPage: async () => ({}),
+            on: () => {},
+            close: async () => {},
+          }),
+        } as any
+      },
+    )
+
+    // Wait for initial prewarm reconcile triggered by constructor
+    await pool.reconcilePrewarm()
+
+    // 1. Initial prewarm created 1 empty host without business sessions
+    expect(launchCount).toBe(1)
+    expect(pool.getHostCount()).toBe(1)
+    expect(pool.getContextCount()).toBe(0)
+    let status = pool.getPrewarmStatus()
+    expect(status.actualIdleCount).toBe(1)
+    expect(status.warmHits).toBe(0)
+    expect(status.coldMisses).toBe(0)
+
+    // 2. First session arrives: hits warm host without launching a new browser
+    const h1 = await withTestOccupancy(() =>
+      pool.acquireContext('session-1', ['target:sysA'], { headless: true }, 0, 5),
+    )
+    expect(launchCount).toBe(1) // No new browser launch!
+    status = pool.getPrewarmStatus()
+    expect(status.warmHits).toBe(1)
+    expect(status.coldMisses).toBe(0)
+    expect(pool.getContextCount()).toBe(1)
+
+    // Wait for background replenish to complete
+    await pool.reconcilePrewarm()
+    // Now launchCount is 2 (the replenished idle host)
+    expect(launchCount).toBe(2)
+    expect(pool.getHostCount()).toBe(2)
+    status = pool.getPrewarmStatus()
+    expect(status.actualIdleCount).toBe(1)
+
+    // 3. Second session arrives for the same system: strict spread forces placement onto the replenished empty warm host
+    const h2 = await withTestOccupancy(() =>
+      pool.acquireContext('session-2', ['target:sysA'], { headless: true }, 1, 5),
+    )
+    expect(launchCount).toBe(2) // No new launch!
+    status = pool.getPrewarmStatus()
+    expect(status.warmHits).toBe(2)
+    expect(status.coldMisses).toBe(0)
+    expect(h1.hostId).not.toBe(h2.hostId)
+
+    // 4. Third session arrives for a third system: packs onto an existing host (reuse hit)
+    const h3 = await withTestOccupancy(() =>
+      pool.acquireContext('session-3', ['target:sysC'], { headless: true }, 2, 5),
+    )
+    expect(launchCount).toBe(2) // No new launch!
+    status = pool.getPrewarmStatus()
+    expect(status.reuseHits).toBe(1)
+    expect([h1.hostId, h2.hostId]).toContain(h3.hostId)
+
+    // 5. Budget constraint: maxBrowserHosts is 2, currently 2 hosts are active with sessions.
+    // Background prewarm cannot exceed maxBrowserHosts.
+    await pool.reconcilePrewarm()
+    expect(launchCount).toBe(2) // No over-provisioning
+    status = pool.getPrewarmStatus()
+    expect(status.effectiveTarget).toBe(0)
+    expect(status.lastPrewarmSkipReason).toContain('budget_limit_2_busy_2')
+
+    await pool.shutdown()
+  })
+
+  it('A16: 预热宿主防抖与生命周期保护：预热目标内空宿主不受 idleTimer 误杀、多余空宿主自动关闭、maxAge 到期平滑轮转、内存压力归零回收', async () => {
+    const closedHosts: string[] = []
+    const pool = new BrowserHostPool(
+      'worker-a16-test',
+      {
+        maxContextsPerHost: 6,
+        hostMaxAgeSeconds: 0.1, // 100ms for testing maxAge rotation
+        hostRssHighWatermarkMb: 0,
+        targetSpread: 'strict',
+        idleCloseDelayMs: 30, // 30ms for testing idle close
+        maxBrowserHosts: 4,
+        prewarmPolicy: {
+          mode: 'fixed',
+          fixedIdle: 1,
+          minIdle: 1,
+          maxIdle: 5,
+        },
+      },
+      async (hostId) => {
+        return {
+          hostId,
+          isConnected: () => true,
+          close: async () => {
+            closedHosts.push(hostId)
+          },
+          on: () => {},
+          newContext: async () => ({
+            newPage: async () => ({}),
+            on: () => {},
+            close: async () => {},
+          }),
+        } as any
+      },
+    )
+
+    // 1. Initial warm host
+    await pool.reconcilePrewarm()
+    expect(pool.getHostCount()).toBe(1)
+    const initialHostId = pool.getHostsSnapshot()[0]!.hostId
+
+    // 2. Idle timer test: wait 50ms (> idleCloseDelayMs 30ms).
+    // The warm host must NOT be killed because it is within prewarm target.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(pool.getHostCount()).toBe(1)
+    expect(closedHosts).not.toContain(initialHostId)
+
+    // 3. Max age rotation test: after 100ms total, initialHostId reaches maxAge,
+    // drains and closes, and pool replenishes with a fresh warm host!
+    await new Promise((r) => setTimeout(r, 90))
+    expect(closedHosts).toContain(initialHostId)
+    // Replenished host is present
+    expect(pool.getHostCount()).toBe(1)
+    const newHostId = pool.getHostsSnapshot()[0]!.hostId
+    expect(newHostId).not.toBe(initialHostId)
+
+    // 4. Memory pressure test:
+    // Acquire a context on the current host
+    await withTestOccupancy(() =>
+      pool.acquireContext('session-mem', ['target:sysA'], { headless: true }, 0, 5),
+    )
+    // Background prewarm launches an idle host
+    await pool.reconcilePrewarm()
+    expect(pool.getHostCount()).toBe(2)
+
+    // Trigger memory pressure
+    pool.setMemoryPressure(true)
+    let status = pool.getPrewarmStatus()
+    expect(status.underMemoryPressure).toBe(true)
+    expect(status.effectiveTarget).toBe(0)
+
+    // Idle warm host is closed, but the active session host remains alive!
+    expect(pool.getHostCount()).toBe(1)
+    expect(pool.getContextCount()).toBe(1)
+
+    // Release memory pressure -> prewarm recovers
+    pool.setMemoryPressure(false)
+    await pool.reconcilePrewarm()
+    expect(pool.getHostCount()).toBe(2)
+
+    await pool.shutdown()
+  })
+
+  it('A17 & A20: 自适应预热阶梯扩缩容与动态配置热切换：off/fixed/adaptive 切换无缝排空与补齐，可观测性指标准确', async () => {
+    let closedCount = 0
+    const pool = new BrowserHostPool(
+      'worker-a17-a20-test',
+      {
+        maxContextsPerHost: 6,
+        hostMaxAgeSeconds: 14400,
+        hostRssHighWatermarkMb: 0,
+        targetSpread: 'strict',
+        idleCloseDelayMs: 60000,
+        maxBrowserHosts: 5,
+        prewarmPolicy: {
+          mode: 'off',
+          fixedIdle: 1,
+          minIdle: 1,
+          maxIdle: 5,
+        },
+      },
+      async (hostId) => {
+        return {
+          hostId,
+          isConnected: () => true,
+          close: async () => {
+            closedCount++
+          },
+          on: () => {},
+          newContext: async () => ({
+            newPage: async () => ({}),
+            on: () => {},
+            close: async () => {},
+          }),
+        } as any
+      },
+    )
+
+    // 1. Initial mode is 'off': 0 hosts
+    expect(pool.getHostCount()).toBe(0)
+    let status = pool.getPrewarmStatus()
+    expect(status.mode).toBe('off')
+    expect(status.configuredTarget).toBe(0)
+    expect(status.effectiveTarget).toBe(0)
+
+    // 2. Dynamic switch: off -> fixed (revision 1)
+    pool.setPrewarmPolicy(
+      {
+        mode: 'fixed',
+        fixedIdle: 2,
+        minIdle: 1,
+        maxIdle: 5,
+      },
+      1,
+    )
+    await pool.reconcilePrewarm()
+    expect(pool.getHostCount()).toBe(2)
+    status = pool.getPrewarmStatus()
+    expect(status.mode).toBe('fixed')
+    expect(status.policyRevision).toBe(1)
+    expect(status.configuredTarget).toBe(2)
+    expect(status.actualIdleCount).toBe(2)
+
+    // 3. Dynamic switch: fixed -> off (revision 2)
+    // Warm idle hosts must be cleanly closed immediately
+    pool.setPrewarmPolicy(
+      {
+        mode: 'off',
+        fixedIdle: 1,
+        minIdle: 1,
+        maxIdle: 5,
+      },
+      2,
+    )
+    expect(pool.getHostCount()).toBe(0)
+    expect(closedCount).toBe(2)
+    status = pool.getPrewarmStatus()
+    expect(status.mode).toBe('off')
+    expect(status.policyRevision).toBe(2)
+    expect(status.effectiveTarget).toBe(0)
+
+    // 4. Dynamic switch: off -> adaptive (revision 3)
+    pool.setPrewarmPolicy(
+      {
+        mode: 'adaptive',
+        fixedIdle: 1,
+        minIdle: 1,
+        maxIdle: 5,
+      },
+      3,
+    )
+    await pool.reconcilePrewarm()
+    // Adaptive starts at minIdle (1)
+    expect(pool.getHostCount()).toBe(1)
+    status = pool.getPrewarmStatus()
+    expect(status.mode).toBe('adaptive')
+    expect(status.policyRevision).toBe(3)
+    expect(status.configuredTarget).toBe(1)
+    expect(status.actualIdleCount).toBe(1)
+
+    await pool.shutdown()
+  })
 })

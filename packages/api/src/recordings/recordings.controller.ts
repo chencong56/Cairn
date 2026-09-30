@@ -9,12 +9,16 @@ import {
   renameRecordingBodySchema,
   updateRecordingExclusionsBodySchema,
   createScenarioHandoffBodySchema,
+  revertRecordingAdoptionBodySchema,
+  revertRecordingAdoptionResultSchema,
+  recordingAdoptionReceiptDtoSchema,
   type ClaimRecordingBindingBody,
   type CreateRecordingBody,
   type RecordingDraftListQuery,
   type RenameRecordingBody,
   type UpdateRecordingExclusionsBody,
   type CreateScenarioHandoffBody,
+  type RevertRecordingAdoptionBody,
 } from '@cairn/shared'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
 import type { RequestAccount } from '../common/request-account'
@@ -59,6 +63,34 @@ export class RecordingsController {
     @CurrentAccount() actor: RequestAccount,
   ) {
     return this.recordings.handoffCreateScenario(id, body, actor)
+  }
+
+  @Get(':recordingId/adoptions')
+  @RequirePermissions('workflow:write', 'target:read')
+  listAdoptions(@Param('recordingId') id: string, @CurrentAccount() actor: RequestAccount) {
+    return this.recordings.listAdoptions(id, actor)
+  }
+
+  @Get(':recordingId/adoptions/:receiptId')
+  @RequirePermissions('workflow:write', 'target:read')
+  getAdoption(
+    @Param('recordingId') id: string,
+    @Param('receiptId') receiptId: string,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return this.recordings.getAdoption(id, receiptId, actor)
+  }
+
+  @Post(':recordingId/adoptions/:receiptId/revert')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('workflow:write', 'target:read')
+  revertAdoption(
+    @Param('recordingId') id: string,
+    @Param('receiptId') receiptId: string,
+    @Body(new ZodValidationPipe(revertRecordingAdoptionBodySchema)) _body: RevertRecordingAdoptionBody,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return this.recordings.revertAdoption(id, receiptId, actor)
   }
 
   @Post(':recordingId/artifacts/:artifactId/content')

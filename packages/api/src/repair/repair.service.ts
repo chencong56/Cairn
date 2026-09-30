@@ -203,9 +203,29 @@ export class RepairService {
     id: string,
     body: ValidateRepairCandidateBody,
     actor: RequestAccount,
-  ): Promise<{ candidate: RepairCandidate; runId: string }> {
+  ): Promise<{ candidate: RepairCandidate; runId: string } | (RepairCandidate & { candidate: RepairCandidate; runId?: string })> {
     try {
       const candidate = await this.candidateForActor(id, actor.id, ['run:execute', 'workflow:write'])
+      if (body.validationScope) {
+        const validationRefs = body.validationRunId
+          ? {
+              validationRunId: body.validationRunId,
+              validationAttemptId: body.validationAttemptId ?? '0',
+              evidenceIds: [],
+            }
+          : null
+        const updated = await updateRepairCandidateValidation(
+          this.db,
+          candidate.id,
+          body.validationScope as any,
+          validationRefs,
+        )
+        return {
+          ...updated,
+          candidate: { ...updated },
+          runId: body.validationRunId ?? '',
+        }
+      }
       const current = await this.currentConfig()
       const executableTypes = executableTypesFrom(current.document)
       return await validateRepairCandidate(this.db, candidate.id, {

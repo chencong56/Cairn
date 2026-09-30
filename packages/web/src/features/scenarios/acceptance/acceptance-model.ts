@@ -10,6 +10,8 @@ import {
   type OutcomeVerdict,
   type RunDetailDto,
   type TargetDescriptor,
+  type TableReadPlan,
+  type TableExpectRule,
 } from '@cairn/shared'
 
 export type AcceptanceIntentMeta = {
@@ -21,10 +23,11 @@ export type AcceptanceIntentMeta = {
 }
 
 export const ACCEPTANCE_INTENT_META: Record<AcceptanceIntentKind, AcceptanceIntentMeta> = {
+  table_acceptance: { label: '表格验收', description: '解析页面表格结构，并按行数与单元格规则验收', needsTarget: true, judged: true },
+  table_non_empty: { label: '列表非空', description: '这一步之后的列表或表格有数据，并统计行数', needsTarget: true, judged: true },
   page_reachable: { label: '页面可达', description: '这一步之后页面能正常打开', needsTarget: true, judged: true },
   page_duration: { label: '页面耗时', description: '这一步耗时不超过上限，并把耗时放进报告', needsTarget: false, judged: true },
   scenario_duration: { label: '全程耗时', description: '场景全程执行耗时不超过上限，并把耗时放进报告', needsTarget: false, judged: true },
-  table_non_empty: { label: '列表非空', description: '这一步之后的列表或表格有数据，并统计行数', needsTarget: true, judged: true },
   number_range: { label: '数值在范围', description: '这一步之后页面上的某个数值满足比较', needsTarget: true, judged: true },
   text_present_or_absent: { label: '文字出现 / 不出现', description: '这一步之后整页出现或不出现某段文字', needsTarget: false, judged: true },
   extract_to_report: { label: '取值进报告', description: '把这一步之后页面上的某个值放进报告', needsTarget: true, judged: false },
@@ -32,6 +35,7 @@ export const ACCEPTANCE_INTENT_META: Record<AcceptanceIntentKind, AcceptanceInte
 }
 
 export const ACCEPTANCE_INTENT_ORDER: AcceptanceIntentKind[] = [
+  'table_acceptance',
   'table_non_empty',
   'page_reachable',
   'page_duration',
@@ -59,6 +63,9 @@ export type IntentDraft = {
   metricName?: string
   unit?: string
   tolerance?: string
+  tablePlan?: TableReadPlan
+  rules?: TableExpectRule[]
+  tableEvidenceId?: string
 }
 
 export function newIntentDraft(kind: AcceptanceIntentKind, stepId: string, key: string): IntentDraft {
@@ -73,6 +80,10 @@ export function newIntentDraft(kind: AcceptanceIntentKind, stepId: string, key: 
     ...(kind === 'number_range' ? { op: 'gte' as const, value: '' } : {}),
     ...(kind === 'extract_to_report' ? { metricName: '' } : {}),
     ...(kind === 'value_consistency' ? { stepIdA: stepId, stepIdB: '', tolerance: '0', metricName: '' } : {}),
+    ...(kind === 'table_acceptance' ? {
+      metricName: '数据表',
+      rules: [{ rule: 'row_count', op: 'gte', value: 1 }],
+    } : {}),
   }
 }
 
@@ -86,6 +97,18 @@ export function toIntentRequest(draft: IntentDraft): { ok: true; value: Acceptan
     case 'page_reachable':
       if (!draft.stepId) return { ok: false, message: '请选择步骤' }
       candidate = { ...common, stepId: draft.stepId, kind: draft.kind, ...target }
+      break
+    case 'table_acceptance':
+      if (!draft.stepId) return { ok: false, message: '请选择步骤' }
+      candidate = {
+        ...common,
+        stepId: draft.stepId,
+        kind: draft.kind,
+        ...target,
+        ...(metricName ? { metricName } : {}),
+        ...(draft.tablePlan ? { tablePlan: draft.tablePlan } : {}),
+        ...(draft.rules && draft.rules.length > 0 ? { rules: draft.rules } : {}),
+      }
       break
     case 'page_duration': {
       if (!draft.stepId) return { ok: false, message: '请选择步骤' }

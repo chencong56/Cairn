@@ -32,6 +32,7 @@ import {
   waitForPopup,
   waitOnPage,
 } from './runtime'
+import { sampleTableOnPage } from './table-observe.js'
 import { candidateTries, errorForOutcome, pickResolvedCandidate } from './resolver'
 import { isPageLevelAssertExpect, safeDownloadFileName, sanitizeAriaSnapshot } from '@cairn/shared'
 import { matchAriaSnapshot } from './aria-match.js'
@@ -93,6 +94,7 @@ async function readRememberedTarget(page: Page, locator: Locator,
       signal?.throwIfAborted()
       if (!sample) return failOutcome('SURFACE_LOST', { outcome: 'SURFACE_LOST', candidatesTried: [] })
       if (command.type === 'extract') {
+        if (command.as === 'table') throw new Error('表格提取不支持 remembered target')
         const value = sample[command.as]
         if (typeof value !== 'string') throw new Error('目标元素不支持请求的提取方式')
         return { ok: true, output: { value } }
@@ -315,6 +317,49 @@ export async function executeOnPage(
       return { ok: true, output: { matched: false } }
     }
 
+    if (command.type === 'extract' && command.as === 'table') {
+      if (!command.table) {
+        return {
+          ok: false,
+          error: {
+            code: 'TABLE_PLAN_MISSING',
+            category: 'VALIDATION',
+            retryable: false,
+            safeMessage: '缺少表格读取计划',
+          },
+          output: {},
+          diagnostics: { outcome: 'NOT_FOUND', candidatesTried: [] },
+        }
+      }
+      try {
+        const sample = await sampleTableOnPage(page, command.table, {
+          signal,
+          meta: {
+            runId: evidence?.runId,
+            stepRunId: evidence?.stepRunId,
+            attemptId: evidence?.attemptId,
+          },
+        })
+        return {
+          ok: true,
+          output: { value: sample },
+          diagnostics: { outcome: 'FOUND', candidatesTried: [] },
+        }
+      } catch (err: any) {
+        return {
+          ok: false,
+          error: {
+            code: err?.code ?? 'TABLE_EXTRACT_FAILED',
+            category: err?.code === 'TABLE_NOT_FOUND' || err?.code === 'TABLE_AMBIGUOUS' ? 'VALIDATION' : 'EXECUTOR',
+            retryable: false,
+            safeMessage: err?.message ?? '表格提取失败',
+          },
+          output: {},
+          diagnostics: { outcome: 'NOT_FOUND', candidatesTried: [] },
+        }
+      }
+    }
+
     const target = 'target' in command ? command.target : undefined
     let locatedLocator: Locator
 
@@ -378,11 +423,25 @@ export async function executeOnPage(
     }
 
     if (command.type === 'extract') {
+      if (command.as === 'table') {
+        return {
+          ok: false,
+          error: {
+            code: 'UNEXPECTED_TABLE_PATH',
+            category: 'EXECUTOR',
+            retryable: false,
+            safeMessage: '未预期的表格提取路径',
+          },
+          output: {},
+          diagnostics,
+        }
+      }
+      const extractAs = command.as
       if (command.many) {
         const count = await locatedLocator.count()
         const settled = count > command.many.maxItems
           ? undefined
-          : await readListSettled(locatedLocator, command.as, command.attribute, signal)
+          : await readListSettled(locatedLocator, extractAs, command.attribute, signal)
         if (count > command.many.maxItems || (settled && settled.length > command.many.maxItems)) {
           return {
             ok: false,
@@ -412,7 +471,7 @@ export async function executeOnPage(
         }
         return { ok: true, output: { value, count: value.length }, diagnostics }
       }
-      const value = await readLocator(locatedLocator, command.as, command.attribute)
+      const value = await readLocator(locatedLocator, extractAs, command.attribute)
       return { ok: true, output: { value }, diagnostics }
     }
 

@@ -373,18 +373,14 @@ const browserSessionEnvShape = {
   CAIRN_BROWSER_HEADLESS: boolFromEnv(DEFAULT_BROWSER_HEADLESS),
   CAIRN_BROWSER_PROFILE_DIR: z.string().min(1).default(DEFAULT_BROWSER_PROFILE_DIR),
   CAIRN_BROWSER_MAX_SESSIONS: z.coerce.number().int().positive().default(DEFAULT_BROWSER_MAX_SESSIONS),
+  CAIRN_BROWSER_MAX_HOSTS: z.coerce.number().int().positive().optional(),
+  CAIRN_BROWSER_MEMORY_BUDGET_MB: z.coerce.number().int().nonnegative().default(0),
+  CAIRN_BROWSER_MAX_CONTEXTS_PER_HOST: z.coerce.number().int().positive().default(6),
+  CAIRN_BROWSER_TARGET_SPREAD: z.enum(['strict', 'prefer']).default('strict'),
   CAIRN_BROWSER_EXECUTABLE_PATH: z.string().min(1).optional(),
+  // 会话空闲 TTL、最大寿命、无人值守超时由控制台「平台配置」管理（Run 快照），
+  // 环境不再读取；此处只剩租约与认证等待两类基础设施节奏。
   // 下列默认必须与 session.ts 的 DEFAULT_SESSION_* 一致（快照平台默认同源）
-  CAIRN_SESSION_IDLE_TTL_SECONDS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(600),
-  CAIRN_SESSION_MAX_LIFETIME_SECONDS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(14_400),
   CAIRN_SESSION_LEASE_TTL_SECONDS: z.coerce
     .number()
     .int()
@@ -401,11 +397,6 @@ const browserSessionEnvShape = {
     .int()
     .positive()
     .default(300),
-  CAIRN_SESSION_UNATTENDED_AUTH_TIMEOUT_SECONDS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(120),
 }
 
 export const DEFAULT_BROWSER_AI_REQUEST_TIMEOUT_MS = 15_000
@@ -791,13 +782,6 @@ export const workerEnvSchema = z.preprocess(
           code: 'custom',
           path: ['CAIRN_BROWSER_MAX_SESSIONS'],
           message: 'CAIRN_BROWSER_MAX_SESSIONS 至少为 1',
-        })
-      }
-      if (env.CAIRN_SESSION_MAX_LIFETIME_SECONDS <= env.CAIRN_SESSION_IDLE_TTL_SECONDS) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['CAIRN_SESSION_MAX_LIFETIME_SECONDS'],
-          message: 'CAIRN_SESSION_MAX_LIFETIME_SECONDS 必须大于 CAIRN_SESSION_IDLE_TTL_SECONDS',
         })
       }
       const heartbeatSeconds = env.CAIRN_SESSION_HEARTBEAT_MS / 1000

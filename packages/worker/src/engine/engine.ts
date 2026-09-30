@@ -29,6 +29,8 @@ import {
   stepUsesBrowser,
   type DebugAction,
   type DebugMode,
+  type DebugPresenceBody,
+  type DebugPresenceResponse,
   type RunGrant,
   type RunSnapshot,
   type SessionGrant,
@@ -65,6 +67,7 @@ import {
   exitAfterHold,
   holdRun,
   indexAfterContinue,
+  renewDebugPresence,
 } from './engine-debug.js'
 import { acquireSession, resolveRedactionSecrets, watchCancellation } from './engine-preflight.js'
 import { settleRun } from './engine-settle.js'
@@ -563,6 +566,10 @@ export class ExecutionEngine {
 
   async buildCheckpoint(input: Parameters<typeof buildCheckpoint>[0]) {
     return buildCheckpoint.call(this, input)
+  }
+
+  async renewDebugPresence(runId: string, body: DebugPresenceBody): Promise<DebugPresenceResponse> {
+    return renewDebugPresence.call(this, runId, body)
   }
 
   async resolveRedactionSecrets(snapshot: RunSnapshot) {

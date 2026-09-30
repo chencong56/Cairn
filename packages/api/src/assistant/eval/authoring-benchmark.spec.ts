@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { expandAuthoringDocument, moduleContentDigest, type LoadedModuleVersion } from '@cairn/authoring'
 import {
   type AuthoringOperation,
   type ScenarioAuthoringDocumentV2,
@@ -8,6 +9,21 @@ import {
 let mockIdCounter = 100
 
 vi.mock('@cairn/db', () => ({
+  expandWithLoader: vi.fn(async (_db, targetId, document, mode) => {
+    const loaded: LoadedModuleVersion = {
+      moduleId: '00000000-0000-4000-8000-000000000005', targetId, moduleKey: 'benchmark.module', name: '基准模块',
+      versionId: '00000000-0000-4000-8000-000000000006', versionNo: 1, publicationStatus: 'published',
+      contentDigest: 'benchmark-content', contractDigest: 'benchmark-contract', implementationDigest: 'benchmark-implementation',
+      content: {
+        contract: { inputs: [], outputs: [], preconditions: [], postconditions: [], effectCeiling: 'SIDE_EFFECT' },
+        implementations: [{ implementationKey: 'default', kind: 'structured_steps', outputMapping: {}, steps: [
+          { id: '00000000-0000-4000-8000-000000000007', name: '模块内导航', type: 'navigate', effectType: 'READ_ONLY', input: { url: 'https://fixture.example.test/module' } },
+        ] }],
+      },
+    }
+    loaded.contentDigest = moduleContentDigest(loaded.content)
+    return expandAuthoringDocument(document, { targetId, mode, loadedModules: new Map([[loaded.versionId!, loaded]]) })
+  }),
   getScenario: vi.fn(),
   assertTargetPermission: vi.fn().mockResolvedValue(undefined),
   newId: vi.fn(() => {
@@ -524,7 +540,7 @@ describe('识途助手场景编排正反例评测基准 (Authoring Benchmark P01
       expect(res.kind).toBe('authoring_proposal')
       if (res.kind === 'authoring_proposal') {
         expect(res.operations[0]!.kind).toBe('update_step')
-        expect(res.executable).toBe(true)
+        expect(res.executable, JSON.stringify(res.diagnostics)).toBe(true)
       }
     })
   })

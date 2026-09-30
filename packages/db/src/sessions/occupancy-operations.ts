@@ -559,6 +559,7 @@ export async function claimSessionOperation(
           keepAliveSeconds: lifecycle.keepAliveSeconds,
           authProbeIntervalSeconds: lifecycle.authProbeIntervalSeconds,
           evictionPriority: lifecycle.evictionPriority,
+          isolation: policy.browserIsolation,
           touchLastUsed: !['VERIFY_AUTH', 'RENEW_AUTH', 'SETTLE_LANDING'].includes(candidate.kind),
         })
         if (!claimed.ok) {
@@ -794,6 +795,9 @@ export async function recreateSessionForOperation(
       accountSlot: previous.accountSlot,
       profileKey: previous.profileKey,
       predecessorSessionId: previous.id,
+      // 重启延续选定实例的隔离模式：模式迁移必须显式处理，不能默认回落 DEDICATED
+      isolation:
+        previous.isolation === 'SHARED' || previous.isolation === 'DEDICATED' ? previous.isolation : null,
     })
     if (created.ok) {
       await adoptSessionRetention(tx, { fromSessionId: previous.id, toSessionId: created.session.id })

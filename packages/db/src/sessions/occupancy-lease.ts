@@ -88,6 +88,7 @@ export type ClaimSessionUseResult =
         | 'SESSION_TARGET_MISSING'
         | 'SESSION_POLICY_INVALID'
         | 'SESSION_ACCOUNT_CAP_EXCEEDED'
+        | 'SESSION_ISOLATION_MISMATCH'
       message?: string
       operationWait?: SessionClaimOperationWait
     }
@@ -276,6 +277,15 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
       if (decision.action === 'reuse') {
         const session = await lockSession(tx, decision.session.id)
         if (!session) return { ok: false as const, code: 'SESSION_NOT_CLAIMABLE' as const }
+        // 复用不改写既有会话的隔离模式：历史 null 按实际含义解释为 DEDICATED。
+        // 请求模式与实例不同时给出可解释的拒绝，让调用方走受控重建而不是静默混用。
+        if (input.isolation && (session.isolation ?? 'DEDICATED') !== input.isolation) {
+          return {
+            ok: false as const,
+            code: 'SESSION_ISOLATION_MISMATCH' as const,
+            message: `会话隔离模式为 ${session.isolation ?? 'DEDICATED'}，与请求的 ${input.isolation} 不一致，请通过受控重建切换`,
+          }
+        }
         if (session.status === 'CLOSING' || session.status === 'LOST') {
           return { ok: false as const, code: 'SESSION_BUSY' as const, message: '会话正在关闭或已失联' }
         }

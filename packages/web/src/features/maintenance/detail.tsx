@@ -66,7 +66,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
-import type { IncidentSeverity, MaintenanceUpgradeJobDto } from '@cairn/shared'
+import { getReliabilitySignalMeta, type IncidentSeverity, type MaintenanceUpgradeJobDto } from '@cairn/shared'
 import { getIncidentStatusMeta } from './index'
 
 import { useResetOnChange } from '@/hooks/use-reset-on-change'
@@ -365,6 +365,18 @@ export function IncidentDetailPage() {
       />
 
       <Main className="space-y-6">
+        {incident.ruleVersion === 1 && (
+          <div className="flex items-center gap-2 rounded-lg border border-status-warning-border bg-status-warning-background px-4 py-3 text-body text-status-warning-foreground">
+            <ShieldAlert className="size-4 shrink-0 text-status-warning-foreground" />
+            <div>
+              <span className="font-semibold">历史旧规则生成，数据仅供追溯</span>
+              <span className="ml-2 text-label text-status-warning-foreground">
+                该事件由历史旧版自动化维护规则建立，评分与诊断仅供演进参考。
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Status Bar */}
         <div className="flex flex-wrap items-center gap-3 p-4 rounded-lg border border-border bg-card">
           <Badge variant={SEVERITY_VARIANTS[incident.severity] ?? 'outline'} className="text-label">
@@ -966,43 +978,56 @@ export function IncidentDetailPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {signals.map((sig) => (
-                        <TableRow key={sig.id}>
-                          <TableCell>
-                            <Badge variant="outline" className="text-label font-mono">
-                              {sig.kind}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={
-                                sig.severity === 'CRITICAL' || sig.severity === 'ERROR'
-                                  ? 'destructive'
-                                  : 'secondary'
-                              }
-                              className="text-label"
-                            >
-                              {sig.severity}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-label text-muted-foreground">
-                            {new Date(sig.occurredAt).toLocaleString('zh-CN')}
-                          </TableCell>
-                          <TableCell className="text-label">
-                            <span className="font-mono text-muted-foreground">
-                              {sig.subjectRef ? `${sig.subjectRef.kind}: ${sig.subjectRef.id}` : '—'}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-label">
-                            <span className="font-mono text-muted-foreground">
-                              {sig.sourceRef ? `${sig.sourceRef.kind}: ${sig.sourceRef.id}` : '—'}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right text-label font-semibold">
-                            {sig.value !== undefined ? `${sig.value} ${sig.unit || ''}` : '—'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {signals.map((sig) => {
+                        const meta = getReliabilitySignalMeta(sig.kind)
+                        return (
+                          <TableRow key={sig.id}>
+                            <TableCell>
+                              <div className="flex flex-col gap-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <Badge variant="outline" className="text-label font-mono">
+                                    {meta.label}
+                                  </Badge>
+                                  {meta.isLegacy && (
+                                    <Badge variant="secondary" className="text-caption px-1 py-0">
+                                      旧规则
+                                    </Badge>
+                                  )}
+                                </div>
+                                <span className="text-caption text-muted-foreground">{meta.description}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  sig.severity === 'CRITICAL' || sig.severity === 'ERROR'
+                                    ? 'destructive'
+                                    : 'secondary'
+                                }
+                                className="text-label"
+                              >
+                                {sig.severity}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-label text-muted-foreground">
+                              {new Date(sig.occurredAt).toLocaleString('zh-CN')}
+                            </TableCell>
+                            <TableCell className="text-label">
+                              <span className="font-mono text-muted-foreground">
+                                {sig.subjectRef ? `${sig.subjectRef.kind}: ${sig.subjectRef.id}` : '—'}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-label">
+                              <span className="font-mono text-muted-foreground">
+                                {sig.sourceRef ? `${sig.sourceRef.kind}: ${sig.sourceRef.id}` : '—'}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right text-label font-semibold">
+                              {sig.value !== undefined ? `${sig.value} ${sig.unit || ''}` : '—'}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 )}

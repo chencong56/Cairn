@@ -9,6 +9,8 @@ import { resolveOutcomeWriteback } from '@cairn/authoring'
 import {
   observationShowsFragileCss,
   type AuthoringCapabilities,
+  type ObserveOperation,
+  type TableDiscoveredItem,
   type RunDetailDto,
   type TargetDescriptor,
   type TargetObservation,
@@ -92,6 +94,14 @@ export function computeScreenAlignment(input: {
   return 'disconnected'
 }
 
+export type TableMarkers = {
+  tables: TableDiscoveredItem[]
+  /** 当前选中的表格序号；未选中为空。 */
+  activeIndex?: number
+  /** 画布点击线框时回调（序号对齐 tables）。 */
+  onPick?: (index: number) => void
+}
+
 type AuthoringObserveValue = {
   runId?: string
   sessionId?: string
@@ -103,6 +113,10 @@ type AuthoringObserveValue = {
   overlayStepId?: string
   highlight?: TargetObservation
   lastPicked?: TargetDescriptor
+  enclosingTable?: TargetDescriptor
+  /** 表格发现的画布线框标记；由验收面板写入，受管画面渲染并支持点选消歧。 */
+  tableMarkers?: TableMarkers | null
+  setTableMarkers: (markers: TableMarkers | null) => void
   pickMode: boolean
   canIndicate: boolean
   canHighlight: boolean
@@ -113,6 +127,7 @@ type AuthoringObserveValue = {
   ) => void
   highlightTarget: (target: TargetDescriptor, options?: { silent?: boolean }) => Promise<TargetObservation | undefined>
   pickAt: (x: number, y: number) => void
+  pickEnclosingTable?: () => void
   applyForTrial: (target?: TargetDescriptor) => void
   clearOverlay: (stepId: string) => void
   writeBack: () => void
@@ -131,7 +146,9 @@ const closedObserve: AuthoringObserveValue = {
   canDebugHold: false,
   setPickMode: () => undefined,
   highlightTarget: async () => undefined,
+  setTableMarkers: () => undefined,
   pickAt: () => undefined,
+  pickEnclosingTable: () => undefined,
   applyForTrial: () => undefined,
   clearOverlay: () => undefined,
   writeBack: () => undefined,
@@ -196,6 +213,9 @@ export function AuthoringObserveProvider({
   const [pickOutcome, setPickOutcome] = useState<NonNullable<ApplyPickedExtras['outcomePick']>>()
   const [highlight, setHighlight] = useState<TargetObservation | undefined>()
   const [lastPicked, setLastPicked] = useState<TargetDescriptor | undefined>()
+  const [enclosingTable, setEnclosingTable] = useState<TargetDescriptor | undefined>()
+  const [tableMarkers, setTableMarkersState] = useState<TableMarkers | null>(null)
+  const setTableMarkers = (markers: TableMarkers | null) => setTableMarkersState(markers)
   const holding = Boolean(
     run && run.status === 'HOLDING' && run.debugMode !== 'runThrough'
   )
@@ -260,7 +280,7 @@ export function AuthoringObserveProvider({
     }
   }
 
-  const observePage = (body: Parameters<typeof observeRun>[1]) => {
+  const observePage = (body: Exclude<ObserveOperation, { op: 'table' }>): Promise<TargetObservation> => {
     if (holding && runId) return observeRun(runId, body)
     if (sessionId) return observeSession(sessionId, body)
     return Promise.reject(new Error('没有可观察的受管页面'))
@@ -278,6 +298,9 @@ export function AuthoringObserveProvider({
       overlayStepId: overlayStepIdForSelection(run, selectedStepId),
       highlight,
       lastPicked,
+      enclosingTable,
+      tableMarkers,
+      setTableMarkers,
       pickMode,
       canIndicate,
       canHighlight,
@@ -292,6 +315,7 @@ export function AuthoringObserveProvider({
           toast.message('请先选择要设置成功条件的步骤')
           return
         }
+        if (next) setEnclosingTable(undefined)
         setPickOutcome(next && outcome
           ? { ...outcome, ...(outcome.scope === 'step' ? { stepId: selectedStepId! } : {}) }
           : undefined)
@@ -311,6 +335,7 @@ export function AuthoringObserveProvider({
         try {
           const observation = await observePage({ op: 'highlight', target })
           setHighlight(observation)
+          setEnclosingTable(observation.enclosingTable)
           if (options?.silent) return observation
           if (observation.outcome === 'AMBIGUOUS') {
             toast.message(
@@ -341,6 +366,7 @@ export function AuthoringObserveProvider({
         void observePage({ op: 'pick', x, y })
           .then((observation) => {
             setHighlight(observation)
+            setEnclosingTable(observation.enclosingTable)
             if (observation.outcome === 'AMBIGUOUS') {
               setLastPicked(undefined)
               toast.message(
@@ -374,7 +400,10 @@ export function AuthoringObserveProvider({
               }
               if (canHighlight) {
                 void observePage({ op: 'highlight', target: observation.target })
-                  .then(setHighlight)
+                  .then((obs) => {
+                    setHighlight(obs)
+                    setEnclosingTable(obs.enclosingTable)
+                  })
                   .catch(() => undefined)
               }
             } else {
@@ -396,6 +425,24 @@ export function AuthoringObserveProvider({
               error instanceof ApiRequestError ? error.message : '指认失败'
             )
           })
+      },
+      pickEnclosingTable: () => {
+        if (!enclosingTable) return
+        setLastPicked(enclosingTable)
+        setPickModeState(false)
+        if (!holding || pickOutcome) {
+          applyPickedTarget(enclosingTable, enclosingTable.semantic ?? '表格')
+        } else {
+          toast.success('已切换为所在表格，可写入本次验证或写回草稿')
+        }
+        if (canHighlight) {
+          void observePage({ op: 'highlight', target: enclosingTable })
+            .then((obs) => {
+              setHighlight(obs)
+              setEnclosingTable(obs.enclosingTable)
+            })
+            .catch(() => undefined)
+        }
       },
       applyForTrial: (target) => {
         const next = target ?? lastPicked ?? highlight?.target
@@ -433,6 +480,7 @@ export function AuthoringObserveProvider({
         void observePage({ op: 'highlight', clearOverlayStepId: stepId })
           .then(() => {
             setHighlight(undefined)
+            setEnclosingTable(undefined)
             void refresh()
           })
           .catch((error) => {
@@ -503,6 +551,7 @@ export function AuthoringObserveProvider({
       highlight,
       holding,
       lastPicked,
+      enclosingTable,
       livePage,
       observePage,
       onApplyTarget,

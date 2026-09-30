@@ -71,10 +71,12 @@ export function collectAttemptOutcomeResults(input: {
     return { outcomeResults: results, continueMode }
   }
 
-  // 2.5 度量缺失（DURATION_UNAVAILABLE）：巡检类耗时条件取不到度量时不是流程闸门，
+  // 2.5 度量缺失（DURATION_UNAVAILABLE）或表格事实不可得（TABLE_FACTS_UNAVAILABLE）：
   // 判 UNKNOWN 并按 onViolation 约定决定是否继续，不把整个 Run 打成 FAILED。
-  if (outcome.error.code === 'DURATION_UNAVAILABLE') {
+  if (outcome.error.code === 'DURATION_UNAVAILABLE' || outcome.error.code === 'TABLE_FACTS_UNAVAILABLE') {
     const continueMode = entries.every((e) => e.onViolation === 'continue')
+    const actual = extractActual(outcome.output)
+    const details = extractDetails(outcome.output) ?? { code: outcome.error.code, safeMessage: outcome.error.safeMessage }
     const results: OutcomeResultInsertItem[] = entries.map((e) => ({
       contractId: e.contractId,
       scope: e.scope,
@@ -84,8 +86,8 @@ export function collectAttemptOutcomeResults(input: {
       provenance: e.provenance,
       verdict: 'UNKNOWN',
       expected: extractExpected(step, e),
-      actual: null,
-      details: { code: outcome.error.code, safeMessage: outcome.error.safeMessage },
+      actual,
+      details,
       evaluatedAt: now,
     }))
     return { outcomeResults: results, continueMode }

@@ -297,7 +297,7 @@ describe('StepEditor', () => {
     const enabled = onChange.mock.calls[
       onChange.mock.calls.length - 1
     ]?.[0] as Step
-    expect(enabled.type === 'extract' && enabled.input.many).toEqual({
+    expect(enabled.type === 'extract' && enabled.input.as !== 'table' && enabled.input.many).toEqual({
       maxItems: 50,
     })
   })
@@ -306,7 +306,13 @@ describe('StepEditor', () => {
     const onChange = vi.fn()
     const screen = await render(
       editor(
-        { ...extract, input: { ...extract.input, many: { maxItems: 50 } } },
+        {
+          ...extract,
+          input: {
+            ...(extract.type === 'extract' && extract.input.as !== 'table' ? extract.input : { target: { framePath: [], candidates: [] }, as: 'text' as const }),
+            many: { maxItems: 50 },
+          },
+        } as Step,
         onChange
       )
     )
@@ -314,6 +320,6 @@ describe('StepEditor', () => {
     const disabled = onChange.mock.calls[
       onChange.mock.calls.length - 1
     ]?.[0] as Step
-    expect(disabled.type === 'extract' && disabled.input.many).toBeUndefined()
+    expect(disabled.type === 'extract' && disabled.input.as !== 'table' && disabled.input.many).toBeUndefined()
   })
 })

@@ -165,19 +165,16 @@ describe('resolveSessionPolicy', () => {
 
   it('平台默认与 workerEnvSchema 空配置默认逐字对齐', () => {
     const env = workerEnvSchema.parse({ ...WORKER_SECRETS })
-    expect(DEFAULT_SESSION_IDLE_TTL_SECONDS).toBe(env.CAIRN_SESSION_IDLE_TTL_SECONDS)
-    expect(DEFAULT_SESSION_MAX_LIFETIME_SECONDS).toBe(env.CAIRN_SESSION_MAX_LIFETIME_SECONDS)
     expect(DEFAULT_SESSION_LEASE_TTL_SECONDS).toBe(env.CAIRN_SESSION_LEASE_TTL_SECONDS)
     expect(DEFAULT_SESSION_AUTH_WAIT_SECONDS).toBe(env.CAIRN_SESSION_AUTH_WAIT_SECONDS)
-    expect(DEFAULT_UNATTENDED_AUTH_TIMEOUT_SECONDS).toBe(env.CAIRN_SESSION_UNATTENDED_AUTH_TIMEOUT_SECONDS)
     expect(DEFAULT_SESSION_REUSE_POLICY).toBe('NEW_PAGE')
     expect(DEFAULT_SESSION_POLICY).toEqual({
       reuse: 'NEW_PAGE',
-      idleTtlSeconds: env.CAIRN_SESSION_IDLE_TTL_SECONDS,
-      maxLifetimeSeconds: env.CAIRN_SESSION_MAX_LIFETIME_SECONDS,
+      idleTtlSeconds: DEFAULT_SESSION_IDLE_TTL_SECONDS,
+      maxLifetimeSeconds: DEFAULT_SESSION_MAX_LIFETIME_SECONDS,
       leaseTtlSeconds: env.CAIRN_SESSION_LEASE_TTL_SECONDS,
       authWaitSeconds: env.CAIRN_SESSION_AUTH_WAIT_SECONDS,
-      unattendedAuthTimeoutSeconds: env.CAIRN_SESSION_UNATTENDED_AUTH_TIMEOUT_SECONDS,
+      unattendedAuthTimeoutSeconds: DEFAULT_UNATTENDED_AUTH_TIMEOUT_SECONDS,
       notifyOnAuthWait: true,
       reclaim: 'IDLE',
       keepAliveSeconds: 3600,

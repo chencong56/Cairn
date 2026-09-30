@@ -493,6 +493,11 @@ export function MaintenancePage() {
                               className="font-medium hover:text-primary transition-colors flex items-center gap-1.5"
                             >
                               <span>{incident.title}</span>
+                              {incident.ruleVersion === 1 && (
+                                <Badge variant="secondary" className="text-caption px-1 py-0 text-status-warning-foreground">
+                                  旧规则
+                                </Badge>
+                              )}
                               <ArrowRight className="size-3.5 opacity-60" />
                             </Link>
                             <p className="text-label text-muted-foreground line-clamp-1">{incident.summary}</p>

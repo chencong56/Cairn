@@ -9,7 +9,7 @@ import {
   type SessionOperationWaitReason,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
-import { databaseNow, schemaFor } from '../native.js'
+import { databaseNow, schemaFor, updateRows } from '../native.js'
 import type { SessionLeaseRow } from '../records.js'
 import { loadResolvedSessionPolicyForTarget } from './session-policy.js'
 import { findLiveSessions, isClaimable, type SessionKey, type SessionRecord } from './sessions.js'
@@ -262,6 +262,49 @@ export type SessionClaimOperationWait = {
   detail?: Record<string, unknown>
 }
 
+export async function retireSurplusIdleSessions(
+  tx: Db,
+  input: {
+    key: SessionKey
+    lives: readonly SessionRecord[]
+    leases: Map<string, SessionLeaseRow>
+    effectiveCap: number
+  },
+): Promise<string[]> {
+  if (input.lives.length <= input.effectiveCap) return []
+  const { browserSessions } = schemaFor(tx)
+  const surplusCount = input.lives.length - input.effectiveCap
+
+  const idleSessions = input.lives
+    .filter((s) => s.status === 'OPEN' && !input.leases.has(s.id))
+    .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
+
+  const toRetire = idleSessions.slice(0, surplusCount)
+  if (toRetire.length === 0) return []
+
+  const retired: string[] = []
+  const now = new Date()
+  for (const session of toRetire) {
+    const [updated] = await updateRows(
+      tx,
+      browserSessions,
+      {
+        status: 'CLOSING',
+        version: sql`${browserSessions.version} + 1`,
+        updatedAt: now,
+        closeReason: 'draining_concurrency_cap',
+      },
+      and(
+        eq(browserSessions.id, session.id),
+        eq(browserSessions.status, 'OPEN'),
+      ),
+      { id: browserSessions.id },
+    )
+    if (updated) retired.push(updated.id)
+  }
+  return retired
+}
+
 export async function decideAccountSessionClaim(
   db: Db,
   input: {
@@ -282,6 +325,25 @@ export async function decideAccountSessionClaim(
   const requireConcurrency = concurrencyProtocolRequired(cap.effectiveCap, input.lives.length)
   if (requireConcurrency && !workerHasConcurrencyProtocol(input.holderProtocols)) {
     return { action: 'reject', code: 'SESSION_NOT_CLAIMABLE', message: 'Worker 未声明账号并发协议' }
+  }
+
+  if (input.lives.length > cap.effectiveCap) {
+    await retireSurplusIdleSessions(db, {
+      key: input.key,
+      lives: input.lives,
+      leases: input.leases,
+      effectiveCap: cap.effectiveCap,
+    })
+    return {
+      action: 'reject',
+      code: input.purpose === 'MAINTENANCE' ? 'SESSION_ACCOUNT_CAP_EXCEEDED' : 'SESSION_BUSY',
+      waitReason: 'SESSION_ACCOUNT_AT_CAPACITY',
+      message: '账号超限排空中，暂停授予新占用',
+      operationWait: {
+        reason: 'SESSION_ACCOUNT_AT_CAPACITY',
+        detail: { lives: input.lives.length, cap: cap.effectiveCap, draining: true },
+      },
+    }
   }
 
   if (input.expectedSessionId) {
