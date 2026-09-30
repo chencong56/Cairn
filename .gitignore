@@ -114,3 +114,4 @@ vendor/**/.pnpm-store/
 
 # 仅供阅读的上游源码参考（覆盖前面的 vendor 放行规则）
 /vendor/ref/
+/deploy/singe/
