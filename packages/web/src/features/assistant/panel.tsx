@@ -49,10 +49,12 @@ function ContextCapsule({
   boundContext,
   capabilities,
   onChipClick,
+  className,
 }: {
   boundContext: AssistantBoundContext | null
   capabilities: AssistantCapabilitiesResponse | null
   onChipClick: (question: string, capabilityHint?: AssistantCapabilityId) => void
+  className?: string
 }) {
   const canAssist = useCan('ai:assist')
   const canWrite = useCan('workflow:write')
@@ -82,7 +84,7 @@ function ContextCapsule({
     <div
       role='region'
       aria-label='上下文详情与操作'
-      className='shrink-0 border-b border-border-default bg-surface-subtle px-4 py-2.5 space-y-2'
+      className={cn('shrink-0 border-b border-border-default bg-surface-subtle px-4 py-2.5 space-y-2', className)}
     >
       {boundContext.summaryText ? (
         <p className='text-label text-text-secondary line-clamp-2 leading-relaxed'>
@@ -324,18 +326,29 @@ export function AssistantPanel({
         </div>
       </header>
 
-      {/* 仅在具体业务实体绑定 (boundContext) 且含有错误/诊断或实体摘要时渲染 */}
-      <ContextCapsule
-        boundContext={boundContext}
-        capabilities={capabilities}
-        onChipClick={handlePromptSelect}
-      />
+      {/* 停靠侧栏模式下保持吸顶 */}
+      {isDocked ? (
+        <ContextCapsule
+          boundContext={boundContext}
+          capabilities={capabilities}
+          onChipClick={handlePromptSelect}
+        />
+      ) : null}
 
       <div
         ref={conversationRef}
         className='flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 py-4'
         aria-label='助手对话'
       >
+        {/* 悬浮窗模式下置于滚动流顶部，不抢占宝贵的垂直固定视口 */}
+        {!isDocked ? (
+          <ContextCapsule
+            boundContext={boundContext}
+            capabilities={capabilities}
+            onChipClick={handlePromptSelect}
+            className='-mx-5 -mt-4 mb-4 rounded-b-lg border-b'
+          />
+        ) : null}
         {turns.length === 0 && !busy && capabilities?.modelEnabled ? (
           <PromptCards
             pageContext={pageContext}
@@ -571,7 +584,7 @@ export function AssistantPanel({
           </p>
         ) : null}
         {boundContext?.isDirty ? (
-          <p className='text-label text-status-warning-foreground'>
+          <p className='text-label text-status-warning-foreground leading-snug py-0.5'>
             当前有未保存修改。助手会依据已保存版本回答；要分析刚才的编辑，请先保存草稿。
           </p>
         ) : null}

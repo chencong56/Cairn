@@ -1263,18 +1263,18 @@ export function AssistantResultView({
                 {result.claims.map((claim, idx) => (
                   <div
                     key={idx}
-                    className='rounded-lg border border-border-default/60 bg-surface-subtle/50 p-2.5 space-y-1.5'
+                    className='rounded-lg bg-surface-subtle/60 p-2.5 space-y-1.5'
                   >
                     <div className='flex items-center gap-1.5 flex-wrap'>
                       <span
                         className={cn(
-                          'inline-flex items-center rounded px-1.5 py-0.5 text-label font-medium',
+                          'inline-flex items-center rounded-md px-1.5 py-0.5 text-label font-medium',
                           claim.factKind === 'observed' &&
-                            'bg-status-success-background text-status-success-foreground border border-status-success-foreground/20',
+                            'bg-status-success-background/80 text-status-success-foreground border border-status-success-foreground/15',
                           claim.factKind === 'human_confirmed' &&
                             'bg-primary/10 text-primary border border-primary/20',
                           claim.factKind === 'inferred' &&
-                            'bg-status-warning-background text-status-warning-foreground border border-status-warning-foreground/20',
+                            'bg-status-warning-background/80 text-status-warning-foreground border border-status-warning-foreground/20',
                         )}
                       >
                         {claim.factKind === 'observed' && '系统观测'}
@@ -1284,14 +1284,14 @@ export function AssistantResultView({
                       {claim.citations?.map((cit, cIdx) => (
                         <span
                           key={cIdx}
-                          className='inline-flex items-center text-label text-text-muted bg-surface-base px-1.5 py-0.5 rounded border border-border-default/40'
+                          className='inline-flex items-center text-label text-text-muted bg-surface-card px-1.5 py-0.5 rounded-md border border-border-default/40'
                           title={cit}
                         >
                           {citationDisplayLabel(cit)}
                         </span>
                       ))}
                     </div>
-                    <p className='text-small text-text-secondary leading-normal'>{claim.text}</p>
+                    <p className='text-small text-text-secondary leading-relaxed'>{claim.text}</p>
                     {claim.premises?.length ? (
                       <p className='text-label text-text-muted'>
                         依据前提: {claim.premises.join('; ')}
@@ -1304,7 +1304,7 @@ export function AssistantResultView({
 
             {result.missing?.length ? (
               <div
-                className='rounded-lg border border-status-warning-foreground/20 bg-status-warning-background p-2.5 text-label space-y-1'
+                className='rounded-lg border border-status-warning-border/40 bg-status-warning-subtle/40 p-2.5 text-label space-y-1.5'
                 data-testid='knowledge-missing-list'
               >
                 <p className='font-medium text-status-warning-foreground flex items-center gap-1'>

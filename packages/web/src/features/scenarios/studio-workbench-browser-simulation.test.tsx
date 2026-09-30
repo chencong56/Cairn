@@ -86,6 +86,11 @@ describe('场景编排工作台（Scenario Studio）浏览器全功能与 UI 布
       const [preset, setPreset] = useState<StudioViewPreset>('balanced')
       return (
         <div className='h-[700px] w-[1440px] flex flex-col bg-background'>
+          <div className='flex gap-2 p-2 border-b'>
+            <button data-testid='btn-set-balanced' onClick={() => setPreset('balanced')}>均衡</button>
+            <button data-testid='btn-set-stage' onClick={() => setPreset('stage')}>舞台聚焦</button>
+            <button data-testid='btn-set-pipeline' onClick={() => setPreset('pipeline')}>编排聚焦</button>
+          </div>
           <StudioSplitterLayout
             preset={preset}
             onPresetChange={setPreset}
@@ -117,16 +122,38 @@ describe('场景编排工作台（Scenario Studio）浏览器全功能与 UI 布
     const leftHandle = screen.getByTestId('splitter-handle-left')
     const rightHandle = screen.getByTestId('splitter-handle-right')
 
-    // 1. 初始 balanced 模式验证
+    // 1. 初始 balanced 模式验证：三栏均渲染，左栏 250px，右栏 400px，中栏自适应
     await expect.element(leftPane).toBeInTheDocument()
+    await expect.element(leftPane).toHaveStyle({ width: '250px' })
     await expect.element(centerPane).toBeInTheDocument()
     await expect.element(rightPane).toBeInTheDocument()
+    await expect.element(rightPane).toHaveStyle({ width: '400px' })
     await expect.element(leftHandle).toBeInTheDocument()
     await expect.element(rightHandle).toBeInTheDocument()
 
     // 2. 双击分割条验证重置行为
     await leftHandle.dblClick()
     await rightHandle.dblClick()
+
+    // 3. 切换为舞台聚焦（stage）：中栏舞台最大化，右栏收起，左栏保持 250px 舒适宽度（不压缩为 48px）
+    await screen.getByTestId('btn-set-stage').click()
+    await expect.element(leftPane).toHaveStyle({ width: '250px' })
+    await expect.element(centerPane).toBeInTheDocument()
+    await expect.element(rightPane).not.toBeInTheDocument()
+
+    // 4. 切换为编排聚焦（pipeline）：中栏画面隐藏，左栏管线获得主舞台空间 (flex-1) 杜绝挤压，右栏 400px
+    await screen.getByTestId('btn-set-pipeline').click()
+    await expect.element(leftPane).toHaveClass('flex-1')
+    await expect.element(centerPane).not.toBeInTheDocument()
+    await expect.element(rightPane).toBeInTheDocument()
+    await expect.element(rightPane).toHaveStyle({ width: '400px' })
+    await expect.element(screen.getByTestId('splitter-handle-right')).toBeInTheDocument()
+
+    // 5. 切换回均衡模式（balanced）：三栏重新呈现
+    await screen.getByTestId('btn-set-balanced').click()
+    await expect.element(leftPane).toBeInTheDocument()
+    await expect.element(centerPane).toBeInTheDocument()
+    await expect.element(rightPane).toBeInTheDocument()
   })
 
   it('走查 2：步骤管线 Rail 时间轴、节点序列、输出标记与禁用跳过状态呈现', async () => {

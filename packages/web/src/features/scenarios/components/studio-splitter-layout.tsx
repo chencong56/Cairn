@@ -154,12 +154,9 @@ export function StudioSplitterLayout({
 
   // 容器狭窄（< 768px）时的自适应降级：自动将左栏压缩
   const isNarrowContainer = containerWidth < 768
-  const effectiveLeftWidth =
-    preset === 'stage'
-      ? 48
-      : isNarrowContainer
-        ? Math.min(widths.left, 180)
-        : widths.left
+  const effectiveLeftWidth = isNarrowContainer
+    ? Math.min(widths.left, 180)
+    : widths.left
   const showCenter = preset !== 'pipeline' && Boolean(center)
   const showRight = preset !== 'stage'
 
@@ -181,10 +178,10 @@ export function StudioSplitterLayout({
       {/* 左栏：步骤管线 */}
       <div
         data-testid='splitter-left-pane'
-        style={{ width: `${effectiveLeftWidth}px` }}
+        style={{ width: preset === 'pipeline' ? 'auto' : `${effectiveLeftWidth}px` }}
         className={cn(
-          'flex flex-col min-h-0 shrink-0 overflow-hidden bg-card transition-[width] duration-150',
-          preset === 'stage' && 'items-center px-1',
+          'flex flex-col min-h-0 overflow-hidden bg-card transition-[width] duration-150',
+          preset === 'pipeline' ? 'flex-1 min-w-0' : 'shrink-0',
           mobilePane && mobilePane !== 'steps' && 'max-lg:hidden',
           mobilePane === 'steps' && 'max-lg:!w-full max-lg:flex-1',
         )}
@@ -192,8 +189,8 @@ export function StudioSplitterLayout({
         {left}
       </div>
 
-      {/* 左侧可拖拽分割条 */}
-      {preset !== 'stage' && (
+      {/* 左侧可拖拽分割条（展示中栏舞台时调节左栏管线宽度） */}
+      {showCenter && (
         <div
           role='separator'
           aria-orientation='vertical'
@@ -230,8 +227,8 @@ export function StudioSplitterLayout({
         </div>
       )}
 
-      {/* 右侧可拖拽分割条 */}
-      {showCenter && showRight && (
+      {/* 右侧属性检查器前可拖拽分割条（均衡模式下分隔中右，编排聚焦模式下分隔左右） */}
+      {showRight && (
         <div
           role='separator'
           aria-orientation='vertical'
@@ -258,10 +255,9 @@ export function StudioSplitterLayout({
       {showRight && (
         <div
           data-testid='splitter-right-pane'
-          style={{ width: preset === 'pipeline' ? 'auto' : `${widths.right}px` }}
+          style={{ width: `${widths.right}px` }}
           className={cn(
-            'flex flex-col min-h-0 overflow-hidden bg-card',
-            preset === 'pipeline' ? 'flex-1 min-w-0' : 'shrink-0',
+            'flex flex-col min-h-0 shrink-0 overflow-hidden bg-card',
             mobilePane && mobilePane !== 'properties' && 'max-lg:hidden',
             mobilePane === 'properties' && 'max-lg:!w-full max-lg:flex-1',
           )}

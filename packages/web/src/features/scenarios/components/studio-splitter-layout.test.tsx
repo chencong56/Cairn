@@ -64,7 +64,7 @@ describe('StudioSplitterLayout', () => {
     expect(leftPane.element().style.width).toBe('250px')
   })
 
-  it('支持 stage 舞台对焦模式：左栏紧凑为 48px，隐藏右栏与左手柄，中间最大化', async () => {
+  it('支持 stage 舞台对焦模式：左栏保持标准 250px 舒适宽度不被挤压，隐藏右栏，中间舞台最大化', async () => {
     const screen = await render(
       <div style={{ width: '1280px', height: '600px', display: 'flex' }}>
         <StudioSplitterLayout
@@ -77,15 +77,14 @@ describe('StudioSplitterLayout', () => {
     )
 
     const leftPane = screen.getByTestId('splitter-left-pane')
-    expect(leftPane.element().style.width).toBe('48px')
+    expect(leftPane.element().style.width).toBe('250px')
 
-    // 右栏与手柄在 stage 模式下隐藏
+    // 右栏在 stage 模式下隐藏，中栏舞台最大化
     expect(screen.getByTestId('splitter-right-pane').elements()).toHaveLength(0)
-    expect(screen.getByTestId('splitter-handle-left').elements()).toHaveLength(0)
     await expect.element(screen.getByTestId('splitter-center-pane')).toBeInTheDocument()
   })
 
-  it('支持 pipeline 编排对焦模式：隐藏中栏舞台，左侧与右侧平铺', async () => {
+  it('支持 pipeline 编排对焦模式：隐藏中栏舞台，左栏获得主工作区空间 (flex-1) 杜绝挤压，右栏保持属性面板', async () => {
     const screen = await render(
       <div style={{ width: '1280px', height: '600px', display: 'flex' }}>
         <StudioSplitterLayout
@@ -98,7 +97,9 @@ describe('StudioSplitterLayout', () => {
     )
 
     expect(screen.getByTestId('splitter-center-pane').elements()).toHaveLength(0)
-    await expect.element(screen.getByTestId('splitter-left-pane')).toBeInTheDocument()
+    const leftPane = screen.getByTestId('splitter-left-pane')
+    await expect.element(leftPane).toBeInTheDocument()
+    await expect.element(leftPane).toHaveClass('flex-1')
     await expect.element(screen.getByTestId('splitter-right-pane')).toBeInTheDocument()
   })
 })

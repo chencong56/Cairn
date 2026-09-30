@@ -110,6 +110,7 @@ describe('AssistantHost', () => {
       capabilityHint: undefined,
       capabilities: null,
       adoptHandler: null,
+      mode: 'floating',
     })
   })
 
@@ -576,4 +577,49 @@ describe('AssistantHost', () => {
     await expect.element(overlay).not.toBeInTheDocument()
     await expect.element(headerTrigger).toHaveFocus()
   })
+
+  it('支持拖拽边缘与角落自由调整浮窗尺寸，并记忆设定宽高', async () => {
+    localStorage.clear()
+    useAssistantStore.setState({ mode: 'floating' })
+    await openAssistant()
+    const dialog = page.getByRole('dialog', { name: '识途助手' }).element()
+    const initialBounds = dialog.getBoundingClientRect()
+    expect(Math.round(initialBounds.width)).toBe(400)
+    expect(Math.round(initialBounds.height)).toBe(600)
+
+    const westHandle = dialog.querySelector('[data-resize-handle="w"]') as HTMLElement
+    expect(westHandle).not.toBeNull()
+
+    const pointer = (target: HTMLElement, type: string, x: number, y: number) =>
+      target.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 42,
+          button: 0,
+          clientX: x,
+          clientY: y,
+        })
+      )
+
+    vi.spyOn(westHandle, 'setPointerCapture').mockImplementation(() => {})
+    vi.spyOn(westHandle, 'hasPointerCapture').mockReturnValue(true)
+
+    const handleRect = westHandle.getBoundingClientRect()
+    pointer(westHandle, 'pointerdown', handleRect.x, handleRect.y)
+    pointer(westHandle, 'pointermove', handleRect.x - 80, handleRect.y)
+    pointer(westHandle, 'pointerup', handleRect.x - 80, handleRect.y)
+
+    await expect
+      .poll(() => Math.round(dialog.getBoundingClientRect().width))
+      .toBe(480)
+
+    await page.getByRole('button', { name: '关闭识途助手' }).click()
+    await page.getByRole('button', { name: '打开识途助手' }).click()
+    const reopened = page.getByRole('dialog').element()
+    await expect
+      .poll(() => Math.round(reopened.getBoundingClientRect().width))
+      .toBe(480)
+  })
 })
+
