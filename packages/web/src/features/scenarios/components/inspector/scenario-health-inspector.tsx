@@ -96,23 +96,23 @@ export function ScenarioHealthInspector({
                     ? `${warningCount} 个步骤规则衰减`
                     : failingCount > 0
                       ? `${failingCount} 个步骤定位失败`
-                      : '全部规则 100% 稳定'}
+                      : '全部规则定位稳定'}
               </h4>
             </div>
 
             {hasTestedSteps ? (
-              <span
-                className={cn(
-                  'rounded px-2 py-0.5 text-caption font-semibold font-mono',
-                  warningCount > 0
-                    ? 'bg-status-warning/15 text-status-warning-foreground'
-                    : failingCount > 0
-                      ? 'bg-status-error/15 text-status-error-foreground'
-                      : 'bg-status-success/15 text-status-success-foreground',
-                )}
-              >
-                {warningCount > 0 ? `${warningCount} 步需维护` : failingCount > 0 ? `${failingCount} 步失效` : '100% 稳定'}
-              </span>
+              (warningCount > 0 || failingCount > 0) && (
+                <span
+                  className={cn(
+                    'rounded px-2 py-0.5 text-caption font-semibold font-mono',
+                    warningCount > 0
+                      ? 'bg-status-warning/15 text-status-warning-foreground'
+                      : 'bg-status-error/15 text-status-error-foreground',
+                  )}
+                >
+                  {warningCount > 0 ? `${warningCount} 步需维护` : `${failingCount} 步失效`}
+                </span>
+              )
             ) : (
               <span className='rounded px-2 py-0.5 text-caption font-semibold font-mono bg-muted/60 text-muted-foreground'>
                 待试跑

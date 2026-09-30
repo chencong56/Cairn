@@ -146,4 +146,54 @@ describe('SegmentedStepInspector', () => {
       .element(screen.getByText('建议为关键操作配置断言检查'))
       .toBeInTheDocument()
   })
+
+  it('AI 业务指令输入框支持变量智能补全并在选定后自动同步注册 contextBindings', async () => {
+    const onChange = vi.fn()
+    const screen = await renderInspector(
+      <SegmentedStepInspector
+        step={{
+          id: 'step-ai-intent',
+          name: 'AI 审核',
+          type: 'ai_action',
+          effectType: 'SIDE_EFFECT',
+          input: { instruction: '请处理订单' },
+        }}
+        index={0}
+        bindings={[
+          { key: 'orderId', label: '订单号提取' },
+          { key: 'input.username', label: '登录用户名' },
+        ]}
+        shapes={new Map()}
+        editableTypes={['ai_action']}
+        diagnostics={[]}
+        onChange={onChange}
+        onRequestTypeChange={vi.fn()}
+      />
+    )
+
+    const instructionInput = screen.getByLabelText('业务指令')
+    await expect.element(instructionInput).toBeInTheDocument()
+    await expect.element(instructionInput).toHaveValue('请处理订单')
+
+    // 点击变量按钮触发变量选择
+    const varBtn = screen.getByRole('button', { name: '插入变量引用' })
+    await varBtn.click()
+
+    // 弹层展示候选变量
+    await expect.element(screen.getByText('orderId')).toBeInTheDocument()
+    await screen.getByText('orderId').click()
+
+    // 校验 onChange 被调用，且指令包含变量，同时自动注册 contextBindings
+    expect(onChange).toHaveBeenCalled()
+    const lastStep = onChange.mock.lastCall?.[0] as Extract<Step, { type: 'ai_action' }>
+    expect('instruction' in lastStep.input ? lastStep.input.instruction : '').toContain('{{orderId}}')
+    expect(lastStep.contextBindings).toEqual([
+      {
+        name: 'orderId',
+        source: 'steps.orderId',
+        path: 'orderId',
+        required: true,
+      },
+    ])
+  })
 })

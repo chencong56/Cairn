@@ -241,7 +241,7 @@ function ProposalDiffViewer({
                 <div className='flex items-center justify-between gap-2'>
                   <span className='font-medium text-text-primary'>{card.meaning}</span>
                   <span className={cn(
-                    'px-1.5 py-0.5 rounded text-xs font-mono',
+                    'px-1.5 py-0.5 rounded text-caption font-mono',
                     card.severity === 'MUST'
                       ? 'bg-status-error-background text-status-error-foreground'
                       : 'bg-status-warning-background text-status-warning-foreground'
@@ -249,7 +249,7 @@ function ProposalDiffViewer({
                     {card.severity === 'MUST' ? 'MUST 异常' : 'SHOULD 警告'}
                   </span>
                 </div>
-                <div className='flex items-center gap-2 text-xs text-text-muted'>
+                <div className='flex items-center gap-2 text-caption text-text-muted'>
                   <span>意图: {card.intentKind}</span>
                   <span>·</span>
                   <span>实测: {card.testResult}</span>

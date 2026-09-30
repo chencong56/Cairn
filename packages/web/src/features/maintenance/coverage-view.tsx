@@ -263,7 +263,7 @@ function ScenarioRow({
               <span className='text-small font-medium font-mono'>{browserCoveragePct}%</span>
             </div>
           ) : (
-            <span className='text-xs text-muted-foreground'>
+            <span className='text-caption text-muted-foreground'>
               {item.hasDraft ? '未体检' : '未体检（无草稿）'}
             </span>
           )}
@@ -272,7 +272,7 @@ function ScenarioRow({
           {outputCoveragePct !== null ? (
             <span className='text-small font-medium font-mono'>{outputCoveragePct}%</span>
           ) : (
-            <span className='text-xs text-muted-foreground'>—</span>
+            <span className='text-caption text-muted-foreground'>—</span>
           )}
         </TableCell>
         <TableCell>
@@ -293,7 +293,7 @@ function ScenarioRow({
               </Badge>
             )
           ) : (
-            <span className='text-xs text-muted-foreground'>—</span>
+            <span className='text-caption text-muted-foreground'>—</span>
           )}
         </TableCell>
         <TableCell className='text-muted-foreground text-small'>
@@ -305,7 +305,7 @@ function ScenarioRow({
               </div>
             </div>
           ) : (
-            <span className='text-xs text-muted-foreground'>
+            <span className='text-caption text-muted-foreground'>
               {item.hasDraft ? '尚未巡检' : '无草稿'}
             </span>
           )}
@@ -314,7 +314,7 @@ function ScenarioRow({
           <Link
             to='/scenarios/$scenarioId'
             params={{ scenarioId: item.scenarioId }}
-            className='inline-flex items-center text-xs text-link hover:underline font-medium gap-0.5'
+            className='inline-flex items-center text-caption text-link hover:underline font-medium gap-0.5'
           >
             下钻 <ArrowRight className='size-3' />
           </Link>
@@ -331,7 +331,7 @@ function ScenarioRow({
               </div>
               <ul className='space-y-1'>
                 {item.topFindings!.map((f, idx) => (
-                  <li key={`${item.scenarioId}-f-${idx}`} className='text-xs flex items-center gap-2'>
+                  <li key={`${item.scenarioId}-f-${idx}`} className='text-caption flex items-center gap-2'>
                     <Badge variant={f.severity === 'error' ? 'destructive' : 'outline'} className='text-2xs px-1.5 py-0'>
                       {f.code}
                     </Badge>

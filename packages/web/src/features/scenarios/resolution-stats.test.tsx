@@ -90,7 +90,7 @@ describe('ScenarioResolutionStats', () => {
     )
 
     // 检查卡片标题与聚合徽标
-    await expect.element(getByText('元素定位稳定性（规则命中率）')).toBeInTheDocument()
+    await expect.element(getByText('步骤定位明细')).toBeInTheDocument()
     await expect.element(getByText('1 步发生规则衰减')).toBeInTheDocument()
     await expect.element(getByText('1 步定位失败')).toBeInTheDocument()
 

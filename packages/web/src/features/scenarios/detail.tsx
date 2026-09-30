@@ -48,6 +48,7 @@ import {
   Copy,
   Crosshair,
   Layers,
+  LayoutGrid,
   ListOrdered,
   Monitor,
   Plus,
@@ -2739,6 +2740,8 @@ export function ScenarioDetailPage() {
                       onInsertModuleOpen={() => setInsertModuleOpen(true)}
                       onExtractOpen={() => setExtractOpen(true)}
                       onReplaceOpen={() => setReplaceOpen(true)}
+                      viewPreset={viewPreset}
+                      onPresetChange={setViewPreset}
                     />
                   }
                   center={
@@ -2767,8 +2770,68 @@ export function ScenarioDetailPage() {
                 />
               )}
             <div className='hidden lg:flex h-7 shrink-0 items-center justify-between border-t border-border-divider bg-surface-header px-4 text-label text-muted-foreground'>
-              <span>快捷键：Alt + ↑ / Alt + ↓ 调整步骤顺序</span>
-              <span>草稿 r{draft.baseline?.revision ?? scenario?.draft?.revision ?? 1} · {draft.dirty ? '有未保存修改' : '与服务端一致'}</span>
+              <div className='flex items-center gap-3'>
+                <span>快捷键：Alt + ↑ / Alt + ↓ 调整步骤顺序</span>
+                {viewPreset === 'pipeline' && (
+                  <button
+                    type='button'
+                    data-testid='footer-restore-stage-button'
+                    onClick={() => setViewPreset('balanced')}
+                    className='inline-flex items-center gap-1 text-primary hover:underline font-medium cursor-pointer'
+                    title='受管画面已收起，点击恢复均衡视图'
+                  >
+                    <LayoutGrid className='size-3' />
+                    <span>恢复受管画面</span>
+                  </button>
+                )}
+              </div>
+              <div className='flex items-center gap-4'>
+                <div className='flex items-center gap-1 rounded border border-border-divider bg-card px-1 py-0.5 text-caption'>
+                  <button
+                    type='button'
+                    aria-label='均衡视图'
+                    title='均衡视图（左管线 + 中舞台 + 右属性）'
+                    onClick={() => setViewPreset('balanced')}
+                    className={cn(
+                      'px-1.5 py-0.5 rounded transition-colors cursor-pointer',
+                      viewPreset === 'balanced'
+                        ? 'bg-primary/10 text-primary font-medium'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    均衡
+                  </button>
+                  <button
+                    type='button'
+                    aria-label='舞台聚焦'
+                    title='舞台聚焦模式（放大受管画面）'
+                    onClick={() => setViewPreset('stage')}
+                    className={cn(
+                      'px-1.5 py-0.5 rounded transition-colors cursor-pointer',
+                      viewPreset === 'stage'
+                        ? 'bg-primary/10 text-primary font-medium'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    舞台聚焦
+                  </button>
+                  <button
+                    type='button'
+                    aria-label='编排聚焦'
+                    title='编排聚焦模式（隐藏画面，全宽编排）'
+                    onClick={() => setViewPreset('pipeline')}
+                    className={cn(
+                      'px-1.5 py-0.5 rounded transition-colors cursor-pointer',
+                      viewPreset === 'pipeline'
+                        ? 'bg-primary/10 text-primary font-medium'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    编排聚焦
+                  </button>
+                </div>
+                <span>草稿 r{draft.baseline?.revision ?? scenario?.draft?.revision ?? 1} · {draft.dirty ? '有未保存修改' : '与服务端一致'}</span>
+              </div>
             </div>
             </div>
             </ResolutionSourceProvider>

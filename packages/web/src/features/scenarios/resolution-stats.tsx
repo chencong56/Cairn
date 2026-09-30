@@ -232,7 +232,7 @@ export function ScenarioResolutionStats({
           ) : (
             <ChevronDown className='size-4 text-muted-foreground' />
           )}
-          <span>元素定位稳定性（规则命中率）</span>
+          <span>步骤定位明细</span>
         </button>
         <div className='flex items-center gap-1 text-2xs'>
           {stepsWithAi > 0 && (
@@ -245,9 +245,9 @@ export function ScenarioResolutionStats({
               {stepsWithFailures} 步定位失败
             </span>
           )}
-          {stepsWithAi === 0 && stepsWithFailures === 0 && (
-            <span className='px-1.5 py-0.5 rounded bg-status-success-background text-status-success-foreground font-medium'>
-              全部规则 100% 命中
+          {stepsWithAi === 0 && stepsWithFailures === 0 && activeSteps.length > 0 && (
+            <span className='px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground font-medium'>
+              共 {activeSteps.length} 步
             </span>
           )}
         </div>
@@ -255,10 +255,6 @@ export function ScenarioResolutionStats({
 
       {!collapsed && (
         <>
-          <p className='text-label text-muted-foreground leading-normal'>
-            统计历史运行中各步骤定位目标元素的健康度。规则命中率 100% 表示满分稳定（全部规则直接命中）；一旦发生衰减扣减（如 90%、80%），说明部分运行依赖了 AI 视觉自愈兜底，建议更新对应步骤的选择器。
-          </p>
-
           {activeSteps.length > 0 ? (
             <ul className='space-y-1.5 pt-1'>
               {activeSteps.map(renderStepItem)}

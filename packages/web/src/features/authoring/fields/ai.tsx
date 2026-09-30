@@ -16,10 +16,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import { Plus, Trash2 } from 'lucide-react'
 import { FieldHelp } from '@/components/ui/field-help'
 import { fieldElementId, type BindingOption } from '../document'
+import { ContextMentionInput } from '@/features/scenarios/components/context-mention-input'
 import { BindingFields } from './binding'
 
 const TYPE_LABELS: Record<OutputFieldType, string> = {
@@ -60,10 +60,10 @@ export function AiStepFields({
             <SelectTrigger className='w-full' aria-label='视觉操作动作类型'><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value='intent'>业务意图</SelectItem><SelectItem value='tap'>点击目标</SelectItem><SelectItem value='input'>输入文字</SelectItem><SelectItem value='keyboard'>按键</SelectItem><SelectItem value='scroll'>相对滚动</SelectItem></SelectContent>
           </Select>
-          {'operation' in step.input ? <AtomicActionFields step={step} disabled={disabled} bindings={bindings} shapes={shapes} onChange={onChange} /> : <InstructionFields step={step} disabled={disabled} onChange={onChange} />}
+          {'operation' in step.input ? <AtomicActionFields step={step} disabled={disabled} bindings={bindings} shapes={shapes} onChange={onChange} /> : <InstructionFields step={step} disabled={disabled} bindings={bindings} onChange={onChange} />}
         </div>
       ) : (
-        <InstructionFields step={step} disabled={disabled} onChange={onChange} />
+        <InstructionFields step={step} disabled={disabled} bindings={bindings} onChange={onChange} />
       )}
       <ContextBindingsField
         stepId={step.id}
@@ -185,35 +185,92 @@ function AtomicActionFields({ step, disabled, bindings, shapes, onChange }: { st
   const input = step.input
   if (!('operation' in input)) return null
   const update = (patch: Record<string, unknown>) => onChange({ ...step, input: { ...input, ...patch } } as Step)
-  return <div className='space-y-3'>
-    <div className='space-y-2'>
-      <div className='flex items-center gap-1.5'>
-        <Label htmlFor={`atom-target-${step.id}`}>目标描述{input.operation === 'keyboard' || input.operation === 'scroll' ? '（可选）' : ''}</Label>
-        <FieldHelp label='目标描述'>
-          {input.operation === 'keyboard'
-            ? '不填写目标时，在当前焦点上发送按键。'
-            : '描述要操作的页面元素，供视觉模型识别定位。每次执行一个明确动作；属于页面变更操作，不会自动盲目重试。'}
-        </FieldHelp>
+  return (
+    <div className='space-y-3'>
+      <div className='space-y-2'>
+        <div className='flex items-center gap-1.5'>
+          <Label htmlFor={`atom-target-${step.id}`}>目标描述{input.operation === 'keyboard' || input.operation === 'scroll' ? '（可选）' : ''}</Label>
+          <FieldHelp label='目标描述'>
+            {input.operation === 'keyboard'
+              ? '不填写目标时，在当前焦点上发送按键。'
+              : '描述要操作的页面元素，供视觉模型识别定位。每次执行一个明确动作；属于页面变更操作，不会自动盲目重试。'}
+          </FieldHelp>
+        </div>
+        <ContextMentionInput
+          id={`atom-target-${step.id}`}
+          aria-label='目标描述'
+          value={input.targetDescription ?? ''}
+          disabled={disabled}
+          multiline
+          mode='template'
+          bindings={bindings}
+          placeholder='描述要操作的页面元素，供视觉模型识别定位，可输入 @ 或 {{ 插入变量'
+          className='min-h-[60px] font-normal border-control focus:border-primary shadow-control-focus'
+          onChange={(val) => update({ targetDescription: val || undefined })}
+        />
       </div>
-      <Textarea id={`atom-target-${step.id}`} value={input.targetDescription ?? ''} disabled={disabled} onChange={(e) => update({ targetDescription: e.target.value || undefined })} />
+      {input.operation === 'input' && <>
+        <Label>输入模式</Label><Select value={input.mode} disabled={disabled} onValueChange={(mode) => onChange({ ...step, input: mode === 'clear' ? { operation: 'input', mode, targetDescription: input.targetDescription } : { ...input, mode: mode as 'replace' | 'type_only', ...(input.from ? {} : { value: input.value ?? '' }) } })}>
+          <SelectTrigger className='w-full' aria-label='输入模式'><SelectValue /></SelectTrigger><SelectContent><SelectItem value='replace'>替换内容</SelectItem><SelectItem value='type_only'>仅输入（保留原内容）</SelectItem><SelectItem value='clear'>清空</SelectItem></SelectContent>
+        </Select>
+        {input.mode !== 'clear' && <BindingFields id={step.id} from={input.from ?? ''} fromField={input.fromField} value={input.value ?? ''} bindings={bindings} shape={shapes.get(input.from ?? '')} disabled={disabled} onBinding={(from, value, fromField) => {
+          const { value: _v, from: _f, fromField: _ff, ...base } = input
+          onChange({ ...step, input: { ...base, ...(from ? { from, fromField } : { value }) } })
+        }} />}
+        {input.mode !== 'clear' && !input.from && !input.value && <p role='alert' className='text-label text-destructive'>输入不能为空；如需删除内容，请选择清空。</p>}
+      </>}
+      {input.operation === 'keyboard' && <div className='space-y-2'><Label htmlFor={`atom-key-${step.id}`}>按键组合</Label><Input id={`atom-key-${step.id}`} disabled={disabled} value={input.key} placeholder='Control+a / Enter' onChange={(e) => update({ key: e.target.value })} /></div>}
+      {input.operation === 'scroll' && <div className='grid gap-3 sm:grid-cols-2'><div className='space-y-2'><Label>滚动方向</Label><Select disabled={disabled} value={input.direction} onValueChange={(direction) => update({ direction })}><SelectTrigger aria-label='滚动方向'><SelectValue /></SelectTrigger><SelectContent>{([['up', '向上'], ['down', '向下'], ['left', '向左'], ['right', '向右']] as const).map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}</SelectContent></Select></div><div className='space-y-2'><Label htmlFor={`atom-distance-${step.id}`}>距离（CSS 像素）</Label><Input id={`atom-distance-${step.id}`} type='number' min={1} max={10000} value={input.distance} disabled={disabled} onChange={(e) => update({ distance: Number(e.target.value) })} /></div></div>}
     </div>
-    {input.operation === 'input' && <>
-      <Label>输入模式</Label><Select value={input.mode} disabled={disabled} onValueChange={(mode) => onChange({ ...step, input: mode === 'clear' ? { operation: 'input', mode, targetDescription: input.targetDescription } : { ...input, mode: mode as 'replace' | 'type_only', ...(input.from ? {} : { value: input.value ?? '' }) } })}>
-        <SelectTrigger className='w-full' aria-label='输入模式'><SelectValue /></SelectTrigger><SelectContent><SelectItem value='replace'>替换内容</SelectItem><SelectItem value='type_only'>仅输入（保留原内容）</SelectItem><SelectItem value='clear'>清空</SelectItem></SelectContent>
-      </Select>
-      {input.mode !== 'clear' && <BindingFields id={step.id} from={input.from ?? ''} fromField={input.fromField} value={input.value ?? ''} bindings={bindings} shape={shapes.get(input.from ?? '')} disabled={disabled} onBinding={(from, value, fromField) => {
-        const { value: _v, from: _f, fromField: _ff, ...base } = input
-        onChange({ ...step, input: { ...base, ...(from ? { from, fromField } : { value }) } })
-      }} />}
-      {input.mode !== 'clear' && !input.from && !input.value && <p role='alert' className='text-label text-destructive'>输入不能为空；如需删除内容，请选择清空。</p>}
-    </>}
-    {input.operation === 'keyboard' && <div className='space-y-2'><Label htmlFor={`atom-key-${step.id}`}>按键组合</Label><Input id={`atom-key-${step.id}`} disabled={disabled} value={input.key} placeholder='Control+a / Enter' onChange={(e) => update({ key: e.target.value })} /></div>}
-    {input.operation === 'scroll' && <div className='grid gap-3 sm:grid-cols-2'><div className='space-y-2'><Label>滚动方向</Label><Select disabled={disabled} value={input.direction} onValueChange={(direction) => update({ direction })}><SelectTrigger aria-label='滚动方向'><SelectValue /></SelectTrigger><SelectContent>{([['up', '向上'], ['down', '向下'], ['left', '向左'], ['right', '向右']] as const).map(([key, label]) => <SelectItem key={key} value={key}>{label}</SelectItem>)}</SelectContent></Select></div><div className='space-y-2'><Label htmlFor={`atom-distance-${step.id}`}>距离（CSS 像素）</Label><Input id={`atom-distance-${step.id}`} type='number' min={1} max={10000} value={input.distance} disabled={disabled} onChange={(e) => update({ distance: Number(e.target.value) })} /></div></div>}
-  </div>
+  )
 }
 
-function InstructionFields({ step, disabled, onChange }: { step: Extract<Step, { type: 'ai_action' | 'ai_extract' | 'ai_assert' }>; disabled?: boolean; onChange: (step: Step) => void }) {
+function InstructionFields({
+  step,
+  disabled,
+  bindings = [],
+  onChange,
+}: {
+  step: Extract<Step, { type: 'ai_action' | 'ai_extract' | 'ai_assert' }>
+  disabled?: boolean
+  bindings?: BindingOption[]
+  onChange: (step: Step) => void
+}) {
   if (!('instruction' in step.input)) return null
+
+  const handleSelectBinding = (b: BindingOption, nextInstruction?: string) => {
+    const existing = (step.contextBindings ?? []).some(
+      (cb) => cb.path === b.key || cb.name === b.key,
+    )
+    const cleanName = b.key.replace(/[^A-Za-z0-9_]/g, '_')
+    const validName = /^[A-Za-z]/.test(cleanName)
+      ? cleanName.slice(0, 64)
+      : `param_${cleanName}`.slice(0, 64)
+    const isInput = b.label.startsWith('输入') || b.key.startsWith('input.')
+    const source = isInput ? `input.${b.key.replace(/^input\./, '')}` : `steps.${b.key}`
+    const newBinding: ContextBinding = {
+      name: validName,
+      source,
+      path: b.key,
+      required: true,
+    }
+    const nextContextBindings =
+      existing || (step.contextBindings?.length ?? 0) >= 16
+        ? step.contextBindings
+        : [...(step.contextBindings ?? []), newBinding]
+
+    const nextInput = {
+      ...step.input,
+      instruction: nextInstruction ?? ('instruction' in step.input ? step.input.instruction : ''),
+    }
+
+    onChange({
+      ...step,
+      ...(nextContextBindings ? { contextBindings: nextContextBindings } : {}),
+      input: nextInput,
+    } as Step)
+  }
+
   return (
     <div className='space-y-3'>
       <div className='space-y-2'>
@@ -228,19 +285,24 @@ function InstructionFields({ step, disabled, onChange }: { step: Extract<Step, {
           </FieldHelp>
           <span className='text-destructive font-semibold' aria-hidden='true'>*</span>
         </div>
-        <Textarea
+        <ContextMentionInput
           id={fieldElementId(step.id, ['input', 'instruction'])}
           aria-label='业务指令'
           value={step.input.instruction}
           disabled={disabled}
-          onChange={(event) => {
-            const instruction = event.target.value
+          multiline
+          mode='template'
+          bindings={bindings}
+          placeholder='例如：查看页面并点击审批通过按钮，可输入 @ 或 {{ 插入变量'
+          className='min-h-[80px] font-normal border-control focus:border-primary shadow-control-focus'
+          onChange={(instruction) => {
             if (step.type === 'ai_extract') {
               onChange({ ...step, input: { ...step.input, instruction } })
               return
             }
             onChange({ ...step, input: { instruction } })
           }}
+          onSelectBinding={handleSelectBinding}
         />
       </div>
       {step.type === 'ai_extract' ? (

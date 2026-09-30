@@ -11,10 +11,12 @@ import {
   Link2,
   ListOrdered,
   Loader2,
+  Monitor,
   Plus,
   Sparkles,
   Split,
 } from 'lucide-react'
+import type { StudioViewPreset } from './studio-splitter-layout'
 import {
   authoringHasControlBlocks,
   formatExpressionReadable,
@@ -112,6 +114,8 @@ export interface StepPipelineRailProps {
   onInsertModuleOpen?: () => void
   onExtractOpen?: () => void
   onReplaceOpen?: () => void
+  viewPreset?: StudioViewPreset
+  onPresetChange?: (preset: StudioViewPreset) => void
   className?: string
 }
 
@@ -154,6 +158,8 @@ export function StepPipelineRail({
   onInsertModuleOpen,
   onExtractOpen,
   onReplaceOpen,
+  viewPreset,
+  onPresetChange,
   className,
 }: StepPipelineRailProps) {
   const stepListRef = useRef<HTMLOListElement>(null)
@@ -524,7 +530,7 @@ export function StepPipelineRail({
       </div>
 
       {/* 视图切换与步骤定位次级栏 */}
-      {(onToggleFlowgram || onLocateStep || (locatorHealth && onOpenHealthInspector)) && (
+      {(onToggleFlowgram || onLocateStep || (locatorHealth && onOpenHealthInspector) || (viewPreset === 'pipeline' && onPresetChange)) && (
         <div className='flex flex-wrap items-center justify-between gap-1.5 border-b border-border-divider px-3 py-1.5 shrink-0 bg-surface-header'>
           <div className='flex items-center gap-1.5'>
             {onToggleFlowgram && (
@@ -554,6 +560,20 @@ export function StepPipelineRail({
               </div>
             )}
 
+            {/* 编排聚焦模式下的恢复画面快捷按钮 */}
+            {viewPreset === 'pipeline' && onPresetChange && (
+              <button
+                type='button'
+                data-testid='restore-stage-button'
+                onClick={() => onPresetChange('balanced')}
+                className='inline-flex items-center gap-1 px-2 py-0.5 rounded text-caption font-medium border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer shrink-0'
+                title='受管画面已收起，点击恢复均衡视图'
+              >
+                <Monitor className='size-3 shrink-0' />
+                <span>恢复画面</span>
+              </button>
+            )}
+
             {/* 步骤流水线健康胶囊（冷启动显示未评测中性胶囊，有衰减/自愈时高亮，点击唤起体检） */}
             {locatorHealth && onOpenHealthInspector && (() => {
               const hasTested =
@@ -569,7 +589,7 @@ export function StepPipelineRail({
                     data-testid='pipeline-health-pill'
                     onClick={onOpenHealthInspector}
                     className={cn(
-                      'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-caption font-medium border transition-colors cursor-pointer shrink-0',
+                      'inline-flex items-center gap-1 h-6 px-2 rounded-full text-2xs font-mono font-medium border transition-colors cursor-pointer shrink-0',
                       isHealthView
                         ? 'border-primary/50 bg-primary/15 text-primary shadow-2xs'
                         : 'border-border-default/60 bg-surface-subtle/50 text-muted-foreground/80 hover:text-foreground hover:bg-surface-subtle',
@@ -588,7 +608,7 @@ export function StepPipelineRail({
                   data-testid='pipeline-health-pill'
                   onClick={onOpenHealthInspector}
                   className={cn(
-                    'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-caption font-medium border transition-colors cursor-pointer shrink-0',
+                    'inline-flex items-center gap-1 h-6 px-2 rounded-full text-2xs font-mono font-medium border transition-colors cursor-pointer shrink-0',
                     isHealthView
                       ? 'border-primary/50 bg-primary/15 text-primary shadow-2xs'
                       : locatorHealth.candidateCount > 0 || locatorHealth.warningCount > 0

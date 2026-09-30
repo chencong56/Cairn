@@ -600,10 +600,9 @@ describe('StepPipelineRail', () => {
     await expect.element(screen2.getByText('挂起')).toBeInTheDocument()
   })
 
-  it('PipelineHealthPill：零样本冷启动展示未评测，有自愈/衰减时高亮且点击触发 onOpenHealthInspector', async () => {
+  it('PipelineHealthPill：零样本冷启动展示未评测，点击触发 onOpenHealthInspector', async () => {
     const onOpenHealthInspector = vi.fn()
 
-    // 1. 冷启动零样本：展示未评测中性胶囊，且可点击唤起
     const screenCold = await render(
       <div className='h-[600px] w-[320px] flex flex-col'>
         <StepPipelineRail
@@ -637,9 +636,11 @@ describe('StepPipelineRail', () => {
     await expect.element(coldPill).toHaveTextContent('未评测')
     await coldPill.click()
     expect(onOpenHealthInspector).toHaveBeenCalledTimes(1)
-    screenCold.unmount()
+  })
 
-    // 2. 有自愈候选：展示可自愈并点击唤起
+  it('PipelineHealthPill：有自愈候选时高亮展示并点击唤起体检', async () => {
+    const onOpenHealthInspector = vi.fn()
+
     const screenHeal = await render(
       <div className='h-[600px] w-[320px] flex flex-col'>
         <StepPipelineRail
@@ -674,7 +675,32 @@ describe('StepPipelineRail', () => {
     await expect.element(pill).toBeInTheDocument()
     await expect.element(pill).toHaveTextContent('2 步可自愈')
     await pill.click()
-    expect(onOpenHealthInspector).toHaveBeenCalledTimes(2)
+    expect(onOpenHealthInspector).toHaveBeenCalledTimes(1)
+  })
+
+  it('在编排聚焦 (pipeline) 模式下展示恢复画面按钮，点击后恢复为均衡模式', async () => {
+    const onPresetChange = vi.fn()
+    const screen = await render(
+      <div className='h-[600px] w-[320px] flex flex-col'>
+        <StepPipelineRail
+          document={sampleDoc}
+          selectedId={null}
+          canWrite={true}
+          disabled={false}
+          viewPreset='pipeline'
+          onPresetChange={onPresetChange}
+          editableTypes={['navigate', 'click']}
+          onSelect={vi.fn()}
+          onAddStep={vi.fn()}
+        />
+      </div>,
+    )
+
+    const restoreBtn = screen.getByTestId('restore-stage-button')
+    await expect.element(restoreBtn).toBeInTheDocument()
+    await expect.element(restoreBtn).toHaveTextContent('恢复画面')
+    await restoreBtn.click()
+    expect(onPresetChange).toHaveBeenCalledWith('balanced')
   })
 })
 

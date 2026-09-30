@@ -65,8 +65,7 @@ describe('ScenarioHealthInspector - 场景定位健康与自愈工作区', () =>
       </QueryClientProvider>,
     )
 
-    await expect.element(screen.getByText('全部规则 100% 稳定')).toBeInTheDocument()
-    await expect.element(screen.getByText('100% 稳定', { exact: true })).toBeInTheDocument()
+    await expect.element(screen.getByText('全部规则定位稳定')).toBeInTheDocument()
 
     const returnBtn = screen.getByTestId('health-inspector-return-step-btn')
     await expect.element(returnBtn).toBeInTheDocument()

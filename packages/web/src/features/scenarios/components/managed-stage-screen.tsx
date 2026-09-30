@@ -1,4 +1,4 @@
-import { Monitor, Maximize2, LayoutGrid } from 'lucide-react'
+import { Monitor, Maximize2, LayoutGrid, ListOrdered } from 'lucide-react'
 import { StudioScreen, type StudioScreenProps } from '../studio-screen'
 import type { StudioViewPreset } from './studio-splitter-layout'
 import { cn } from '@/lib/utils'
@@ -36,7 +36,7 @@ export function ManagedStageScreen({
               aria-label='均衡视图'
               onClick={() => onPresetChange('balanced')}
               className={cn(
-                'flex items-center gap-1 px-2 py-0.5 rounded text-caption font-medium transition-colors',
+                'flex items-center gap-1 px-2 py-0.5 rounded text-caption font-medium transition-colors cursor-pointer',
                 preset === 'balanced'
                   ? 'bg-card text-foreground shadow-xs'
                   : 'text-muted-foreground hover:text-foreground',
@@ -51,7 +51,7 @@ export function ManagedStageScreen({
               aria-label='舞台对焦模式'
               onClick={() => onPresetChange('stage')}
               className={cn(
-                'flex items-center gap-1 px-2 py-0.5 rounded text-caption font-medium transition-colors',
+                'flex items-center gap-1 px-2 py-0.5 rounded text-caption font-medium transition-colors cursor-pointer',
                 preset === 'stage'
                   ? 'bg-card text-foreground shadow-xs'
                   : 'text-muted-foreground hover:text-foreground',
@@ -59,6 +59,21 @@ export function ManagedStageScreen({
             >
               <Maximize2 className='size-3' />
               <span>舞台聚焦</span>
+            </button>
+            <button
+              type='button'
+              title='编排对焦模式（专注流程与属性，隐藏受管画面）'
+              aria-label='编排对焦模式'
+              onClick={() => onPresetChange('pipeline')}
+              className={cn(
+                'flex items-center gap-1 px-2 py-0.5 rounded text-caption font-medium transition-colors cursor-pointer',
+                preset === 'pipeline'
+                  ? 'bg-card text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <ListOrdered className='size-3' />
+              <span>编排聚焦</span>
             </button>
           </div>
         )}

@@ -52,5 +52,143 @@
       "kind": "motion",
       "value": "h-full rounded-full transition-all"
     }
+  ],
+  "features/runs/run-video-player.tsx": [
+    {
+      "kind": "color",
+      "value": "bg-emerald-300"
+    },
+    {
+      "kind": "color",
+      "value": "bg-red-300 ring-1 ring-white/50"
+    },
+    {
+      "kind": "color",
+      "value": "bg-sky-200 animate-pulse"
+    },
+    {
+      "kind": "motion",
+      "value": "group inline-flex shrink-0 items-center gap-1.5 h-7 px-2.5 rounded-full text-small transition-all select-none whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary/40 "
+    }
+  ],
+  "features/scenarios/acceptance/acceptance-workbench.tsx": [
+    {
+      "kind": "font",
+      "value": "gap-1.5 h-8 text-xs"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "flex items-center gap-1 text-xs text-status-warning-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-status-warning-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "h-8 text-xs"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-status-warning-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "flex flex-col items-center justify-center py-12 text-sm text-muted-foreground gap-2"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground pl-1"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs"
+    },
+    {
+      "kind": "font",
+      "value": "flex flex-col items-center justify-center py-12 text-sm text-muted-foreground gap-2"
+    },
+    {
+      "kind": "font",
+      "value": "py-12 text-center text-muted-foreground text-sm space-y-2"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs max-w-sm mx-auto"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground shrink-0"
+    },
+    {
+      "kind": "font",
+      "value": "flex items-center justify-between text-xs text-muted-foreground"
+    },
+    {
+      "kind": "font",
+      "value": "rounded bg-surface-base border border-border-default px-2.5 py-1.5 text-xs text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs font-medium text-muted-foreground flex items-center gap-1"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground pl-1 italic"
+    },
+    {
+      "kind": "font",
+      "value": "rounded-md border border-border-default bg-surface-base p-2.5 space-y-2 text-xs"
+    },
+    {
+      "kind": "font",
+      "value": "font-mono text-xs text-muted-foreground pt-0.5"
+    },
+    {
+      "kind": "font",
+      "value": "text-muted-foreground text-xs leading-relaxed"
+    },
+    {
+      "kind": "font",
+      "value": "text-status-warning-foreground text-xs"
+    },
+    {
+      "kind": "font",
+      "value": "h-7 text-xs px-2.5"
+    },
+    {
+      "kind": "font",
+      "value": "text-xs text-muted-foreground"
+    }
+  ],
+  "features/scenarios/components/inspector/scenario-config-workspace.tsx": [
+    {
+      "kind": "font",
+      "value": "h-7 shrink-0 text-xs"
+    }
+  ],
+  "features/suites/components/member-node.tsx": [
+    {
+      "kind": "motion",
+      "value": "group relative rounded-xl border bg-card p-3 shadow-card transition-all duration-150 space-y-2.5 cursor-pointer"
+    }
+  ],
+  "features/suites/components/stage-card.tsx": [
+    {
+      "kind": "motion",
+      "value": "rounded-xl border p-4 shadow-card space-y-4 transition-all"
+    }
   ]
 }

@@ -17,7 +17,7 @@ export interface ContextMentionInputProps {
   bindings: BindingOption[]
   mode?: 'template' | 'binding_picker'
   onChange: (value: string) => void
-  onSelectBinding?: (binding: BindingOption) => void
+  onSelectBinding?: (binding: BindingOption, nextValue?: string) => void
 }
 
 export function ContextMentionInput({
@@ -88,7 +88,12 @@ export function ContextMentionInput({
     // template mode: insert at cursor
     const el = inputRef.current
     if (!el) {
-      onChange(`${value}{{${rawBinding.key}}}`)
+      const nextVal = `${value}{{${rawBinding.key}}}`
+      if (onSelectBinding) {
+        onSelectBinding(rawBinding, nextVal)
+      } else {
+        onChange(nextVal)
+      }
       setIsOpen(false)
       return
     }
@@ -108,7 +113,11 @@ export function ContextMentionInput({
 
     const inserted = `{{${rawBinding.key}}}`
     const nextVal = `${prefix}${inserted}${textAfter}`
-    onChange(nextVal)
+    if (onSelectBinding) {
+      onSelectBinding(rawBinding, nextVal)
+    } else {
+      onChange(nextVal)
+    }
     setIsOpen(false)
 
     // 重新聚焦并将光标移到插入标记之后
