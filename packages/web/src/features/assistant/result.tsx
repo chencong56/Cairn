@@ -35,6 +35,7 @@ import { RUN_STATUS_LABELS, STEP_RUN_STATUS_LABELS } from '@/features/scenarios/
 import { RUN_OUTCOME_STATUS_LABELS } from '@/features/runs/outcome-labels'
 import { AssistantFactItem } from './components/assistant-fact-badge'
 import { citationDisplayLabel } from './citation-label'
+import { AssistantMarkdown } from './components/assistant-markdown'
 
 const FIELD_LABELS: Record<string, string> = {
   input: '步骤输入',
@@ -869,9 +870,9 @@ export function AssistantResultView({
   if (result.kind === 'explanation') {
     return (
       <div className='space-y-2.5 rounded-lg border border-border-default bg-surface-card p-3.5 shadow-2xs'>
-        <p className='text-body text-text-primary leading-relaxed'>{result.summary}</p>
+        <AssistantMarkdown content={result.summary} />
         {result.stepSummary ? (
-          <p className='text-small text-text-secondary'>{result.stepSummary}</p>
+          <AssistantMarkdown content={result.stepSummary} className='text-text-secondary' />
         ) : null}
         {(result.diagnostics?.length ?? 0) > 0 ? (
           <div className='rounded-md border border-border-divider bg-surface-subtle p-2.5 space-y-1.5'>
@@ -1251,7 +1252,7 @@ export function AssistantResultView({
         <div className='flex items-start gap-2.5 text-small text-text-primary leading-relaxed'>
           <Sparkles className='size-4 text-primary-600 shrink-0 mt-0.5' aria-hidden='true' />
           <div className='space-y-2 min-w-0 flex-1'>
-            <p className='font-medium text-text-primary whitespace-pre-wrap'>{result.summary}</p>
+            <AssistantMarkdown content={result.summary} />
             {result.sourceAsOf ? (
               <p className='text-label text-text-muted' data-testid='knowledge-source-as-of'>
                 来源数据查询基准时间：{formatSourceTime(result.sourceAsOf)}
