@@ -4,20 +4,30 @@ import {
   MAX_SUITE_MEMBERS,
   MAX_SUITE_SNAPSHOT_BYTES,
   SUITE_ADMISSION_PROTOCOL,
+  TERMINAL_RUN_STATUSES,
+  TERMINAL_SUITE_RUN_STATUSES,
   aggregateSuiteVerdict,
   allSuiteMembers,
+  cleanupStatusResponseSchema,
   createSuiteRunBodySchema,
+  deletePreviewResponseSchema,
   effectiveSuiteStages,
   interpolateStageVariables,
+  isCleanupFailed,
   mergeSuiteMemberInput,
   resolveSuiteMemberAccountId,
   suiteRunListQuerySchema,
   suiteRunListResponseSchema,
   suiteRunObservationSchema,
+  tallyKnownBytes,
   validateStageDependencies,
+  type CleanupStatusResponse,
   type CreateSuiteRunBody,
+  type DeletePreviewResponse,
+  type DeleteResourceBody,
   type ExecutionActor,
   type JsonValue,
+  type ResourceDeletedBy,
   type RunEvidenceStatus,
   type SuiteDocument,
   type SuiteExecutionMode,
@@ -32,7 +42,7 @@ import {
   type SuiteValidationIssue,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
-import { recordAudit } from '../audit/record.js'
+import { recordAudit, type AuditActor } from '../audit/record.js'
 import { assertTargetPermission, lockConsoleAuthorization, scopedTargetFilter } from '../console/target-authorization.js'
 import { cursorFilter, paginateResults } from '../cursor.js'
 import { newId } from '../id.js'
@@ -42,10 +52,11 @@ import { sha256Hex } from '../runs/digest.js'
 import { badRequest, conflict, DomainError, mapRestriction, notFound } from '../runs/errors.js'
 import { loadResolutionLayers, stepsNeedAiExecute } from '../runs/resolution-layers.js'
 import { loadScenarioVersion } from '../runs/scenarios.js'
-import { resolveRunTargetAccountId, writeRunWithSnapshot } from '../runs/runs.js'
+import { resolveRunTargetAccountId, writeRunWithSnapshot, softDeleteRunTx } from '../runs/runs.js'
 import { requestRunCancel } from '../runs/runs.js'
 import { readAccountSessionCap } from '../sessions/account-session-concurrency.js'
-import { liveTargetExists } from '../lifecycle.js'
+import { assertExpectedCounts, assertResourceIdle, liveTargetExists, pendingWriteBlockers, snapshotDeletedBy } from '../lifecycle.js'
+import { revokeReportTrees } from '../reports/cleanup.js'
 import { validateSuiteDocument } from './validate.js'
 import { lockReportDefaults, resolveReportProfile } from '../reports/profiles.js'
 import { assertReportDeploymentReady } from '../reports/protocol.js'
@@ -114,7 +125,7 @@ async function loadObservationTx(db: Db, suiteRunId: string): Promise<SuiteRunOb
     .innerJoin(scenarioSuites, eq(scenarioSuites.id, suiteRuns.suiteId))
     .where(eq(suiteRuns.id, suiteRunId))
     .limit(1)
-  if (!parent) throw notFound('SUITE_RUN_NOT_FOUND', '集合运行不存在')
+  if (!parent || parent.run.deletedAt) throw notFound('SUITE_RUN_NOT_FOUND', '集合运行不存在')
   const [target] = await db
     .select({ deletedAt: targets.deletedAt })
     .from(targets)
@@ -199,6 +210,7 @@ export async function listSuiteRuns(db: Db, query: Partial<SuiteRunListQuery> = 
     await scopedTargetFilter(db, actorId, suiteRuns.targetId, 'suite:read'),
     await scopedTargetFilter(db, actorId, suiteRuns.targetId, 'run:read'),
     liveTargetExists(db, suiteRuns.targetId),
+    isNull(suiteRuns.deletedAt),
     parsed.targetId ? eq(suiteRuns.targetId, parsed.targetId) : undefined,
     parsed.suiteId ? eq(suiteRuns.suiteId, parsed.suiteId) : undefined,
     parsed.status ? eq(suiteRuns.status, parsed.status) : undefined,
@@ -362,6 +374,9 @@ export async function createSuiteRun(db: Db, body: CreateSuiteRunBody, actor: Ex
     const [existing] = await tx.select().from(suiteRuns)
       .where(and(eq(suiteRuns.createdByConsoleAccountId, actor.id), eq(suiteRuns.idempotencyKey, input.idempotencyKey))).limit(1)
     if (existing) {
+      if (existing.deletedAt) {
+        throw conflict('IDEMPOTENCY_KEY_CONSUMED', '该幂等键对应的场景集运行已被删除，请更换幂等键')
+      }
       await assertTargetPermission(tx, actor.id, existing.targetId, 'run:execute')
       if (existing.idempotencyDigest !== digest) throw conflict('SUITE_RUN_IDEMPOTENCY_CONFLICT', '相同幂等键对应不同的集合运行输入')
       return { observation: await getSuiteRunObservation(tx, existing.id), created: false }
@@ -425,6 +440,9 @@ async function createSuiteRunTx(db: Db, input: CreateSuiteRunBody, actor: Execut
         .where(and(eq(suiteRuns.createdByConsoleAccountId, actor.id), eq(suiteRuns.idempotencyKey, input.idempotencyKey)))
         .limit(1)
       if (existing) {
+        if (existing.deletedAt) {
+          throw conflict('IDEMPOTENCY_KEY_CONSUMED', '该幂等键对应的场景集运行已被删除，请更换幂等键')
+        }
         if (existing.idempotencyDigest !== digest) throw conflict('SUITE_RUN_IDEMPOTENCY_CONFLICT', '相同幂等键对应不同的集合运行输入')
         return
       }
@@ -621,7 +639,7 @@ export async function advanceSuiteRun(db: Db, suiteRunId: string): Promise<Suite
 export async function advanceSuiteRunTx(tx: Db, suiteRunId: string): Promise<void> {
   const { suiteRuns, suiteRunItems, runs, targets, scenarios, targetAccounts } = schemaFor(tx)
   const [parent] = await locked(tx, tx.select().from(suiteRuns).where(eq(suiteRuns.id, suiteRunId)))
-  if (!parent) return
+  if (!parent || parent.deletedAt) return
   const now = new Date()
   const rows = await tx
     .select({ item: suiteRunItems, child: runs })
@@ -916,7 +934,7 @@ export async function rerunSuiteItem(
     await lockConsoleAuthorization(tx, actor.id)
     const { suiteRuns, suiteRunItems, runs } = schemaFor(tx)
     const [parent] = await locked(tx, tx.select().from(suiteRuns).where(eq(suiteRuns.id, input.suiteRunId)))
-    if (!parent) throw notFound('SUITE_RUN_NOT_FOUND', '场景集运行不存在')
+    if (!parent || parent.deletedAt) throw notFound('SUITE_RUN_NOT_FOUND', '场景集运行不存在')
     await assertTargetPermission(tx, actor.id, parent.targetId, 'run:execute')
 
     const [item] = await tx
@@ -1027,7 +1045,7 @@ export async function cancelSuiteRun(db: Db, suiteRunId: string, actor: Executio
   await atomic(db, async (tx) => {
     const { suiteRuns } = schemaFor(tx)
     const [parent] = await locked(tx, tx.select().from(suiteRuns).where(eq(suiteRuns.id, suiteRunId)))
-    if (!parent) throw notFound('SUITE_RUN_NOT_FOUND', '集合运行不存在')
+    if (!parent || parent.deletedAt) throw notFound('SUITE_RUN_NOT_FOUND', '集合运行不存在')
     await assertTargetPermission(tx, actor.id, parent.targetId, 'run:cancel')
     if (!OPEN_SUITE_STATUSES.includes(parent.status)) return
     const now = new Date()
@@ -1046,7 +1064,12 @@ export async function advanceDueSuiteRuns(db: Db, limit = 16): Promise<number> {
   const due = await db
     .select({ id: suiteRuns.id })
     .from(suiteRuns)
-    .where(or(inArray(suiteRuns.status, OPEN_SUITE_STATUSES), eq(suiteRuns.evidenceStatus, 'PENDING')))
+    .where(
+      and(
+        or(inArray(suiteRuns.status, OPEN_SUITE_STATUSES), eq(suiteRuns.evidenceStatus, 'PENDING')),
+        isNull(suiteRuns.deletedAt),
+      ),
+    )
     .orderBy(asc(suiteRuns.updatedAt))
     .limit(limit)
   const settledActive = await db
@@ -1054,7 +1077,13 @@ export async function advanceDueSuiteRuns(db: Db, limit = 16): Promise<number> {
     .from(suiteRunItems)
     .innerJoin(runs, eq(runs.id, suiteRunItems.childRunId))
     .innerJoin(suiteRuns, eq(suiteRuns.id, suiteRunItems.suiteRunId))
-    .where(and(eq(suiteRunItems.admissionStatus, 'ACTIVE'), inArray(runs.status, ['SUCCEEDED', 'FAILED', 'CANCELLED', 'NEEDS_REVIEW', 'WAITING_FOR_AUTH'])))
+    .where(
+      and(
+        eq(suiteRunItems.admissionStatus, 'ACTIVE'),
+        inArray(runs.status, ['SUCCEEDED', 'FAILED', 'CANCELLED', 'NEEDS_REVIEW', 'WAITING_FOR_AUTH']),
+        isNull(suiteRuns.deletedAt),
+      ),
+    )
     .limit(limit)
   const ids = [...new Set([...due.map((row) => row.id), ...settledActive.map((row) => row.id)])]
   let advanced = 0
@@ -1070,10 +1099,16 @@ export async function advanceDueSuiteRuns(db: Db, limit = 16): Promise<number> {
 }
 
 export async function scheduleSuiteAdvanceForChild(db: Db, runId: string) {
-  const { runs } = schemaFor(db)
+  const { runs, suiteRuns } = schemaFor(db)
   const [row] = await db.select({ suiteRunId: runs.suiteRunId }).from(runs).where(eq(runs.id, runId)).limit(1)
   if (!row?.suiteRunId) return
   const suiteRunId = row.suiteRunId
+  const [suiteRow] = await db
+    .select({ id: suiteRuns.id, deletedAt: suiteRuns.deletedAt })
+    .from(suiteRuns)
+    .where(eq(suiteRuns.id, suiteRunId))
+    .limit(1)
+  if (!suiteRow || suiteRow.deletedAt) return
   if (inTransaction(db)) {
     // The durable sweeper will advance after commit. A transaction handle must
     // never escape into an after-commit callback (nor recursively lock the parent).
@@ -1084,4 +1119,324 @@ export async function scheduleSuiteAdvanceForChild(db: Db, runId: string) {
 
 export function emptySuiteDocumentMembers(_document: SuiteDocument) {
   return undefined
+}
+
+export async function collectSuiteRunCascadeRunIds(
+  db: Db,
+  suiteRunId: string,
+): Promise<string[]> {
+  const { runs, suiteRunItems } = schemaFor(db)
+  const fromRuns = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(and(eq(runs.suiteRunId, suiteRunId), isNull(runs.deletedAt)))
+
+  const fromItems = await db
+    .select({
+      childRunId: suiteRunItems.childRunId,
+      originalRunId: suiteRunItems.originalRunId,
+    })
+    .from(suiteRunItems)
+    .where(eq(suiteRunItems.suiteRunId, suiteRunId))
+
+  const set = new Set<string>()
+  for (const r of fromRuns) set.add(r.id)
+  for (const item of fromItems) {
+    if (item.childRunId) set.add(item.childRunId)
+    if (item.originalRunId) set.add(item.originalRunId)
+  }
+
+  if (set.size === 0) return []
+
+  const activeRuns = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(and(inArray(runs.id, Array.from(set)), isNull(runs.deletedAt)))
+
+  return activeRuns.map((r) => r.id)
+}
+
+async function countSuiteRunReports(db: Db, suiteRunId: string, childRunIds: string[]): Promise<number> {
+  const { reports } = schemaFor(db)
+  const rows = await db
+    .select({ id: reports.id })
+    .from(reports)
+    .where(
+      and(
+        or(eq(reports.suiteRunId, suiteRunId), childRunIds.length ? inArray(reports.runId, childRunIds) : undefined),
+        isNull(reports.deletedAt),
+      ),
+    )
+  return rows.length
+}
+
+export async function previewDeleteSuiteRun(
+  db: Db,
+  suiteRunId: string,
+): Promise<DeletePreviewResponse> {
+  const { suiteRuns, runs, runLeases, storedObjects, suiteReportTriggers } = schemaFor(db)
+  const [suiteRun] = await db
+    .select()
+    .from(suiteRuns)
+    .where(and(eq(suiteRuns.id, suiteRunId), isNull(suiteRuns.deletedAt)))
+    .limit(1)
+  if (!suiteRun) throw notFound('SUITE_RUN_NOT_FOUND', '场景集运行不存在')
+
+  const activeBlockers: { id: string; code: string; message: string }[] = []
+  if (!TERMINAL_SUITE_RUN_STATUSES.includes(suiteRun.status as any)) {
+    activeBlockers.push({
+      id: 'suite_run_not_terminal',
+      code: 'RUN_NOT_TERMINAL',
+      message: '仅终态（已完成、失败、已取消）场景集运行允许删除',
+    })
+  }
+
+  const childRunIds = await collectSuiteRunCascadeRunIds(db, suiteRunId)
+  if (childRunIds.length > 0) {
+    const childRuns = await db
+      .select({ id: runs.id, status: runs.status })
+      .from(runs)
+      .where(and(inArray(runs.id, childRunIds), isNull(runs.deletedAt)))
+
+    const nonTerminalChild = childRuns.find(
+      (r) => !TERMINAL_RUN_STATUSES.includes(r.status as any),
+    )
+    if (nonTerminalChild) {
+      activeBlockers.push({
+        id: 'child_run_not_terminal',
+        code: 'RESOURCE_BUSY',
+        message: '场景集下仍有未结束的子运行',
+      })
+    }
+
+    const activeLeases = await db
+      .select({ id: runLeases.id })
+      .from(runLeases)
+      .where(and(inArray(runLeases.runId, childRunIds), eq(runLeases.status, 'ACTIVE')))
+    if (activeLeases.length > 0) {
+      activeBlockers.push({
+        id: 'child_run_lease_active',
+        code: 'RESOURCE_BUSY',
+        message: '场景集子运行仍有关联活跃任务租约',
+      })
+    }
+
+    activeBlockers.push(...(await pendingWriteBlockers(db, childRunIds)))
+  }
+
+  const pendingTriggers = await db
+    .select({ suiteRunId: suiteReportTriggers.suiteRunId })
+    .from(suiteReportTriggers)
+    .where(and(eq(suiteReportTriggers.suiteRunId, suiteRunId), eq(suiteReportTriggers.status, 'pending')))
+  if (pendingTriggers.length > 0) {
+    activeBlockers.push({
+      id: 'suite_report_generating',
+      code: 'RESOURCE_BUSY',
+      message: '场景集报告仍在生成中，请等待生成完成',
+    })
+  }
+
+  const reportCount = await countSuiteRunReports(db, suiteRunId, childRunIds)
+
+  let storedObjectsCount = 0
+  let totalBytes = 0
+  let unknownByteObjects = 0
+  if (childRunIds.length > 0) {
+    const objects = await db
+      .select({ id: storedObjects.id, byteSize: storedObjects.byteSize })
+      .from(storedObjects)
+      .where(and(inArray(storedObjects.runId, childRunIds), isNull(storedObjects.purgedAt)))
+    storedObjectsCount = objects.length
+    totalBytes = objects.reduce((sum, o) => sum + (o.byteSize ?? 0), 0)
+    unknownByteObjects = objects.filter((o) => o.byteSize === null).length
+  }
+
+  return deletePreviewResponseSchema.parse({
+    previewToken: newId(),
+    counts: {
+      suiteRuns: 1,
+      runs: childRunIds.length,
+      reports: reportCount,
+      storedObjects: storedObjectsCount,
+      totalBytes,
+      unknownByteObjects,
+    },
+    blockers: activeBlockers,
+  })
+}
+
+export async function deleteSuiteRun(
+  db: Db,
+  suiteRunId: string,
+  actor: AuditActor,
+  input: DeleteResourceBody = {},
+): Promise<CleanupStatusResponse> {
+  const { suiteRuns, suiteReportTriggers, reports } = schemaFor(db)
+  try {
+    await atomic(db, async (tx) => {
+      const [suiteRun] = await locked(tx, tx.select().from(suiteRuns).where(eq(suiteRuns.id, suiteRunId)))
+      if (!suiteRun) throw notFound('SUITE_RUN_NOT_FOUND', '场景集运行不存在')
+      if (suiteRun.deletedAt) return
+
+      if (!TERMINAL_SUITE_RUN_STATUSES.includes(suiteRun.status as any)) {
+        throw conflict('RUN_NOT_TERMINAL', '仅终态（已完成、失败、已取消）场景集运行允许删除')
+      }
+
+      const childRunIds = await collectSuiteRunCascadeRunIds(tx, suiteRunId)
+      if (childRunIds.length > 0) {
+        const { runs: childRunsTable } = schemaFor(tx)
+        const childRows = await tx
+          .select({ status: childRunsTable.status })
+          .from(childRunsTable)
+          .where(inArray(childRunsTable.id, childRunIds))
+        if (childRows.some((row) => !TERMINAL_RUN_STATUSES.includes(row.status as any))) {
+          throw conflict('RESOURCE_BUSY', '场景集下仍有未结束的子运行')
+        }
+        await assertResourceIdle(tx as unknown as Db, { runIds: childRunIds, checkPendingWrites: true })
+      }
+
+      const [pendingTrigger] = await tx
+        .select({ suiteRunId: suiteReportTriggers.suiteRunId })
+        .from(suiteReportTriggers)
+        .where(and(eq(suiteReportTriggers.suiteRunId, suiteRunId), eq(suiteReportTriggers.status, 'pending')))
+        .limit(1)
+      if (pendingTrigger) {
+        throw conflict('RESOURCE_BUSY', '场景集报告仍在生成中，请等待生成完成')
+      }
+
+      assertExpectedCounts(
+        { suiteRuns: 1, runs: childRunIds.length, reports: await countSuiteRunReports(tx as unknown as Db, suiteRunId, childRunIds) },
+        input.expectedCounts,
+      )
+
+      const now = new Date()
+      const deletedBy = await snapshotDeletedBy(tx as unknown as Db, actor)
+
+      await tx
+        .update(suiteRuns)
+        .set({ deletedAt: now, deletedBy, updatedAt: now })
+        .where(eq(suiteRuns.id, suiteRunId))
+
+      let totalObjects = 0
+      let totalBytes = 0
+      for (const childRunId of childRunIds) {
+        const res = await softDeleteRunTx(tx as unknown as Db, childRunId, now, deletedBy)
+        totalObjects += res.objectCount
+        totalBytes += res.byteSize
+      }
+
+      const suiteReports = await tx
+        .select({ id: reports.id })
+        .from(reports)
+        .where(and(eq(reports.suiteRunId, suiteRunId), isNull(reports.deletedAt)))
+      if (suiteReports.length > 0) {
+        await revokeReportTrees(tx as unknown as Db, suiteReports.map((r) => r.id))
+      }
+
+      await tx.delete(suiteReportTriggers).where(eq(suiteReportTriggers.suiteRunId, suiteRunId))
+
+      await recordAudit(
+        tx as unknown as Db,
+        actor,
+        'suite_run.delete',
+        'suite_run',
+        suiteRunId,
+        `删除场景集运行 ${suiteRunId.slice(0, 8)}：关联子运行 ${childRunIds.length} 个，对象 ${totalObjects} 个、${totalBytes} 字节`,
+      )
+    })
+  } catch (error) {
+    rethrow(error)
+  }
+
+  return getSuiteRunCleanupStatus(db, suiteRunId)
+}
+
+export async function getSuiteRunCleanupStatus(
+  db: Db,
+  suiteRunId: string,
+): Promise<CleanupStatusResponse> {
+  const { suiteRuns, suiteRunItems, runs, storedObjects } = schemaFor(db)
+  const [suiteRun] = await db
+    .select({ id: suiteRuns.id, deletedAt: suiteRuns.deletedAt })
+    .from(suiteRuns)
+    .where(eq(suiteRuns.id, suiteRunId))
+    .limit(1)
+  if (!suiteRun) throw notFound('SUITE_RUN_NOT_FOUND', '场景集运行不存在')
+
+  const fromRuns = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(eq(runs.suiteRunId, suiteRunId))
+
+  const fromItems = await db
+    .select({
+      childRunId: suiteRunItems.childRunId,
+      originalRunId: suiteRunItems.originalRunId,
+    })
+    .from(suiteRunItems)
+    .where(eq(suiteRunItems.suiteRunId, suiteRunId))
+
+  const runIds = new Set<string>()
+  for (const r of fromRuns) runIds.add(r.id)
+  for (const item of fromItems) {
+    if (item.childRunId) runIds.add(item.childRunId)
+    if (item.originalRunId) runIds.add(item.originalRunId)
+  }
+
+  const childRunIds = Array.from(runIds)
+  if (childRunIds.length === 0) {
+    return cleanupStatusResponseSchema.parse({
+      resourceId: suiteRunId,
+      resourceType: 'suite_run',
+      status: 'completed',
+      totalObjects: 0,
+      purgedObjects: 0,
+      failedObjects: 0,
+      totalBytes: 0,
+      purgedBytes: 0,
+      unknownByteObjects: 0,
+    })
+  }
+
+  const objects = await db
+    .select({
+      status: storedObjects.status,
+      byteSize: storedObjects.byteSize,
+      purgeAttempts: storedObjects.purgeAttempts,
+      lastPurgeErrorAt: storedObjects.lastPurgeErrorAt,
+    })
+    .from(storedObjects)
+    .where(inArray(storedObjects.runId, childRunIds))
+
+  const total = objects.length
+  const purged = objects.filter((o) => o.status === 'purged').length
+  const failed = objects.filter((o) => isCleanupFailed(o)).length
+  const byteTally = tallyKnownBytes(objects.map((o) => o.byteSize))
+  const totalBytes = byteTally.knownBytes
+  const purgedBytes = tallyKnownBytes(
+    objects.filter((o) => o.status === 'purged').map((o) => o.byteSize),
+  ).knownBytes
+
+  const status =
+    failed > 0
+      ? 'failed'
+      : total === purged || total === 0
+        ? 'completed'
+        : purged > 0
+          ? 'in_progress'
+          : 'pending'
+
+  return cleanupStatusResponseSchema.parse({
+    resourceId: suiteRunId,
+    resourceType: 'suite_run',
+    status,
+    totalObjects: total,
+    purgedObjects: purged,
+    failedObjects: failed,
+    totalBytes,
+    purgedBytes,
+    lastError: failed > 0 ? '部分对象文件清理失败，请重试' : null,
+    completedAt: status === 'completed' ? new Date().toISOString() : null,
+    unknownByteObjects: byteTally.unknownCount,
+  })
 }

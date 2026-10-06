@@ -31,6 +31,7 @@ import {
   uploadToLocator,
   waitForPopup,
   waitOnPage,
+  watchActionNavigation,
 } from './runtime'
 import { sampleTableOnPage } from './table-observe.js'
 import { candidateTries, errorForOutcome, pickResolvedCandidate } from './resolver'
@@ -159,7 +160,8 @@ export async function executeOnPage(
       return { ok: true, output: { url: page.url() } }
     }
     if (command.type === 'keyboard' && !command.target) {
-      await pressKeys(page, command.keys)
+      const lost = await withActionNavigation(page, () => pressKeys(page, command.keys), KEY_SUBMIT_GRACE_MS)
+      if (lost) return lost
       return { ok: true, output: {} }
     }
 
@@ -392,16 +394,20 @@ export async function executeOnPage(
     }
 
     if (command.type === 'click') {
-      const popup = await waitForPopup(page, () =>
-        clickLocator(locatedLocator, {
-          button: command.button,
-          clickCount: command.clickCount,
-          modifiers: command.modifiers,
-        }),
-      )
+      let popup: Awaited<ReturnType<typeof waitForPopup>> = null
+      const lost = await withActionNavigation(page, async () => {
+        popup = await waitForPopup(page, () =>
+          clickLocator(locatedLocator, {
+            button: command.button,
+            clickCount: command.clickCount,
+            modifiers: command.modifiers,
+          }),
+        )
+      })
+      if (lost) return { ...lost, diagnostics }
       if (popup) {
         // P5：点击可以打开 popup，但不把新窗收成后续步骤的当前 Surface。
-        await popup.waitForLoadState('domcontentloaded').catch(() => undefined)
+        await (popup as import('playwright').Page).waitForLoadState('domcontentloaded').catch(() => undefined)
       }
       return { ok: true, output: {}, diagnostics }
     }
@@ -470,7 +476,12 @@ export async function executeOnPage(
     }
 
     if (command.type === 'keyboard') {
-      await pressKeys(page, command.keys, locatedLocator)
+      const lost = await withActionNavigation(
+        page,
+        () => pressKeys(page, command.keys, locatedLocator),
+        KEY_SUBMIT_GRACE_MS,
+      )
+      if (lost) return { ...lost, diagnostics }
       return { ok: true, output: {}, diagnostics }
     }
 
@@ -890,6 +901,38 @@ function compareNumber(actual: number, op: 'eq' | 'gt' | 'gte' | 'lt' | 'lte', e
   if (op === 'gte') return actual >= expected
   if (op === 'lt') return actual < expected
   return actual <= expected
+}
+
+/** 回车提交表单时导航请求晚于按键返回发出；点击路径已由等弹窗覆盖这段窗口。 */
+const KEY_SUBMIT_GRACE_MS = 300
+
+/**
+ * 点击／按键触发的主框导航失败（如提交后连接被断开）：动作可能已到达目标，结果未确认。
+ * 记为 UNKNOWN，副作用步骤据此进入人工复核且不重试。
+ */
+async function withActionNavigation(
+  page: Page,
+  action: () => Promise<void>,
+  graceMs = 0,
+): Promise<BrowserCommandResult | null> {
+  const navigation = watchActionNavigation(page)
+  try {
+    await action()
+    const failure = await navigation.settle({ graceMs })
+    if (!failure) return null
+    return {
+      ok: false,
+      output: {},
+      error: {
+        code: 'ACTION_NAVIGATION_FAILED',
+        category: 'UNKNOWN',
+        retryable: false,
+        safeMessage: `动作触发的页面跳转失败（${failure}），可能已提交但未收到响应，结果未确认`,
+      },
+    }
+  } finally {
+    navigation.dispose()
+  }
 }
 
 function failOutcome(

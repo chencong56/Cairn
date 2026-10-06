@@ -99,6 +99,7 @@ async function account(label, password = 'lab-password') {
     displayName: username,
     username,
     password,
+    validity: { mode: 'permanent' },
   })
   return api(`${path(created)}/identity`, {
     expectedRevision: created.configRevision,
@@ -253,6 +254,9 @@ try {
         ...config.document.sessionAuth,
         verifyTimeoutMs: 1200,
         loginTimeoutMs: 3000,
+        // 离开登录页与落地整理的预算不得大于自动登录超时。
+        loginLeaveTimeoutMs: 3000,
+        landingSettleBudgetMs: 3000,
         verifyRetryBackoffSeconds: [1],
       },
     },
@@ -436,15 +440,18 @@ try {
     },
   )
 
+  // 账号有在途运行时不允许清除密码（凭据只能在空闲时清除）；在途撤销授权只能停用账号，
+  // 停用后已冻结／已解析的口令都不得再提交。
   await check(
-    'N05 password cleared during expired probe: frozen secret cannot be submitted',
+    'N05 credentials revoked during expired probe: clear refused, disabled account never submits frozen secret',
     async () => {
       const a = await account('revoke-secret')
       const gate = lab.holdNextProbe()
       const created = await run(a)
       try {
         await arrival(gate)
-        await api(path(a), { clearPassword: true })
+        await api(path(a), { clearPassword: true }, { status: 409 })
+        await api(path(a), { status: 'disabled' })
       } finally {
         gate.release()
       }
@@ -454,21 +461,24 @@ try {
         0,
       )
       await noOccupancy(a)
+      await api(path(a), { status: 'active' })
       await operation(a, 'CLOSE')
     },
   )
 
-  await check('N05B password cleared while login page is loading: cached plaintext never submitted', async () => {
+  await check('N05B credentials revoked while login page is loading: resolved plaintext never submitted', async () => {
     const a = await account('revoke-resolved-secret')
     const gate = lab.holdNextLoginPage()
     const created = await run(a)
     try {
       await arrival(gate)
-      await api(path(a), { clearPassword: true })
+      await api(path(a), { clearPassword: true }, { status: 409 })
+      await api(path(a), { status: 'disabled' })
     } finally { gate.release() }
     await waitRun(created, 'FAILED')
     assert.equal(lab.state.logins.filter(l => l.user === a.username).length, 0)
     await noOccupancy(a)
+    await api(path(a), { status: 'active' })
     await operation(a, 'CLOSE')
   })
 

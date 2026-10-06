@@ -33,6 +33,7 @@ export const BROWSER_SERIAL_SPEC_FILES: readonly string[] = [
 /** BROWSER 组中不连 PostgreSQL 的文件：无跨文件共享资源，可受控并行。 */
 export const BROWSER_PARALLEL_SPEC_FILES: readonly string[] = [
   'src/ai/midscene/__tests__/action-recorder.lab.spec.ts',
+  'src/browser/action-navigation.spec.ts',
   'src/ai/midscene/page-write-gate.spec.ts',
   'src/ai/page-agent/inpage-binding.spec.ts',
   'src/browser/aria-match.spec.ts',
@@ -45,6 +46,7 @@ export const BROWSER_PARALLEL_SPEC_FILES: readonly string[] = [
   'src/browser/managed-helpers.spec.ts',
   'src/browser/map-consumption.lab.spec.ts',
   'src/browser/map-ingest-collector.spec.ts',
+  'src/browser/page-discovery.spec.ts',
   'src/browser/profiles.isolation.lab.spec.ts',
   'src/browser/resolved-handle.lab.spec.ts',
   'src/browser/reverse-locator-probe.lab.spec.ts',
@@ -119,6 +121,7 @@ export const PURE_SPEC_FILES: readonly string[] = [
   'src/browser/managed-browser.boundary.spec.ts',
   'src/browser/map-observer.spec.ts',
   'src/browser/observe-grant.spec.ts',
+  'src/browser/observe-page.spec.ts',
   'src/browser/observed-session.spec.ts',
   'src/browser/operation-progress.spec.ts',
   'src/browser/page-identity.spec.ts',

@@ -82,6 +82,11 @@ export class SessionGuard {
     return grant
   }
 
+  /** 只读查看已装载的 grant（不校验到期），用于判定租约归属类型。 */
+  peek(leaseId: string): SessionGrant | undefined {
+    return this.revoked.has(leaseId) ? undefined : this.grants.get(leaseId)
+  }
+
   has(leaseId: string): boolean {
     return this.grants.has(leaseId) && !this.revoked.has(leaseId)
   }

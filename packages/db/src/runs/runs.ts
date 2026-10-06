@@ -22,6 +22,7 @@ import {
   projectRunOutput,
   CANCELLED_ATTEMPT_ERROR,
   TERMINAL_RUN_STATUSES,
+  type ResourceDeletedBy,
   cleanupStatusResponseSchema,
   isCleanupFailed,
   tallyKnownBytes,
@@ -478,6 +479,13 @@ export async function previewDeleteRun(db: Db, runId: string): Promise<DeletePre
   if (!run) throw notFound('RUN_NOT_FOUND', '运行不存在')
 
   const activeBlockers: { id: string; code: string; message: string }[] = []
+  if (run.suiteRunId) {
+    activeBlockers.push({
+      id: 'run_owned_by_suite',
+      code: 'RUN_OWNED_BY_SUITE',
+      message: '该运行属于场景集运行，请直接删除所属场景集运行',
+    })
+  }
   if (!TERMINAL_RUN_STATUSES.includes(run.status as any)) {
     activeBlockers.push({
       id: 'run_not_terminal',
@@ -520,18 +528,59 @@ export async function previewDeleteRun(db: Db, runId: string): Promise<DeletePre
   })
 }
 
+export async function softDeleteRunTx(
+  tx: Db,
+  runId: string,
+  now: Date,
+  deletedBy: ResourceDeletedBy | null,
+): Promise<{ objectCount: number; byteSize: number }> {
+  const { runs, storedObjects } = schemaFor(tx)
+  await tx
+    .update(runs)
+    .set({ deletedAt: now, deletedBy, updatedAt: now })
+    .where(eq(runs.id, runId))
+
+  await revokeExternalEvidence(tx as unknown as Db, [runId])
+  await tx
+    .update(storedObjects)
+    .set({ deleteRequestedAt: now })
+    .where(
+      and(
+        eq(storedObjects.runId, runId),
+        isNull(storedObjects.deleteRequestedAt),
+        isNull(storedObjects.purgedAt),
+      ),
+    )
+
+  const [objectRow] = await tx
+    .select({
+      n: sql<number>`count(*)`,
+      bytes: sql<number>`coalesce(sum(${storedObjects.byteSize}), 0)`,
+    })
+    .from(storedObjects)
+    .where((await runCleanupObjectScope(tx as unknown as Db, runId)).filter)
+
+  return {
+    objectCount: Number(objectRow?.n ?? 0),
+    byteSize: Number(objectRow?.bytes ?? 0),
+  }
+}
+
 export async function deleteRun(
   db: Db,
   runId: string,
   actor: AuditActor,
   input: { expectedCounts?: { runs?: number } } = {},
 ): Promise<CleanupStatusResponse> {
-  const { runs, storedObjects } = schemaFor(db)
+  const { runs } = schemaFor(db)
   try {
     await db.transaction(async (tx) => {
       const [run] = await locked(tx, tx.select().from(runs).where(eq(runs.id, runId)))
       if (!run) throw notFound('RUN_NOT_FOUND', '运行不存在')
       if (run.deletedAt) return
+      if (run.suiteRunId) {
+        throw conflict('RUN_OWNED_BY_SUITE', '该运行属于场景集运行，请直接删除所属场景集运行')
+      }
       if (!TERMINAL_RUN_STATUSES.includes(run.status as any)) {
         throw conflict('RUN_NOT_TERMINAL', '仅终态（成功、失败、已取消）运行允许删除')
       }
@@ -540,39 +589,17 @@ export async function deleteRun(
 
       const now = new Date()
       const deletedBy = await snapshotDeletedBy(tx as unknown as Db, actor)
-      await tx
-        .update(runs)
-        .set({ deletedAt: now, deletedBy, updatedAt: now })
-        .where(eq(runs.id, runId))
+      const { objectCount, byteSize } = await softDeleteRunTx(tx as unknown as Db, runId, now, deletedBy)
 
-      await revokeExternalEvidence(tx as unknown as Db, [runId])
-      await tx
-        .update(storedObjects)
-        .set({ deleteRequestedAt: now })
-        .where(
-          and(
-            eq(storedObjects.runId, runId),
-            isNull(storedObjects.deleteRequestedAt),
-            isNull(storedObjects.purgedAt),
-          ),
-        )
-
-      const [objectRow] = await tx
-        .select({
-          n: sql<number>`count(*)`,
-          bytes: sql<number>`coalesce(sum(${storedObjects.byteSize}), 0)`,
-        })
-        .from(storedObjects)
-        .where((await runCleanupObjectScope(tx as unknown as Db, runId)).filter)
       await recordAudit(
         tx as unknown as Db,
         actor,
         'run.delete',
         'run',
         runId,
-        `删除运行 ${runId.slice(0, 8)}：对象 ${Number(objectRow?.n ?? 0)}、${Number(objectRow?.bytes ?? 0)} 字节`,
+        `删除运行 ${runId.slice(0, 8)}：对象 ${objectCount}、${byteSize} 字节`,
       )
-      if (Number(objectRow?.n ?? 0) === 0) {
+      if (objectCount === 0) {
         await recordAudit(
           tx as unknown as Db,
           actor,

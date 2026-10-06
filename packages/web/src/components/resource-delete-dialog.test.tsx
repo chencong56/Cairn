@@ -96,4 +96,60 @@ describe('ResourceDeleteDialog', () => {
     await expect.element(confirmButton).toBeDisabled()
     expect(deleteFn).not.toHaveBeenCalled()
   })
+
+  it('支持 suite_run 资源类型，正确展示标题与级联子运行/对象提示', async () => {
+    const deleteFn = vi.fn().mockResolvedValue({
+      resourceId: 'sr-1',
+      resourceType: 'suite_run',
+      status: 'completed',
+      totalObjects: 3,
+      purgedObjects: 0,
+      failedObjects: 0,
+      totalBytes: 1024,
+      purgedBytes: 0,
+    })
+    const previewFn = vi.fn().mockResolvedValue({
+      previewToken: 'tok-suite-1',
+      counts: {
+        suiteRuns: 1,
+        runs: 5,
+        reports: 1,
+        storedObjects: 3,
+        totalBytes: 1024,
+      },
+      blockers: [],
+    })
+
+    const screen = await renderWithClient(
+      <ResourceDeleteDialog
+        open
+        onOpenChange={vi.fn()}
+        resourceId='sr-1'
+        resourceName='场景集运行 #sr-1'
+        resourceType='suite_run'
+        previewFn={previewFn}
+        deleteFn={deleteFn}
+        onSuccess={vi.fn()}
+      />,
+    )
+
+    await expect.element(screen.getByRole('heading', { name: '删除场景集运行' })).toBeVisible()
+    await expect.element(screen.getByText(/该场景集运行及其包含的/)).toBeVisible()
+    const confirmButton = screen.getByRole('button', { name: '确认删除' })
+    await expect.element(confirmButton).toBeEnabled()
+    await userEvent.click(confirmButton)
+
+    expect(deleteFn).toHaveBeenCalledWith({
+      expectedCounts: {
+        suiteRuns: 1,
+        runs: 5,
+        reports: 1,
+        recordings: undefined,
+        scenarios: undefined,
+        schedules: undefined,
+        suites: undefined,
+        targetAccounts: undefined,
+      },
+    })
+  })
 })

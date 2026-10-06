@@ -15,6 +15,9 @@ const navigateMock = vi.fn()
 
 vi.mock('@/lib/suites-api', () => ({
   fetchSuiteRuns: mocks.fetchSuiteRuns,
+  cancelSuiteRun: vi.fn(),
+  previewDeleteSuiteRun: vi.fn(),
+  deleteSuiteRun: vi.fn(),
 }))
 
 vi.mock('@/lib/targets-api', () => ({
@@ -168,7 +171,7 @@ describe('SuiteRunsPage', () => {
     expect(screen.getByRole('tab', { name: '交付报告' }).elements()).toHaveLength(0)
   })
 
-  it('缺少 run:delete 权限时隐藏留存与清理标签页', async () => {
+  it('缺少 run:delete 权限时隐藏留存与清理标签页及删除按钮', async () => {
     signIn(['suite:read', 'run:read', 'report:read'])
     const screen = await renderPage()
 
@@ -177,5 +180,40 @@ describe('SuiteRunsPage', () => {
     await expect.element(screen.getByRole('tab', { name: '交付报告' })).toBeInTheDocument()
     await expect.element(screen.getByRole('tab', { name: '材料检索' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '留存与清理' }).elements()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: '删除场景集运行' }).elements()).toHaveLength(0)
+  })
+
+  it('具有 run:delete 权限且为终态时展示删除按钮', async () => {
+    signIn(['suite:read', 'run:read', 'run:delete'])
+    const screen = await renderPage()
+
+    await expect.element(screen.getByRole('button', { name: '删除场景集运行' })).toBeInTheDocument()
+  })
+
+  it('进行中且有 run:cancel 权限时展示取消按钮，终态不展示', async () => {
+    mocks.fetchSuiteRuns.mockResolvedValue({
+      items: [
+        summary({ id: 'sr-running', status: 'RUNNING', verdict: null, suiteName: '进行中集' }),
+        summary({ id: 'sr-done', status: 'COMPLETED', suiteName: '已结束集' }),
+      ],
+      nextCursor: undefined,
+    })
+    signIn(['suite:read', 'run:read', 'run:cancel'])
+    const screen = await renderPage()
+
+    await expect.element(screen.getByRole('button', { name: '取消' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消' }).elements()).toHaveLength(1)
+  })
+
+  it('缺少 run:cancel 权限时隐藏取消按钮', async () => {
+    mocks.fetchSuiteRuns.mockResolvedValue({
+      items: [summary({ status: 'RUNNING', verdict: null })],
+      nextCursor: undefined,
+    })
+    signIn(['suite:read', 'run:read'])
+    const screen = await renderPage()
+
+    await expect.element(screen.getByText('核心业务链路巡检')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消' }).elements()).toHaveLength(0)
   })
 })

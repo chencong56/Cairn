@@ -1209,6 +1209,15 @@ export class LifecycleService
             );
             continue;
           }
+          // 转入等待认证会主动释放 RunLease（交给认证等待租约）：此时中止会把留给人登录的会话一并关掉。
+          // 该 Run 已不再执行业务步骤，写入仍由租约校验兜底。
+          if (row?.status === "WAITING_FOR_AUTH") {
+            this.logger.log(
+              { runId: item.grant.runId, leaseId: item.grant.leaseId },
+              "Run 已转入等待认证，RunLease 结束属正常交接，不中止",
+            );
+            continue;
+          }
           this.logger.warn(
             { runId: item.grant.runId, leaseId: item.grant.leaseId },
             "RunLease 续租失败，停手",

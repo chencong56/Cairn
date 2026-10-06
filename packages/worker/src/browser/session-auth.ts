@@ -6,7 +6,7 @@ import {
   type LoginLocator,
   type TargetAuthProfileDefinition,
 } from '@cairn/shared'
-import type { BrowserHandle } from './runtime'
+import { openInternalPage, type BrowserHandle } from './runtime'
 
 function loginLocator(page: BrowserHandle['basePage'], field: LoginLocator) {
   if (field.by === 'id') return page.locator(`#${field.value.replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1')}`)
@@ -48,7 +48,7 @@ export async function verifyAuthProfile(
       return { observation, ...expiryFromBody(input.definition, body) }
     }
 
-    const page = await handle.context.newPage()
+    const page = await openInternalPage(handle.context)
     try {
       const deadline = Date.now() + timeout
       const remaining = () => Math.max(1, deadline - Date.now())

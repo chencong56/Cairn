@@ -46,6 +46,7 @@ import {
   viewportMatches
 } from './managed-helpers'
 import { openedEntryDuringVerify } from './landing-settle.js'
+import { closeDiscoveredPages } from './page-discovery.js'
 import { pageRefFor } from './page-identity'
 import { type LiveHandle, type SessionManagerContext } from './session-live.js'
 
@@ -172,6 +173,7 @@ export async function executeAuthInput(this: SessionManagerContext, params: {
     }
     const entry = live.pages.get(input.command.pageRef.pageId)
     if (!entry || entry.page.isClosed()) throw conflict('PAGE_STALE', '页面已关闭或已失效')
+    if (entry.runId !== input.runId) throw conflict('PAGE_STALE', '页面不属于当前操作对象，请刷新画面')
     if (
       input.command.pageRef.sessionId !== latest.id ||
       input.command.pageRef.sessionGeneration !== boundGeneration ||
@@ -219,6 +221,10 @@ export async function executeAuthInput(this: SessionManagerContext, params: {
         urlBefore,
         urlAfter: redactAuthUrl(typeof entry.page.url === 'function' ? entry.page.url() : ''),
         pageCount: [...live.pages.values()].filter((item) => !item.page.isClosed()).length,
+        contextPages:
+          typeof entry.page.context === 'function'
+            ? entry.page.context().pages().map((item) => redactAuthUrl(item.url()))
+            : undefined,
       },
       '认证输入已落地',
     )
@@ -297,9 +303,29 @@ export async function resumeRunAuth(this: SessionManagerContext, input: {
             throw conflict('AUTH_CONTEXT_NOT_RECOVERABLE', '登录已恢复，当前运行无法安全续跑')
           }
         } else {
-          const auth = await withWait(() => probeAuthOnPage(page, target))
-          if (auth !== 'AUTHENTICATED') {
-            throw conflict('AUTH_NOT_VERIFIED', '目标系统仍未登录')
+          // 领取时进入的认证等待：有冻结核验规则就按规则核验，身份规则要求身份一致；
+          // 否则人登成别的账号也会被放行。不一致只拒绝本次回交，运行仍停在等待认证，可换正确账号重登。
+          const verification = run.snapshot.authVerification
+          const profile =
+            verification && verification.capability !== 'LEGACY' && verification.profileRevision
+              ? await loadAuthProfileRevision(this.dbHandle, run.snapshot.targetId, verification.profileRevision)
+              : null
+          if (verification && profile) {
+            const verified = await withWait(() =>
+              verifyAuthProfile(live.handle, { definition: profile.definition, verification }),
+            )
+            await this.persistProfileObservation(latestSession, verification, verified).catch(() => undefined)
+            if (verified.observation.authState !== 'AUTHENTICATED') {
+              throw conflict('AUTH_NOT_VERIFIED', '目标系统仍未登录')
+            }
+            if (verification.capability === 'IDENTITY_VERIFIED' && verified.observation.identityState !== 'MATCH') {
+              throw conflict('AUTH_IDENTITY_MISMATCH', '登录账号与期望身份不符，请用正确账号重新登录')
+            }
+          } else {
+            const auth = await withWait(() => probeAuthOnPage(page, target))
+            if (auth !== 'AUTHENTICATED') {
+              throw conflict('AUTH_NOT_VERIFIED', '目标系统仍未登录')
+            }
           }
         }
         const urlAfter = typeof page.url === 'function' ? page.url() : ''
@@ -323,6 +349,7 @@ export async function resumeRunAuth(this: SessionManagerContext, input: {
         })
         live.autoInputClosed = false
         live.inputAccepting = false
+        await closeDiscoveredPages(live, input.runId)
       })
     } catch (error) {
       const latest = await getRun(this.dbHandle, input.runId).catch(() => run)

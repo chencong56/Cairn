@@ -119,6 +119,8 @@ export const suiteRuns = cairnSchema.table(
     idempotencyDigest: text('idempotency_digest'),
     revision: integer('revision').notNull().default(0),
     eventSeq: integer('event_seq').notNull().default(0),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: jsonb('deleted_by').$type<ResourceDeletedBy>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -127,6 +129,7 @@ export const suiteRuns = cairnSchema.table(
     index('suite_runs_target_created_idx').on(t.targetId, t.createdAt),
     index('suite_runs_suite_created_idx').on(t.suiteId, t.createdAt),
     index('suite_runs_status_idx').on(t.status, t.updatedAt),
+    index('suite_runs_deleted_at_idx').on(t.deletedAt),
   ],
 )
 

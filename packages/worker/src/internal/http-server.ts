@@ -268,6 +268,13 @@ async function streamFrames(
         res.write(`event: frame\ndata: ${JSON.stringify(frame)}\n\n`)
       },
     })
+  } catch (error) {
+    // 响应头已写出，所选页失效只能以流内事件告知，Web 据此回到当前页。
+    if (error instanceof DomainError && error.code === 'PAGE_STALE' && !res.writableEnded) {
+      res.write(`event: page_stale\ndata: ${JSON.stringify({ code: error.code, message: error.message })}\n\n`)
+      return
+    }
+    throw error
   } finally {
     if (!res.writableEnded) res.end()
   }

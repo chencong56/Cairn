@@ -335,7 +335,13 @@ export function closeManagedPage(id: string, pageId: string): Promise<CloseManag
 
 export async function subscribeBrowserFrames(
   id: string,
-  input: { signal: AbortSignal; pageId?: string; onFrame: (frame: ManagedBrowserFrame) => void },
+  input: {
+    signal: AbortSignal
+    pageId?: string
+    onFrame: (frame: ManagedBrowserFrame) => void
+    /** 所看的页已关闭或已不属于该运行，调用方应回到当前页。 */
+    onPageStale?: () => void
+  },
 ): Promise<void> {
   const token = useAuthStore.getState().auth.accessToken
   const query = input.pageId ? `?pageId=${encodeURIComponent(input.pageId)}` : ''
@@ -352,6 +358,10 @@ export async function subscribeBrowserFrames(
   await readSseStream(
     res.body,
     (frame) => {
+      if (frame.event === 'page_stale') {
+        input.onPageStale?.()
+        return
+      }
       if (frame.event !== 'frame') return
       const parsed = managedBrowserFrameSchema.safeParse(parseJson(frame.data))
       if (parsed.success) input.onFrame(parsed.data)

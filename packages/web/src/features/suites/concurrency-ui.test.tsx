@@ -195,8 +195,8 @@ describe('场景集并发调度与运行度量 UI', () => {
       </QueryClientProvider>,
     )
 
-    await expect.element(page.getByText('受控并发 (上限 3)')).toBeVisible()
+    await expect.element(page.getByText('受控并发 (上限 3)').first()).toBeVisible()
     await expect.element(page.getByText('目标账号')).toBeVisible()
-    await expect.element(page.getByText('节约 50%')).toBeVisible()
+    await expect.element(page.getByText('节约 50%').first()).toBeVisible()
   })
 })

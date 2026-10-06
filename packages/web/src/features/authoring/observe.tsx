@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -102,6 +103,8 @@ export type TableMarkers = {
   onPick?: (index: number) => void
 }
 
+export type ViewedManagedPage = { pageId?: string; kind?: string }
+
 type AuthoringObserveValue = {
   runId?: string
   sessionId?: string
@@ -127,6 +130,8 @@ type AuthoringObserveValue = {
   ) => void
   highlightTarget: (target: TargetDescriptor, options?: { silent?: boolean }) => Promise<TargetObservation | undefined>
   pickAt: (x: number, y: number) => void
+  /** 受管画面上报正在查看的页：指认、高亮作用于此页；pageId 省略表示跟随当前页。 */
+  setViewedPage: (page: ViewedManagedPage | null) => void
   pickEnclosingTable?: () => void
   applyForTrial: (target?: TargetDescriptor) => void
   clearOverlay: (stepId: string) => void
@@ -148,6 +153,7 @@ const closedObserve: AuthoringObserveValue = {
   highlightTarget: async () => undefined,
   setTableMarkers: () => undefined,
   pickAt: () => undefined,
+  setViewedPage: () => undefined,
   pickEnclosingTable: () => undefined,
   applyForTrial: () => undefined,
   clearOverlay: () => undefined,
@@ -215,6 +221,7 @@ export function AuthoringObserveProvider({
   const [lastPicked, setLastPicked] = useState<TargetDescriptor | undefined>()
   const [enclosingTable, setEnclosingTable] = useState<TargetDescriptor | undefined>()
   const [tableMarkers, setTableMarkersState] = useState<TableMarkers | null>(null)
+  const viewedPage = useRef<ViewedManagedPage | null>(null)
   const setTableMarkers = (markers: TableMarkers | null) => setTableMarkersState(markers)
   const holding = Boolean(
     run && run.status === 'HOLDING' && run.debugMode !== 'runThrough'
@@ -243,6 +250,13 @@ export function AuthoringObserveProvider({
       toast.success(
         previewText ? `已写入当前步骤。画面上读到「${previewText}」` : '已写入当前步骤',
       )
+      // 手动操作不会录成步骤：新标签页上的元素要在试跑里找得到，前面必须有一步把执行切过去。
+      if (viewedPage.current?.kind === 'popup') {
+        toast.message(
+          '该元素在新标签页上。试跑时需要前面有一个点击步骤把「页面变化」设为「切换到弹出窗口」，否则会在原页面上执行而失败。',
+          { duration: 10_000 },
+        )
+      }
     }
   }
 
@@ -280,7 +294,9 @@ export function AuthoringObserveProvider({
     }
   }
 
-  const observePage = (body: Exclude<ObserveOperation, { op: 'table' }>): Promise<TargetObservation> => {
+  const observePage = (operation: Exclude<ObserveOperation, { op: 'table' }>): Promise<TargetObservation> => {
+    const pageId = viewedPage.current?.pageId
+    const body = pageId ? { ...operation, pageId } : operation
     if (holding && runId) return observeRun(runId, body)
     if (sessionId) return observeSession(sessionId, body)
     return Promise.reject(new Error('没有可观察的受管页面'))
@@ -301,6 +317,9 @@ export function AuthoringObserveProvider({
       enclosingTable,
       tableMarkers,
       setTableMarkers,
+      setViewedPage: (page) => {
+        viewedPage.current = page
+      },
       pickMode,
       canIndicate,
       canHighlight,

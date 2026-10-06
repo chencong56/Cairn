@@ -623,6 +623,16 @@ describe("LifecycleService", () => {
     expect(loadRunRow).toHaveBeenCalled();
   });
 
+  it("转入等待认证后 RunLease 结束不中止，免得关掉留给人登录的会话", async () => {
+    const { renewRunLease, loadRunRow } = await import("@cairn/db");
+    const svc = await buildLifecycle();
+    vi.mocked(renewRunLease).mockResolvedValueOnce(null);
+    vi.mocked(loadRunRow).mockResolvedValueOnce({ status: "WAITING_FOR_AUTH" } as never);
+    const abort = injectInFlight(svc);
+    await beat(svc);
+    expect(abort).not.toHaveBeenCalled();
+  });
+
   it("运行中续租失败仍停手", async () => {
     const { renewRunLease, loadRunRow } = await import("@cairn/db");
     const svc = await buildLifecycle();

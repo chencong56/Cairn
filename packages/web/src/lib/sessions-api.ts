@@ -200,6 +200,7 @@ export function sessionBrowserTransport(kind: 'operation' | 'session'): BrowserT
         `${base(id)}/browser/frames${toQueryString({ pageId: input.pageId })}`,
         input.signal,
         (frame) => {
+          if (frame.event === 'page_stale') input.onPageStale?.()
           if (frame.event === 'frame') input.onFrame(managedBrowserFrameSchema.parse(JSON.parse(frame.data)))
         },
       ),

@@ -4,8 +4,14 @@ import { BrowserSessionManager } from './session-manager'
 
 const state = vi.hoisted(() => ({
   session: {} as Record<string, unknown>,
-  run: { status: 'WAITING_FOR_AUTH', snapshot: {} },
+  run: { status: 'WAITING_FOR_AUTH', snapshot: {} } as { status: string; snapshot: Record<string, unknown> },
 }))
+const authMock = vi.hoisted(() => ({
+  verifyAuthProfile: vi.fn(),
+  resumeRunAfterAuth: vi.fn(async () => undefined),
+}))
+
+vi.mock('./session-auth', () => ({ verifyAuthProfile: authMock.verifyAuthProfile }))
 
 vi.mock('@cairn/db', async (original) => {
   const actual = await original<typeof import('@cairn/db')>()
@@ -17,6 +23,8 @@ vi.mock('@cairn/db', async (original) => {
     }),
     getSessionById: async () => state.session,
     getRun: async () => state.run,
+    loadAuthProfileRevision: async () => ({ definition: { verify: { mode: 'http' } }, digest: 'profile-digest' }),
+    resumeRunAfterAuth: authMock.resumeRunAfterAuth,
     // 人工续跑要碰页面，生产路径要求先拿到 AUTH_WAIT 租约再装占用（不变量 2）。
     findAuthWaitLeaseForRun: async () => ({
       id: '00000000-0000-4000-8000-000000000005',
@@ -159,14 +167,65 @@ describe('认证输入 fencing', () => {
     expect(r.insertText).not.toHaveBeenCalled()
   })
 
+  it('领取时进入的认证等待：人登成别的身份时拒绝回交，运行仍等待认证且可再输入', async () => {
+    const r = rig()
+    state.run = {
+      status: 'WAITING_FOR_AUTH',
+      snapshot: {
+        targetId: '00000000-0000-4000-8000-000000000009',
+        authVerification: { capability: 'IDENTITY_VERIFIED', profileRevision: 1, expectedIdentity: 'alice' },
+      },
+    }
+    authMock.verifyAuthProfile.mockResolvedValueOnce({
+      observation: { authState: 'AUTHENTICATED', identityState: 'MISMATCH' },
+      authValidUntil: null,
+      authExpirySource: null,
+    })
+    await expect(r.manager.resumeRunAuth({ runId, actor: { id: actorId }, token })).rejects.toMatchObject({
+      code: 'AUTH_IDENTITY_MISMATCH',
+    })
+    expect(authMock.resumeRunAfterAuth).not.toHaveBeenCalled()
+    expect(r.live.inputAccepting).toBe(true)
+  })
+
+  it('领取时进入的认证等待：身份一致才回交', async () => {
+    const r = rig()
+    r.manager.settleOccupiedLanding = vi.fn(async () => undefined) as never
+    state.run = {
+      status: 'WAITING_FOR_AUTH',
+      snapshot: {
+        targetId: '00000000-0000-4000-8000-000000000009',
+        authVerification: { capability: 'IDENTITY_VERIFIED', profileRevision: 1, expectedIdentity: 'alice' },
+      },
+    }
+    authMock.verifyAuthProfile.mockResolvedValueOnce({
+      observation: { authState: 'AUTHENTICATED', identityState: 'MATCH' },
+      authValidUntil: null,
+      authExpirySource: null,
+    })
+    await r.manager.resumeRunAuth({ runId, actor: { id: actorId }, token })
+    expect(authMock.resumeRunAfterAuth).toHaveBeenCalledTimes(1)
+  })
+
   it('支持无 Run 的直接会话受控输入', async () => {
     const r = rig()
     state.run = { status: 'RUNNING', snapshot: {} }
     state.session.status = 'OPEN'
+    // 直接会话的受管页登记在会话名下（编排会话画面只列会话名下的页）。
+    r.live.pages.get(pageId)!.runId = sessionId
     const input = { runId: sessionId, actorId, token, command: r.command }
     const res = await r.manager.inputRunAuthControl(input)
     expect(res.status).toBe('accepted')
     expect(r.insertText).toHaveBeenCalledTimes(1)
+  })
+
+  it('pageRef 指向其他归属的页时拒绝输入，不落到页面上', async () => {
+    const r = rig()
+    state.run = { status: 'RUNNING', snapshot: {} }
+    state.session.status = 'OPEN'
+    const input = { runId: sessionId, actorId, token, command: r.command }
+    await expect(r.manager.inputRunAuthControl(input)).rejects.toMatchObject({ code: 'PAGE_STALE' })
+    expect(r.insertText).not.toHaveBeenCalled()
   })
 
   it('支持 PageUp/PageDown 等翻页导航按键输入', async () => {

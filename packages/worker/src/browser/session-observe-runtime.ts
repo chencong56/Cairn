@@ -187,7 +187,10 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
     if (detail?.stepRuns.some((step) => step.attempts.some((attempt) => attempt.status === 'RUNNING'))) {
       throw conflict('WAITING_FOR_STABLE_HOLD', '在途业务动作尚未停稳，不能签发观察授权')
     }
-    const entry = this.ensureRunPage(live, input.runId)
+    // 带 pageId 时作用于用户正在看的那页；省略时保持执行当前页。
+    const entry = input.op.pageId
+      ? requireViewPage(live, input.runId, input.op.pageId)
+      : this.ensureRunPage(live, input.runId)
     const pageRef = pageRefFor(session.id, session.generation, entry)
     const url = entry.page.url()
     const title = await entry.page.title().catch(() => undefined)
@@ -388,8 +391,9 @@ export async function pipeFrames(this: SessionManagerContext, input: {
       throw conflict('AUTH_CONTROL_INVALID', '认证阶段仅有操作权限的用户可看画面')
     }
     await touchViewedSession(this.dbHandle, session, true)
-    const entry = this.pageForView(live, input.runId, input.pageId)
+    const entry = input.pageId ? requireViewPage(live, input.runId, input.pageId) : this.pageForView(live, input.runId)
     if (!entry) throw conflict('PAGE_STALE', '没有可观察的页面')
+    const withRevision = (frame: ManagedBrowserFrame): ManagedBrowserFrame => ({ ...frame, pagesRevision: live.pagesRevision })
     const getPageRef = () => pageRefFor(session.id, session.generation, entry)
     let cast = live.screencasts.get(entry.pageId)
     if (!cast) {
@@ -399,6 +403,7 @@ export async function pipeFrames(this: SessionManagerContext, input: {
     live.screencastObservers.set(entry.pageId, (live.screencastObservers.get(entry.pageId) ?? 0) + 1)
     if (cast) await refreshScreencastIfStale(entry.page, cast, getPageRef)
     const interval = Math.max(500, Math.floor(1000 / BROWSER_FRAME_MAX_FPS))
+    let viewedPageGone = false
     try {
       await new Promise<void>((resolve) => {
         let timer: ReturnType<typeof setTimeout> | undefined
@@ -451,11 +456,17 @@ export async function pipeFrames(this: SessionManagerContext, input: {
                 finish()
                 return
               }
+              // 所看的页已关闭或已撤登记：结束本条流，Web 重连时按 PAGE_STALE 回到当前页。
+              if (entry.page.isClosed() || live.pages.get(entry.pageId) !== entry) {
+                viewedPageGone = true
+                finish()
+                return
+              }
               if (cast) {
                 await refreshScreencastIfStale(entry.page, cast, getPageRef)
               }
               if (closed || input.signal.aborted) return
-              if (cast?.latest) input.onFrame(cast.latest)
+              if (cast?.latest) input.onFrame(withRevision(cast.latest))
               await touchViewedSession(this.dbHandle, session)
               if (closed || input.signal.aborted) return
               timer = setTimeout(tick, interval)
@@ -465,13 +476,16 @@ export async function pipeFrames(this: SessionManagerContext, input: {
               ticking = false
             })
         }
-        if (cast?.latest && !input.signal.aborted) input.onFrame(cast.latest)
+        if (cast?.latest && !input.signal.aborted) input.onFrame(withRevision(cast.latest))
         timer = setTimeout(tick, interval)
         input.signal.addEventListener('abort', finish, { once: true })
         if (input.signal.aborted) finish()
       })
     } finally {
       await this.dropScreencastObserver(live, entry.pageId)
+    }
+    if (viewedPageGone && input.pageId && !input.signal.aborted) {
+      throw conflict('PAGE_STALE', '所看的页面已关闭，已回到当前页')
     }
   }
 
@@ -490,6 +504,15 @@ export async function dropScreencastObserver(this: SessionManagerContext, live: 
     }
     live.screencastObservers.set(pageId, current - 1)
   }
+
+/** 显式指定的页必须仍登记在该 Run／会话名下；不再静默回落到当前页，避免看的与作用的不是同一页。 */
+function requireViewPage(live: LiveHandle, ownerId: string, pageId: string): ManagedPageEntry {
+  const chosen = live.pages.get(pageId)
+  if (!chosen || chosen.runId !== ownerId || chosen.page.isClosed()) {
+    throw conflict('PAGE_STALE', '所选页面已关闭或不属于当前对象，请刷新画面')
+  }
+  return chosen
+}
 
 export function pageForView(this: SessionManagerContext, live: LiveHandle, runId: string, pageId?: string): ManagedPageEntry | undefined {
     if (pageId) {
@@ -655,7 +678,8 @@ export async function buildMeta(this: SessionManagerContext, runId: string, acto
     const framesAvailable =
       liveOk && (!waiting || heldByViewer || actorCanControl) && capabilities.screencast !== 'closed'
     const current = live && liveOk ? this.ensureRunPage(live, runId) : undefined
-    const isRunning = run.status === 'RUNNING'
+    // 直接会话（编排会话）的合成状态是 RUNNING，但没有执行在跑，当前页可关闭。
+    const isRunning = run.status === 'RUNNING' && runId !== session?.id
     const pages: ManagedPageSummary[] =
       live && liveOk && session
         ? [...live.pages.values()]

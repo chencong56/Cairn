@@ -370,6 +370,20 @@ export const INVARIANT_RULES = [
     },
   },
   {
+    id: 'INV019_WORKER_PAGES_VIA_INTERNAL_OPEN',
+    articles: ['执行分层'],
+    title: 'Worker 自建页只允许经 runtime.ts 的 openInternalPage',
+    rationale: '会话级页发现按对象身份区分「Worker 自建页」与「站点新开的标签页」；绕过 openInternalPage 直接 newPage() 会被误登记为弹出页，进而被上限淘汰或在 Run 结束时关闭',
+    targetDir: 'packages/worker/src',
+    excludeTests: true,
+    check: (file, rel, content) => {
+      if (rel.replaceAll('\\', '/').endsWith('browser/runtime.ts')) return []
+      return /\.newPage\s*\(/.test(content)
+        ? ['Worker 业务代码不得直接调用 newPage()，请改用 browser/runtime.ts 的 openInternalPage(context)']
+        : []
+    },
+  },
+  {
     id: 'INV018_API_RUN_READ_ACTOR_SCOPE',
     articles: ['执行分层'],
     title: 'API 读取运行详情与证据必须显式传入 actorId',

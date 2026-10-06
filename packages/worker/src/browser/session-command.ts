@@ -579,9 +579,19 @@ export function adoptPage(this: SessionManagerContext,
     kind: ManagedPageEntry['kind'],
     leaseId?: string,
   ): ManagedPageEntry {
-    const entry = createManagedPage({ page, runId, kind })
-    live.pages.set(entry.pageId, entry)
+    // 同一归属下同一页只保留一个 pageId：页发现先登记、执行 handoff 后接管时复用同一条。
+    const existing = [...live.pages.values()].find(
+      (item) => item.page === page && item.runId === runId && !item.page.isClosed(),
+    )
+    const entry = existing ?? createManagedPage({ page, runId, kind })
+    if (existing) {
+      existing.kind = kind
+      existing.discovered = false
+    } else {
+      live.pages.set(entry.pageId, entry)
+    }
     live.currentPageIdByRun.set(runId, entry.pageId)
+    live.pagesRevision += 1
     if (leaseId) {
       live.currentPageIdByLease.set(leaseId, entry.pageId)
       if (typeof this.retargetVideoForLease === 'function') {
@@ -615,6 +625,23 @@ function dropPageEntries(live: LiveHandle, page: Page) {
     if (entry.page !== page) continue
     entry.dispose?.()
     live.pages.delete(id)
+    live.pagesRevision += 1
+  }
+}
+
+/** Run 结束：该 Run 名下除保留页外的页（最初运行页、自发弹出页、handoff 中间页）一律关闭；保留页只撤登记。 */
+async function closeRunOwnedPages(live: LiveHandle, runId: string, keep: Set<Page | undefined>): Promise<void> {
+  for (const entry of [...live.pages.values()]) {
+    if (entry.runId !== runId || !live.pages.has(entry.pageId)) continue
+    if (keep.has(entry.page)) {
+      entry.dispose?.()
+      live.pages.delete(entry.pageId)
+      live.pagesRevision += 1
+      continue
+    }
+    dropPageEntries(live, entry.page)
+    if (!entry.page.isClosed()) await closePage(entry.page)
+    if (live.lastPage === entry.page) live.lastPage = undefined
   }
 }
 
@@ -631,12 +658,35 @@ export async function closeRunPage(this: SessionManagerContext, leaseId: string)
     if (!sessionId) return
     const live = this.lives.get(sessionId)
     if (!live) return
-    const page = live.runPages.get(leaseId)
+    const runPage = live.runPages.get(leaseId)
+    const leaseRunId = this.leaseToRun.get(leaseId)
+    // 同一 Run 仍有别的租约在本进程持有（认证等待租约过期回收时，续跑已换新租约）：
+    // 只收本租约自己的运行页，Run 级的当前页、投射与清理留给真正结束的那条租约。
+    const runStillHeld =
+      leaseRunId !== undefined &&
+      [...this.leaseToRun].some(([other, mapped]) => other !== leaseId && mapped === leaseRunId)
+    const runId = runStillHeld ? undefined : leaseRunId
+    const currentId =
+      live.currentPageIdByLease.get(leaseId) ?? (runId ? live.currentPageIdByRun.get(runId) : undefined)
+    const current = currentId ? live.pages.get(currentId) : undefined
     live.runPages.delete(leaseId)
     live.runPageIds.delete(leaseId)
     live.currentPageIdByLease.delete(leaseId)
-    const runId = this.leaseToRun.get(leaseId)
     if (runId) live.currentPageIdByRun.delete(runId)
+    live.pagesRevision += 1
+    // 跨标签执行（handoff）后，会话画面停在执行实际结束的页，而不是退回最初运行页。
+    const handedOff =
+      current && current.kind === 'popup' && !current.discovered && current.page !== runPage &&
+      pageUsableForProjection(current.page, live.handle.basePage)
+        ? current.page
+        : undefined
+    const page = handedOff ?? runPage
+    if (runId) await closeRunOwnedPages(live, runId, new Set([page, live.handle.basePage, live.lastPage]))
+    if (handedOff && runPage && runPage !== live.handle.basePage) {
+      dropPageEntries(live, runPage)
+      if (!runPage.isClosed()) await closePage(runPage)
+      if (live.lastPage === runPage) live.lastPage = undefined
+    }
     if (!page) return
     if (pageUsableForProjection(page, live.handle.basePage)) {
       await retireRetainedPage(live, page)
@@ -672,7 +722,8 @@ export async function closeManagedPage(
 
   // 2. 运行态保护
   const isCurrentActive = entry.pageId === current.pageId
-  if (isCurrentActive && run.status === 'RUNNING') {
+  // 直接会话（编排会话）的合成状态是 RUNNING，但没有执行在跑，当前页可关闭。
+  if (isCurrentActive && run.status === 'RUNNING' && input.ownerId !== session.id) {
     throw conflict('CANNOT_CLOSE_ACTIVE_PAGE', '任务正在当前页面上执行，不可关闭')
   }
 

@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql, type AnyColumn } from 'drizzle-orm'
 import { hasPermission } from '@cairn/shared'
 import type { Db } from '../client.js'
-import { schemaFor } from '../native.js'
+import { lockedShared, schemaFor } from '../native.js'
 import { forbidden, notFound } from '../runs/errors.js'
 
 export type TargetScope = { all: boolean; ids: string[] }
@@ -12,6 +12,19 @@ export async function lockConsoleAuthorization(db: Db, accountId: string, requir
   const [account] = await db.select({ status: consoleAccounts.status }).from(consoleAccounts)
     .where(eq(consoleAccounts.id, accountId)).for('update')
   if (!account || (requireActive && account.status !== 'active')) throw forbidden('FORBIDDEN', '账号不可用')
+}
+
+/**
+ * 只读确认操作者授权：共享锁挡住同时停用或改角色，但不与执行面在途事务的外键复查互等。
+ * 本事务之后不会改写该账号行时用它；要改账号或角色的写路径仍用 lockConsoleAuthorization。
+ */
+export async function shareConsoleAuthorization(db: Db, accountId: string) {
+  const { consoleAccounts } = schemaFor(db)
+  const [account] = await lockedShared(
+    db,
+    db.select({ status: consoleAccounts.status }).from(consoleAccounts).where(eq(consoleAccounts.id, accountId)),
+  )
+  if (!account || account.status !== 'active') throw forbidden('FORBIDDEN', '账号不可用')
 }
 
 /**

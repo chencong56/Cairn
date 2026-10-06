@@ -194,6 +194,7 @@ try {
         displayName: 'Alice',
         username: 'alice',
         password: 'lab-password',
+        validity: { mode: 'permanent' },
       })
       scenario = await api('/scenarios', {
         targetId: target.id,
@@ -290,7 +291,7 @@ try {
     },
   )
   await check(
-    'SM42 LOGIN_VERIFIED reuses login but expired credentials require human control',
+    'SM42 LOGIN_VERIFIED reuses login, auto-logs in after expiry, mid-run loss is unrecoverable',
     async () => {
       account = (await api(`/targets/${target.id}/accounts`)).items.find(
         (item) => item.id === account.id,
@@ -313,16 +314,14 @@ try {
         (await operation('VERIFY_AUTH')).operationId,
         'FAILED',
       )
+      // 失效后 LOGIN_VERIFIED 先用已存凭据自动登录（planAuthEnsure：EXPIRED → auto_login），不再停在人工认证。
       const expired = await run()
-      const waiting = await waitRun(expired.id, 'WAITING_FOR_AUTH')
-      assert.ok(waiting.stepRuns.every((s) => s.attempts.length === 0))
+      await waitRun(expired.id)
       assert.equal(
         lab.state.logins.length,
-        logins,
-        'LOGIN_VERIFIED cannot automatically submit stored credentials',
+        logins + 1,
+        'LOGIN_VERIFIED submits stored credentials once after expiry',
       )
-      await loginRun(expired.id)
-      await waitRun(expired.id)
       const beforeLoss = new Map(lab.state.sessions)
       const afterManualLogin = lab.state.logins.length
       const midRun = await run([
@@ -541,7 +540,8 @@ try {
   await check(
     'SM17C/SM24 manual control uses real frames, serial input and identity verification',
     async () => {
-      // The preceding recovery consumed the account's one automatic login budget.
+      // 已存口令在靶场侧失效：自动登录被拒后转人工，由人在受管画面输入当前口令。
+      lab.state.users.set('alice', 'human-only-password')
       manual = (await operation('LOGIN')).operationId
       await waitOperation(manual, 'WAITING_FOR_AUTH')
       control = await api(
@@ -616,13 +616,14 @@ try {
       }
       await input({ type: 'insert_text', text: 'alice' })
       await input({ type: 'key', key: 'Tab' })
-      await input({ type: 'insert_text', text: 'lab-password' })
+      await input({ type: 'insert_text', text: 'human-only-password' })
       await input({ type: 'key', key: 'Enter' })
       await eventually(
         () => Promise.resolve([...lab.state.sessions.values()]),
         (v) => v.includes('alice'),
         'manual login reached target',
       )
+      lab.state.users.set('alice', 'lab-password')
       await api(`/session-operations/${manual}/complete-auth`, {
         token: control.token,
       })
@@ -638,6 +639,7 @@ try {
         displayName: 'Bob',
         username: 'bob',
         password: 'lab-password',
+        validity: { mode: 'permanent' },
       })
       await api(`${accountPath()}/identity`, {
         expectedRevision: account.configRevision ?? 1,
@@ -833,7 +835,7 @@ try {
         await page.getByLabel('账号', { exact: true }).fill('admin')
         await page
           .getByLabel('密码', { exact: true })
-          .fill('e2e-admin-password')
+          .fill('cairn-admin')
         await page.getByRole('button', { name: '登录', exact: true }).click()
         await page.waitForURL((url) => !url.pathname.includes('sign-in'))
         await page.goto(`${webUrl}/sessions`)
@@ -849,7 +851,10 @@ try {
           (v) => Date.parse(v.session.retainUntil) > Date.now() + 800000,
           'UI retention persisted',
         )
+        // 会话详情是侧滑抽屉，选中态不进 URL：刷新后重新打开，确认保留设置来自服务端。
         await page.reload()
+        await page.getByText('Alice', { exact: true }).first().waitFor()
+        await page.getByText('Alice', { exact: true }).first().click()
         await page.getByLabel('保留秒数').waitFor()
         await page.screenshot({
           path: resolve(stack.artifacts, 'console-desktop.png'),

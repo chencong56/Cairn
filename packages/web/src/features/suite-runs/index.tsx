@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { SUITE_RUN_STATUSES, type SuiteRunStatus } from '@cairn/shared'
-import { fetchSuiteRuns } from '@/lib/suites-api'
+import { SUITE_RUN_STATUSES, TERMINAL_SUITE_RUN_STATUSES, type SuiteRunStatus } from '@cairn/shared'
+import { cancelSuiteRun, deleteSuiteRun, fetchSuiteRuns, previewDeleteSuiteRun } from '@/lib/suites-api'
 import { fetchTargets } from '@/lib/targets-api'
 import { useCursorPage } from '@/hooks/use-cursor-page'
 import { useCan } from '@/hooks/use-permissions'
@@ -12,8 +12,12 @@ import { Main } from '@/components/layout/main'
 import { PageHeader } from '@/components/layout/page-header'
 import { PageSkeleton } from '@/components/page-skeleton'
 import { QueryErrorState } from '@/components/query-error-state'
+import { ResourceDeleteDialog } from '@/components/resource-delete-dialog'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
+import { Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { ApiRequestError } from '@/lib/api-client'
 import {
   Select,
   SelectContent,
@@ -41,6 +45,9 @@ export function SuiteRunsPage() {
   const page = useCursorPage()
   const navigate = useNavigate()
   const canReadTargets = useCan('target:read')
+  const canDeleteRun = useCan('run:delete')
+  const canCancelRun = useCan('run:cancel')
+  const [deletingItem, setDeletingItem] = useState<{ id: string; suiteName: string } | null>(null)
   const [status, setStatus] = useState<'all' | SuiteRunStatus>('all')
   const [targetId, setTargetId] = useState('all')
   const targets = useQuery({
@@ -63,6 +70,16 @@ export function SuiteRunsPage() {
     placeholderData: keepPreviousData,
   })
   const items = query.data?.items ?? []
+
+  async function handleCancel(suiteRunId: string) {
+    try {
+      await cancelSuiteRun(suiteRunId)
+      toast.success('已请求取消')
+      void query.refetch()
+    } catch (error) {
+      toast.error(error instanceof ApiRequestError ? error.message : '取消失败')
+    }
+  }
 
   return (
     <Main className='flex min-w-0 flex-1 flex-col gap-4 sm:gap-6'>
@@ -137,6 +154,7 @@ export function SuiteRunsPage() {
                   <TableHead>业务判断</TableHead>
                   <TableHead>计数</TableHead>
                   <TableHead>开始时间</TableHead>
+                  <TableHead className='w-20 text-end'>操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -174,6 +192,29 @@ export function SuiteRunsPage() {
                       {item.counts.succeeded}/{item.counts.planned} 成功 · {item.counts.failed} 失败 · {item.counts.skipped} 跳过
                     </TableCell>
                     <TableCell>{new Date(item.createdAt).toLocaleString()}</TableCell>
+                    <TableCell className='text-end' onClick={(e) => e.stopPropagation()}>
+                      {canCancelRun && !(TERMINAL_SUITE_RUN_STATUSES as readonly string[]).includes(item.status) ? (
+                        <Button
+                          variant='ghost'
+                          size='sm'
+                          className='text-destructive hover:bg-destructive/10 hover:text-destructive'
+                          onClick={() => void handleCancel(item.id)}
+                        >
+                          取消
+                        </Button>
+                      ) : null}
+                      {canDeleteRun && (TERMINAL_SUITE_RUN_STATUSES as readonly string[]).includes(item.status) ? (
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='size-8 text-text-secondary hover:text-destructive hover:bg-destructive/10'
+                          title='删除场景集运行'
+                          onClick={() => setDeletingItem({ id: item.id, suiteName: item.suiteName })}
+                        >
+                          <Trash2 className='size-4' />
+                        </Button>
+                      ) : null}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -195,6 +236,18 @@ export function SuiteRunsPage() {
           </div>
         </div>
       )}
+      {deletingItem ? (
+        <ResourceDeleteDialog
+          open={Boolean(deletingItem)}
+          onOpenChange={(open) => !open && setDeletingItem(null)}
+          resourceId={deletingItem.id}
+          resourceName={`场景集运行 #${deletingItem.id.slice(0, 8)}（${deletingItem.suiteName}）`}
+          resourceType='suite_run'
+          previewFn={() => previewDeleteSuiteRun(deletingItem.id)}
+          deleteFn={(body) => deleteSuiteRun(deletingItem.id, body)}
+          onSuccess={() => void query.refetch()}
+        />
+      ) : null}
     </Main>
   )
 }

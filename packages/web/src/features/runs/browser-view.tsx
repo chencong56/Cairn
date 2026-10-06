@@ -193,6 +193,9 @@ export function BrowserView({
   const [authError, setAuthError] = useState<string | null>(null)
   const [acquireError, setAcquireError] = useState<{ code: string; message: string } | null>(null)
   const [closingPageId, setClosingPageId] = useState<string | null>(null)
+  // 换运行／会话时所选页签作废，避免拿上一个对象的 pageId 去订阅画面。
+  useResetOnChange(runId, () => setViewPageId(undefined))
+  const knownPageIds = useRef<{ owner: string; ids: Set<string> } | null>(null)
   const seq = useRef(0)
   const composing = useRef(false)
   const tokenRef = useRef<string | null>(null)
@@ -202,6 +205,29 @@ export function BrowserView({
   useEffect(() => {
     tokenRef.current = token
   })
+
+  // 持有操作权时出现新标签页就切过去：编排会话里 Worker 已把它设为当前页，跟随即可；
+  // 认证等待时执行页不变，只切查看。
+  const acceptMeta = useCallback(
+    (next: ManagedBrowserMeta) => {
+      const known = knownPageIds.current
+      knownPageIds.current = {
+        owner: next.runId,
+        ids: new Set(next.pages.map((page) => page.pageRef.pageId)),
+      }
+      setMeta(next)
+      if (!known || known.owner !== next.runId || !tokenRef.current) return
+      const added = next.pages.filter(
+        (page) => page.kind === 'popup' && !known.ids.has(page.pageRef.pageId)
+      )
+      const newest = added[added.length - 1]
+      if (!newest) return
+      setViewPageId(
+        sessionMode && newest.currentExecution ? undefined : newest.pageRef.pageId
+      )
+    },
+    [sessionMode]
+  )
 
   // 运行进入可实时观看的状态时自动展开画面（切换运行或状态变化时重新判断）。
   useResetOnChange(`${runId}:${runStatus}:${sessionMode}`, () => {
@@ -219,7 +245,7 @@ export function BrowserView({
       void fetchManagedBrowser(runId, viewPageId)
         .then((next) => {
           if (cancelled) return
-          setMeta(next)
+          acceptMeta(next)
           const waitingAuthGate =
             next.runStatus === 'WAITING_FOR_AUTH' && !tokenRef.current
           const needRetry =
@@ -255,6 +281,7 @@ export function BrowserView({
     token,
     fetchManagedBrowser,
     sessionMode,
+    acceptMeta,
   ])
 
   useEffect(() => {
@@ -263,7 +290,7 @@ export function BrowserView({
     const timer = window.setTimeout(() => {
       void fetchManagedBrowser(runId, viewPageId)
         .then((next) => {
-          if (!cancelled) setMeta(next)
+          if (!cancelled) acceptMeta(next)
         })
         .catch(() => undefined)
     }, 250)
@@ -271,7 +298,7 @@ export function BrowserView({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [eventSeq, open, canView, runId, viewPageId, fetchManagedBrowser])
+  }, [eventSeq, open, canView, runId, viewPageId, fetchManagedBrowser, acceptMeta])
 
   useEffect(() => {
     return () => {
@@ -296,6 +323,8 @@ export function BrowserView({
     if (!streamEnabled) return
     let cancelled = false
     let retryTimer = 0
+    let metaTimer = 0
+    let seenRevision: number | undefined
     let controller: AbortController | null = null
     const connect = () => {
       if (cancelled) return
@@ -307,6 +336,22 @@ export function BrowserView({
         onFrame: (next) => {
           setStreamError(null)
           setFrame(next)
+          // 页列表变化（新标签页出现、关闭、当前页变化）随帧推送，序号变了才重取。
+          if (next.pagesRevision === undefined || next.pagesRevision === seenRevision) return
+          seenRevision = next.pagesRevision
+          window.clearTimeout(metaTimer)
+          metaTimer = window.setTimeout(() => {
+            void fetchManagedBrowser(runId, viewPageId)
+              .then((meta) => {
+                if (!cancelled) acceptMeta(meta)
+              })
+              .catch(() => undefined)
+          }, 150)
+        },
+        onPageStale: () => {
+          if (cancelled) return
+          toast.message('所看的页面已关闭，已回到当前页')
+          setViewPageId(undefined)
         },
       })
         .then(() => {
@@ -336,6 +381,7 @@ export function BrowserView({
       cancelled = true
       controller?.abort()
       window.clearTimeout(retryTimer)
+      window.clearTimeout(metaTimer)
     }
   }, [
     streamEnabled,
@@ -349,6 +395,8 @@ export function BrowserView({
     meta?.authControl?.epoch,
     meta?.authControl?.heldByViewer,
     subscribeBrowserFrames,
+    fetchManagedBrowser,
+    acceptMeta,
   ])
 
   useEffect(() => {
@@ -447,7 +495,7 @@ export function BrowserView({
         if (error instanceof ApiRequestError && error.payload.code === 'PAGE_STALE') {
           void fetchManagedBrowser(runId, viewPageId)
             .then((next) => {
-              if (next) setMeta(next)
+              if (next) acceptMeta(next)
             })
             .catch(() => undefined)
         }
@@ -466,7 +514,7 @@ export function BrowserView({
           }
         }
       })
-  }, [token, pageRef, frame, canControl, runId, inputAuthControl])
+  }, [token, pageRef, frame, canControl, runId, inputAuthControl, acceptMeta])
   useEffect(() => {
     flushWheelRef.current = flushWheel
   }, [flushWheel])
@@ -501,11 +549,26 @@ export function BrowserView({
     }
   }, [])
 
+  // 指认、高亮作用于正在查看的页；跟随当前页时不带 pageId。
+  const viewedKind = meta?.pages.find(
+    (page) => page.pageRef.pageId === (viewPageId ?? meta.currentPage?.pageRef.pageId)
+  )?.kind
+  const { setViewedPage } = observe
+  useEffect(() => {
+    setViewedPage({ pageId: viewPageId, kind: viewedKind })
+  }, [setViewedPage, viewPageId, viewedKind])
+  useEffect(() => () => setViewedPage(null), [setViewedPage])
+
   if (!canView) return null
 
   const waiting = runStatus === 'WAITING_FOR_AUTH'
   const holding = runStatus === 'HOLDING'
-  const picking = observe.pickMode && (holding || (sessionMode && observe.livePage))
+  // 调试挂起时步骤只在执行当前页上运行：看着别的页指认会写进对不上的定位。
+  const pickBlockedOnOtherPage = !sessionMode && holding && Boolean(meta?.viewingOtherPage)
+  const picking =
+    observe.pickMode &&
+    !pickBlockedOnOtherPage &&
+    (holding || (sessionMode && observe.livePage))
   const highlightBox = observe.highlight?.preview?.box
   const tableMarkers = observe.tableMarkers
   const controlling = Boolean(token && canControl)
@@ -551,7 +614,7 @@ export function BrowserView({
       if (error instanceof ApiRequestError && error.payload.code === 'PAGE_STALE') {
         void fetchManagedBrowser(runId, viewPageId)
           .then((next) => {
-            if (next) setMeta(next)
+            if (next) acceptMeta(next)
           })
           .catch(() => undefined)
       }
@@ -570,7 +633,7 @@ export function BrowserView({
         setToken(granted.token)
         setPageRef(granted.pageRef)
         setExpiresAt(granted.expiresAt)
-        setMeta(granted.meta)
+        acceptMeta(granted.meta)
         setOpen(true)
         toast.success(sessionMode ? '已取得手动操作权' : '已取得登录输入权')
       })
@@ -625,7 +688,7 @@ export function BrowserView({
         return fetchManagedBrowser(runId, undefined)
       })
       .then((next) => {
-        if (next) setMeta(next)
+        if (next) acceptMeta(next)
       })
       .catch((error) => {
         toast.error(
@@ -942,7 +1005,9 @@ export function BrowserView({
           {meta && meta.pages.length > 1 ? (
             <div className='space-y-2'>
               <p className='text-label text-muted-foreground'>
-                查看其他受管页不会改变执行当前页。
+                {sessionMode
+                  ? '切换页签可查看其他受管页；手动操作与指认都作用于正在查看的页。'
+                  : '查看其他受管页不会改变执行当前页。'}
               </p>
               <div className='flex flex-wrap gap-2'>
                 {meta.pages.map((page) => {
@@ -971,7 +1036,7 @@ export function BrowserView({
                         )}
                         onClick={() => setViewPageId(page.pageRef.pageId)}
                       >
-                        {duplicateCount > 1 ? (
+                        {duplicateCount > 1 || page.kind === 'popup' ? (
                           <span className='text-label text-muted-foreground mr-0.5'>
                             [{managedPageBadge(page.kind)}]
                           </span>
@@ -1007,7 +1072,14 @@ export function BrowserView({
           ) : null}
           {meta?.viewingOtherPage ? (
             <p className='text-small text-status-warning-foreground'>
-              正在查看其他页面，不会改变执行当前页。
+              {sessionMode
+                ? '正在查看非当前页：手动操作与指认作用于此页。'
+                : '正在查看其他页面，不会改变执行当前页。'}
+            </p>
+          ) : null}
+          {observe.pickMode && pickBlockedOnOtherPage ? (
+            <p className='text-small text-status-warning-foreground'>
+              步骤将在执行当前页上运行，请切回当前页再指认。
             </p>
           ) : null}
           {!embedded &&

@@ -42,6 +42,7 @@ export const SUITE_RUN_STATUSES = [
 ] as const
 export type SuiteRunStatus = (typeof SUITE_RUN_STATUSES)[number]
 export const suiteRunStatusSchema = z.enum(SUITE_RUN_STATUSES)
+export const TERMINAL_SUITE_RUN_STATUSES = ['COMPLETED', 'CANCELLED', 'FAILED'] as const
 
 export const EXECUTION_ORIGINS = ['standalone', 'suite_member', 'batch_item'] as const
 export type ExecutionOrigin = (typeof EXECUTION_ORIGINS)[number]

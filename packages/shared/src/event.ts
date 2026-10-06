@@ -25,6 +25,7 @@ export const RUN_EVENT_TYPES = [
   'run.auth_recovered',
   'run.auth_unrecoverable',
   'run.page_handoff',
+  'run.page_discovered',
   'run.holding',
   'run.debug_resumed',
   'run.debug_stopped',

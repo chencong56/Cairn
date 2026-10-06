@@ -82,10 +82,14 @@ export type ObserveGrant = z.infer<typeof observeGrantSchema>
 
 export const MAX_STRUCTURE_SNAPSHOT_CHARS = 32_000
 
+/** 作用页：省略时为执行当前页；Web 传入正在查看的受管页，保证看的与指认的是同一页。 */
+const observePageIdSchema = entityIdSchema.optional()
+
 export const observeTableDiscoverOperationSchema = z.strictObject({
   op: z.literal('table'),
   subOp: z.literal('discover'),
   target: targetDescriptorSchema.optional(),
+  pageId: observePageIdSchema,
 })
 export type ObserveTableDiscoverOperation = z.infer<typeof observeTableDiscoverOperationSchema>
 
@@ -94,6 +98,7 @@ export const observeTableSampleOperationSchema = z.strictObject({
   subOp: z.literal('sample'),
   target: targetDescriptorSchema.optional(),
   plan: tableReadPlanSchema,
+  pageId: observePageIdSchema,
 })
 export type ObserveTableSampleOperation = z.infer<typeof observeTableSampleOperationSchema>
 
@@ -111,6 +116,7 @@ export const observeOperationSchema = z.union([
     target: targetDescriptorSchema.optional(),
     applyOverlay: z.boolean().optional(),
     clearOverlayStepId: entityIdSchema.optional(),
+    pageId: observePageIdSchema,
   }),
   observeTableOperationSchema,
 ])

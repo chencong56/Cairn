@@ -61,6 +61,8 @@ export function assertExpectedCounts(
     (expected.suites !== undefined && (actual.suites ?? 0) > expected.suites) ||
     (expected.recordings !== undefined && (actual.recordings ?? 0) > expected.recordings) ||
     (expected.runs !== undefined && (actual.runs ?? 0) > expected.runs) ||
+    (expected.suiteRuns !== undefined && (actual.suiteRuns ?? 0) > expected.suiteRuns) ||
+    (expected.reports !== undefined && (actual.reports ?? 0) > expected.reports) ||
     (expected.schedules !== undefined && (actual.schedules ?? 0) > expected.schedules)
   ) {
     throw conflict('DELETE_SCOPE_EXPANDED', '级联删除影响范围已发生变化，请刷新预览后重新确认')
@@ -141,9 +143,12 @@ export async function assertResourceIdle(
     targetAccountId?: string
     scenarioId?: string
     checkPendingWrites?: boolean
+    /** 被拦下的动作，用于提示文案；默认是删除。 */
+    action?: string
   },
 ): Promise<void> {
   const { browserSessions, runLeases, runs, sessionLeases } = schemaFor(tx)
+  const action = input.action ?? '删除'
   const now = new Date()
   let runIds = input.runIds ?? []
   if (input.scenarioId) {
@@ -160,7 +165,7 @@ export async function assertResourceIdle(
       .where(and(inArray(runLeases.runId, runIds), eq(runLeases.status, 'ACTIVE')))
       .limit(1)
     if (lease) {
-      throw conflict('RESOURCE_BUSY', '仍有活跃任务租约，无法删除')
+      throw conflict('RESOURCE_BUSY', `仍有活跃任务租约，无法${action}`)
     }
     if (input.checkPendingWrites) {
       const pending = await pendingWriteBlockers(tx, runIds)
@@ -192,12 +197,12 @@ export async function assertResourceIdle(
     .where(and(inArray(sessionLeases.sessionId, sessionIds), eq(sessionLeases.status, 'ACTIVE')))
     .limit(1)
   if (held) {
-    throw conflict('RESOURCE_BUSY', '仍有活跃会话租约，无法删除')
+    throw conflict('RESOURCE_BUSY', `仍有活跃会话租约，无法${action}`)
   }
   if (
     sessions.some((row) => row.authControlExpiresAt && row.authControlExpiresAt > now)
   ) {
-    throw conflict('RESOURCE_BUSY', '仍有认证占用，无法删除')
+    throw conflict('RESOURCE_BUSY', `仍有认证占用，无法${action}`)
   }
 }
 

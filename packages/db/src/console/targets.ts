@@ -1093,7 +1093,7 @@ export class TargetsStore {
             })
           }
         }
-        if (body.clearPassword || usernameChanged) await assertResourceIdle(tx as unknown as Db, { targetAccountId: accountId })
+        if (body.clearPassword || usernameChanged) await assertResourceIdle(tx as unknown as Db, { targetAccountId: accountId, action: body.clearPassword ? '清除密码' : '修改账号' })
         if (body.clearPassword) {
           const [activeRun] = await tx.select({ id: runs.id }).from(runs).where(and(eq(runs.targetAccountId, accountId), inArray(runs.status, ACTIVE_RUN_STATUSES), isNull(runs.deletedAt))).limit(1)
           if (activeRun) throw failure('conflict', '账号仍有未完成运行，请先处理后再清除密码')

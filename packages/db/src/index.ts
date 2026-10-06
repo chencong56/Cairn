@@ -1482,6 +1482,9 @@ export const listSuiteRunEventsAfter = operation(
 );
 export const cancelSuiteRun = operation(suiteImpl.cancelSuiteRun);
 export const rerunSuiteItem = operation(suiteImpl.rerunSuiteItem);
+export const previewDeleteSuiteRun = operation(suiteImpl.previewDeleteSuiteRun);
+export const deleteSuiteRun = operation(suiteImpl.deleteSuiteRun);
+export const getSuiteRunCleanupStatus = operation(suiteImpl.getSuiteRunCleanupStatus);
 export const advanceSuiteRun = operation(suiteImpl.advanceSuiteRun);
 export const advanceDueSuiteRuns = operation(suiteImpl.advanceDueSuiteRuns);
 

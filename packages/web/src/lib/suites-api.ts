@@ -1,4 +1,5 @@
 import {
+  cleanupStatusResponseSchema,
   createSuiteBodySchema,
   createSuiteRunBodySchema,
   deletePreviewResponseSchema,
@@ -14,8 +15,10 @@ import {
   suiteRunPreviewResponseSchema,
   suiteValidateResponseSchema,
   updateSuiteEnabledBodySchema,
+  type CleanupStatusResponse,
   type CreateSuiteBody,
   type CreateSuiteRunBody,
+  type DeletePreviewResponse,
   type DeleteResourceBody,
   type PublishSuiteBody,
   type RerunSuiteItemBody,
@@ -128,3 +131,20 @@ export function rerunSuiteItem(suiteRunId: string, body: RerunSuiteItemBody) {
     body: JSON.stringify(rerunSuiteItemBodySchema.parse(body)),
   })
 }
+
+export function previewDeleteSuiteRun(suiteRunId: string): Promise<DeletePreviewResponse> {
+  return apiFetch(`/api/suite-runs/${suiteRunId}/delete-preview`, deletePreviewResponseSchema)
+}
+
+export function deleteSuiteRun(suiteRunId: string, body?: DeleteResourceBody): Promise<CleanupStatusResponse> {
+  return apiFetch(`/api/suite-runs/${suiteRunId}/delete`, cleanupStatusResponseSchema, {
+    method: 'POST',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(deleteResourceBodySchema.parse(body)) : undefined,
+  })
+}
+
+export function fetchSuiteRunCleanup(suiteRunId: string): Promise<CleanupStatusResponse> {
+  return apiFetch(`/api/suite-runs/${suiteRunId}/cleanup`, cleanupStatusResponseSchema)
+}
+

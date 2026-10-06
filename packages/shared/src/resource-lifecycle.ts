@@ -14,6 +14,7 @@ export const deletePreviewCountsSchema = z.object({
   targetAccounts: z.number().int().nonnegative().optional(),
   scenarios: z.number().int().nonnegative().optional(),
   suites: z.number().int().nonnegative().optional(),
+  suiteRuns: z.number().int().nonnegative().optional(),
   recordings: z.number().int().nonnegative().optional(),
   runs: z.number().int().nonnegative().optional(),
   schedules: z.number().int().nonnegative().optional(),
@@ -44,8 +45,10 @@ export const deleteResourceBodySchema = z.strictObject({
       targetAccounts: z.number().int().nonnegative().optional(),
       scenarios: z.number().int().nonnegative().optional(),
       suites: z.number().int().nonnegative().optional(),
+      suiteRuns: z.number().int().nonnegative().optional(),
       recordings: z.number().int().nonnegative().optional(),
       runs: z.number().int().nonnegative().optional(),
+      reports: z.number().int().nonnegative().optional(),
       schedules: z.number().int().nonnegative().optional(),
     })
     .optional(),
@@ -58,7 +61,7 @@ export const cleanupStatusSchema = z.enum(CLEANUP_STATUSES)
 
 export const cleanupStatusResponseSchema = z.object({
   resourceId: z.string().min(1),
-  resourceType: z.enum(['target', 'run']),
+  resourceType: z.enum(['target', 'run', 'suite_run']),
   status: cleanupStatusSchema,
   totalObjects: z.number().int().nonnegative(),
   purgedObjects: z.number().int().nonnegative(),

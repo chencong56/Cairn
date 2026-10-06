@@ -94,6 +94,14 @@ export function translateStepError(error?: { code?: string; safeMessage?: string
         isRetryable: false,
       }
 
+    case 'ACTION_NAVIGATION_FAILED':
+      return {
+        title: '提交后页面没有返回结果',
+        description: '点击或按键触发的页面跳转以网络错误告终，目标系统可能已经处理了提交，只是响应丢失。',
+        suggestion: '请到目标系统核对这次操作是否已生效，确认后再决定是否重新执行，避免重复提交。',
+        isRetryable: false,
+      }
+
     case 'NAVIGATE_OUT_OF_SCOPE':
       return {
         title: '页面跳转超出安全范围',

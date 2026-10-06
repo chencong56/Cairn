@@ -88,3 +88,13 @@ describe('source-scan 口径', () => {
     assert.deepEqual(importSpecifiers(source), ['./a.js', 'b'])
   })
 })
+
+describe('INV019 Worker 自建页经 openInternalPage', () => {
+  it('业务代码直接 newPage() 即违规', () => {
+    assert.equal(check('INV019', 'packages/worker/src/browser/x.ts', 'const page = await handle.context.newPage()').length, 1)
+  })
+  it('runtime.ts 内的 openInternalPage 实现与改用入口的调用不受限', () => {
+    assert.deepEqual(check('INV019', 'packages/worker/src/browser/runtime.ts', 'const opening = context.newPage()'), [])
+    assert.deepEqual(check('INV019', 'packages/worker/src/browser/x.ts', 'await openInternalPage(handle.context)'), [])
+  })
+})

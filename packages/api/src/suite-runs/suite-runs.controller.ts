@@ -2,9 +2,11 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, R
 import type { Request, Response } from 'express'
 import {
   createSuiteRunBodySchema,
+  deleteResourceBodySchema,
   rerunSuiteItemBodySchema,
   suiteRunListQuerySchema,
   type CreateSuiteRunBody,
+  type DeleteResourceBody,
   type RerunSuiteItemBody,
   type SuiteRunListQuery,
 } from '@cairn/shared'
@@ -13,6 +15,7 @@ import type { RequestAccount } from '../common/request-account'
 import { CurrentAccount } from '../rbac/current-account.decorator'
 import { RequirePermissions } from '../rbac/require-permission.decorator'
 import { SuiteRunsService } from './suite-runs.service'
+import { cleanupAcceptedStatus } from '../common/cleanup-status'
 
 @Controller('suite-runs')
 export class SuiteRunsController {
@@ -71,5 +74,30 @@ export class SuiteRunsController {
     @CurrentAccount() account: RequestAccount,
   ) {
     return this.suiteRuns.rerunItem(suiteRunId, body, account)
+  }
+
+  @Get(':suiteRunId/delete-preview')
+  @RequirePermissions('run:delete', 'suite:read')
+  previewDelete(@Param('suiteRunId') suiteRunId: string) {
+    return this.suiteRuns.previewDelete(suiteRunId)
+  }
+
+  @Post(':suiteRunId/delete')
+  @RequirePermissions('run:delete', 'suite:read')
+  async delete(
+    @Param('suiteRunId') suiteRunId: string,
+    @CurrentAccount() actor: RequestAccount,
+    @Body(new ZodValidationPipe(deleteResourceBodySchema.optional())) body: DeleteResourceBody | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const cleanup = await this.suiteRuns.delete(suiteRunId, actor, body)
+    res.status(cleanupAcceptedStatus(cleanup))
+    return cleanup
+  }
+
+  @Get(':suiteRunId/cleanup')
+  @RequirePermissions('run:read', 'suite:read')
+  cleanupStatus(@Param('suiteRunId') suiteRunId: string) {
+    return this.suiteRuns.cleanupStatus(suiteRunId)
   }
 }

@@ -50,6 +50,7 @@ export const BROWSER_STEP_ERROR_CODES = [
   'FIXTURE_SIZE_EXCEEDED',
   'EXTRACT_TOO_MANY',
   'EXTRACT_TOO_FEW',
+  'ACTION_NAVIGATION_FAILED',
 ] as const
 export type BrowserStepErrorCode = (typeof BROWSER_STEP_ERROR_CODES)[number]
 

@@ -41,6 +41,8 @@ export async function dropLocalHandle(
     }
     live.authObserver?.dispose()
     live.authObserver = undefined
+    live.pageDiscovery?.dispose()
+    live.pageDiscovery = undefined
     live.screencastObservers.clear()
     for (const cast of live.screencasts.values()) {
       await cast.stop().catch(() => undefined)
@@ -334,6 +336,8 @@ export async function dropDisposedHandles(this: SessionManagerContext): Promise<
         row !== null && row.status !== 'CLOSED' && row.ownerWorkerId === this.options.workerId
       if (stillOurs) continue
 
+      live.pageDiscovery?.dispose()
+      live.pageDiscovery = undefined
       for (const page of live.runPages.values()) await closePage(page)
       if (live.lastPage && live.lastPage !== live.handle.basePage && !live.lastPage.isClosed()) {
         await closePage(live.lastPage)

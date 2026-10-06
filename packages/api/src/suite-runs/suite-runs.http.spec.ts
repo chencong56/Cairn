@@ -55,6 +55,31 @@ function mockService() {
     observation: vi.fn(async () => observation),
     cancel: vi.fn(async () => observation),
     rerunItem: vi.fn(async () => ({ runId: '99999999-9999-4999-8999-999999999999', suiteRun: observation })),
+    previewDelete: vi.fn(async () => ({
+      previewToken: 'tok-1',
+      counts: { suiteRuns: 1, runs: 1, reports: 0, storedObjects: 0, totalBytes: 0 },
+      blockers: [],
+    })),
+    delete: vi.fn(async () => ({
+      resourceId: suiteRunId,
+      resourceType: 'suite_run',
+      status: 'completed',
+      totalObjects: 0,
+      purgedObjects: 0,
+      failedObjects: 0,
+      totalBytes: 0,
+      purgedBytes: 0,
+    })),
+    cleanupStatus: vi.fn(async () => ({
+      resourceId: suiteRunId,
+      resourceType: 'suite_run',
+      status: 'completed',
+      totalObjects: 0,
+      purgedObjects: 0,
+      failedObjects: 0,
+      totalBytes: 0,
+      purgedBytes: 0,
+    })),
     stream: vi.fn(),
   }
 }
@@ -120,5 +145,41 @@ describe('SuiteRuns HTTP', () => {
       .send({ memberId: 'm1' })
       .expect(200)
     expect(service.rerunItem).toHaveBeenCalledWith(suiteRunId, { memberId: 'm1' }, admin)
+  })
+
+  it('删除预览和删除需要 run:delete 和 suite:read 权限', async () => {
+    await request(viewerApp.getHttpServer())
+      .get(`/suite-runs/${suiteRunId}/delete-preview`)
+      .expect(403)
+    expect(service.previewDelete).not.toHaveBeenCalled()
+
+    await request(adminApp.getHttpServer())
+      .get(`/suite-runs/${suiteRunId}/delete-preview`)
+      .expect(200)
+    expect(service.previewDelete).toHaveBeenCalledWith(suiteRunId)
+
+    await request(viewerApp.getHttpServer())
+      .post(`/suite-runs/${suiteRunId}/delete`)
+      .send({ expectedCounts: { runs: 1 } })
+      .expect(403)
+    expect(service.delete).not.toHaveBeenCalled()
+
+    await request(adminApp.getHttpServer())
+      .post(`/suite-runs/${suiteRunId}/delete`)
+      .send({ expectedCounts: { runs: 1 } })
+      .expect(200)
+    expect(service.delete).toHaveBeenCalledWith(suiteRunId, admin, { expectedCounts: { runs: 1 } })
+  })
+
+  it('获取清理状态需要 run:read 和 suite:read 权限', async () => {
+    await request(viewerApp.getHttpServer())
+      .get(`/suite-runs/${suiteRunId}/cleanup`)
+      .expect(403)
+    expect(service.cleanupStatus).not.toHaveBeenCalled()
+
+    await request(adminApp.getHttpServer())
+      .get(`/suite-runs/${suiteRunId}/cleanup`)
+      .expect(200)
+    expect(service.cleanupStatus).toHaveBeenCalledWith(suiteRunId)
   })
 })

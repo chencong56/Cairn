@@ -10,6 +10,8 @@ export type ManagedPageEntry = {
   page: Page
   runId: string
   kind: ManagedPageKind
+  /** 由会话级页发现登记、尚未被执行显式接管的新标签页；可被上限淘汰与 Run 结束清理。 */
+  discovered?: boolean
   lastNavigationMethod?: string
   retarget?: Promise<void>
   dispose?: () => void

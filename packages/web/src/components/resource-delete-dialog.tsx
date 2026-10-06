@@ -37,7 +37,7 @@ export type ResourceDeleteDialogProps = {
   onOpenChange: (open: boolean) => void
   resourceId: string
   resourceName: string
-  resourceType: 'target' | 'scenario' | 'run' | 'recording' | 'suite' | 'report'
+  resourceType: 'target' | 'scenario' | 'run' | 'recording' | 'suite' | 'report' | 'suite_run'
   previewFn?: () => Promise<DeletePreviewResponse>
   deleteFn: (body?: DeleteResourceBody) => Promise<CleanupStatusResponse | DeleteResourceResult | void>
   onSuccess: (result?: CleanupStatusResponse | DeleteResourceResult | void) => void
@@ -76,6 +76,7 @@ export function ResourceDeleteDialog({
     recording: '删除录制草稿',
     suite: '删除场景集',
     report: '删除报告',
+    suite_run: '删除场景集运行',
   }
 
   const handleConfirm = async () => {
@@ -88,8 +89,10 @@ export function ResourceDeleteDialog({
               targetAccounts: preview.counts.targetAccounts,
               scenarios: preview.counts.scenarios,
               suites: preview.counts.suites,
+              suiteRuns: preview.counts.suiteRuns,
               recordings: preview.counts.recordings,
               runs: preview.counts.runs,
+              reports: preview.counts.reports,
               schedules: preview.counts.schedules,
             },
           }
@@ -248,7 +251,17 @@ export function ResourceDeleteDialog({
                     </div>
                   )}
 
-                  {!hasBlockers && ['target', 'run'].includes(resourceType) && !!counts.unknownByteObjects && (
+                  {!hasBlockers && resourceType === 'suite_run' && (
+                    <div className='rounded-md border border-border-default bg-muted/40 p-3 text-label text-text-secondary space-y-1.5'>
+                      <p>
+                        该场景集运行及其包含的 <strong>{counts.runs ?? 0}</strong> 个子运行、执行证据将被软删除。
+                        级联的 <strong>{counts.storedObjects ?? 0}</strong> 个存储对象（已知{' '}
+                        {formatBytes(counts.totalBytes)}）将进入物理清理队列，含 {counts.reports ?? 0} 份关联报告。
+                      </p>
+                    </div>
+                  )}
+
+                  {!hasBlockers && ['target', 'run', 'suite_run'].includes(resourceType) && !!counts.unknownByteObjects && (
                     <p className='text-label text-muted-foreground'>
                       另有 {counts.unknownByteObjects} 个对象大小未知，未计入已知字节。
                     </p>

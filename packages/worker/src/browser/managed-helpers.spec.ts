@@ -12,7 +12,10 @@ describe('managed helpers', () => {
 
   it('交接错误有明确中文说明', () => {
     expect(handoffMessage('PAGE_HANDOFF_NO_POPUP')).toContain('没有')
-    expect(handoffMessage('PAGE_HANDOFF_OUT_OF_SCOPE')).toContain('范围')
+    expect(handoffMessage('PAGE_HANDOFF_AMBIGUOUS')).toContain('多个')
+    expect(handoffMessage('PAGE_HANDOFF_CLOSED')).toContain('已关闭')
+    // 访问范围已移除，弹窗不再因越界被拒；旧记录里的越界码只给通用说明。
+    expect(handoffMessage('PAGE_HANDOFF_OUT_OF_SCOPE')).toBe('页面交接失败')
   })
 
   describe('真实 Chromium 滚轮与键盘导航端到端验证', () => {

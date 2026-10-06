@@ -441,3 +441,29 @@ it('终态前的后台维护跨窗口复用同一操作', async () => {
   expect(second.operation?.id).toBe(first.operation?.id)
   expect(second.created).toBe(false)
 })
+
+it('受理会话操作不与执行面「锁账号后写引用操作者的行」互等成死锁', async () => {
+  const { targetAccounts, consoleAuditEvents } = schemaFor(h.db)
+  let releaseWorker!: () => void
+  const workerMayFinish = new Promise<void>((resolve) => { releaseWorker = resolve })
+  let workerLocked!: () => void
+  const accountLocked = new Promise<void>((resolve) => { workerLocked = resolve })
+  // 执行面事务：先锁账号行，等受理事务拿到操作者锁并开始等账号后，再写一行引用操作者的数据（外键检查取 KEY SHARE）。
+  const worker = h.db.transaction(async (tx) => {
+    await tx.select({ id: targetAccounts.id }).from(targetAccounts).where(eq(targetAccounts.id, key.targetAccountId)).for('update')
+    workerLocked()
+    await workerMayFinish
+    await tx.insert(consoleAuditEvents).values({ actorConsoleAccountId: actorId, action: 'worker.write', resource: 'run', summary: '执行面写入' })
+  })
+  await accountLocked
+  const request = requestMaintenanceOperation(h.db, {
+    key,
+    body: { kind: 'PREPARE', idempotencyKey: 'deadlock-regression' },
+    actor: { id: actorId },
+  })
+  // 让受理事务先拿到操作者锁并阻塞在账号锁上，再放执行面写引用行。
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  releaseWorker()
+  await expect(worker).resolves.toBeUndefined()
+  await expect(request).resolves.toMatchObject({ created: true })
+})

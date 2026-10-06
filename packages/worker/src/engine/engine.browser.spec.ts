@@ -1092,8 +1092,11 @@ describe('ExecutionEngine × BrowserPort（L1）', { timeout: 60_000 }, () => {
       { action: 'retry_current', fencingToken: held.checkpoint?.fencingToken, confirmSideEffect: true },
       actorId,
     )
+    // 第二次 Attempt 落库时步骤可能仍在跑：等它再次失败并重新挂起，再结束调试（结束只对挂起中的运行有效）。
     await vi.waitFor(async () => {
-      expect((await getRun(handle.db, created.detail.id)).stepRuns[0]?.attempts.length).toBe(2)
+      const current = await getRun(handle.db, created.detail.id)
+      expect(current.stepRuns[0]?.attempts.length).toBe(2)
+      expect(current.status).toBe('HOLDING')
     })
     await engine.resumeDebug(created.detail.id, { action: 'stop' }, actorId)
     await done
@@ -1264,8 +1267,11 @@ describe('ExecutionEngine × BrowserPort（L1）', { timeout: 60_000 }, () => {
       { action: 'retry_current', fencingToken: held.checkpoint?.fencingToken, pageChangedAck: true },
       actorId,
     )
+    // 同上：等第二次 Attempt 结束并重新挂起再结束调试。
     await vi.waitFor(async () => {
-      expect((await getRun(handle.db, created.detail.id)).stepRuns[0]?.attempts.length).toBe(2)
+      const current = await getRun(handle.db, created.detail.id)
+      expect(current.stepRuns[0]?.attempts.length).toBe(2)
+      expect(current.status).toBe('HOLDING')
     })
     await engine.resumeDebug(created.detail.id, { action: 'stop' }, actorId)
     await done

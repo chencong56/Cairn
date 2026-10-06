@@ -242,7 +242,7 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
     expect(canvas.error.code).toBe('BROWSER_CAPABILITY_MISSING')
   })
 
-  it('extract / assert / navigate 越界', async ({ skip }) => {
+  it('extract / assert / navigate 跨域地址不受访问范围限制', async ({ skip }) => {
     if (!hasBrowser) skip()
     const page = await open('/')
     const extracted = await executeOnPage(page, {
@@ -271,14 +271,22 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
     expect(failed.error.code).toBe('ASSERT_FAILED')
     expect(failed.output).toMatchObject({ expected: '别的', actual: '普通 DOM' })
 
-    const nav = await executeOnPage(page, {
-      type: 'navigate',
-      url: 'https://evil.example/',
-      allowedOrigins: [new URL(baseUrl).origin],
-    })
-    expect(nav.ok).toBe(false)
-    if (nav.ok) throw new Error('nav')
-    expect(nav.error.code).toBe('NAVIGATE_OUT_OF_SCOPE')
+    // 访问范围已移除：绝对地址跨域照常导航，旧 API 仍下发的 allowedOrigins 被忽略。保留域名经路由拦截，不访问外网。
+    await page.route('https://other.example/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<!doctype html><title>跨域页</title><h1>跨域页</h1>' }),
+    )
+    try {
+      const nav = await executeOnPage(page, {
+        type: 'navigate',
+        url: 'https://other.example/landing',
+        allowedOrigins: [new URL(baseUrl).origin],
+      })
+      expect(nav.ok).toBe(true)
+      expect(nav.output).toEqual({ url: 'https://other.example/landing' })
+      expect(await page.locator('h1').textContent()).toBe('跨域页')
+    } finally {
+      await page.unroute('https://other.example/**')
+    }
   })
 
   it('select / keyboard / wait 在编写夹具页可执行', async ({ skip }) => {

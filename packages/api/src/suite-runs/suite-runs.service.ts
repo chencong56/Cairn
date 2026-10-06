@@ -3,15 +3,18 @@ import type { Request, Response } from 'express'
 import {
   cancelSuiteRun,
   createSuiteRun,
+  deleteSuiteRun,
+  getSuiteRunCleanupStatus,
   getSuiteRunObservation,
   listSuiteRunEventsAfter,
   listSuiteRuns,
+  previewDeleteSuiteRun,
   previewSuiteRun,
   rerunSuiteItem,
   type DbHandle,
   type ChangeHintBus,
 } from '@cairn/db'
-import type { CreateSuiteRunBody, RerunSuiteItemBody, SuiteRunListQuery } from '@cairn/shared'
+import type { CreateSuiteRunBody, DeleteResourceBody, RerunSuiteItemBody, SuiteRunListQuery } from '@cairn/shared'
 import { rethrowDomain } from '../common/domain-error.js'
 import { observeObject } from '../common/observe-object.js'
 import { CHANGE_HINT } from '../observe/change-hint.module.js'
@@ -48,6 +51,18 @@ export class SuiteRunsService {
 
   rerunItem(suiteRunId: string, body: RerunSuiteItemBody, account: RequestAccount) {
     return rerunSuiteItem(this.database, { suiteRunId, memberId: body.memberId }, this.actor(account)).catch(rethrowDomain)
+  }
+
+  previewDelete(suiteRunId: string) {
+    return previewDeleteSuiteRun(this.database, suiteRunId).catch(rethrowDomain)
+  }
+
+  delete(suiteRunId: string, account: RequestAccount, body?: DeleteResourceBody) {
+    return deleteSuiteRun(this.database, suiteRunId, this.actor(account), body).catch(rethrowDomain)
+  }
+
+  cleanupStatus(suiteRunId: string) {
+    return getSuiteRunCleanupStatus(this.database, suiteRunId).catch(rethrowDomain)
   }
 
   async stream(suiteRunId: string, actorId: string, req: Request, res: Response) {

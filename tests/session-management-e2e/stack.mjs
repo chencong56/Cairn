@@ -16,7 +16,7 @@ export const root = resolve(import.meta.dirname, '../..')
 // shared workspace. External installed dependencies remain read-only links.
 function freezeRuntime(artifacts) {
   const runtime = resolve(artifacts, 'runtime')
-  const packages = ['shared', 'db', 'map', 'secret', 'storage', 'api', 'worker']
+  const packages = ['shared', 'authoring', 'db', 'map', 'secret', 'storage', 'api', 'worker']
   for (const pkg of packages) {
     const source = resolve(root, 'packages', pkg)
     const destination = resolve(runtime, pkg)
@@ -159,7 +159,7 @@ export async function startStack() {
     CAIRN_BROWSER_HEADLESS: 'true',
     CAIRN_API_PORT: String(apiPort),
     CAIRN_BOOTSTRAP_ADMIN_EMAIL: 'admin',
-    CAIRN_BOOTSTRAP_ADMIN_PASSWORD: 'e2e-admin-password',
+    CAIRN_BOOTSTRAP_ADMIN_PASSWORD: 'cairn-admin',
     CAIRN_WORKER_ENDPOINTS: workerPorts
       .map((p, i) => `session-e2e-${i}=http://127.0.0.1:${p}`)
       .join(','),
@@ -169,6 +169,7 @@ export async function startStack() {
     CAIRN_SESSION_LEASE_TTL_SECONDS: '6',
     CAIRN_SESSION_HEARTBEAT_MS: '1000',
     CAIRN_SESSION_REAPER_INTERVAL_MS: '1000',
+    CAIRN_REAPER_DRAIN_BUDGET_MS: '500',
     CAIRN_BROWSER_MAX_SESSIONS: '4',
     CAIRN_WORKER_CAPACITY: '4',
   }
@@ -322,7 +323,7 @@ export async function startStack() {
     token = (
       await request('/auth/login', {
         email: 'admin',
-        password: 'e2e-admin-password',
+        password: 'cairn-admin',
       })
     ).accessToken
     if (!token) throw new Error('Login did not return accessToken')

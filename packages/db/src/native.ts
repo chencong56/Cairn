@@ -591,6 +591,13 @@ export function locked<Q>(db: object, query: Q, skipLocked = false): Q {
     ? query
     : (query as any).for('update', skipLocked ? { skipLocked: true } : undefined)
 }
+/**
+ * 共享行锁：挡住并发改写该行，但不与外键检查取的 KEY SHARE 冲突。
+ * 只读确认用它，别用 FOR UPDATE：后者会与「同事务新插行再更新」触发的外键复查互等成死锁。
+ */
+export function lockedShared<Q>(db: object, query: Q): Q {
+  return driverOf(db) === 'sqlite' ? query : (query as any).for('share')
+}
 export async function atomic<T>(db: Db, fn: (tx: Db) => Promise<T>): Promise<T> {
   return inTransaction(db) ? fn(db) : db.transaction((tx) => fn(tx as unknown as Db))
 }

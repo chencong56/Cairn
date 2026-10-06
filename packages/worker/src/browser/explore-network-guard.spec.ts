@@ -6,13 +6,10 @@ import { affectsCapturedSurface, blockedRequestImpactBasis, classifyReadOnlyRequ
 
 const policy = targetAccessPolicySchema.parse({
   schemaVersion: 1, policyVersion: 1,
-  rules: [
-    { origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' },
-    { origin: 'https://app.example', purpose: 'business_surface', effect: 'deny', pathPrefix: '/admin' },
-  ],
   readOnlyRequests: [{ method: 'POST', origin: 'https://app.example', pathPattern: '/api/search' }],
 })
-const options = { allowedOrigins: [], accessPolicy: policy }
+// 访问范围规则已移除：地图采集的边界是目标入口／登录 origin。
+const options = { allowedOrigins: ['https://app.example'], accessPolicy: policy }
 const post = (url: string, contentType: string, postData: string) => classifyReadOnlyRequest({
   url, method: 'POST', resourceType: 'fetch', navigation: false, contentType, postData,
 }, options)
@@ -97,9 +94,7 @@ describe('read-only map network guard', () => {
     try {
       const context = await browser.newContext()
       const guard = await installExploreGuard(context, { allowedOrigins: [origin], allowInferredReadPosts: true,
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1, postReadMode: 'balanced',
-          rules: [{ origin, purpose: 'business_surface', effect: 'allow' }],
-        }),
+        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1, postReadMode: 'balanced' }),
       })
       const page = await context.newPage()
       await page.goto(origin)
@@ -114,8 +109,9 @@ describe('read-only map network guard', () => {
     }
   })
 
-  it('applies access deny paths to navigation and strips query values from block records', () => {
-    expect(classifyReadOnlyRequest({ url: 'https://app.example/admin/users', method: 'GET', resourceType: 'document', navigation: true }, options).allowed).toBe(false)
+  it('keeps navigation within the target origin and still blocks write-shaped navigation', () => {
+    expect(classifyReadOnlyRequest({ url: 'https://app.example/admin/users', method: 'GET', resourceType: 'document', navigation: true }, options).allowed).toBe(true)
+    expect(classifyReadOnlyRequest({ url: 'https://other.example/admin/users', method: 'GET', resourceType: 'document', navigation: true }, options).allowed).toBe(false)
     expect(classifyReadOnlyRequest({ url: 'https://app.example/api/tokens/delete?id=1', method: 'GET', resourceType: 'document', navigation: true }, options).allowed).toBe(false)
   })
 
@@ -168,7 +164,6 @@ describe('read-only map network guard', () => {
       const context = await browser.newContext()
       const guard = await installExploreGuard(context, { allowedOrigins: [origin],
         accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin, purpose: 'business_surface', effect: 'allow' }],
           verifiedNonContentRequests: [{ method: 'POST', resourceType: 'xhr', origin,
             pathPattern: '/telemetry-xhr', evidence: '已核实为独立遥测，不参与业务页面内容' }],
         }),

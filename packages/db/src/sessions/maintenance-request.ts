@@ -14,7 +14,7 @@ import { appendSessionEvent } from './session-events.js'
 import type { SessionKey } from './sessions.js'
 import { loadOccupancyFacts } from './session-overview.js'
 import { readAccountSessionCap } from './account-session-concurrency.js'
-import { lockConsoleAuthorization, assertTargetPermission } from '../console/target-authorization.js'
+import { shareConsoleAuthorization, assertTargetPermission } from '../console/target-authorization.js'
 import {
   availabilityWaitReason,
   countEligibleMaintenanceWorkers,
@@ -39,7 +39,8 @@ export async function requestMaintenanceOperation(
   eligibleWorkers: number | null
 }> {
   return atomic(db, async (tx) => {
-    if (input.actor && input.origin !== 'BACKGROUND') await lockConsoleAuthorization(tx, input.actor.id)
+    // 只读确认操作者仍可用：共享锁，免得与执行面「新建运行后追加事件」的外键复查互等成死锁。
+    if (input.actor && input.origin !== 'BACKGROUND') await shareConsoleAuthorization(tx, input.actor.id)
     const origin = input.origin ?? 'USER'
     const { targetAccounts, sessionOperations } = schemaFor(tx)
     await locked(
@@ -236,7 +237,7 @@ export async function cancelSessionOperation(
   input: { operationId: string; actor?: AuditActor },
 ): Promise<SessionOperationRow> {
   return atomic(db, async (tx) => {
-    if (input.actor) await lockConsoleAuthorization(tx, input.actor.id)
+    if (input.actor) await shareConsoleAuthorization(tx, input.actor.id)
     const { sessionOperations, sessionLeases, targetAccounts } = schemaFor(tx)
     const [row] = await tx
       .select()

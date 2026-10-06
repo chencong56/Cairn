@@ -69,6 +69,7 @@ import {
 } from './runtime'
 import { SessionLeaseError, emptyLive, type LiveHandle, type SessionAcquireResult, type SessionManagerContext } from './session-live.js'
 import { shouldContinueCaptchaRetry } from './captcha/login-outcome.js'
+import { attachPageDiscovery } from './page-discovery.js'
 
 async function recordAuthAttemptStarted(
   db: SessionManagerContext['dbHandle'],
@@ -89,6 +90,28 @@ async function recordAuthAttemptStarted(
   } catch {
     /* 事件失败不得阻断登录，但持久化后可用于崩溃后复盘已尝试次数 */
   }
+}
+
+/**
+ * 填写凭据前确认目标与账号仍可用：登录页加载等在途期间被停用／撤销，已解析的口令一律不再提交。
+ * 由 attemptLoginCredentials 在每次填写前调用，抛错即中止且不触发表单。
+ */
+function liveConfigurationGuard(
+  db: SessionManagerContext['dbHandle'],
+  snapshot: { targetId: string; targetAccountId?: string | null },
+): () => Promise<void> {
+  return async () => {
+    if (!snapshot.targetAccountId) return
+    const live = await assertLiveAuthConfiguration(db, {
+      targetId: snapshot.targetId,
+      targetAccountId: snapshot.targetAccountId,
+    })
+    if (!live.ok) throw new SessionLeaseError(live.code, live.message)
+  }
+}
+
+function isConfigurationRevoked(error: unknown): error is SessionLeaseError {
+  return error instanceof SessionLeaseError && error.code === 'AUTH_CONFIGURATION_REVOKED'
 }
 
 export function bindOccupancy(this: SessionManagerContext, grant: SessionGrant, runId: string, ttlSeconds: number) {
@@ -325,6 +348,17 @@ export async function finishClaimedAcquire(this: SessionManagerContext,
         if (!auth.waitingForAuth) await this.abandonOccupancy(grant.leaseId, 'auth_failed')
         return auth
       }
+      // 核验／登录在途期间目标或账号可能被停用：放行业务步骤前再确认一次，失效即闭合失败。
+      if (run.targetAccountId) {
+        const stillLive = await assertLiveAuthConfiguration(this.dbHandle, {
+          targetId: run.targetId,
+          targetAccountId: run.targetAccountId,
+        })
+        if (!stillLive.ok) {
+          await this.abandonOccupancy(grant.leaseId, 'auth_failed')
+          return { ok: false, code: stillLive.code, message: stillLive.message }
+        }
+      }
       live = auth.session
     } finally {
       signal?.removeEventListener('abort', abortAuth)
@@ -463,6 +497,9 @@ export async function recoverAuthHeld(this: SessionManagerContext,
       targetAccountId: input.snapshot.targetAccountId,
     })
     if (!occupied.ok) {
+      if (occupied.code === 'AUTH_CONFIGURATION_REVOKED') {
+        return { ok: false, unrecoverable: true, code: 'AUTH_CONFIGURATION_REVOKED', runStatus: 'FAILED' }
+      }
       return waiting(occupied.code as SessionErrorCode, occupied.message)
     }
     const accountId = input.snapshot.targetAccountId
@@ -492,9 +529,15 @@ export async function recoverAuthHeld(this: SessionManagerContext,
         target,
         credential,
         input.snapshot.authVerification?.loginTimeoutMs,
+        liveConfigurationGuard(this.dbHandle, input.snapshot),
       )
       after = await this.verifyInRunAuth(grant, 'recovery', input.snapshot)
-    } catch {
+    } catch (error) {
+      if (isConfigurationRevoked(error)) {
+        await recordOutcome('verify_failed')
+        this.authGateClosed.add(grant.leaseId)
+        return { ok: false, unrecoverable: true, code: 'AUTH_CONFIGURATION_REVOKED', runStatus: 'FAILED' }
+      }
       // 预算已计次：结果不可观察也必须补记一次失败，否则 consecutiveFailures 不增长、熔断永不触发。
       await recordOutcome('verify_failed')
       this.authGateClosed.add(grant.leaseId)
@@ -688,7 +731,9 @@ export async function launchAndOpen(this: SessionManagerContext,
         }
       }
 
-      this.lives.set(created.id, emptyLive(handle, created.id, created.generation, hostId))
+      const live = emptyLive(handle, created.id, created.generation, hostId)
+      this.lives.set(created.id, live)
+      attachPageDiscovery(this, live)
       await this.attachSessionAuthObserver(created.id)
       const health = await probeHealth(handle)
       await setSessionProbe(db, {
@@ -966,6 +1011,9 @@ export async function ensureProfileAuth(this: SessionManagerContext,
         targetAccountId: run.targetAccountId,
       })
       if (!occupied.ok) {
+        if (occupied.code === 'AUTH_CONFIGURATION_REVOKED') {
+          return { ok: false, code: 'AUTH_CONFIGURATION_REVOKED', message: occupied.message }
+        }
         return this.enterWaitingForAuth(
           session,
           runGrant,
@@ -977,12 +1025,25 @@ export async function ensureProfileAuth(this: SessionManagerContext,
         )
       }
       await recordAuthAttemptStarted(db, session)
-      const submitted = await submitLoginCredentials(
-        live.handle,
-        targetInfo,
-        credential,
-        verification.loginTimeoutMs,
-      )
+      let submitted: boolean
+      try {
+        submitted = await submitLoginCredentials(
+          live.handle,
+          targetInfo,
+          credential,
+          verification.loginTimeoutMs,
+          liveConfigurationGuard(db, run),
+        )
+      } catch (error) {
+        if (!isConfigurationRevoked(error)) throw error
+        const liveAfterRevoke = await readLiveSessionAuth(db)
+        await recordAutoLoginOutcome(db, {
+          targetAccountId: run.targetAccountId,
+          result: 'verify_failed',
+          sessionAuth: liveAfterRevoke.sessionAuth,
+        })
+        return { ok: false, code: error.code, message: error.message }
+      }
       const verified = await verifyAuthProfile(live.handle, { definition: profile.definition, verification })
       observation = verified.observation
       await this.persistProfileObservation(session, verification, verified)
@@ -1181,10 +1242,18 @@ export async function ensureAuth(this: SessionManagerContext,
           { type: 'run.captcha_attempted', payload: challengeAudit },
         ]).catch(() => undefined)
       }
-      const loginResult = await attemptLoginWithCredentials(live.handle, singleAttemptTarget, {
-        username,
-        password: credential.password,
-      })
+      let loginResult: Awaited<ReturnType<typeof attemptLoginWithCredentials>>
+      try {
+        loginResult = await attemptLoginWithCredentials(
+          live.handle,
+          singleAttemptTarget,
+          { username, password: credential.password },
+          liveConfigurationGuard(db, run),
+        )
+      } catch (error) {
+        if (!isConfigurationRevoked(error)) throw error
+        return { ok: false, code: error.code, message: error.message }
+      }
       ok = loginResult.authenticated
       if (isSupportedCaptcha) {
         const outcome =
@@ -1294,7 +1363,8 @@ function findPageAlreadyOnLogin(
 ): import('playwright').Page | undefined {
   const seen = new Set<import('playwright').Page>()
   const candidates: Array<import('playwright').Page | undefined> = [
-    ...[...live.pages.values()].map((entry) => entry.page),
+    // 页发现登记的新标签页不是执行页候选，不能因落在登录页而被接管为运行页。
+    ...[...live.pages.values()].filter((entry) => !entry.discovered).map((entry) => entry.page),
     live.lastPage,
     live.handle.basePage,
   ]

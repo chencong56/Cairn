@@ -156,6 +156,8 @@ export const managedBrowserFrameSchema = z.strictObject({
   height: z.number().int().positive(),
   capturedAt: utcInstantSchema,
   image: z.string().min(1),
+  /** 页登记表变更序号；与上次读到的不一致时 Web 重取页列表（新标签页出现、关闭、当前页变化）。 */
+  pagesRevision: z.number().int().nonnegative().optional(),
 })
 export type ManagedBrowserFrame = z.infer<typeof managedBrowserFrameSchema>
 

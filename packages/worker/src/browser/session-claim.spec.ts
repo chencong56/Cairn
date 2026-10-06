@@ -267,6 +267,52 @@ describe('session-claim 认证与启动完整性', () => {
       expect(dbMock.occupyAutoLoginBudget).toHaveBeenCalledTimes(1)
       expect(runtimeMock.submitLoginCredentials).toHaveBeenCalledTimes(1)
     })
+
+    it('占预算时发现账号已停用：闭合失败，不进人工认证、不提交', async () => {
+      manager.resolveLoginCredential = vi.fn(async () => ({ username: 'alice', password: 'valid-password' }))
+      dbMock.occupyAutoLoginBudget.mockResolvedValueOnce({
+        ok: false,
+        code: 'AUTH_CONFIGURATION_REVOKED',
+        message: '目标或账号已停用',
+      } as never)
+      runtimeMock.planAuthEnsure.mockReturnValueOnce({ action: 'auto_login' } as any)
+
+      const res = await manager.ensureProfileAuth(session, run, runGrant, policy, occupancy, verification)
+
+      expect(res).toEqual({ ok: false, code: 'AUTH_CONFIGURATION_REVOKED', message: '目标或账号已停用' })
+      expect(manager.enterWaitingForAuth).not.toHaveBeenCalled()
+      expect(runtimeMock.submitLoginCredentials).not.toHaveBeenCalled()
+    })
+
+    it('登录页加载期间账号被停用：填写前的守卫拦下，口令不提交且闭合失败', async () => {
+      manager.resolveLoginCredential = vi.fn(async () => ({ username: 'alice', password: 'valid-password' }))
+      runtimeMock.planAuthEnsure.mockReturnValueOnce({ action: 'auto_login' } as any)
+      dbMock.assertLiveAuthConfiguration
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce({ ok: false, code: 'AUTH_CONFIGURATION_REVOKED', message: '目标账号已停用或撤销' } as never)
+      let typed = false
+      runtimeMock.submitLoginCredentials.mockImplementationOnce((async (
+        _handle: unknown,
+        _target: unknown,
+        _credential: unknown,
+        _timeoutMs: unknown,
+        beforeAction?: () => Promise<void>,
+      ) => {
+        await beforeAction?.()
+        typed = true
+        return true
+      }) as never)
+
+      const res = await manager.ensureProfileAuth(session, run, runGrant, policy, occupancy, verification)
+
+      expect(res).toEqual({ ok: false, code: 'AUTH_CONFIGURATION_REVOKED', message: '目标账号已停用或撤销' })
+      expect(typed).toBe(false)
+      expect(manager.enterWaitingForAuth).not.toHaveBeenCalled()
+      expect(dbMock.recordAutoLoginOutcome).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ result: 'verify_failed' }),
+      )
+    })
   })
 
   describe('launchAndOpen storageState 处理与自愈', () => {

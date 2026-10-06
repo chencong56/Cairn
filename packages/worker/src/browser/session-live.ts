@@ -48,6 +48,9 @@ export type LiveHandle = {
   controlEpoch: number
   screencasts: Map<string, ScreencastHandle>
   screencastObservers: Map<string, number>
+  /** 页登记表与当前页的变更序号，随画面帧下发，Web 据此重取页列表。 */
+  pagesRevision: number
+  pageDiscovery?: { dispose: () => void }
   authObserver?: { dispose: () => void }
 }
 
@@ -87,5 +90,6 @@ export function emptyLive(
     controlEpoch: 0,
     screencasts: new Map(),
     screencastObservers: new Map(),
+    pagesRevision: 0,
   }
 }

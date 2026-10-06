@@ -23,6 +23,11 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/runs-api', () => mocks)
+const observeSession = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/sessions-api', async (original) => ({
+  ...(await original<typeof import('@/lib/sessions-api')>()),
+  observeSession,
+}))
 
 const meta: ManagedBrowserMeta = {
   runId: '44444444-4444-4444-8444-444444444444',
@@ -77,6 +82,12 @@ describe('BrowserView', () => {
     })
     mocks.fetchManagedBrowser.mockResolvedValue(meta)
     mocks.subscribeBrowserFrames.mockResolvedValue(undefined)
+    observeSession.mockResolvedValue({
+      outcome: 'NOT_FOUND',
+      source: 'managed',
+      page: {},
+      diagnostics: { outcome: 'NOT_FOUND', candidatesTried: [] },
+    })
     mocks.releaseAuthControl.mockResolvedValue({ released: true })
     mocks.inputAuthControl.mockResolvedValue({ accepted: true })
     mocks.heartbeatAuthControl.mockResolvedValue({
@@ -1024,5 +1035,201 @@ describe('BrowserView', () => {
     await closeBtn.click()
     expect(mocks.closeManagedPage).toHaveBeenCalledWith(meta.runId, 'p2')
   })
-})
 
+  describe('新标签页', () => {
+    const basePage = {
+      pageRef: { sessionId: meta.sessionId!, sessionGeneration: 1, pageId: '77777777-7777-4777-8777-777777777771', documentEpoch: 0 },
+      kind: 'base' as const,
+      viewing: true,
+      currentExecution: true,
+      url: 'https://portal.example/eip/index',
+      canClose: false,
+    }
+    const popupPage = {
+      pageRef: { sessionId: meta.sessionId!, sessionGeneration: 1, pageId: '77777777-7777-4777-8777-777777777772', documentEpoch: 0 },
+      kind: 'popup' as const,
+      viewing: false,
+      currentExecution: false,
+      url: 'https://sub.example/gwmanage/',
+      canClose: true,
+    }
+    const liveMeta = (pages: ManagedBrowserMeta['pages'], status = 'RUNNING'): ManagedBrowserMeta => ({
+      ...meta,
+      runStatus: status,
+      framesAvailable: true,
+      authHold: null,
+      currentPage: pages.find((page) => page.currentExecution) ?? null,
+      viewingOtherPage: false,
+      pages,
+    })
+    type FrameInput = {
+      pageId?: string
+      signal: AbortSignal
+      onFrame: (frame: unknown) => void
+      onPageStale?: () => void
+    }
+    let streams: FrameInput[] = []
+    const latest = () => streams[streams.length - 1]!
+    const emit = (revision: number) => {
+      const input = latest()
+      input.onFrame({
+        pageRef: (input.pageId === popupPage.pageRef.pageId ? popupPage : basePage).pageRef,
+        frameId: `f-${revision}`,
+        width: 1280,
+        height: 720,
+        capturedAt: '2026-10-06T00:00:01.000Z',
+        image: 'data:image/jpeg;base64,ZmFrZQ==',
+        pagesRevision: revision,
+      })
+    }
+
+    beforeEach(() => {
+      streams = []
+      mocks.subscribeBrowserFrames.mockImplementation(async (_id: string, input: FrameInput) => {
+        streams.push(input)
+        await new Promise<void>((resolve) => input.signal.addEventListener('abort', () => resolve(), { once: true }))
+      })
+    })
+
+    async function renderSession() {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      return render(
+        <QueryClientProvider client={client}>
+          <BrowserView runId={meta.runId} runStatus='RUNNING' sessionMode defaultOpen />
+        </QueryClientProvider>,
+      )
+    }
+
+    it('会话模式手动操作打开的新页随页序号出现，并跟随为当前页', async () => {
+      signIn(['session:read', 'session:view', 'session:control'])
+      mocks.fetchManagedBrowser.mockResolvedValue(liveMeta([basePage]))
+      mocks.acquireAuthControl.mockResolvedValue({
+        token: 't'.repeat(32),
+        epoch: 1,
+        expiresAt: '2026-09-13T00:00:30.000Z',
+        pageRef: basePage.pageRef,
+        meta: liveMeta([basePage]),
+      })
+      const screen = await renderSession()
+      await vi.waitFor(() => expect(streams.length).toBeGreaterThan(0))
+      emit(1)
+      await screen.getByRole('button', { name: '手动操作' }).click()
+      await expect.element(screen.getByText('正在手动操作', { exact: true })).toBeInTheDocument()
+
+      // Worker 把手动打开的新页设为会话当前页，页序号随帧推送。
+      mocks.fetchManagedBrowser.mockResolvedValue(
+        liveMeta([{ ...basePage, viewing: false, currentExecution: false }, { ...popupPage, viewing: true, currentExecution: true }]),
+      )
+      emit(2)
+      await expect.element(screen.getByText('[弹出页]')).toBeInTheDocument()
+      await expect.element(screen.getByText(/当前页 sub\.example\/gwmanage/)).toBeInTheDocument()
+      expect(latest().pageId).toBeUndefined()
+    })
+
+    it('认证等待持有输入权时新页出现会切过去查看，执行页不变', async () => {
+      signIn(['run:read', 'session:view', 'session:control', 'run:execute'])
+      const waiting = (pages: ManagedBrowserMeta['pages']) => ({
+        ...liveMeta(pages, 'WAITING_FOR_AUTH'),
+        authControl: { epoch: 1, actorId: 'u1', expiresAt: '2026-09-13T00:00:30.000Z', heldByViewer: true },
+      })
+      mocks.fetchManagedBrowser.mockResolvedValue(waiting([basePage]))
+      mocks.acquireAuthControl.mockResolvedValue({
+        token: 't'.repeat(32),
+        epoch: 1,
+        expiresAt: '2026-09-13T00:00:30.000Z',
+        pageRef: basePage.pageRef,
+        meta: waiting([basePage]),
+      })
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const screen = await render(
+        <QueryClientProvider client={client}>
+          <BrowserView runId={meta.runId} runStatus='WAITING_FOR_AUTH' defaultOpen />
+        </QueryClientProvider>,
+      )
+      await screen.getByRole('button', { name: '处理登录' }).first().click()
+      await vi.waitFor(() => expect(streams.length).toBeGreaterThan(0))
+      emit(1)
+      mocks.fetchManagedBrowser.mockResolvedValue(waiting([basePage, popupPage]))
+      emit(2)
+      await vi.waitFor(() => expect(latest().pageId).toBe(popupPage.pageRef.pageId))
+    })
+
+    it('所看的页被关闭时回到当前页', async () => {
+      signIn(['session:read', 'session:view', 'session:control'])
+      mocks.fetchManagedBrowser.mockResolvedValue(liveMeta([basePage, popupPage]))
+      const screen = await renderSession()
+      await screen.getByRole('button', { name: '[弹出页]sub.example/gwmanage/', exact: true }).click()
+      await vi.waitFor(() => expect(latest().pageId).toBe(popupPage.pageRef.pageId))
+      latest().onPageStale?.()
+      await vi.waitFor(() => expect(latest().pageId).toBeUndefined())
+    })
+
+    it('指认与高亮带上正在查看的页', async () => {
+      signIn(['session:read', 'session:view', 'session:control'])
+      mocks.fetchManagedBrowser.mockResolvedValue(liveMeta([basePage, popupPage]))
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      function Host() {
+        const { setPickMode } = useAuthoringObserve()
+        return (
+          <div>
+            <button type='button' onClick={() => setPickMode(true)}>激活拾取</button>
+            <BrowserView runId={meta.runId} runStatus='RUNNING' sessionMode defaultOpen />
+          </div>
+        )
+      }
+      const screen = await render(
+        <QueryClientProvider client={client}>
+          <AuthoringObserveProvider sessionId={meta.sessionId ?? undefined} enabled onApplyTarget={() => undefined}>
+            <Host />
+          </AuthoringObserveProvider>
+        </QueryClientProvider>,
+      )
+      await screen.getByRole('button', { name: '[弹出页]sub.example/gwmanage/', exact: true }).click()
+      await vi.waitFor(() => expect(latest().pageId).toBe(popupPage.pageRef.pageId))
+      await screen.getByRole('button', { name: '激活拾取' }).click()
+      await vi.waitFor(() =>
+        expect(observeSession).toHaveBeenCalledWith(meta.sessionId, { op: 'highlight', pageId: popupPage.pageRef.pageId }),
+      )
+    })
+
+    it('调试挂起时看非执行页禁止指认并提示切回', async () => {
+      signIn(['run:read', 'session:view', 'session:control', 'run:execute'])
+      mocks.fetchManagedBrowser.mockResolvedValue({
+        ...liveMeta([basePage, popupPage], 'HOLDING'),
+        viewingOtherPage: true,
+      })
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      function Host() {
+        const { setPickMode, pickMode } = useAuthoringObserve()
+        useEffect(() => {
+          if (!pickMode) setPickMode(true)
+        }, [pickMode, setPickMode])
+        return <BrowserView runId={meta.runId} runStatus='HOLDING' defaultOpen />
+      }
+      mocks.fetchRunObservation.mockResolvedValue({
+        run: { id: meta.runId, status: 'HOLDING', debugMode: 'step' },
+        evidence: [],
+        eventSeq: 0,
+      })
+      // 运行事件流保持挂起直到卸载，避免立即返回触发重连空转。
+      mocks.subscribeRunEvents.mockImplementation(
+        (_id: string, input: { signal: AbortSignal }) =>
+          new Promise<void>((resolve) => input.signal.addEventListener('abort', () => resolve(), { once: true })),
+      )
+      mocks.observeRun.mockResolvedValue({
+        outcome: 'NOT_FOUND',
+        source: 'managed',
+        page: {},
+        diagnostics: { outcome: 'NOT_FOUND', candidatesTried: [] },
+      })
+      const screen = await render(
+        <QueryClientProvider client={client}>
+          <AuthoringObserveProvider runId={meta.runId} enabled onApplyTarget={() => undefined}>
+            <Host />
+          </AuthoringObserveProvider>
+        </QueryClientProvider>,
+      )
+      await expect.element(screen.getByText('步骤将在执行当前页上运行，请切回当前页再指认。')).toBeInTheDocument()
+    })
+  })
+})

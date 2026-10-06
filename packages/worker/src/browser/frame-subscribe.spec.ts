@@ -221,4 +221,77 @@ describe('画面订阅生命周期', () => {
       expect(controller.signal.aborted).toBe(true)
     })
   })
+
+  describe('所看页与页列表变化', () => {
+    function viewingManager() {
+      const { manager, live } = subscribeManager()
+      const session = {
+        id: sessionId,
+        generation: 1,
+        ownerWorkerId: 'test-worker',
+        ownerWorkerInstanceId: 'test-worker',
+        authControlActorId: null,
+        authControlExpiresAt: null,
+      }
+      Object.assign(live, { pagesRevision: 7 })
+      Object.assign(manager, {
+        lookupRunSession: async () => ({ run: { id: runId, status: 'RUNNING', placement: { sessionId } }, session, live }),
+      })
+      return { manager, live }
+    }
+
+    it('帧携带页登记表序号，Web 据此重取页列表', async () => {
+      const { manager } = viewingManager()
+      const controller = new AbortController()
+      const frame = await new Promise<{ pagesRevision?: number }>((resolve) => {
+        void manager.subscribeRunFrames({
+          runId,
+          actorId,
+          pageId,
+          onFrame: (next) => {
+            controller.abort()
+            resolve(next)
+          },
+          signal: controller.signal,
+        })
+      })
+      expect(frame.pagesRevision).toBe(7)
+    })
+
+    it('指定的页不属于该运行时拒绝订阅，不静默换成当前页', async () => {
+      const { manager, live } = viewingManager()
+      live.pages.get(pageId)!.runId = sessionId
+      await expect(
+        manager.subscribeRunFrames({ runId, actorId, pageId, onFrame: () => undefined, signal: new AbortController().signal }),
+      ).rejects.toMatchObject({ code: 'PAGE_STALE' })
+    })
+
+    it('所看的页在订阅中被撤登记时以 PAGE_STALE 结束；跟随当前页的订阅正常结束', async () => {
+      const { manager, live } = viewingManager()
+      let frames = 0
+      const viewing = manager.subscribeRunFrames({
+        runId,
+        actorId,
+        pageId,
+        onFrame: () => {
+          frames += 1
+          live.pages.delete(pageId)
+        },
+        signal: new AbortController().signal,
+      })
+      await expect(viewing).rejects.toMatchObject({ code: 'PAGE_STALE' })
+      expect(frames).toBe(1)
+
+      const followed = viewingManager()
+      const following = followed.manager.subscribeRunFrames({
+        runId,
+        actorId,
+        onFrame: () => {
+          followed.live.pages.delete(pageId)
+        },
+        signal: new AbortController().signal,
+      })
+      await expect(following).resolves.toBeUndefined()
+    })
+  })
 })

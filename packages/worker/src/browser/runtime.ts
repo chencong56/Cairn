@@ -367,7 +367,7 @@ export async function openDedicatedSession(
         throw error
       }
     }
-    const basePage = context.pages()[0] ?? (await context.newPage())
+    const basePage = context.pages()[0] ?? (await openInternalPage(context))
     return {
       context,
       basePage,
@@ -402,7 +402,7 @@ export async function openSharedSession(
     if (opts.storageState) {
       await injectStorageState(context, opts.storageState)
     }
-    const basePage = await context.newPage()
+    const basePage = await openInternalPage(context)
     return {
       context,
       basePage,
@@ -839,10 +839,48 @@ export async function stopSession(
   }
 }
 
+type InternalPageTracker = { pending: Set<Promise<unknown>>; pages: WeakSet<Page> }
+const internalPageTrackers = new WeakMap<BrowserContext, InternalPageTracker>()
+
+/**
+ * Worker 自建页的唯一入口。context 的 page 事件分不清「站点开的新标签页」与「Worker 自己建的页」
+ * （现代 Chromium 对 target=_blank 默认 noopener，opener() 不可依赖），这里按对象身份登记自建页。
+ */
+export async function openInternalPage(context: BrowserContext): Promise<Page> {
+  let tracker = internalPageTrackers.get(context)
+  if (!tracker) {
+    tracker = { pending: new Set(), pages: new WeakSet() }
+    internalPageTrackers.set(context, tracker)
+  }
+  const owned = tracker
+  const opening = context.newPage()
+  const marker = opening.then(
+    (page) => {
+      owned.pages.add(page)
+    },
+    () => undefined,
+  )
+  owned.pending.add(marker)
+  try {
+    return await opening
+  } finally {
+    await marker
+    owned.pending.delete(marker)
+  }
+}
+
+/** 新页是否由 openInternalPage 创建；自建页在途时先等其落定再按对象身份判定。 */
+export async function isInternalPage(page: Page): Promise<boolean> {
+  const tracker = internalPageTrackers.get(page.context())
+  if (!tracker) return false
+  if (tracker.pages.has(page)) return true
+  if (tracker.pending.size > 0) await Promise.all([...tracker.pending])
+  return tracker.pages.has(page)
+}
+
 export async function openRunPage(handle: BrowserHandle): Promise<Page> {
   requireOccupancy('openRunPage')
-  const page = await handle.context.newPage()
-  return page
+  return openInternalPage(handle.context)
 }
 
 export async function closePage(page: Page): Promise<void> {
@@ -1222,6 +1260,64 @@ export async function readLocatorMany(
 
 export async function isLocatorVisible(locator: Locator): Promise<boolean> {
   return locator.isVisible().catch(() => false)
+}
+
+/**
+ * 动作触发的主框导航结局。表单提交等导航在点击／按键返回后才发出、才失败；最后一次主框导航
+ * 以网络错误告终（ERR_ABORTED 除外：被新导航顶替或转为下载属正常）时，提交可能已到达目标但响应丢失，
+ * 不能当作动作成功。
+ */
+export function watchActionNavigation(page: Page): {
+  /** graceMs：动作返回后等多久看是否发起导航（按键提交表单时请求晚于按键返回）。 */
+  settle: (options?: { maxWaitMs?: number; graceMs?: number }) => Promise<string | null>
+  dispose: () => void
+} {
+  if (typeof page.on !== 'function') return { settle: async () => null, dispose: () => undefined }
+  const pending = new Set<Request>()
+  let latest: Request | undefined
+  let failure: string | null = null
+  const isMainNavigation = (request: Request) => {
+    try {
+      return request.isNavigationRequest() && request.frame() === page.mainFrame()
+    } catch {
+      return false
+    }
+  }
+  const onRequest = (request: Request) => {
+    if (!isMainNavigation(request)) return
+    pending.add(request)
+    latest = request
+    failure = null
+  }
+  const onResponse = (response: import('playwright').Response) => {
+    pending.delete(response.request())
+  }
+  const onFailed = (request: Request) => {
+    if (!pending.delete(request) || request !== latest) return
+    const text = request.failure()?.errorText ?? 'net::ERR_FAILED'
+    if (!text.includes('ERR_ABORTED')) failure = text
+  }
+  page.on('request', onRequest)
+  page.on('response', onResponse)
+  page.on('requestfailed', onFailed)
+  return {
+    async settle({ maxWaitMs = 10_000, graceMs = 0 } = {}) {
+      const graceUntil = Date.now() + graceMs
+      while (!latest && Date.now() < graceUntil && !page.isClosed()) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      const deadline = Date.now() + maxWaitMs
+      while (pending.size > 0 && Date.now() < deadline && !page.isClosed()) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      return failure
+    },
+    dispose() {
+      page.off('request', onRequest)
+      page.off('response', onResponse)
+      page.off('requestfailed', onFailed)
+    },
+  }
 }
 
 export async function waitForPopup(page: Page, action: () => Promise<void>, timeoutMs = 1_500): Promise<Page | null> {
