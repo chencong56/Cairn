@@ -33,7 +33,6 @@ import {
   type AuthRecoveryOutcome,
   type FrozenAuthVerification,
   type ChallengeAuditRecord,
-  compileAccessScopeFromSnapshot,
   deriveRecoveryRule,
   inRunAuthVerifyAllowed,
   isAuthEvidenceFresh,
@@ -68,8 +67,6 @@ import {
   type BrowserHandle,
   type TargetAuthInfo
 } from './runtime'
-import { hasTargetScope, installTargetScope } from './target-scope'
-import { originAllowed } from './page-identity'
 import { SessionLeaseError, emptyLive, type LiveHandle, type SessionAcquireResult, type SessionManagerContext } from './session-live.js'
 import { shouldContinueCaptchaRetry } from './captcha/login-outcome.js'
 
@@ -309,13 +306,6 @@ export async function finishClaimedAcquire(this: SessionManagerContext,
     }
 
     const managed = this.lives.get(live.id)
-    if (managed) {
-      managed.allowedOrigins = run.allowedOrigins ?? []
-      managed.accessScope = compileAccessScopeFromSnapshot(run)
-      if (managed.accessScope.rules.length > 0 || hasTargetScope(managed.handle.context)) {
-        await installTargetScope(managed.handle.context, managed.accessScope)
-      }
-    }
     await this.applyReuse(live, policy, grant.leaseId)
     if (managed) this.ensureRunPage(managed, run.runId, grant.leaseId)
     this.runAuth.set(grant.leaseId, { ...this.runAuth.get(grant.leaseId), snapshot: run })
@@ -415,17 +405,6 @@ export async function recoverAuthHeld(this: SessionManagerContext,
     if (checkpoint?.recoveryRule?.reuse === 'REUSE_PAGE') {
       const hold = await this.describeHoldPage(input.runGrant.runId)
       if (checkpoint.pageRef && hold?.pageRef && hold.pageRef.documentEpoch !== checkpoint.pageRef.documentEpoch) {
-        return { ok: false, unrecoverable: true, code: 'AUTH_CONTEXT_NOT_RECOVERABLE', runStatus: 'FAILED' }
-      }
-      const pageUrl = (page && typeof page.url === 'function' ? page.url() : hold?.url) ?? ''
-      if (
-        pageUrl &&
-        !originAllowed(
-          pageUrl,
-          checkpoint.recoveryRule.allowedOrigins ?? [],
-          compileAccessScopeFromSnapshot(input.snapshot),
-        )
-      ) {
         return { ok: false, unrecoverable: true, code: 'AUTH_CONTEXT_NOT_RECOVERABLE', runStatus: 'FAILED' }
       }
     }
@@ -537,7 +516,6 @@ export async function recoverAuthHeld(this: SessionManagerContext,
         reuse: input.snapshot.sessionPolicy?.reuse,
         entryUrl: input.snapshot.targetAuth?.entryUrl,
         loginUrl: input.snapshot.targetAuth?.loginUrl,
-        allowedOrigins: input.snapshot.allowedOrigins,
       })
     if (page && !(await this.applyRecoveryRule(page, rule))) {
       return { ok: false, unrecoverable: true, code: 'AUTH_CONTEXT_NOT_RECOVERABLE', runStatus: 'FAILED' }

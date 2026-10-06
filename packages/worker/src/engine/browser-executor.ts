@@ -5,7 +5,6 @@ import { loadTargetForExecution, resolveFixtureForRun, type DbHandle } from '@ca
 import {
   asRunFileHandle,
   BROWSER_STEP_TYPES,
-  originsFromTargetUrls,
   readContextValue,
   retainUntilFor,
   RUN_FILE_HANDLE_KIND,
@@ -403,19 +402,19 @@ export class BrowserStepExecutor implements StepExecutor {
         input && typeof input === 'object' && !Array.isArray(input) && typeof input.url === 'string'
           ? input.url
           : step.input.url
-      const allowedOrigins = await this.loadAllowedOrigins(targetId, snapshot)
-      if (allowedOrigins.length === 0) {
+      const resolved = await this.resolveNavigateUrl(url, targetId, snapshot)
+      if (!resolved) {
         return {
           ok: false,
           error: {
             code: 'SESSION_TARGET_MISSING',
             category: 'VALIDATION',
             retryable: false,
-            safeMessage: 'Target 没有可用入口，无法校验导航范围',
+            safeMessage: 'Target 没有可用入口，无法解析相对导航地址',
           },
         }
       }
-      return { ok: true, command: { type: 'navigate', url, allowedOrigins } }
+      return { ok: true, command: { type: 'navigate', url: resolved } }
     }
 
     if (step.type === 'click') {
@@ -830,11 +829,20 @@ export class BrowserStepExecutor implements StepExecutor {
     }
   }
 
-  private async loadAllowedOrigins(targetId: string, snapshot: RunSnapshot): Promise<string[]> {
-    if (snapshot.allowedOrigins?.length) return snapshot.allowedOrigins
-    const row = await loadTargetForExecution(this.handle, targetId)
-    if (!row) return []
-    return originsFromTargetUrls(row.entryUrl, row.loginUrl)
+  /** 绝对地址原样放行（不限制域）；相对地址按目标入口 origin 展开。 */
+  private async resolveNavigateUrl(url: string, targetId: string, snapshot: RunSnapshot): Promise<string | null> {
+    try {
+      return new URL(url).href
+    } catch {
+      /* relative */
+    }
+    const entryUrl = snapshot.targetAuth?.entryUrl ?? (await loadTargetForExecution(this.handle, targetId))?.entryUrl
+    if (!entryUrl) return null
+    try {
+      return new URL(url, `${new URL(entryUrl).origin}/`).href
+    } catch {
+      return null
+    }
   }
 }
 

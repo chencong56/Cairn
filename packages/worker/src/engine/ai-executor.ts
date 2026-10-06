@@ -37,14 +37,6 @@ export class AiStepExecutor implements StepExecutor {
         safeMessage: '运行快照缺少 AI 执行配置',
       })
     }
-    if (!snapshot.allowedOrigins?.length) {
-      return fail({
-        code: 'SESSION_TARGET_MISSING',
-        category: 'VALIDATION',
-        retryable: false,
-        safeMessage: '运行快照没有冻结页面范围',
-      })
-    }
 
     // Resolve explicit contextBindings (B2)
     const contextValues: Record<string, JsonValue> = {}
@@ -176,7 +168,6 @@ function commandFor(
     maxOutputTokens: config.maxOutputTokens,
     requestTimeoutMs: config.requestTimeoutMs,
     hangWaitMs: config.hangWaitMs,
-    allowedOrigins: snapshot.allowedOrigins ?? [],
     loginOrigin: snapshot.loginOrigin,
     loginPath: snapshot.loginPath,
   })

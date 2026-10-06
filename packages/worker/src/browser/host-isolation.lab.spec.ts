@@ -8,7 +8,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Browser, BrowserContext, Page } from 'playwright'
-import { installTargetScope, installedScopeAllows } from './target-scope.js'
 import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 
 function listen(server: Server): Promise<string> {
@@ -388,37 +387,6 @@ describe('Host Context Isolation Lab (§8.2)', { timeout: 120_000 }, () => {
       await p2.click('#download-link')
       const download = await downloadPromise
       expect(download.suggestedFilename()).toBe('test.txt')
-    } finally {
-      await ctx1.close()
-      await ctx2.close()
-    }
-  })
-
-  it('路由拦截（target-scope）只作用于本 Context 的页面', async () => {
-    if (!hasBrowser || !browser) return
-    const ctx1 = await browser.newContext()
-    const ctx2 = await browser.newContext()
-
-    try {
-      const p1 = await ctx1.newPage()
-      const p2 = await ctx2.newPage()
-
-      // Install target scope interceptor on ctx1 only allowing baseUrl
-      await installTargetScope(ctx1, [new URL(baseUrl).origin])
-
-      // p1 intercepted when going to other origin
-      let p1Blocked = false
-      try {
-        await p1.goto('http://127.0.0.1:9999/unreachable', { timeout: 3_000 })
-      } catch (e) {
-        p1Blocked = true
-      }
-      expect(p1Blocked).toBe(true)
-
-      // p2 can navigate to an external origin without ctx1's target scope intercepting it
-      // (verified via installedScopeAllows)
-      expect(installedScopeAllows(ctx1, 'http://127.0.0.1:9999/unreachable')).toBe(false)
-      expect(installedScopeAllows(ctx2, 'http://127.0.0.1:9999/unreachable')).toBeNull()
     } finally {
       await ctx1.close()
       await ctx2.close()

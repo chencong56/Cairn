@@ -1,33 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import { createManagedPage, describeOutOfScopeOrigin, originAllowed, pickPopupHandoff } from './page-identity'
+import { createManagedPage, pickPopupHandoff } from './page-identity'
 
 describe('popup handoff selection', () => {
   const page = { isClosed: () => false } as import('playwright').Page
   const closed = { isClosed: () => true } as import('playwright').Page
 
-  it('拒绝零个、多个和越权来源，不取最后一个猜测', () => {
-    expect(pickPopupHandoff([], ['https://app.example']).ok).toBe(false)
+  it('拒绝零个、多个弹窗，不取最后一个猜测', () => {
+    expect(pickPopupHandoff([]).ok).toBe(false)
     expect(
-      pickPopupHandoff(
-        [
-          { page, url: 'https://app.example/a' },
-          { page, url: 'https://app.example/b' },
-        ],
-        ['https://app.example'],
-      ),
+      pickPopupHandoff([
+        { page, url: 'https://app.example/a' },
+        { page, url: 'https://app.example/b' },
+      ]),
     ).toMatchObject({ ok: false, code: 'PAGE_HANDOFF_AMBIGUOUS' })
-    expect(
-      pickPopupHandoff([{ page, url: 'https://evil.example' }], ['https://app.example']),
-    ).toMatchObject({ ok: false, code: 'PAGE_HANDOFF_OUT_OF_SCOPE' })
-    expect(pickPopupHandoff([{ page: closed, url: 'https://app.example' }], ['https://app.example'])).toMatchObject({
+    expect(pickPopupHandoff([{ page: closed, url: 'https://app.example' }])).toMatchObject({
       ok: false,
       code: 'PAGE_HANDOFF_NO_POPUP',
     })
   })
 
-  it('唯一允许来源则收养', () => {
-    const chosen = pickPopupHandoff([{ page, url: 'https://app.example/ok' }], ['https://app.example'])
-    expect(chosen).toEqual({ ok: true, page })
+  it('唯一弹窗则收养，不论来源域', () => {
+    expect(pickPopupHandoff([{ page, url: 'https://app.example/ok' }])).toEqual({ ok: true, page })
+    expect(pickPopupHandoff([{ page, url: 'https://sso.other.example/cb' }])).toEqual({ ok: true, page })
   })
 
   it('VE06 主框导航增加 documentEpoch，子框导航不改轨道', () => {
@@ -64,36 +58,5 @@ describe('popup handoff selection', () => {
     const entry = createManagedPage({ page, runId: '00000000-0000-4000-8000-000000000099', kind: 'base' })
     expect(entry.documentEpoch).toBe(0)
     expect(entry.page).toBe(page)
-  })
-
-  it('origin 检查拒绝凭据和奇怪协议', () => {
-    expect(originAllowed('https://user:pass@app.example', ['https://app.example'])).toBe(false)
-    expect(originAllowed('https://app.example/path', ['https://app.example'])).toBe(true)
-  })
-
-  it('有编译范围时拒绝同 origin 越权路径', () => {
-    const scope = {
-      purposes: ['business_surface' as const],
-      rules: [{ origin: 'https://app.example', purpose: 'business_surface' as const, effect: 'allow' as const, pathPrefix: '/ok' }],
-    }
-    expect(originAllowed('https://app.example/ok', ['https://app.example'], scope)).toBe(true)
-    expect(originAllowed('https://app.example/admin', ['https://app.example'], scope)).toBe(false)
-    expect(
-      pickPopupHandoff([{ page, url: 'https://app.example/admin' }], ['https://app.example'], scope),
-    ).toMatchObject({ ok: false, code: 'PAGE_HANDOFF_OUT_OF_SCOPE' })
-  })
-})
-
-describe('describeOutOfScopeOrigin', () => {
-  it('带上被拦站点与配置入口，且不含路径、查询与 URL 形态（避免被 API 转发时脱敏成「执行面不可达」）', () => {
-    const message = describeOutOfScopeOrigin('http://eipxcuat.tower0788.cn:9000/eip/index?token=secret')
-    expect(message).toContain('eipxcuat.tower0788.cn:9000')
-    expect(message).toContain('协议 http')
-    expect(message).toContain('访问策略')
-    expect(message).not.toMatch(/https?:\/\/|token|secret|\/eip/)
-  })
-
-  it('地址无法解析时仍给出配置入口', () => {
-    expect(describeOutOfScopeOrigin('not a url')).toContain('访问策略')
   })
 })

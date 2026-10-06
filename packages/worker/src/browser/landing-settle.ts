@@ -25,14 +25,12 @@ import {
 } from '@cairn/shared'
 import type { Frame, Locator, Page } from 'playwright'
 import { detectChallenge } from './captcha/index.js'
-import { originAllowed } from './page-identity.js'
 import { inspectAuthOnPage, loginUrlLooksPending, type TargetAuthInfo } from './runtime.js'
 import type { SessionManagerContext } from './session-live.js'
 
 export type SettlePageTarget = TargetAuthInfo & {
   landingSettleMode?: 'default' | 'off' | null
   landingSettleTimeoutMs?: number | null
-  allowedOrigins?: string[]
 }
 
 export type SettleAuthenticatedLandingInput = {
@@ -79,8 +77,7 @@ function pageOrigin(url: string): string | null {
   }
 }
 
-function urlInScope(url: string, entryUrl: string, allowedOrigins?: string[]): boolean {
-  if (allowedOrigins && allowedOrigins.length > 0) return originAllowed(url, allowedOrigins)
+function urlInScope(url: string, entryUrl: string): boolean {
   const current = pageOrigin(url)
   const entry = pageOrigin(entryUrl)
   return Boolean(current && entry && current === entry)
@@ -258,7 +255,7 @@ export async function settleAuthenticatedLanding(
     return skippedLandingSettle('url_unusable', catchUp)
   }
   if (isUnusableSettleUrl(url)) return skippedLandingSettle('url_unusable', catchUp)
-  if (!urlInScope(url, input.target.entryUrl, input.target.allowedOrigins)) {
+  if (!urlInScope(url, input.target.entryUrl)) {
     return skippedLandingSettle('out_of_scope', catchUp)
   }
 
@@ -433,7 +430,6 @@ export async function settleOccupiedLanding(
       captcha: targetRow.captcha ?? null,
       landingSettleMode: targetRow.landingSettleMode,
       landingSettleTimeoutMs: targetRow.landingSettleTimeoutMs,
-      allowedOrigins: live?.allowedOrigins,
     },
     sessionAuth: parsed.data,
     alreadyOpenedEntry: input.alreadyOpenedEntry,

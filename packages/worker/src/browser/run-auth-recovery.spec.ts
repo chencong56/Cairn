@@ -126,45 +126,6 @@ it('REUSE_PAGE 不接受已变更的文档', async () => {
   manager.describeHoldPage = vi.fn(async () => ({ pageRef: { sessionId: 'session', pageId: 'page', documentEpoch: 2 } }))
   expect(await recover()).toMatchObject({ ok: false, unrecoverable: true })
 })
-it('REUSE_PAGE 越出冻结 pathPrefix 则不可恢复', async () => {
-  db.run.authCheckpoint.recoveryRule.reuse = 'REUSE_PAGE'
-  db.run.authCheckpoint.recoveryRule.allowedOrigins = ['https://app.example']
-  snapshot.accessPolicy = {
-    revision: 1,
-    digest: 'a'.repeat(64),
-    policy: {
-      schemaVersion: 1,
-      policyVersion: 1,
-      rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow', pathPrefix: '/app' }],
-    },
-  }
-  page.url = () => 'https://app.example/orders'
-  expect(await recover()).toMatchObject({ ok: false, unrecoverable: true, code: 'AUTH_CONTEXT_NOT_RECOVERABLE' })
-  expect(submitLoginCredentials).not.toHaveBeenCalled()
-  expect(page.goto).not.toHaveBeenCalled()
-})
-it('REUSE_PAGE origin 已离开 allowedOrigins 则不可恢复', async () => {
-  db.run.authCheckpoint.recoveryRule.reuse = 'REUSE_PAGE'
-  db.run.authCheckpoint.recoveryRule.allowedOrigins = ['https://app.example']
-  page.url = () => 'https://other.example/orders'
-  expect(await recover()).toMatchObject({ ok: false, unrecoverable: true, code: 'AUTH_CONTEXT_NOT_RECOVERABLE' })
-  expect(submitLoginCredentials).not.toHaveBeenCalled()
-  expect(page.goto).not.toHaveBeenCalled()
-})
-it('续接时 origin 已离开也不可恢复，且不再核验登录', async () => {
-  db.run.authCheckpoint.recoveryRule.reuse = 'REUSE_PAGE'
-  db.run.authCheckpoint.recoveryRule.allowedOrigins = ['https://app.example']
-  page.url = () => 'https://other.example/orders'
-  manager.authGateClosed.add('lease')
-  expect(await recover({ resuming: true })).toMatchObject({
-    ok: false,
-    unrecoverable: true,
-    code: 'AUTH_CONTEXT_NOT_RECOVERABLE',
-  })
-  expect(manager.verifyInRunAuth).not.toHaveBeenCalled()
-  expect(submitLoginCredentials).not.toHaveBeenCalled()
-  expect(() => manager.assertAuthGate('lease')).toThrow('AUTH_GATE_CLOSED')
-})
 it('续接核验未 MATCH 不得开门', async () => {
   manager.authGateClosed.add('lease')
   manager.verifyInRunAuth.mockResolvedValue({ authState: 'AUTHENTICATED', identityState: 'UNVERIFIED' })

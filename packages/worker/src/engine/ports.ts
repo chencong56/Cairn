@@ -131,6 +131,7 @@ export type BrowserPort = {
       targetId: string
       targetAccountId: string
       accessPolicy: TargetAccessPolicy
+      allowedOrigins: string[]
       signal: AbortSignal
       onProgress: (cursor: MapIngestCursor, page?: MapIngestPageSnapshot) => Promise<void>
     },
@@ -140,7 +141,6 @@ export type BrowserPort = {
 export type AiLocateInput = {
   prompt: string
   deepLocate?: boolean
-  allowedOrigins: string[]
   loginOrigin?: string
   loginPath?: string
   allowVision?: boolean

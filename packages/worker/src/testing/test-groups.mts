@@ -60,7 +60,6 @@ export const BROWSER_PARALLEL_SPEC_FILES: readonly string[] = [
   'src/browser/surface.business-flows.lab.spec.ts',
   'src/browser/surface.dynamic-lab.spec.ts',
   'src/browser/surface.lab.spec.ts',
-  'src/browser/target-scope.spec.ts',
 ]
 
 export const BROWSER_SPEC_FILES: readonly string[] = [

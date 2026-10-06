@@ -46,7 +46,7 @@ import {
   viewportMatches
 } from './managed-helpers'
 import { openedEntryDuringVerify } from './landing-settle.js'
-import { describeOutOfScopeOrigin, originAllowed, pageRefFor } from './page-identity'
+import { pageRefFor } from './page-identity'
 import { type LiveHandle, type SessionManagerContext } from './session-live.js'
 
 export async function acquireRunAuthControl(this: SessionManagerContext, input: {
@@ -202,9 +202,6 @@ export async function executeAuthInput(this: SessionManagerContext, params: {
       }
     }
     const pageUrl = typeof entry.page.url === 'function' ? entry.page.url() : ''
-    if (live.allowedOrigins.length > 0 && pageUrl && !originAllowed(pageUrl, live.allowedOrigins, live.accessScope)) {
-      throw conflict('AUTH_INPUT_REJECTED', describeOutOfScopeOrigin(pageUrl))
-    }
     this.assertSessionOwnedHere(latest)
     await this.assertOwnLiveRegistration()
     const urlBefore = redactAuthUrl(pageUrl)

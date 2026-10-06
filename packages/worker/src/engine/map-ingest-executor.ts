@@ -1,4 +1,5 @@
-import { commitMapIngestProgress, recordMapIngestSliceResult, type DbHandle } from '@cairn/db'
+import { commitMapIngestProgress, loadTargetForExecution, recordMapIngestSliceResult, type DbHandle } from '@cairn/db'
+import { originsFromTargetUrls } from '@cairn/shared'
 import type { BrowserPort } from './ports.js'
 import type { StepExecutionContext, StepExecutionOutcome, StepExecutor } from './step-executor.js'
 
@@ -28,11 +29,20 @@ export class MapIngestExecutor implements StepExecutor {
         safeMessage: '采集浏览器会话不可用',
       } }
     }
+    const target = await loadTargetForExecution(this.db, ctx.targetId)
+    const allowedOrigins = target ? originsFromTargetUrls(target.entryUrl, target.loginUrl) : []
+    if (allowedOrigins.length === 0) {
+      return { kind: 'failed', error: {
+        code: 'SESSION_TARGET_MISSING', category: 'VALIDATION', retryable: false,
+        safeMessage: 'Target 没有可用入口，无法确定采集站点',
+      } }
+    }
     try {
       const result = await this.browser.ingestMapSlice(ctx.sessionGrant, {
         step: ctx.step.input, targetId: ctx.targetId,
         targetAccountId: ctx.snapshot.targetAccountId,
         accessPolicy: ctx.snapshot.accessPolicy.policy,
+        allowedOrigins,
         signal: ctx.signal,
         onProgress: async (cursor, page) => {
           await commitMapIngestProgress(this.db, {

@@ -459,43 +459,11 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
     return detail.outcomeResults.find((item) => item.contractId === contractId)
   }
 
-  it('OCC-02：pathPrefix 外路径同样拦截并记账；范围内停机写 PASS（越界源拦截的记账语义由 L1 engine.outcome.spec 承接）', async () => {
-    const current = await getTargetAccessPolicy(handle.db, targetId)
-    await updateTargetAccessPolicy(
-      handle.db,
-      targetId,
-      {
-        expectedRevision: current.revision,
-        idempotencyKey: `occ-c-admin-${newId()}`.slice(0, 128),
-        reason: 'lab deny /admin',
-        rules: [
-          { origin, purpose: 'business_surface', effect: 'allow', pathPrefix: '/' },
-          { origin, purpose: 'business_surface', effect: 'deny', pathPrefix: '/admin' },
-          { origin, purpose: 'authentication', effect: 'allow', pathPrefix: '/login' },
-        ],
-      },
-      { id: actorId },
-    )
-
-    const denyId = newId()
-    const denied = await executeScenario({
-      name: `occ-02-admin-${newId()}`,
-      steps: [navigate(newId(), '/admin')],
-      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', denyId)],
-    })
-    expect(denied.status).toBe('FAILED')
-    expect(denied.stepRuns[0]?.attempts[0]?.error?.code).toBe('NAVIGATE_OUT_OF_SCOPE')
-    expect(denied.outcomeStatus).toBe('FAIL')
-    expect(invariantRow(denied, denyId)).toMatchObject({
-      provenance: 'runtime_invariant',
-      verdict: 'FAIL',
-      actual: { errorCode: 'NAVIGATE_OUT_OF_SCOPE' },
-    })
-
+  it('OCC-02：任意路径导航不再被访问范围拦截，navigation_boundary 记 PASS', async () => {
     const passId = newId()
     const passed = await executeScenario({
       name: `occ-02-pass-${newId()}`,
-      steps: [navigate(newId(), '/')],
+      steps: [navigate(newId(), '/admin')],
       runtimeInvariants: [createRuntimeInvariant('navigation_boundary', passId)],
     })
     expect(passed.status).toBe('SUCCEEDED')

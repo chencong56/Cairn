@@ -12,7 +12,6 @@ import type {
   MapJobStatus,
   MapJobStopReason,
   TargetAccessPolicy,
-  TargetAccessRule,
 } from '@cairn/shared'
 import { newId } from '../id.js'
 import { cairnSchema } from './console.js'
@@ -25,7 +24,6 @@ export const targetAccessPolicies = cairnSchema.table('target_access_policies', 
     .references(() => targets.id, { onDelete: 'restrict' }),
   policySchemaVersion: integer('policy_schema_version').notNull(),
   policyVersion: integer('policy_version').notNull(),
-  rulesJson: jsonb('rules_json').$type<TargetAccessRule[]>().notNull(),
   readOnlyRequestsJson: jsonb('read_only_requests_json').$type<Array<{ method: 'POST'; origin: string; pathPattern: string }>>().notNull().default([]),
   postReadMode: text('post_read_mode').$type<'balanced' | null>(),
   verifiedNonContentRequestsJson: jsonb('verified_non_content_requests_json').$type<NonNullable<TargetAccessPolicy['verifiedNonContentRequests']>>().notNull().default([]),

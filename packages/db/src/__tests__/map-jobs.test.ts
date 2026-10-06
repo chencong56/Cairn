@@ -81,7 +81,7 @@ describe.each(DRIVERS)('%s 地图作业账本', { timeout: 60_000 }, (driver) =>
     return { targetId, accountId }
   }
 
-  it('工厂政策默认关闭，新正式 Run 冻结授权且含认证域', async () => {
+  it('工厂政策默认关闭，新正式 Run 冻结只读规则策略且不再冻结访问范围', async () => {
     const { targetId } = await freshTarget()
     const policy = await getMapJobPolicy(handle.db, targetId)
     expect(policy.policy.manualJobsEnabled).toBe(false)
@@ -100,11 +100,8 @@ describe.each(DRIVERS)('%s 地图作业账本', { timeout: 60_000 }, (driver) =>
       scenarioId: scenario.id,
       actor: { kind: 'console', id: actorId },
     })
-    expect(created.detail.snapshot.accessPolicy?.policy.rules.map((rule) => rule.purpose).sort()).toEqual([
-      'authentication',
-      'business_surface',
-    ])
-    expect(created.detail.snapshot.allowedOrigins).toEqual(expect.arrayContaining(['https://shop.example', 'https://idp.example']))
+    expect(created.detail.snapshot.accessPolicy?.policy.rules).toEqual([])
+    expect(created.detail.snapshot.allowedOrigins).toBeUndefined()
     expect(created.detail.snapshot.mapJob).toBeUndefined()
     expect(created.detail.snapshot.evidencePolicy?.screenshot).toBe('always')
     expect(created.detail.snapshot.evidencePolicy?.video).toBe('always')
@@ -112,10 +109,9 @@ describe.each(DRIVERS)('%s 地图作业账本', { timeout: 60_000 }, (driver) =>
 
   it('平衡模式随目标访问策略修订冻结，恢复显式模式不改旧作业快照', async () => {
     const { targetId } = await freshTarget()
-    const rules = [{ origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'allow' as const }]
     const balanced = await updateTargetAccessPolicy(handle.db, targetId, {
       expectedRevision: 0, idempotencyKey: `balanced:${targetId}`, reason: '允许受控推断查询',
-      rules, postReadMode: 'balanced',
+      postReadMode: 'balanced',
     }, actor())
     expect(balanced.policy?.postReadMode).toBe('balanced')
     const scenario = await createScenarioWithVersion(handle.db, {
@@ -125,31 +121,29 @@ describe.each(DRIVERS)('%s 地图作业账本', { timeout: 60_000 }, (driver) =>
     expect(created.detail.snapshot.accessPolicy?.policy.postReadMode).toBe('balanced')
     const explicit = await updateTargetAccessPolicy(handle.db, targetId, {
       expectedRevision: balanced.revision, idempotencyKey: `explicit:${targetId}`, reason: '恢复显式模式',
-      rules, postReadMode: 'explicit',
+      postReadMode: 'explicit',
     }, actor())
     expect(explicit.policy?.postReadMode).toBeUndefined()
     expect(created.detail.snapshot.accessPolicy?.policy.postReadMode).toBe('balanced')
   })
 
-  it('冻结 pathPrefix，路径级 deny 不掏空 allowedOrigins', async () => {
+  it('冻结只读 POST 规则：随修订落库并进入 Run 快照', async () => {
     const { targetId } = await freshTarget()
+    const readOnly = { method: 'POST' as const, origin: 'https://shop.example', pathPattern: '/api/list' }
     await updateTargetAccessPolicy(
       handle.db,
       targetId,
       {
         expectedRevision: 0,
         idempotencyKey: `path:${targetId}`.slice(0, 128),
-        reason: '收窄业务路径',
-        rules: [
-          { origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow', pathPrefix: '/' },
-          { origin: 'https://shop.example', purpose: 'business_surface', effect: 'deny', pathPrefix: '/admin' },
-          { origin: 'https://idp.example', purpose: 'authentication', effect: 'allow' },
-        ],
+        reason: '声明只读查询端点',
+        readOnlyRequests: [readOnly],
       },
       actor(),
     )
     const access = await getTargetAccessPolicy(handle.db, targetId)
-    expect(access.policy?.rules.some((rule) => rule.pathPrefix === '/admin')).toBe(true)
+    expect(access.policy?.readOnlyRequests).toEqual([readOnly])
+    expect(access.policy?.rules).toEqual([])
     const scenario = await createScenarioWithVersion(handle.db, {
       targetId,
       name: `路径-${newId().slice(0, 8)}`,
@@ -160,10 +154,8 @@ describe.each(DRIVERS)('%s 地图作业账本', { timeout: 60_000 }, (driver) =>
       scenarioId: scenario.id,
       actor: { kind: 'console', id: actorId },
     })
-    expect(created.detail.snapshot.accessPolicy?.policy.rules.some((rule) => rule.pathPrefix === '/admin')).toBe(true)
-    expect(created.detail.snapshot.allowedOrigins).toEqual(
-      expect.arrayContaining(['https://shop.example', 'https://idp.example']),
-    )
+    expect(created.detail.snapshot.accessPolicy?.policy.readOnlyRequests).toEqual([readOnly])
+    expect(created.detail.snapshot.allowedOrigins).toBeUndefined()
     await requestRunCancel(handle.db, created.detail.id, actor())
   })
 
@@ -174,10 +166,6 @@ describe.each(DRIVERS)('%s 地图作业账本', { timeout: 60_000 }, (driver) =>
       evidence: '已核对前端调用，仅上报访问统计，不参与页面内容' }
     const updated = await updateTargetAccessPolicy(handle.db, targetId, {
       expectedRevision: 0, idempotencyKey: `noncontent:${targetId}`, reason: '记录已核实的非页面请求',
-      rules: [
-        { origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow' },
-        { origin: 'https://idp.example', purpose: 'authentication', effect: 'allow' },
-      ],
       verifiedNonContentRequests: [rule],
     }, actor())
     expect(updated.policy?.verifiedNonContentRequests).toEqual([rule])
@@ -186,7 +174,7 @@ describe.each(DRIVERS)('%s 地图作业账本', { timeout: 60_000 }, (driver) =>
     })
     const created = await createRunWithSnapshot(handle.db, { scenarioId: scenario.id, actor: actor() })
     expect(created.detail.snapshot.accessPolicy?.policy.verifiedNonContentRequests).toEqual([rule])
-    expect(created.detail.snapshot.allowedOrigins).not.toContain('https://metrics.example')
+    expect(created.detail.snapshot.allowedOrigins).toBeUndefined()
     await requestRunCancel(handle.db, created.detail.id, actor())
   })
 })

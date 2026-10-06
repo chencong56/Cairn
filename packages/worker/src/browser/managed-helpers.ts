@@ -4,7 +4,6 @@ import type { AuthControlInputReceipt, BrowserAuthInputCommand } from '@cairn/sh
 export function handoffMessage(code: string): string {
   if (code === 'PAGE_HANDOFF_NO_POPUP') return '点击后没有出现可交接的弹出窗口'
   if (code === 'PAGE_HANDOFF_AMBIGUOUS') return '点击后出现多个弹出窗口，无法判定交接目标'
-  if (code === 'PAGE_HANDOFF_OUT_OF_SCOPE') return '弹出窗口超出目标系统允许范围'
   if (code === 'PAGE_HANDOFF_CLOSED') return '弹出窗口在交接前已关闭'
   return '页面交接失败'
 }

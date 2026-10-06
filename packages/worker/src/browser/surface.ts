@@ -19,7 +19,7 @@ import {
   fillLocator,
   isLocatorVisible,
   locatorForCandidate,
-  navigateInScope,
+  navigatePage,
   pageClosed,
   pressKeys,
   readLocator,
@@ -146,18 +146,7 @@ export async function executeOnPage(
   let diagnostics: ResolverDiagnostics = { outcome: 'FOUND', candidatesTried: [] }
   try {
     if (command.type === 'navigate') {
-      const result = await navigateInScope(page, command.url, command.allowedOrigins)
-      if ('outOfScope' in result) {
-        return {
-          ok: false,
-          error: {
-            code: 'NAVIGATE_OUT_OF_SCOPE',
-            category: 'VALIDATION',
-            retryable: false,
-            safeMessage: `导航目标不在 Target 授权范围：${result.href}`,
-          },
-        }
-      }
+      const result = await navigatePage(page, command.url)
       return { ok: true, output: { url: result.href } }
     }
 

@@ -460,6 +460,7 @@ export class BrowserSessionManager {
       targetId: string
       targetAccountId: string
       accessPolicy: TargetAccessPolicy
+      allowedOrigins: string[]
       signal: AbortSignal
       onProgress: (cursor: MapIngestCursor, page?: MapIngestPageSnapshot) => Promise<void>
     },
@@ -470,7 +471,7 @@ export class BrowserSessionManager {
       const live = this.lives.get(grant.sessionId)
       if (!page || !live?.handle?.context) throw new Error('MAP_INGEST_PAGE_MISSING')
       const guard = await installExploreGuard(live.handle.context, {
-        allowedOrigins: [], accessPolicy: input.accessPolicy,
+        allowedOrigins: input.allowedOrigins, accessPolicy: input.accessPolicy,
         allowInferredReadPosts: true,
         allowedSpaHashPrefixes: input.step.allowedSpaHashPrefixes ?? ['#/'],
       })

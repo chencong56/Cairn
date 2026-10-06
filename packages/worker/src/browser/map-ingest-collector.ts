@@ -16,7 +16,6 @@ import {
   isUnsafeActionText,
   sanitizeExplorationUrl,
   syncSha256,
-  urlAllowedByAccessRules,
   type MapIngestCursor,
   type MapIngestElement,
   type MapIngestPageSnapshot,
@@ -105,16 +104,8 @@ function routePattern(url: URL, hashPrefixes: readonly string[]): string {
   return url.origin + url.pathname + (hashRoute ? '#' + routePath(url, hashPrefixes) : '')
 }
 
-function urlAllowedForMenu(url: string, policy: TargetAccessPolicy, hashPrefixes: readonly string[]): boolean {
-  if (!urlAllowedByAccessRules(url, policy.rules, ['business_surface'])) return false
-  try {
-    const parsed = new URL(url)
-    if (!hashPrefixes.some(prefix => parsed.hash.startsWith(prefix))) return true
-    const virtualPath = routePath(parsed, hashPrefixes)
-    return !policy.rules.some(rule => rule.purpose === 'business_surface' && rule.effect === 'deny'
-      && new URL(rule.origin).origin === parsed.origin
-      && accessPathMatches(virtualPath, rule.pathPrefix ?? '/'))
-  } catch { return false }
+function urlAllowedForMenu(url: string, allowedOrigins: readonly string[]): boolean {
+  try { return allowedOrigins.includes(new URL(url).origin) } catch { return false }
 }
 
 /** R1 DOM ancestry, then R2 segment-safe URL prefix; only nodes inside a detected menu reach this function. */
@@ -684,7 +675,7 @@ export async function collectMapIngestSlice(input: {
   step: MapIngestStep['input']
   targetId: string
   targetAccountId: string
-  accessPolicy: TargetAccessPolicy
+  allowedOrigins: readonly string[]
   guard: ExploreGuardController
   signal: AbortSignal
   onProgress: (cursor: MapIngestCursor, page?: MapIngestPageSnapshot) => Promise<void>
@@ -777,7 +768,7 @@ export async function collectMapIngestSlice(input: {
     try {
       if (node.url) {
         const safe = sanitizeExplorationUrl(node.url, undefined, { allowedSpaHashPrefixes: hashPrefixes })
-        if (!safe.ok || !urlAllowedForMenu(node.url, input.accessPolicy, hashPrefixes)) {
+        if (!safe.ok || !urlAllowedForMenu(node.url, input.allowedOrigins)) {
           nodes.push({ label: node.label, code: 'out_of_scope' })
           cursor.processedNodes++
           completeEntryIfDrained()
@@ -832,7 +823,7 @@ export async function collectMapIngestSlice(input: {
         await persist()
         continue
       }
-      if (!urlAllowedForMenu(page.url(), input.accessPolicy, hashPrefixes)) {
+      if (!urlAllowedForMenu(page.url(), input.allowedOrigins)) {
         await page.goBack({ timeout: step.policy.ingestNavTimeoutSeconds * 1000 }).catch(() => {})
         nodes.push({ label: node.label, code: 'out_of_scope' })
         cursor.processedNodes++
@@ -915,7 +906,7 @@ export async function collectMapIngestSlice(input: {
           if (step.entries.slice(0, cursor.entryIndex).some(prior => belongsToMenuSubtree(candidate, prior, hashPrefixes))) continue
           const safe = candidate.href ? sanitizeExplorationUrl(candidate.href, undefined,
             { allowedSpaHashPrefixes: hashPrefixes }) : null
-          if (candidate.href && (!safe?.ok || !urlAllowedForMenu(candidate.href, input.accessPolicy, hashPrefixes))) continue
+          if (candidate.href && (!safe?.ok || !urlAllowedForMenu(candidate.href, input.allowedOrigins))) continue
           const menuPath = [...candidate.ancestors, candidate.label].slice(0, 8)
           const depth = Math.max(1, menuPath.length - 1)
           const key = candidate.href ?? menuPath.join('>')

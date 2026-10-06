@@ -44,7 +44,7 @@ const accessPolicy: FrozenTargetAccessPolicy = {
   policy: {
     schemaVersion: TARGET_ACCESS_POLICY_SCHEMA_VERSION,
     policyVersion: 1,
-    rules: [{ origin: 'https://erp.example', purpose: 'business_surface', effect: 'allow' }],
+    rules: [],
     readOnlyRequests: [],
   },
 }
@@ -66,7 +66,7 @@ describe('assembleRunSnapshot', () => {
       scenarioId: ids.scenario, scenarioVersionId: ids.version, steps: [step], input: {},
       target: { entryUrl: 'https://erp.example/app', loginUrl: 'https://erp.example/login', authMethod: 'password', captchaMode: 'none', loginFields: null, sessionPolicy: null },
       platformDocument: document, platformRevision: 3,
-      authVerification, allowedOrigins: ['https://erp.example'], accessPolicy, mapConsumption: { mode: 'off' as const },
+      authVerification, accessPolicy, mapConsumption: { mode: 'off' as const },
     }
     const snapshot = assembleRunSnapshot(input)
     expect(snapshot.resolution).toMatchObject({ protocol: 'snapshot.resolution@2', steps: { [step.id]: { actual: ['text_ai'] } }, textConfigVersion: '3' })
@@ -94,7 +94,6 @@ describe('assembleRunSnapshot', () => {
       platformDocument: FACTORY_PLATFORM_CONFIG,
       platformRevision: 1,
       authVerification,
-      allowedOrigins: ['https://erp.example'],
       accessPolicy,
       mapConsumption: { mode: 'off' as const },
     }
@@ -142,7 +141,6 @@ describe('assembleRunSnapshot', () => {
       platformDocument: FACTORY_PLATFORM_CONFIG,
       platformRevision: 1,
       authVerification,
-      allowedOrigins: ['https://erp.example'],
       accessPolicy,
       mapConsumption: { mode: 'off' },
     })
@@ -182,7 +180,6 @@ describe('assembleRunSnapshot', () => {
       platformDocument: FACTORY_PLATFORM_CONFIG,
       platformRevision: 1,
       authVerification,
-      allowedOrigins: ['https://erp.example'],
       accessPolicy,
       mapConsumption: { mode: 'off' },
     })
@@ -235,7 +232,6 @@ describe('assembleRunSnapshot', () => {
       platformDocument,
       platformRevision: 2,
       authVerification,
-      allowedOrigins: ['https://erp.example'],
       accessPolicy,
       mapConsumption: { mode: 'off' },
     })
@@ -261,7 +257,6 @@ describe('assembleRunSnapshot', () => {
       platformDocument,
       platformRevision: 2,
       authVerification,
-      allowedOrigins: ['https://erp.example'],
       accessPolicy,
       mapConsumption: { mode: 'off' },
     })

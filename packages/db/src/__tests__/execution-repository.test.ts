@@ -90,7 +90,7 @@ describe.each(DRIVERS)('%s 执行账本 Repository（集成）', { timeout: 30_0
     })
     expect(first.created).toBe(true)
     expect(first.detail.status).toBe('QUEUED')
-    expect(first.detail.snapshot.allowedOrigins).toEqual(['https://example.com'])
+    expect(first.detail.snapshot.allowedOrigins).toBeUndefined()
     expect(computeSnapshotDigest(first.detail.snapshot)).toBe(first.detail.snapshot.digest)
     const [digestRow] = await handle.db
       .select({ snapshotDigest: runs.snapshotDigest })

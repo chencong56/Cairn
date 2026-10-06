@@ -36,7 +36,7 @@ async function renderCard() {
   )
 }
 
-describe('访问范围卡片', () => {
+describe('地图采集只读规则卡片', () => {
   beforeEach(async () => {
     await page.viewport(1440, 900)
     vi.clearAllMocks()
@@ -47,13 +47,8 @@ describe('访问范围卡片', () => {
       policy: {
         schemaVersion: 1,
         policyVersion: 1,
-        rules: [
-          {
-            origin: 'https://shop.example',
-            purpose: 'business_surface',
-            effect: 'allow',
-          },
-        ],
+        rules: [],
+        readOnlyRequests: [],
       },
       seeded: true,
       resourceLoadsUnrestricted: true,
@@ -61,59 +56,25 @@ describe('访问范围卡片', () => {
     })
   })
 
-  it('展示派生授权并标明资源域不授予操作', async () => {
+  it('只展示地图采集只读规则，不再有授权边界与规则表单', async () => {
     await renderCard()
-    await expect.element(page.getByText('访问范围')).toBeVisible()
-    await expect.element(page.getByText(/资源加载仍按现网不拦/)).toBeVisible()
-    await expect
-      .element(page.getByText(/允许 业务表面 https:\/\/shop.example/))
-      .toBeVisible()
+    await expect.element(page.getByText('地图采集只读规则')).toBeVisible()
+    expect(page.getByText(/已配置授权边界/).elements()).toHaveLength(0)
+    expect(page.getByLabelText('Origin').elements()).toHaveLength(0)
+    expect(page.getByRole('button', { name: '保存授权' }).elements()).toHaveLength(0)
   })
 
-  it('可追加规则并保存授权', async () => {
+  it('添加只读 POST 规则时不再提交 rules', async () => {
     const screen = await renderCard()
-    await screen.getByLabelText('Origin').fill('https://idp.example')
-    await screen.getByLabelText('用途').click()
-    await page.getByRole('option', { name: '认证', exact: true }).click()
-    await screen.getByLabelText('理由').fill('补认证域')
-    await screen.getByRole('button', { name: '保存授权' }).click()
-    expect(mocks.updateTargetAccessPolicy).toHaveBeenCalledWith(
-      TARGET_ID,
-      expect.objectContaining({
-        expectedRevision: 0,
-        rules: expect.arrayContaining([
-          expect.objectContaining({
-            origin: 'https://idp.example',
-            purpose: 'authentication',
-          }),
-        ]),
-      })
-    )
-    expect(
-      mocks.updateTargetAccessPolicy.mock.calls[0]?.[1].rules.at(-1)?.pathPrefix
-    ).toBeUndefined()
-  })
-
-  it('保存带 pathPrefix 的规则，空前缀不写回斜杠', async () => {
-    const screen = await renderCard()
-    await expect
-      .element(page.getByText('整个 origin', { exact: true }))
-      .toBeVisible()
-    await screen.getByLabelText('Origin').fill('https://shop.example')
-    await screen.getByLabelText('可选 pathPrefix').fill('/app')
-    await screen.getByLabelText('理由').fill('收窄业务表面')
-    await screen.getByRole('button', { name: '保存授权' }).click()
-    expect(mocks.updateTargetAccessPolicy).toHaveBeenCalledWith(
-      TARGET_ID,
-      expect.objectContaining({
-        rules: expect.arrayContaining([
-          expect.objectContaining({
-            origin: 'https://shop.example',
-            pathPrefix: '/app',
-          }),
-        ]),
-      })
-    )
+    await screen.getByLabelText('来源站点', { exact: true }).fill('https://shop.example')
+    await screen.getByLabelText('精确路径', { exact: true }).fill('/api/list')
+    await screen.getByRole('button', { name: '添加只读规则' }).click()
+    const body = mocks.updateTargetAccessPolicy.mock.calls[0]?.[1]
+    expect(body).toEqual(expect.objectContaining({
+      expectedRevision: 0,
+      readOnlyRequests: [{ method: 'POST', origin: 'https://shop.example', pathPattern: '/api/list' }],
+    }))
+    expect(body).not.toHaveProperty('rules')
   })
 
   it('提交核实依据与精确 XHR 请求规则，不把它加入放行列表', async () => {

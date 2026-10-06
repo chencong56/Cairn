@@ -1,3 +1,5 @@
+2026-10-06--移除目标系统「访问范围」（授权边界）机制：删除目标页 origin/pathPrefix 允许／拒绝规则的配置界面与规则编译，Worker 不再安装 CDP 导航拦截，也不再按 origin 过滤导航、弹窗接管、AI 页面、落点、认证输入与观测，导航步骤绝对地址不限域（相对地址按目标入口 origin 展开），`allowedOrigins` 不再写入快照，编排观察不再校验 origin，不会再因「没有获得授权域」卡住。保留地图采集只读守卫（只读 POST／GraphQL query 规则，页签改名「执行与采集策略」、卡片「地图采集只读规则」），采集改为与目标入口／登录 origin 同源判定。迁移 0147 删除 target_access_policies.rules_json；旧快照的 rules／allowedOrigins 仍可解析。顺带修复认证恢复判定对 allowedOrigins 的依赖。验证：受影响文件的 shared/db/worker/api/web 测试与类型检查通过，已迁移并热重启，check:stack 通过，浏览器核对目标详情页；未跑全量测试，mysql/sqlite 冻结迁移链未验证。
+
 2026-10-06--登录提交按钮启发式规则扩展：LOGIN_FIELD_HEURISTICS.submit 补充常见后台系统按钮候选（login_btn、login-btn、btn-login、loginBtn、submit_btn、submit-btn 等 id/name），版本升至 2；未显式配置登录框的系统可自动命中带有此类按钮的账密表单。@cairn/shared 单测、全仓 typecheck、lint 及 worker 登录框解析用例全绿，dev 栈已热更新生效。
 
 2026-10-06--认证等待期只读画面与取得输入权失败可诊断交付：等待登录期间具备 session:control（运行侧另需 run:execute，目标范围内）的用户无需先取得输入权即可只读观看受管浏览器画面，仅 session:view 观察者仍不可见；API 依权限向 Worker 转发 control=1（不改内部签名协议、无迁移），Worker 的 canObserveManagedFrames/buildMeta/pipeFrames 以控制资格放行并回报 viewMode，输入仍须有效 Token；前端会话工作台与运行详情自动展开只读画面、取得输入权失败的错误码与说明常驻界面并可重试、等待期展示当前页地址。验证：shared/worker/api/web 全量测试与类型检查通过（web 另有助手面板视口断言既有红灯，与本改动无关）。

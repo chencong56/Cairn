@@ -84,7 +84,7 @@ function namedTargetScopeResult(lookupFailed = false, ambiguous = false): Assist
       ? '当前权限范围内有多个同名目标，不能确定要查哪一个。请打开目标详情页再提问。'
       : lookupFailed
       ? '本次无法读取当前授权的目标列表，因此不能核实该目标的账号或运行。请稍后重试，或从「目标系统」打开已授权目标。'
-      : '在本次查询可访问的目标范围内，未定位到匹配名称。可能是名称不准确或缺少授权；我无法提供该目标的账号或运行信息，也不能确认它是否存在。请从「目标系统」选择已授权目标，或联系管理员核对访问范围。',
+      : '在本次查询可访问的目标范围内，未定位到匹配名称。可能是名称不准确或缺少授权；我无法提供该目标的账号或运行信息，也不能确认它是否存在。请从「目标系统」选择已授权目标，或联系管理员核对授权。',
     claims: [{ factKind: 'human_confirmed', text: '目标账号与运行信息须在当前账号获授权的目标范围内查询。', citations: [NAMED_TARGET_SCOPE_CITATION] }],
     missing: [{ key: 'named_target', reason: ambiguous ? 'ambiguous' : lookupFailed ? 'read_failed' : 'not_visible_or_not_found',
       description: ambiguous ? '本次授权范围内有多个同名目标' : lookupFailed ? '授权目标列表读取失败' : '本次授权范围内无匹配名称' }],
@@ -378,7 +378,7 @@ const KNOWLEDGE_STATUS_MESSAGES: Record<KnowledgeAnswerStatus, {
     missing: { key: 'session_overview', reason: 'permission_denied', description: '需要 target:read 和 session:read 权限' },
   },
   session_access_denied: {
-    summary: '这次请求未能访问目标账号与会话信息，或目标已不存在。请核对当前页面和访问范围后重新提问。',
+    summary: '这次请求未能访问目标账号与会话信息，或目标已不存在。请核对当前页面和权限后重新提问。',
     claim: '识途助手不会展示未获目标范围授权的账号和会话事实。',
     missing: { key: 'session_overview', reason: 'access_denied_or_not_found', description: '目标或会话范围不可访问' },
   },

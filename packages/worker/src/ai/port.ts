@@ -6,9 +6,9 @@ import {
   type DbHandle,
 } from '@cairn/db'
 import {
+  originsFromTargetUrls,
   parseAiOutput,
   aiCommandSchema,
-  urlAllowedByCompiledScope,
   redactErrorSurfaceText,
   type AiCommand,
   type AiExecutionConfig,
@@ -16,7 +16,6 @@ import {
   type AiCallRoute,
   type AiCallIntent,
   type BrowserCommandEvidence,
-  type CompiledAccessScope,
   type ExecutionError,
   type RunGrant,
   type SessionGrant,
@@ -29,7 +28,6 @@ import {
   writeEvidenceArtifactKey,
 } from '@cairn/shared'
 import type { Page } from 'playwright'
-import { installedCompiledScope } from '../browser/target-scope.js'
 import type { BrowserSessionManager } from '../browser/session-manager.js'
 import { attachObjectEvidence } from '../browser/port.js'
 import type { ObjectService } from '../objects/object.service.js'
@@ -75,7 +73,7 @@ export function createAiPort(input: {
         grant,
         evidence,
         async (page) => {
-          assertPageScope(page.url(), command, installedCompiledScope(page.context()))
+          assertAiPage(page.url(), command)
           const pagesBefore = new Set(page.context().pages())
           // 阶段 B 语义树优先分支（PAS-3）：全部准入条件满足时优先尝试无图文本分析
           const admission = isAriaBranchAdmitted({
@@ -162,7 +160,9 @@ export function createAiPort(input: {
                   contextBindings: evidence.contextBindings
                     ? new Map(Object.entries(evidence.contextBindings))
                     : undefined,
-                  allowedOrigins: evidence.snapshot?.allowedOrigins,
+                  allowedOrigins: evidence.snapshot?.targetAuth
+                    ? originsFromTargetUrls(evidence.snapshot.targetAuth.entryUrl, evidence.snapshot.targetAuth.loginUrl)
+                    : undefined,
                   sensitiveSelectors: evidence.snapshot?.targetAuth?.sensitiveSelectors,
                 })
               : undefined
@@ -339,7 +339,6 @@ export function createAiPort(input: {
       const command = {
         type: 'ai_extract',
         instruction: locateInput.prompt,
-        allowedOrigins: locateInput.allowedOrigins,
         loginOrigin: locateInput.loginOrigin,
         loginPath: locateInput.loginPath,
         maxCalls: evidence.maxCalls,
@@ -348,7 +347,7 @@ export function createAiPort(input: {
         hangWaitMs: evidence.config.hangWaitMs,
       } as AiCommand
       const scoped = await input.manager.withManagedPage(grant, evidence, async (page) => {
-        assertPageScope(page.url(), command, installedCompiledScope(page.context()))
+        assertAiPage(page.url(), command)
 
         const requestedRoute = locateInput.route ?? 'legacy'
         // v1 保持文本优先；v2 按冻结路线逐档调用。
@@ -897,7 +896,8 @@ export async function waitWithHang<T>(
   return (await wrapped) as { done: true; ok: true; value: T } | { done: true; ok: false; error: unknown }
 }
 
-export function assertPageScope(url: string, command: AiCommand, scope?: CompiledAccessScope): void {
+/** AI 只拒绝无法解析的页面和认证页；不限制域。 */
+export function assertAiPage(url: string, command: AiCommand): void {
   let origin: string
   let pathname = '/'
   try {
@@ -906,12 +906,6 @@ export function assertPageScope(url: string, command: AiCommand, scope?: Compile
     pathname = parsed.pathname
   } catch {
     throw Object.assign(new Error('当前页面地址无法解析'), { code: 'AI_ORIGIN_INVALID' })
-  }
-  if (!command.allowedOrigins.includes(origin)) {
-    throw Object.assign(new Error(`当前页面源 ${origin} 不在允许范围内`), { code: 'AI_ORIGIN_DENIED' })
-  }
-  if (scope && !urlAllowedByCompiledScope(url, scope)) {
-    throw Object.assign(new Error(`当前页面源 ${origin} 不在允许范围内`), { code: 'AI_ORIGIN_DENIED' })
   }
   if (command.loginOrigin && origin === command.loginOrigin) {
     const loginPath = command.loginPath && command.loginPath.length > 0 ? command.loginPath : '/login'
@@ -955,7 +949,7 @@ export async function settleAiCommand(
 ): Promise<AiResult> {
   if (result.hung) return result
   await closeUnsupportedPages(page, pagesBefore)
-  assertPageScope(page.url(), command, installedCompiledScope(page.context()))
+  assertAiPage(page.url(), command)
   return result
 }
 

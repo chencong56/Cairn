@@ -3,7 +3,6 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { installedScopeAllows, targetScopeReady } from './target-scope'
 import type { BrowserContext, Frame, Locator, Page, Request } from 'playwright'
 import {
   authRoutePath,
@@ -843,7 +842,6 @@ export async function stopSession(
 export async function openRunPage(handle: BrowserHandle): Promise<Page> {
   requireOccupancy('openRunPage')
   const page = await handle.context.newPage()
-  await targetScopeReady(page)
   return page
 }
 
@@ -1045,23 +1043,10 @@ export async function detectCapabilityGap(
   return null
 }
 
-export async function navigateInScope(
-  page: Page,
-  url: string,
-  allowedOrigins: string[],
-): Promise<{ href: string } | { outOfScope: true; href: string }> {
-  requireOccupancy('navigateInScope')
-  const base = allowedOrigins[0]
-  if (!base) return { outOfScope: true, href: url }
-  const resolved = new URL(url, base.endsWith('/') ? base : `${base}/`)
-  if (!allowedOrigins.includes(resolved.origin)) {
-    return { outOfScope: true, href: resolved.href }
-  }
-  const installed = installedScopeAllows(page.context(), resolved.href)
-  if (installed === false) {
-    return { outOfScope: true, href: resolved.href }
-  }
-  await page.goto(resolved.href, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+/** url 须已是绝对地址；相对地址由步骤编译侧按目标入口 origin 展开。 */
+export async function navigatePage(page: Page, url: string): Promise<{ href: string }> {
+  requireOccupancy('navigatePage')
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   // SPA shells often reach DOMContentLoaded before their first usable paint.
   // A following AI step would otherwise see only the shell background and
   // conclude that a visible control is absent. Bound the wait so pages with

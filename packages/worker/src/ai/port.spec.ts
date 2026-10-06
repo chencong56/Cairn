@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Page } from 'playwright'
 import {
-  assertPageScope,
+  assertAiPage,
   classifyAiCallErrorCode,
   createAiPort,
   evidenceFailed,
@@ -50,22 +50,17 @@ const command: AiCommand = {
   maxOutputTokens: 64,
   requestTimeoutMs: 1000,
   hangWaitMs: 20,
-  allowedOrigins: ['https://shop.example'],
   loginOrigin: 'https://shop.example',
   loginPath: '/login',
 }
 
 describe('AI 端口边界', () => {
-  it('越界源和认证页都拒绝', () => {
-    expect(() => assertPageScope('https://evil.example/app', command)).toThrow(/不在允许范围/)
-    expect(() => assertPageScope('https://shop.example/login', command)).toThrow(/认证页面/)
-    expect(() => assertPageScope('https://shop.example/orders', command)).not.toThrow()
-    expect(() =>
-      assertPageScope('https://shop.example/admin', command, {
-        purposes: ['business_surface'],
-        rules: [{ origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow', pathPrefix: '/orders' }],
-      }),
-    ).toThrow(/不在允许范围/)
+  it('只拒绝认证页与无法解析的地址，不限制域', () => {
+    expect(() => assertAiPage('https://shop.example/login', command)).toThrow(/认证页面/)
+    expect(() => assertAiPage('not a url', command)).toThrow(/无法解析/)
+    expect(() => assertAiPage('https://shop.example/orders', command)).not.toThrow()
+    expect(() => assertAiPage('https://other.example/app', command)).not.toThrow()
+    expect(() => assertAiPage('https://shop.example/admin', command)).not.toThrow()
   })
 
   it('定位失败映射保留 hung 与可重试的模型错误', () => {
@@ -263,12 +258,15 @@ describe('AI 端口边界', () => {
     expect(main.close).not.toHaveBeenCalled()
   })
 
-  it('没有新窗时仍校验页面范围', async () => {
+  it('没有新窗时仍拒绝认证页，但不限制域', async () => {
     const main = { close: vi.fn(async () => undefined) }
     const before = new Set([main]) as unknown as Set<Page>
     await expect(
-      settleAiCommand(fakePage('https://evil.example/app', [main]), before, command, { ok: true, output: {} }),
-    ).rejects.toMatchObject({ code: 'AI_ORIGIN_DENIED' })
+      settleAiCommand(fakePage('https://shop.example/login', [main]), before, command, { ok: true, output: {} }),
+    ).rejects.toMatchObject({ code: 'AI_AUTH_PAGE_DENIED' })
+    await expect(
+      settleAiCommand(fakePage('https://other.example/app', [main]), before, command, { ok: true, output: {} }),
+    ).resolves.toMatchObject({ ok: true })
   })
 
   it('丢租分类只看 gate：放行过动作记 UNKNOWN，未放行记 INFRASTRUCTURE，都不可重试', async () => {
@@ -430,7 +428,7 @@ describe('AI 端口边界', () => {
 
       const result = await port.locate!(
         leaseGrant,
-        { prompt: '立即支付按钮', allowedOrigins: ['https://shop.example'] },
+        { prompt: '立即支付按钮' },
         new AbortController().signal,
         locateEvidence,
       )
@@ -512,7 +510,7 @@ describe('AI 端口边界', () => {
 
       const result = await port.locate!(
         leaseGrant,
-        { prompt: '不存在的按钮', allowedOrigins: ['https://shop.example'], allowVision: false },
+        { prompt: '不存在的按钮', allowVision: false },
         new AbortController().signal,
         locateEvidence,
       )

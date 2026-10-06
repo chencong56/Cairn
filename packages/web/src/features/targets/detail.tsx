@@ -371,7 +371,7 @@ export function TargetDetailPage() {
                 </TabsTrigger>
                 <TabsTrigger value='access-policy'>
                   <Shield className='size-4' />
-                  访问范围
+                  执行与采集策略
                 </TabsTrigger>
                 <TabsTrigger value='ai-sources'>
                   <Database className='size-4' />

@@ -1,4 +1,4 @@
-import type { CompiledAccessScope, AuthControlInputReceipt, ObserveGrant, RunSnapshot, SessionErrorCode, SessionGrant } from '@cairn/shared'
+import type { AuthControlInputReceipt, ObserveGrant, RunSnapshot, SessionErrorCode, SessionGrant } from '@cairn/shared'
 import type { BrowserHandle, openRunPage } from './runtime.js'
 import type { ManagedPageEntry } from './page-identity.js'
 import type { ScreencastHandle } from './screencast.js'
@@ -43,8 +43,6 @@ export type LiveHandle = {
   autoInputClosed: boolean
   inputAccepting: boolean
   serial: Promise<void>
-  allowedOrigins: string[]
-  accessScope?: CompiledAccessScope
   receipts: Map<string, AuthControlInputReceipt>
   lastSeq: number
   controlEpoch: number
@@ -84,7 +82,6 @@ export function emptyLive(
     autoInputClosed: false,
     inputAccepting: false,
     serial: Promise.resolve(),
-    allowedOrigins: [],
     receipts: new Map(),
     lastSeq: 0,
     controlEpoch: 0,

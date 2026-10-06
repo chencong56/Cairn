@@ -157,9 +157,8 @@ export function isContextRecoverable(input: {
   if (!input.pageUrl) return false
   if (pageLooksLikeLogin({ pageUrl: input.pageUrl, loginUrl: input.rule.loginUrl })) return false
   try {
-    const origin = new URL(input.pageUrl).origin
-    const allowed = new Set(input.rule.allowedOrigins.map((item) => item.replace(/\/$/, '')))
-    return allowed.has(origin.replace(/\/$/, ''))
+    new URL(input.pageUrl)
+    return true
   } catch {
     return false
   }

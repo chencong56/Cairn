@@ -5,9 +5,7 @@ import {
   MAP_JOB_EVIDENCE_POLICY,
   mapJobCommandKey,
   mapJobIdempotencyKey,
-  originsForAccessPurposes,
   runListQuerySchema,
-  seedTargetAccessRules,
   targetAccessPolicyUpdateBodySchema,
   targetAccessPolicySchema,
 } from '../index.js'
@@ -18,69 +16,31 @@ describe('地图作业契约', () => {
     expect(FACTORY_MAP_JOB_POLICY.sliceWorkSeconds).toBe(20)
   })
 
-  it('从入口派生授权且资源域不进入可操作 origin', () => {
-    const rules = seedTargetAccessRules('https://shop.example/orders', 'https://idp.example/login')
-    const policy = { schemaVersion: 1 as const, policyVersion: 1, rules, readOnlyRequests: [] }
-    expect(originsForAccessPurposes(policy, ['business_surface'])).toEqual(['https://shop.example'])
-    expect(originsForAccessPurposes(policy, ['authentication'])).toEqual(['https://idp.example'])
-    expect(originsForAccessPurposes(policy, ['resource'])).toEqual([])
+  it('只读规则更新体不再接受访问范围 rules', () => {
+    const base = { expectedRevision: 0, idempotencyKey: 'policy-path-1', reason: '调整只读规则' }
+    expect(() => targetAccessPolicyUpdateBodySchema.parse({ ...base, rules: [] })).toThrow()
+    expect(targetAccessPolicyUpdateBodySchema.parse({
+      ...base,
+      readOnlyRequests: [{ method: 'POST', origin: 'https://shop.example', pathPattern: '/api/list' }],
+    }).readOnlyRequests).toHaveLength(1)
+    expect(() => targetAccessPolicyUpdateBodySchema.parse({
+      ...base,
+      readOnlyRequests: [{ method: 'POST', origin: 'https://shop.example', pathPattern: 'api/list' }],
+    })).toThrow()
   })
 
-  it('deny 优先于 allow', () => {
-    const policy = {
-      schemaVersion: 1 as const,
-      policyVersion: 1,
-      rules: [
-        { origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'allow' as const },
-        { origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'deny' as const },
-      ],
-      readOnlyRequests: [],
-    }
-    expect(originsForAccessPurposes(policy, ['business_surface'])).toEqual([])
-  })
-
-  it('路径级 deny 不从 allowedOrigins 删除 origin', () => {
-    const policy = {
-      schemaVersion: 1 as const,
-      policyVersion: 1,
-      rules: [
-        { origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'allow' as const, pathPrefix: '/' },
-        { origin: 'https://shop.example', purpose: 'business_surface' as const, effect: 'deny' as const, pathPrefix: '/admin' },
-      ],
-      readOnlyRequests: [],
-    }
-    expect(originsForAccessPurposes(policy, ['business_surface'])).toEqual(['https://shop.example'])
-  })
-
-  it('发布 pathPrefix 必须是路径且不含 query', () => {
-    const base = {
-      expectedRevision: 0,
-      idempotencyKey: 'policy-path-1',
-      reason: '收窄路径',
-    }
-    expect(() =>
-      targetAccessPolicyUpdateBodySchema.parse({
-        ...base,
-        rules: [{ origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow', pathPrefix: 'orders' }],
-      }),
-    ).toThrow()
-    expect(() =>
-      targetAccessPolicyUpdateBodySchema.parse({
-        ...base,
-        rules: [{ origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow', pathPrefix: '/orders?x=1' }],
-      }),
-    ).toThrow()
-    expect(
-      targetAccessPolicyUpdateBodySchema.parse({
-        ...base,
-        rules: [{ origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow', pathPrefix: '/orders' }],
-      }).rules[0]?.pathPrefix,
-    ).toBe('/orders')
+  it('策略 rules 已废弃：缺省为空，旧冻结快照带 rules 仍可解析', () => {
+    const base = { schemaVersion: 1, policyVersion: 1 }
+    expect(targetAccessPolicySchema.parse(base).rules).toEqual([])
+    const legacy = targetAccessPolicySchema.parse({
+      ...base,
+      rules: [{ origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow', pathPrefix: '/orders' }],
+    })
+    expect(legacy.rules).toHaveLength(1)
   })
 
   it('非页面数据例外必须有精确请求身份和核实依据，空规则保持旧策略形状', () => {
-    const base = { schemaVersion: 1, policyVersion: 1,
-      rules: [{ origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow' }] }
+    const base = { schemaVersion: 1, policyVersion: 1 }
     expect(targetAccessPolicySchema.parse(base).verifiedNonContentRequests).toBeUndefined()
     const rule = { method: 'POST', resourceType: 'xhr', origin: 'https://metrics.example',
       pathPattern: '/collect', evidence: '已核对前端调用，仅上报访问统计，不驱动页面内容' }
@@ -130,8 +90,6 @@ describe('地图作业契约', () => {
       targetAccessPolicyUpdateBodySchema.parse({
         expectedRevision: 0,
         idempotencyKey: 'policy-1',
-        rules: [],
-        reason: '空规则',
       }),
     ).toThrow()
   })

@@ -311,7 +311,6 @@ async function tryAiRung(input: {
     {
       prompt: semantic,
       deepLocate: step.policy?.deepLocate === true,
-      allowedOrigins: ctx.snapshot.allowedOrigins ?? [],
       loginOrigin: ctx.snapshot.loginOrigin,
       loginPath: ctx.snapshot.loginPath,
       allowVision: input.route !== 'text',

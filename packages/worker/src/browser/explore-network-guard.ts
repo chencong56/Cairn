@@ -3,7 +3,6 @@ import {
   accessPathMatchesExact,
   isUnsafeActionText,
   sanitizeExplorationUrl,
-  urlAllowedByAccessRules,
   type TargetAccessPolicy,
 } from '@cairn/shared'
 
@@ -38,6 +37,11 @@ export type InferredReadPostRecord = {
 /** Unclassified XHR/fetch is always a possible gap in the captured page. */
 export function affectsCapturedSurface(request: Pick<BlockedRequestRecord, 'resourceType' | 'impactBasis'>): boolean {
   return request.resourceType !== 'ping' && request.impactBasis !== 'verified_non_content_rule'
+}
+
+/** 地图采集只在目标站点（入口／登录 origin）内导航和读数据；这是采集的只读边界，不影响场景运行。 */
+function sameTargetOrigin(url: string, origins: readonly string[]): boolean {
+  try { return origins.includes(new URL(url).origin) } catch { return false }
 }
 
 const OUT_OF_SCOPE_DATA = '数据请求不在业务授权范围'
@@ -231,9 +235,7 @@ export function classifyReadOnlyRequest(input: {
     if (method !== 'GET' && method !== 'HEAD') return { allowed: false, reason: '导航只能使用 GET/HEAD' }
     const safe = sanitizeExplorationUrl(input.url, undefined, { allowedSpaHashPrefixes: options.allowedSpaHashPrefixes })
     if (!safe.ok) return { allowed: false, reason: '导航地址不安全：' + safe.reason }
-    const allowed = options.accessPolicy
-      ? urlAllowedByAccessRules(input.url, options.accessPolicy.rules, ['business_surface'])
-      : options.allowedOrigins.includes(new URL(input.url).origin)
+    const allowed = sameTargetOrigin(input.url, options.allowedOrigins)
     return allowed ? { allowed: true } : { allowed: false, reason: '导航地址不在业务授权范围' }
   }
   if (STATIC_RESOURCES.has(input.resourceType))
@@ -241,9 +243,7 @@ export function classifyReadOnlyRequest(input: {
       ? { allowed: true } : { allowed: false, reason: '静态资源请求只能使用 GET/HEAD' }
   let parsed: URL
   try { parsed = new URL(input.url) } catch { return { allowed: false, reason: '请求地址无效' } }
-  const allowed = options.accessPolicy
-    ? urlAllowedByAccessRules(input.url, options.accessPolicy.rules, ['business_surface'])
-    : options.allowedOrigins.includes(parsed.origin)
+  const allowed = options.allowedOrigins.includes(parsed.origin)
   if (!allowed) return { allowed: false, reason: OUT_OF_SCOPE_DATA }
   if (isUnsafeActionText(parsed.pathname)) return { allowed: false, reason: '路径疑似写操作' }
   if (method === 'GET' || method === 'HEAD') return { allowed: true }

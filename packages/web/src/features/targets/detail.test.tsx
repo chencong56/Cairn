@@ -136,7 +136,7 @@ describe('TargetDetailPage 账号列表', () => {
       policy: {
         schemaVersion: 1,
         policyVersion: 1,
-        rules: [{ origin: 'https://shop.example.test', purpose: 'business_surface', effect: 'allow' }],
+        rules: [],
       },
       seeded: true,
       resourceLoadsUnrestricted: true,
@@ -287,16 +287,16 @@ describe('TargetDetailPage 账号列表', () => {
     await expect.element(screen.getByText(/清理失败/)).toBeInTheDocument()
   })
 
-  it('支持切换到关联场景与访问范围标签页', async () => {
+  it('支持切换到关联场景与执行与采集策略标签页', async () => {
     signIn()
     const screen = await renderPage()
     await screen.getByRole('tab', { name: /关联场景/ }).click()
     await expect.element(screen.getByText('商城冒烟巡检')).toBeInTheDocument()
 
-    await screen.getByRole('tab', { name: /访问范围/ }).click()
+    await screen.getByRole('tab', { name: /执行与采集策略/ }).click()
     await expect.element(screen.getByText('目标定位')).toBeInTheDocument()
     await expect.element(screen.getByLabelText('目标默认定位顺序')).toBeInTheDocument()
-    await expect.element(screen.getByText(/已配置授权边界/)).toBeInTheDocument()
+    await expect.element(screen.getByText('地图采集只读规则')).toBeInTheDocument()
   })
 
   it('无登录态检测时不能选用认证保活', async () => {

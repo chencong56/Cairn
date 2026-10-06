@@ -376,7 +376,7 @@ describe('OC-A: 编写展开与契约派生 (expand-outcome)', () => {
       runtimeInvariants: [
         {
           id: '20000000-0000-4000-8000-000000000010',
-          meaning: '不得离开允许的访问范围',
+          meaning: '不得离开目标系统',
           kind: 'navigation_boundary',
           severity: 'MUST',
           onViolation: 'halt',

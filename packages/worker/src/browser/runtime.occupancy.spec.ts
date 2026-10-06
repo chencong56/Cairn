@@ -6,7 +6,7 @@ import {
   gotoPage,
   launchSession,
   loginWithCredentials,
-  navigateInScope,
+  navigatePage,
   openRunPage,
   pressKeys,
   selectLocator,
@@ -27,7 +27,7 @@ describe('SM34 先占用后触碰', () => {
     await expect(
       loginWithCredentials({} as never, { entryUrl: 'http://127.0.0.1/' }, { username: 'a', password: 'b' }),
     ).rejects.toBeInstanceOf(OccupancyRequiredError)
-    await expect(navigateInScope({} as never, 'http://127.0.0.1/', ['http://127.0.0.1'])).rejects.toBeInstanceOf(
+    await expect(navigatePage({} as never, 'http://127.0.0.1/')).rejects.toBeInstanceOf(
       OccupancyRequiredError,
     )
     await expect(gotoPage({} as never, 'http://127.0.0.1/')).rejects.toBeInstanceOf(OccupancyRequiredError)
@@ -43,7 +43,7 @@ describe('SM34 先占用后触碰', () => {
       'launchSession',
       'verifyAuthOnPage',
       'loginWithCredentials',
-      'navigateInScope',
+      'navigatePage',
       'gotoPage',
       'clickLocator',
       'fillLocator',

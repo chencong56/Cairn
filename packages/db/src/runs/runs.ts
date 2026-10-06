@@ -1271,7 +1271,6 @@ export async function writeRunWithSnapshot(
           aiExecution,
           hangWaitMs: input.hangWaitMs,
           authVerification,
-          allowedOrigins: access.allowedOrigins,
           accessPolicy: access.frozen,
           mapConsumption,
           suiteAdmission: input.suiteAdmission,

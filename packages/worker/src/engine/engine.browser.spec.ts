@@ -622,40 +622,52 @@ describe('ExecutionEngine × BrowserPort（L1）', { timeout: 60_000 }, () => {
     expect(fillValue).toBe(JSON.stringify({ orderNo: 'SO-1' }))
   })
 
-  it('navigate 越出 Target 源时命令带 allowedOrigins，失败不改写成成功', async () => {
+  it('navigate 到其它域的绝对地址不被拦截，命令原样下发且不带域限制', async () => {
     const created = await queue([
       {
         id: newId(),
         name: '外站',
         type: 'navigate',
         effectType: 'IDEMPOTENT',
-        input: { url: 'https://evil.example/' },
+        input: { url: 'https://sso.other.example/cb?x=1' },
       },
     ])
+    const sent: BrowserCommand[] = []
     const port = fakePort({
       acquire: async (_run, grant) => ({ ok: true, grant: await openLease(created.detail.id, grant.fencingToken) }),
       execute: async (_grant, command) => {
-        expect(command.type).toBe('navigate')
-        if (command.type === 'navigate') {
-          expect(command.allowedOrigins).toContain('https://shop.example.com')
-        }
-        return {
-          ok: false,
-          error: {
-            code: 'NAVIGATE_OUT_OF_SCOPE',
-            category: 'VALIDATION',
-            retryable: false,
-            safeMessage: '越界',
-          },
-        }
+        sent.push(command)
+        return { ok: true, output: {} }
       },
     })
     const engine = new ExecutionEngine(handle, port)
-    const grant = await claimThis(created.detail.id)
-    await engine.execute(created.detail.id, { grant })
+    await engine.execute(created.detail.id, { grant: await claimThis(created.detail.id) })
     const after = await getRun(handle.db, created.detail.id)
-    expect(after.status).toBe('FAILED')
-    expect(after.stepRuns[0]?.attempts[0]?.status).toBe('FAILED')
+    expect(after.status).toBe('SUCCEEDED')
+    expect(sent).toEqual([{ type: 'navigate', url: 'https://sso.other.example/cb?x=1' }])
+  })
+
+  it('navigate 相对地址按目标入口 origin 展开', async () => {
+    const created = await queue([
+      {
+        id: newId(),
+        name: '站内',
+        type: 'navigate',
+        effectType: 'IDEMPOTENT',
+        input: { url: '/orders?id=1' },
+      },
+    ])
+    const sent: BrowserCommand[] = []
+    const port = fakePort({
+      acquire: async (_run, grant) => ({ ok: true, grant: await openLease(created.detail.id, grant.fencingToken) }),
+      execute: async (_grant, command) => {
+        sent.push(command)
+        return { ok: true, output: {} }
+      },
+    })
+    const engine = new ExecutionEngine(handle, port)
+    await engine.execute(created.detail.id, { grant: await claimThis(created.detail.id) })
+    expect(sent[0]).toMatchObject({ type: 'navigate', url: expect.stringMatching(/^https:\/\/shop\.example\.com\/orders\?id=1$/) })
   })
 
   it('含 click 的 Snapshot 版本不对则 FAILED；只含 Echo 的不因 click 版本变化失效', async () => {

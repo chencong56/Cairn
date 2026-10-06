@@ -144,7 +144,8 @@ export const browserCommandSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('navigate'),
     url: z.string().trim().min(1).max(2048),
-    allowedOrigins: z.array(originSchema).min(1).max(16),
+    /** 已废弃：访问范围机制已移除，仅兼容旧 API 仍下发的字段，Worker 忽略。 */
+    allowedOrigins: z.array(originSchema).max(16).optional(),
   }),
   z.strictObject({
     type: z.literal('click'),

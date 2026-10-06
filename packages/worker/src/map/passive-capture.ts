@@ -7,6 +7,7 @@ import {
   mapGapObservation,
   mapObservationShell,
   mapRunFactKey,
+  originsFromTargetUrls,
   stepUsesBrowser,
   type MapFactBatchItem,
   type MapObservation,
@@ -105,7 +106,9 @@ export function captureRequest(input: {
     runBudgetUsedMs: input.budgetUsedMs,
     signal: input.signal,
     stepType: input.step.type,
-    allowedOrigins: input.snapshot.allowedOrigins,
+    allowedOrigins: input.snapshot.targetAuth
+      ? originsFromTargetUrls(input.snapshot.targetAuth.entryUrl, input.snapshot.targetAuth.loginUrl)
+      : undefined,
   }
 }
 

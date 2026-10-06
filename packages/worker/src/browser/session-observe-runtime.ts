@@ -52,7 +52,7 @@ import { discoverTablesOnPage, sampleTableOnPage } from './table-observe.js'
 import { highlightOnPage, pickOnPage } from './observe'
 import { resolveObserveGrant } from './observe-grant'
 import { refreshScreencastIfStale, startScreencast } from './screencast'
-import { originAllowed, pageRefFor, type ManagedPageEntry } from './page-identity'
+import { pageRefFor, type ManagedPageEntry } from './page-identity'
 import { type LiveHandle, type SessionManagerContext } from './session-live.js'
 
 export async function sampleMapConditions(this: SessionManagerContext, 
@@ -155,7 +155,6 @@ export async function describeHoldPage(this: SessionManagerContext, runId: strin
           reuse: snapshot.sessionPolicy?.reuse,
           entryUrl: snapshot.targetAuth?.entryUrl,
           loginUrl: snapshot.targetAuth?.loginUrl,
-          allowedOrigins: snapshot.allowedOrigins,
         })
       : undefined
     return {
@@ -496,10 +495,7 @@ export function pageForView(this: SessionManagerContext, live: LiveHandle, runId
     if (pageId) {
       const chosen = live.pages.get(pageId)
       if (chosen && chosen.runId === runId && !chosen.page.isClosed()) {
-        const url = typeof chosen.page.url === 'function' ? chosen.page.url() : ''
-        if (!url || live.allowedOrigins.length === 0 || originAllowed(url, live.allowedOrigins, live.accessScope)) {
-          return chosen
-        }
+        return chosen
       }
     }
     return this.ensureRunPage(live, runId)

@@ -184,6 +184,7 @@ describe('运行中认证恢复契约', () => {
     })
     expect(isContextRecoverable({ rule, pageUrl: 'https://app.example/login' })).toBe(false)
     expect(isContextRecoverable({ rule, pageUrl: 'https://app.example/orders' })).toBe(true)
+    expect(isContextRecoverable({ rule, pageUrl: 'https://sso.other.example/cb' })).toBe(true)
     expect(isContextRecoverable({ rule: { ...rule, reuse: 'NEW_PAGE' }, pageUrl: 'https://app.example/login' })).toBe(true)
     expect(
       decideAuthRecovery({

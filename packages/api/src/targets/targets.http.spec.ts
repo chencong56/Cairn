@@ -161,7 +161,7 @@ function mockService() {
       policy: {
         schemaVersion: 1,
         policyVersion: 1,
-        rules: [{ origin: 'https://example.com', purpose: 'business_surface', effect: 'allow' }],
+        rules: [],
       },
       seeded: true,
       resourceLoadsUnrestricted: true,
@@ -173,7 +173,7 @@ function mockService() {
       policy: {
         schemaVersion: 1,
         policyVersion: 1,
-        rules: [{ origin: 'https://example.com', purpose: 'business_surface', effect: 'allow' }],
+        rules: [],
       },
       seeded: false,
       resourceLoadsUnrestricted: true,
@@ -563,8 +563,8 @@ describe('Targets HTTP', () => {
       .send({
         expectedRevision: 0,
         idempotencyKey: 'access-policy-1',
-        reason: '确认业务域',
-        rules: [{ origin: 'https://example.com', purpose: 'business_surface', effect: 'allow' }],
+        reason: '确认只读采集接口',
+        readOnlyRequests: [{ method: 'POST', origin: 'https://example.com', pathPattern: '/api/list' }],
       })
       .expect(200)
     expect(service.updateAccessPolicy).toHaveBeenCalled()

@@ -2,8 +2,6 @@ import { and, eq } from 'drizzle-orm'
 import {
   canonicalJson,
   frozenTargetAccessPolicySchema,
-  originsForAccessPurposes,
-  seedTargetAccessRules,
   targetAccessPolicyDtoSchema,
   targetAccessPolicySchema,
   targetAccessPolicyUpdateBodySchema,
@@ -21,8 +19,7 @@ import { sha256Hex } from '../runs/digest.js'
 import { mapCommandIdempotencyConflict, mapRevisionConflict } from './errors.js'
 import { requireLiveTarget } from './view.js'
 
-function policyFromRules(
-  rules: TargetAccessPolicy['rules'],
+function buildPolicy(
   policyVersion: number,
   readOnlyRequests: TargetAccessPolicy['readOnlyRequests'] = [],
   verifiedNonContentRequests: NonNullable<TargetAccessPolicy['verifiedNonContentRequests']> = [],
@@ -31,7 +28,6 @@ function policyFromRules(
   return targetAccessPolicySchema.parse({
     schemaVersion: 1,
     policyVersion,
-    rules,
     readOnlyRequests,
     ...(postReadMode === 'balanced' ? { postReadMode } : {}),
     ...(verifiedNonContentRequests.length ? { verifiedNonContentRequests } : {}),
@@ -43,14 +39,14 @@ export function digestAccessPolicy(policy: TargetAccessPolicy): string {
 }
 
 export async function getTargetAccessPolicy(db: Db, targetId: string): Promise<TargetAccessPolicyDto> {
-  const target = await requireLiveTarget(db, targetId)
+  await requireLiveTarget(db, targetId)
   const { targetAccessPolicies } = schemaFor(db)
   const [row] = await db.select().from(targetAccessPolicies).where(eq(targetAccessPolicies.targetId, targetId)).limit(1)
   if (!row) {
     return targetAccessPolicyDtoSchema.parse({
       targetId,
       revision: 0,
-      policy: policyFromRules(seedTargetAccessRules(target.entryUrl, target.loginUrl), 1),
+      policy: buildPolicy(1),
       seeded: true,
       resourceLoadsUnrestricted: true,
       updatedAt: new Date(0).toISOString(),
@@ -59,7 +55,7 @@ export async function getTargetAccessPolicy(db: Db, targetId: string): Promise<T
   return targetAccessPolicyDtoSchema.parse({
     targetId,
     revision: row.revision,
-    policy: policyFromRules(row.rulesJson, row.policyVersion, row.readOnlyRequestsJson,
+    policy: buildPolicy(row.policyVersion, row.readOnlyRequestsJson,
       row.verifiedNonContentRequestsJson, row.postReadMode),
     seeded: false,
     resourceLoadsUnrestricted: true,
@@ -70,14 +66,14 @@ export async function getTargetAccessPolicy(db: Db, targetId: string): Promise<T
 export async function ensureFrozenAccessPolicyTx(
   db: Db,
   input: { targetId: string; actorId: string; mapJob?: boolean },
-): Promise<{ frozen: FrozenTargetAccessPolicy; allowedOrigins: string[] }> {
-  const target = await requireLiveTarget(db, input.targetId)
+): Promise<{ frozen: FrozenTargetAccessPolicy }> {
+  await requireLiveTarget(db, input.targetId)
   const { targetAccessPolicies } = schemaFor(db)
   const [row] = await locked(db, db.select().from(targetAccessPolicies).where(eq(targetAccessPolicies.targetId, input.targetId)))
   const now = await clockNow(db)
   let existing = row
   if (!existing) {
-    const seeded = policyFromRules(seedTargetAccessRules(target.entryUrl, target.loginUrl), 1)
+    const seeded = buildPolicy(1)
     // 首次创建策略时还没有行可锁，上面的 FOR UPDATE 拦不住并发：同一个新目标上
     // 两个几乎同时的 Run 会都判定「没有策略」。所以插入必须容忍冲突，
     // 输家回读赢家落库的那一行，以库里的事实为准，而不是沿用自己算出来的值。
@@ -85,7 +81,6 @@ export async function ensureFrozenAccessPolicyTx(
       targetId: input.targetId,
       policySchemaVersion: seeded.schemaVersion,
       policyVersion: seeded.policyVersion,
-      rulesJson: seeded.rules,
       policyDigest: digestAccessPolicy(seeded),
       revision: 1,
       updatedBy: input.actorId,
@@ -94,14 +89,13 @@ export async function ensureFrozenAccessPolicyTx(
     if (inserted === 1) {
       return {
         frozen: frozenTargetAccessPolicySchema.parse({ revision: 1, digest: digestAccessPolicy(seeded), policy: seeded }),
-        allowedOrigins: originsForAccessPurposes(seeded, input.mapJob ? ['business_surface'] : ['business_surface', 'authentication']),
       }
     }
     ;[existing] = await db.select().from(targetAccessPolicies).where(eq(targetAccessPolicies.targetId, input.targetId))
     // 冲突意味着行已存在；读不到只可能是它在两步之间被删，这是真错误，不能拿自己算的值顶替。
     if (!existing) throw new Error(`目标 ${input.targetId} 的访问策略在并发创建后读不到`)
   }
-  const policy = policyFromRules(existing.rulesJson, existing.policyVersion, existing.readOnlyRequestsJson,
+  const policy = buildPolicy(existing.policyVersion, existing.readOnlyRequestsJson,
     existing.verifiedNonContentRequestsJson, existing.postReadMode)
   return {
     frozen: frozenTargetAccessPolicySchema.parse({
@@ -109,7 +103,6 @@ export async function ensureFrozenAccessPolicyTx(
       digest: existing.policyDigest,
       policy,
     }),
-    allowedOrigins: originsForAccessPurposes(policy, input.mapJob ? ['business_surface'] : ['business_surface', 'authentication']),
   }
 }
 
@@ -138,14 +131,13 @@ export async function updateTargetAccessPolicy(
     if (expected !== parsed.expectedRevision) mapRevisionConflict('目标授权修订已变更')
     const now = await clockNow(tx)
     const nextRevision = expected + 1
-    const policy = policyFromRules(parsed.rules, nextRevision, parsed.readOnlyRequests ?? current?.readOnlyRequestsJson ?? [],
+    const policy = buildPolicy(nextRevision, parsed.readOnlyRequests ?? current?.readOnlyRequestsJson ?? [],
       parsed.verifiedNonContentRequests ?? current?.verifiedNonContentRequestsJson ?? [],
       parsed.postReadMode === undefined ? current?.postReadMode ?? null : parsed.postReadMode === 'balanced' ? 'balanced' : null)
     const digest = digestAccessPolicy(policy)
     const values = {
       policySchemaVersion: policy.schemaVersion,
       policyVersion: policy.policyVersion,
-      rulesJson: policy.rules,
       readOnlyRequestsJson: policy.readOnlyRequests,
       postReadMode: policy.postReadMode ?? null,
       verifiedNonContentRequestsJson: policy.verifiedNonContentRequests ?? [],

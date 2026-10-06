@@ -25,7 +25,6 @@ import {
   screenshotPage,
   pageHasSensitiveContent,
 } from './runtime'
-import { assertPageTargetScope, TargetScopeError } from './target-scope'
 import { executeOnPage } from './surface'
 import { handoffMessage } from './managed-helpers'
 import { createManagedPage, pageRefFor, pickPopupHandoff, type ManagedPageEntry } from './page-identity'
@@ -211,9 +210,7 @@ export async function runManagedPage<T>(this: SessionManagerContext,
       }
     }
     try {
-      assertPageTargetScope(page)
       const value = await fn(page)
-      assertPageTargetScope(page)
       const current = this.pageForGrant(grant) ?? page
       const currentId = live?.currentPageIdByLease.get(grant.leaseId)
       const currentEntry = currentId ? live?.pages.get(currentId) : undefined
@@ -324,7 +321,6 @@ export async function runManagedPage<T>(this: SessionManagerContext,
         screenshotSensitive,
       }
     } catch (error) {
-      if (error instanceof TargetScopeError) return { ok: false, error: { code: error.code, category: 'VALIDATION', retryable: false, safeMessage: error.message } }
       if (error instanceof OccupancyRequiredError) {
         return {
           ok: false,
@@ -543,7 +539,7 @@ export async function runSurfaceCommand(this: SessionManagerContext,
             .catch(() => '')),
       })),
     )
-    const decided = pickPopupHandoff(urls, live.allowedOrigins, live.accessScope)
+    const decided = pickPopupHandoff(urls)
     if (!decided.ok) {
       return {
         ok: false,

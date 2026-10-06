@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { chromium } from 'playwright'
-import { mapJobPolicySchema, mapMenuEntrySchema, targetAccessPolicySchema, type MapIngestPageSnapshot, type MapIngestStep } from '@cairn/shared'
+import { mapJobPolicySchema, mapMenuEntrySchema, type MapIngestPageSnapshot, type MapIngestStep } from '@cairn/shared'
 import { belongsToMenuSubtree, collectMapIngestSlice, scanMenu } from './map-ingest-collector.js'
 
 const entry = mapMenuEntrySchema.parse({
@@ -47,8 +47,7 @@ describe('Ant 弹出子菜单只读采集', () => {
           allowedSpaHashPrefixes: ['#/'], sliceWorkSeconds: 10 },
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} },
         signal: new AbortController().signal,
@@ -78,8 +77,7 @@ describe('Ant 弹出子菜单只读采集', () => {
           allowedSpaHashPrefixes: ['#/'], sliceWorkSeconds: 10 },
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} },
         signal: new AbortController().signal,
@@ -119,8 +117,7 @@ describe('Ant 弹出子菜单只读采集', () => {
             allowedSpaHashPrefixes: ['#/'], sliceWorkSeconds: 10 },
           targetId: '00000000-0000-4000-8000-000000000004',
           targetAccountId: '00000000-0000-4000-8000-000000000005',
-          accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-            rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+          allowedOrigins: ['https://app.example'],
           guard: { getBlockedRequests: () => blockedRequests, getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
             uninstall: async () => {} },
           signal: new AbortController().signal,
@@ -182,8 +179,7 @@ describe('Ant 弹出子菜单只读采集', () => {
           allowedSpaHashPrefixes: ['#/'], sliceWorkSeconds: 10 },
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} },
         signal: new AbortController().signal,
@@ -214,8 +210,7 @@ describe('Ant 弹出子菜单只读采集', () => {
           allowedSpaHashPrefixes: ['#/'], ignoreQueryParams: ['nonce'], sliceWorkSeconds: 10 },
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} },
         signal: new AbortController().signal,
@@ -255,8 +250,6 @@ describe('Ant 弹出子菜单只读采集', () => {
         menuAnchor: { label: '管理' }, enabled: true, orderIndex: 0,
         arrivalName: '管理', arrivalTarget: { framePath: [], candidates: [{ by: 'role', value: 'menuitem', name: '管理' }] },
       })
-      const policy = targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-        rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] })
       const abort = new AbortController()
       const step: MapIngestStep['input'] = {
         jobId: '00000000-0000-4000-8000-000000000003', startUrl: 'https://app.example/',
@@ -270,7 +263,7 @@ describe('Ant 弹出子菜单只读采集', () => {
         step,
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: policy,
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} },
         signal: abort.signal,
@@ -321,8 +314,7 @@ describe('Ant 弹出子菜单只读采集', () => {
           sliceWorkSeconds: 10 },
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} },
         signal: new AbortController().signal,
@@ -353,8 +345,7 @@ describe('Ant 弹出子菜单只读采集', () => {
           allowedSpaHashPrefixes: ['#/'], sliceWorkSeconds: 10 },
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} },
         signal: new AbortController().signal,
@@ -392,8 +383,7 @@ describe('Ant 弹出子菜单只读采集', () => {
           allowedSpaHashPrefixes: ['#/'], sliceWorkSeconds: 10 },
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => dialogs,
           wasDialogEncountered: () => dialogs.length > 0, uninstall: async () => {} },
         signal: new AbortController().signal,
@@ -422,8 +412,7 @@ describe('Ant 弹出子菜单只读采集', () => {
       const base = {
         page, targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} }, signal: new AbortController().signal,
         onProgress: async (_cursor: unknown, snapshot?: MapIngestPageSnapshot) => { if (snapshot) snapshots.push(snapshot) },
@@ -472,8 +461,7 @@ describe('Ant 弹出子菜单只读采集', () => {
           allowedSpaHashPrefixes: ['#/'], sliceWorkSeconds: 10 },
         targetId: '00000000-0000-4000-8000-000000000004',
         targetAccountId: '00000000-0000-4000-8000-000000000005',
-        accessPolicy: targetAccessPolicySchema.parse({ schemaVersion: 1, policyVersion: 1,
-          rules: [{ origin: 'https://app.example', purpose: 'business_surface', effect: 'allow' }] }),
+        allowedOrigins: ['https://app.example'],
         guard: { getBlockedRequests: () => [], getInferredReadPosts: () => [], getDialogs: () => [], wasDialogEncountered: () => false,
           uninstall: async () => {} },
         signal: new AbortController().signal,

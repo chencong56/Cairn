@@ -8,6 +8,7 @@ import {
   runStatusSchema,
 } from '../run.js'
 import { DEFAULT_SESSION_POLICY } from '../session.js'
+import { snapshotDigestPayload } from '../digest-payload.js'
 
 const ids = {
   run: '00000000-0000-4000-8000-000000000021',
@@ -129,6 +130,32 @@ describe('runSnapshotSchema', () => {
         }),
       ),
     ).toThrow()
+  })
+
+  it('访问范围机制移除后：新快照无 allowedOrigins 也可解析，旧快照带 allowedOrigins/accessPolicy.rules 仍兼容', () => {
+    const fresh = runSnapshotSchema.parse(snapshot())
+    expect(fresh.allowedOrigins).toBeUndefined()
+    expect(snapshotDigestPayload(fresh).allowedOrigins).toBeUndefined()
+    const legacy = runSnapshotSchema.parse(snapshot({
+      allowedOrigins: ['https://shop.example'],
+      accessPolicy: {
+        revision: 3,
+        digest: 'a'.repeat(64),
+        policy: {
+          schemaVersion: 1,
+          policyVersion: 3,
+          rules: [{ origin: 'https://shop.example', purpose: 'business_surface', effect: 'allow' }],
+          readOnlyRequests: [],
+        },
+      },
+    }))
+    expect(legacy.allowedOrigins).toEqual(['https://shop.example'])
+    expect(legacy.accessPolicy?.policy.rules).toHaveLength(1)
+    const noRules = runSnapshotSchema.parse(snapshot({
+      accessPolicy: { revision: 1, digest: 'b'.repeat(64), policy: { schemaVersion: 1, policyVersion: 1 } },
+    }))
+    expect(noRules.accessPolicy?.policy.rules).toEqual([])
+    expect(snapshotDigestPayload(legacy).allowedOrigins).toEqual(['https://shop.example'])
   })
 
   it('含 AI 步骤的快照必须冻结 AI 配置；缺省确定性快照仍可解析', () => {

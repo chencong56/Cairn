@@ -77,7 +77,6 @@ export async function handleAuthGate(
     reuse: input.snapshot.sessionPolicy?.reuse,
     entryUrl: input.snapshot.targetAuth?.entryUrl,
     loginUrl: input.snapshot.targetAuth?.loginUrl,
-    allowedOrigins: input.snapshot.allowedOrigins,
   })
   const page = input.sessionGrant ? await this.browser?.describeHold?.(input.runId) : undefined
   const confirm = page?.authObservation ?? confirmFromCause(error.cause?.message)

@@ -154,7 +154,6 @@ export type AssembleRunSnapshotInput = {
   aiExecution?: AiExecutionConfig
   hangWaitMs?: number
   authVerification: FrozenAuthVerification
-  allowedOrigins: string[]
   accessPolicy: FrozenTargetAccessPolicy
   mapConsumption: FrozenMapConsumption
   suiteAdmission?: SuiteAdmissionSnapshot
@@ -297,7 +296,6 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
   })
   const parsed = runSnapshotSchema.parse({
     ...snapshotBase,
-    allowedOrigins: input.allowedOrigins,
     accessPolicy: input.accessPolicy,
     mapConsumption: input.mapConsumption,
     ...(input.mapJob ? { mapJob: input.mapJob } : {}),

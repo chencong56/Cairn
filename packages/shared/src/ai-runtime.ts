@@ -109,7 +109,8 @@ export const aiCommandSchema = z.strictObject({
   maxOutputTokens: z.number().int().positive(),
   requestTimeoutMs: z.number().int().positive(),
   hangWaitMs: z.number().int().positive(),
-  allowedOrigins: z.array(z.string().min(1)).min(1).max(16),
+  /** 已废弃：访问范围机制已移除，仅兼容旧下发，Worker 忽略。 */
+  allowedOrigins: z.array(z.string().min(1)).max(16).optional(),
   loginOrigin: z.string().min(1).max(256).optional(),
   loginPath: z.string().max(2048).optional(),
   contextValues: z.record(z.string(), jsonValueSchema).optional(),
