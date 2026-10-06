@@ -152,6 +152,11 @@ export function StudioScreen({
   }, [connecting, refetchSession, refetchOperation])
 
   const sessionOpen = session?.session?.status === 'OPEN'
+  // 账号已有会话实例时，会话操作必须带上实例与代次（服务端据此防止操作到已重建的实例）。
+  const expectedInstance = () =>
+    session?.session
+      ? { expectedSessionId: session.session.id, expectedGeneration: session.session.generation }
+      : {}
   const occupyingRunId = session?.occupancy?.occupyingRunId ?? null
   const occupyingOperationId = session?.occupancy?.occupyingOperationId ?? null
   const sessionViewId = occupyingOperationId ?? session?.session?.id
@@ -340,6 +345,7 @@ export function StudioScreen({
         kind: action.kind,
         idempotencyKey: newSessionIdempotencyKey(action.kind),
         force: action.kind === 'RESTART',
+        ...expectedInstance(),
       })
       setPendingOperationId(accepted.operationId)
       await sessionQuery.refetch()
@@ -366,6 +372,7 @@ export function StudioScreen({
         kind: 'CLOSE',
         idempotencyKey: newSessionIdempotencyKey('CLOSE'),
         force: true,
+        ...expectedInstance(),
       })
       toast.info('已放弃人工接管，受管浏览器会话已关闭')
       setConnecting(false)
