@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalJson } from '../canonical.js'
-import { describeLocatorCandidates, sanitizeLocatorLabel, mergeEffectiveResolution, crossCheckMatches, isCrossCheckContainerTag, policyAllowsVisionAi, minResolutionPolicy } from '../resolution-policy.js'
+import { describeLocatorCandidates, sanitizeLocatorLabel, crossCheckMatches, isCrossCheckContainerTag } from '../resolution-policy.js'
 import { snapshotDigestPayload } from '../digest-payload.js'
-import { deriveAuthoringResolutionMode, snapshotNeedsBrowserAi } from '../resolution.js'
-import { runNeedsAiExecute } from '../ai-runtime.js'
+import { locatorPlanPreset } from '../locator-plan.js'
+import { locatorPlansNeedAiExecute, stepsNeedLocatorAiExecute } from '../locator-resolution.js'
 import { FACTORY_PLATFORM_CONFIG } from '../platform-config.js'
 import type { RunSnapshot } from '../run.js'
 import { targetDescriptorSchema } from '../target-descriptor.js'
@@ -49,102 +49,24 @@ describe('统一目标解析契约', () => {
     )
   })
 
-  it('有效档位取部署上限与请求档位的较低者，AI 关闭时强制仅规则', () => {
-    expect(
-      mergeEffectiveResolution({
-        ceiling: 'prefer_deterministic',
-        defaultResolution: 'prefer_deterministic',
-      }),
-    ).toBe('prefer_deterministic')
-    expect(
-      mergeEffectiveResolution({
-        ceiling: 'deterministic_only',
-        defaultResolution: 'prefer_deterministic',
-        step: 'prefer_ai',
-      }),
-    ).toBe('deterministic_only')
-    expect(
-      mergeEffectiveResolution({
-        ceiling: 'prefer_ai',
-        defaultResolution: 'prefer_deterministic',
-        step: 'ai_only',
-        browserAiEnabled: false,
-      }),
-    ).toBe('deterministic_only')
-  })
-
-  it('目标系统优先顺序覆盖平台默认，但不能突破平台或目标上限', () => {
-    expect(
-      mergeEffectiveResolution({
-        ceiling: 'prefer_ai',
-        defaultResolution: 'prefer_deterministic',
-        targetPreference: 'prefer_ai',
-      }),
-    ).toBe('prefer_ai')
-    expect(
-      mergeEffectiveResolution({
-        ceiling: 'prefer_deterministic',
-        defaultResolution: 'prefer_deterministic',
-        targetPreference: 'ai_only',
-      }),
-    ).toBe('prefer_deterministic')
-    expect(
-      mergeEffectiveResolution({
-        ceiling: 'ai_only',
-        defaultResolution: 'prefer_deterministic',
-        targetCeiling: 'deterministic_only',
-        targetPreference: 'prefer_ai',
-      }),
-    ).toBe('deterministic_only')
-    expect(
-      mergeEffectiveResolution({
-        ceiling: 'prefer_ai',
-        defaultResolution: 'prefer_deterministic',
-        targetPreference: 'prefer_ai',
-        step: 'deterministic_only',
-      }),
-    ).toBe('deterministic_only')
-  })
-
-  it('目标优先顺序抬高时需要 AI 执行，目标上限压低时不需要', () => {
+  it('实际会走模型路线的运行才需要 AI 执行权限', () => {
     const step = click('00000000-0000-4000-8000-000000000001', {
       input: { target: { candidates: [{ by: 'text', value: '查询' }] } },
     })
     const open = {
       ...FACTORY_PLATFORM_CONFIG,
-      browserAi: {
-        ...FACTORY_PLATFORM_CONFIG.browserAi,
-        enabled: true,
-        resolutionCeiling: 'prefer_deterministic' as const,
-        defaultResolution: 'deterministic_only' as const,
-      },
+      browserAi: { ...FACTORY_PLATFORM_CONFIG.browserAi, enabled: true },
     }
-    expect(runNeedsAiExecute({ steps: [step], document: open })).toBe(false)
-    expect(
-      runNeedsAiExecute({
-        steps: [step],
-        document: open,
-        targetPreference: 'prefer_deterministic',
-      }),
-    ).toBe(true)
-    expect(
-      runNeedsAiExecute({
-        steps: [step],
-        document: {
-          ...open,
-          browserAi: { ...open.browserAi, defaultResolution: 'prefer_deterministic' },
-        },
-        targetCeiling: 'deterministic_only',
-      }),
-    ).toBe(false)
-  })
-
-  it('含 AI 档位或 AI 步骤才需要冻结浏览器 AI', () => {
-    const step = click('00000000-0000-4000-8000-000000000001', {
-      input: { target: { candidates: [{ by: 'text', value: '查询' }] } },
-    })
-    expect(snapshotNeedsBrowserAi([step], { [step.id]: 'deterministic_only' })).toBe(false)
-    expect(snapshotNeedsBrowserAi([step], { [step.id]: 'prefer_deterministic' })).toBe(true)
+    expect(stepsNeedLocatorAiExecute({ steps: [step], document: open })).toBe(false)
+    expect(stepsNeedLocatorAiExecute({
+      steps: [step],
+      document: open,
+      scenarioPlan: locatorPlanPreset('rule_text'),
+    })).toBe(true)
+    expect(stepsNeedLocatorAiExecute({ steps: [step], document: FACTORY_PLATFORM_CONFIG })).toBe(false)
+    expect(locatorPlansNeedAiExecute({
+      [step.id]: { requested: ['rule'], actual: ['rule'], skipped: [], allowed: ['rule'], source: 'platform' },
+    })).toBe(false)
   })
 
   it('等待 semantic 需要描述文本', () => {
@@ -189,44 +111,4 @@ describe('统一目标解析契约', () => {
     )
   })
 
-  it('编写模式由步骤与有效档位推导', () => {
-    const rule = click('00000000-0000-4000-8000-000000000011', {
-      input: { target: { candidates: [{ by: 'text', value: '查询' }] } },
-    })
-    expect(deriveAuthoringResolutionMode({ steps: [rule], effectiveByStep: { [rule.id]: 'deterministic_only' } })).toBe(
-      'rule',
-    )
-    const semantic = click('00000000-0000-4000-8000-000000000012', {
-      input: { target: { semantic: '查询按钮' } },
-    })
-    expect(
-      deriveAuthoringResolutionMode({
-        steps: [semantic],
-        effectiveByStep: { [semantic.id]: 'ai_only' },
-      }),
-    ).toBe('ai')
-  })
-
-  it('policyAllowsVisionAi 区分文本模型与视觉模型档位，上限截断视觉兜底', () => {
-    expect(policyAllowsVisionAi('deterministic_only')).toBe(false)
-    expect(policyAllowsVisionAi('prefer_deterministic_text')).toBe(false)
-    expect(policyAllowsVisionAi('prefer_text_ai')).toBe(false)
-    expect(policyAllowsVisionAi('prefer_deterministic')).toBe(true)
-    expect(policyAllowsVisionAi('prefer_ai')).toBe(true)
-    expect(policyAllowsVisionAi('ai_only')).toBe(true)
-
-    // 上限为文本模型时，请求完整视觉兜底会被压低到仅文本模型
-    expect(
-      minResolutionPolicy('prefer_deterministic_text', 'prefer_deterministic'),
-    ).toBe('prefer_deterministic_text')
-    expect(
-      minResolutionPolicy('prefer_deterministic_text', 'prefer_ai'),
-    ).toBe('prefer_deterministic_text')
-    expect(
-      mergeEffectiveResolution({
-        ceiling: 'prefer_deterministic_text',
-        defaultResolution: 'prefer_deterministic',
-      }),
-    ).toBe('prefer_deterministic_text')
-  })
 })

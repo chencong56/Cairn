@@ -20,6 +20,7 @@ import {
   ZoomOut,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -112,8 +113,12 @@ export function SuiteReportView({
         lines.push(`${idx + 1}. [${f.displayName}] ${f.title} (${f.severity}) - ${f.detail ?? '无详细说明'}`)
       })
     }
-    void navigator.clipboard.writeText(lines.join('\n')).then(() => {
-      toast.success('已复制巡检总结至剪贴板')
+    void copyToClipboard(lines.join('\n')).then((ok) => {
+      if (ok) {
+        toast.success('已复制巡检总结至剪贴板')
+      } else {
+        toast.error('复制失败，请手动复制')
+      }
     })
   }
 

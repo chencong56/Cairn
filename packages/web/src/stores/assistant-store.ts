@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { newUuid } from '@/lib/uuid'
 import type {
   AssistantActiveForm,
   AssistantAuthoringProposal,
@@ -192,7 +193,7 @@ function getSavedDockWidth(): number {
 }
 
 function newClientTurnId(): string {
-  if (typeof crypto.randomUUID === 'function') return `turn-${crypto.randomUUID()}`
+  if (typeof crypto.randomUUID === 'function') return `turn-${newUuid()}`
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   return `turn-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`
 }

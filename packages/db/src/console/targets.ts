@@ -66,8 +66,6 @@ import {
   applyTargetSessionPolicyPatch,
   applyTargetResolutionPolicyPatch,
   parseTargetResolutionPolicy,
-  mergeResolutionCeiling,
-  resolutionCapabilitiesFromPlatform,
   FACTORY_PLATFORM_CONFIG,
   platformConfigDocumentSchema,
   resolveSessionPolicyLayers,
@@ -250,7 +248,6 @@ export class TargetsStore {
     const counts = await this.accountCounts(id)
     const sessionPolicy = parseTargetSessionPolicyOverride(row.sessionPolicy)
     const resolutionPolicy = parseTargetResolutionPolicy(row.resolutionPolicy)
-    const resolutionCaps = resolutionCapabilitiesFromPlatform(await this.platformDocument())
     return this.toTarget(row, counts.get(id) ?? 0, {
       sessionPolicy,
       effectiveSessionPolicy: resolveSessionPolicyLayers({
@@ -258,13 +255,6 @@ export class TargetsStore {
         targetOverride: sessionPolicy,
       }),
       resolutionPolicy,
-      effectiveResolution: {
-        ceiling: mergeResolutionCeiling({
-          ceiling: resolutionCaps.ceiling,
-          targetCeiling: resolutionPolicy?.ceiling,
-        }),
-        preference: resolutionPolicy?.preference ?? resolutionCaps.default,
-      },
     })
   }
 
@@ -1518,7 +1508,6 @@ export class TargetsStore {
       sessionPolicy?: TargetDto['sessionPolicy']
       effectiveSessionPolicy?: TargetDto['effectiveSessionPolicy']
       resolutionPolicy?: TargetDto['resolutionPolicy']
-      effectiveResolution?: TargetDto['effectiveResolution']
     },
   ): TargetDto {
     return targetSchema.parse({
@@ -1546,7 +1535,6 @@ export class TargetsStore {
         ? { effectiveSessionPolicy: extras.effectiveSessionPolicy }
         : {}),
       resolutionPolicy: extras?.resolutionPolicy ?? parseTargetResolutionPolicy(row.resolutionPolicy),
-      ...(extras?.effectiveResolution ? { effectiveResolution: extras.effectiveResolution } : {}),
       createdAt: iso(row.createdAt),
       updatedAt: iso(row.updatedAt),
     })

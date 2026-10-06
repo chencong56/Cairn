@@ -65,9 +65,14 @@ export function isLoopbackListenHost(host: string): boolean {
   return isLoopbackHost(normalized)
 }
 
+export function isWorkerListenHostAllowed(host: string): boolean {
+  const normalized = host.replace(/^\[|\]$/g, '').toLowerCase()
+  return isLoopbackHost(normalized) || isWildcardHost(normalized)
+}
+
 export function assertWorkerListenHostAllowed(host: string): void {
-  if (!isLoopbackListenHost(host)) {
-    throw new Error('本期受限内部服务只允许监听 loopback')
+  if (!isWorkerListenHostAllowed(host)) {
+    throw new Error('Worker 内部服务只允许监听 loopback 或通配地址 (0.0.0.0 / ::)')
   }
 }
 

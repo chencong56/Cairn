@@ -5,6 +5,7 @@ import {
   type ScenarioCapabilities,
   type Step,
 } from '@cairn/shared'
+import { newUuid } from '@/lib/uuid'
 import { uniqueOutputKey, usedContextKeys } from './document'
 
 /** ST02 起步骤库 / 改类型的显式八种允许列表，禁止遍历 EXECUTABLE_STEP_TYPES。 */
@@ -159,7 +160,7 @@ export function createBlankStep(
   type: ExecutableStepType,
   used: Iterable<string> = []
 ): Step {
-  const id = crypto.randomUUID()
+  const id = newUuid()
   const name = STEP_TYPE_LABELS[type]
   const taken = usedContextKeys(used)
   if (type === 'ai_action') {

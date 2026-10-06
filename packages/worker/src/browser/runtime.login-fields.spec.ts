@@ -42,6 +42,12 @@ describe('resolveLoginFieldsOnPage', () => {
     })
     expect(resolved).not.toBeNull()
   })
+
+  it('支持未指定定位时自动命中带有 #login_btn 的账密登录系统', async () => {
+    const page = fakePage(['#username', '#password', '#login_btn'])
+    const resolved = await resolveLoginFieldsOnPage(page as never, null)
+    expect(resolved).not.toBeNull()
+  })
 })
 
 describe('attemptLoginCredentials 空密码守卫', () => {

@@ -492,7 +492,7 @@ describe('SessionDetailPage', () => {
     await expect.element(screen.getByText('准备会话 · 登录页打不开')).toBeInTheDocument()
     await expect.element(screen.getByText('目标登录页打不开', { exact: true })).toBeInTheDocument()
     await expect
-      .element(screen.getByText('目标登录页打不开。画面只发给当前处理登录的人。'))
+      .element(screen.getByText('目标登录页打不开。画面只对有操作权限的人开放。'))
       .toBeInTheDocument()
   })
 

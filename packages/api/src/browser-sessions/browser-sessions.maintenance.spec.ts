@@ -13,6 +13,7 @@ vi.mock('@cairn/db', async (load) => ({
   listSessionEventsAfter: vi.fn(),
   listAccountSessionOverview: vi.fn(),
   listSessionSystemOverview: vi.fn(),
+  assertTargetPermission: vi.fn(),
 }))
 let service: BrowserSessionsService
 let request: ReturnType<typeof vi.fn>
@@ -117,4 +118,49 @@ it('overview 正常路径不受 try/catch 包裹影响，原样返回 db 层结�
   const payload = { items: [], nextCursor: null, summary: {}, asOf: '2026-09-27T00:00:00.000Z' }
   vi.mocked(db.listAccountSessionOverview).mockResolvedValueOnce(payload as never)
   await expect(service.overview({} as never)).resolves.toBe(payload)
+})
+
+const metaPayload = {
+  runId: '66666666-6666-4666-8666-666666666666',
+  runStatus: 'WAITING_FOR_AUTH',
+  sessionId: '77777777-7777-4777-8777-777777777777',
+  sessionGeneration: 1,
+  ownerWorkerId: 'w',
+  framesAvailable: true,
+  viewingOtherPage: false,
+  currentPage: null,
+  pages: [],
+  authHold: null,
+  authControl: null,
+  capabilities: { screencast: 'open', authInput: 'open', popupHandoff: 'open', chineseInsertText: 'open' },
+  degradedReason: null,
+  viewMode: 'readonly',
+}
+
+function stubOwner() {
+  ;(service as any).resolveOwner = async () => ({
+    ownerId: 'op',
+    status: 'WAITING_FOR_AUTH',
+    session: { id: 's', targetId: 't', generation: 1, ownerWorkerId: 'w' },
+    worker: { instanceId: 'i' },
+    endpoint: 'http://worker',
+  })
+  request.mockResolvedValue(metaPayload)
+}
+
+it('认证等待只读观看：有 session:control 且在目标范围内才向 Worker 声明 control=1', async () => {
+  stubOwner()
+  vi.mocked(db.assertTargetPermission).mockResolvedValue(undefined as never)
+  await service.browserMeta('op', { id: 'actor', permissions: ['session:read', 'session:view', 'session:control'] } as never)
+  expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ query: { pageId: undefined, control: '1' } }))
+  expect(db.assertTargetPermission).toHaveBeenCalledWith(expect.anything(), 'actor', 't', 'session:control')
+})
+
+it('认证等待只读观看：缺 session:control 或目标范围不含时不声明 control', async () => {
+  stubOwner()
+  await service.browserMeta('op', { id: 'actor', permissions: ['session:read', 'session:view'] } as never)
+  expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ query: { pageId: undefined, control: undefined } }))
+  vi.mocked(db.assertTargetPermission).mockRejectedValue(new DomainError('forbidden', 'FORBIDDEN', '无权'))
+  await service.browserMeta('op', { id: 'actor', permissions: ['session:control'] } as never)
+  expect(request).toHaveBeenLastCalledWith(expect.objectContaining({ query: { pageId: undefined, control: undefined } }))
 })

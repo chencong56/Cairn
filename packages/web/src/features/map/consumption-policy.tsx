@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { MapConsumptionMode } from '@cairn/shared'
 import { toast } from 'sonner'
@@ -56,7 +57,7 @@ function PolicyForm({ targetId }: ConsumptionPolicyCardProps) {
       }
       const payload = JSON.stringify(body)
       if (requestKey.current?.payload !== payload)
-        requestKey.current = { payload, key: `policy:${crypto.randomUUID()}` }
+        requestKey.current = { payload, key: `policy:${newUuid()}` }
       return updateMapConsumptionPolicy(targetId, {
         ...body,
         idempotencyKey: requestKey.current.key,

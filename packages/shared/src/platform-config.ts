@@ -13,11 +13,6 @@ import {
 } from './evidence-policy.js'
 import { nextCursorSchema } from './rbac.js'
 import { DEFAULT_RETRY_LIMIT, DEFAULT_STEP_TIMEOUT_MS, resolveStepPolicy } from './policy.js'
-import {
-  FACTORY_RESOLUTION_CEILING,
-  FACTORY_RESOLUTION_DEFAULT,
-  resolutionPolicySchema,
-} from './resolution-policy.js'
 import { locatorLimitsSchema, locatorPlanSchema } from './locator-plan.js'
 import { LOCAL_SECRET_PROVIDER, secretRefSchema } from './secret-ref.js'
 import {
@@ -66,7 +61,7 @@ import {
 import { FACTORY_ALERTING, alertRuleSchema, credentialMaintenanceAlertingSchema } from './alerting.js'
 import { FACTORY_OUTBOUND, platformOutboundSchema } from './outbound.js'
 
-export const PLATFORM_CONFIG_SCHEMA_VERSION = 7 as const
+export const PLATFORM_CONFIG_SCHEMA_VERSION = 8 as const
 /** 仍能被本版本读取的最早文档版本。低于它的存量文档必须先跑数据迁移。 */
 export const PLATFORM_CONFIG_MIN_SCHEMA_VERSION = 1 as const
 export const PLATFORM_CONFIG_SCHEMA_UNSUPPORTED = 'PLATFORM_CONFIG_SCHEMA_UNSUPPORTED' as const
@@ -188,15 +183,6 @@ export type PlatformEvidenceDefaults = z.infer<typeof platformEvidenceDefaultsSc
 const emptyToUndefined = (value: unknown) =>
   value === '' || value === null ? undefined : value
 
-const resolutionCeilingSchema = z.preprocess(
-  emptyToUndefined,
-  resolutionPolicySchema.default(FACTORY_RESOLUTION_CEILING),
-)
-const resolutionDefaultSchema = z.preprocess(
-  emptyToUndefined,
-  resolutionPolicySchema.default(FACTORY_RESOLUTION_DEFAULT),
-)
-
 const platformBrowserAiShape = {
   enabled: z.boolean(),
   baseUrl: platformModelUrlSchema.optional(),
@@ -206,8 +192,6 @@ const platformBrowserAiShape = {
   requestTimeoutMs: z.number().int().positive().max(300_000),
   stepMaxCalls: z.number().int().positive().max(200),
   maxOutputTokens: z.number().int().positive().max(32_768),
-  resolutionCeiling: resolutionCeilingSchema,
-  defaultResolution: resolutionDefaultSchema,
   preferAriaTree: z.boolean().default(false).optional(),
 }
 
@@ -410,7 +394,7 @@ const platformConfigDocumentObjectSchema = z
     session: platformSessionDefaultsSchema,
     evidence: platformEvidenceDefaultsSchema,
     browserAi: platformBrowserAiConfigSchema,
-    locator: z.strictObject({ defaultPlan: locatorPlanSchema, limits: locatorLimitsSchema }).optional(),
+    locator: z.strictObject({ defaultPlan: locatorPlanSchema, limits: locatorLimitsSchema }),
     platformAi: platformAiConfigSchema.default(FACTORY_PLATFORM_AI),
     analysisAi: analysisAiSchema.default(FACTORY_ANALYSIS_AI),
     sessionScheduling: platformSessionSchedulingSchema.default(FACTORY_SESSION_SCHEDULING),
@@ -555,9 +539,11 @@ export const FACTORY_PLATFORM_CONFIG: PlatformConfigDocument = {
     requestTimeoutMs: 15_000,
     stepMaxCalls: 20,
     maxOutputTokens: 2048,
-    resolutionCeiling: FACTORY_RESOLUTION_CEILING,
-    defaultResolution: FACTORY_RESOLUTION_DEFAULT,
     preferAriaTree: false,
+  },
+  locator: {
+    defaultPlan: { v: 2, order: ['rule', 'text_ai', 'vision_ai'] },
+    limits: { v: 2, allowed: ['rule', 'text_ai', 'vision_ai'] },
   },
   platformAi: FACTORY_PLATFORM_AI,
   sessionScheduling: FACTORY_SESSION_SCHEDULING,
@@ -665,6 +651,35 @@ const PLATFORM_CONFIG_UPGRADES = new Map<number, PlatformConfigUpgrade>([
       ...raw,
       schemaVersion: 7,
       browserPrewarm: raw.browserPrewarm ?? FACTORY_BROWSER_PREWARM,
+    }
+  }],
+  // v8：删除 browserAi.resolutionCeiling / defaultResolution，定位能力只由 locator 表达。
+  // 存量文档没有 locator 时按旧字段换算（ceiling → allowed，defaultResolution → order）。
+  [7, raw => {
+    const browserAi = (raw.browserAi ?? {}) as Record<string, unknown>
+    const { resolutionCeiling, defaultResolution, ...restBrowserAi } = browserAi
+    const allowedByCeiling: Record<string, string[]> = {
+      deterministic_only: ['rule'],
+      prefer_deterministic_text: ['rule', 'text_ai'],
+      prefer_text_ai: ['rule', 'text_ai'],
+    }
+    const orderByDefault: Record<string, string[]> = {
+      deterministic_only: ['rule'],
+      prefer_deterministic_text: ['rule', 'text_ai'],
+      prefer_deterministic: ['rule', 'text_ai', 'vision_ai'],
+      prefer_text_ai: ['text_ai', 'rule'],
+      prefer_ai: ['text_ai', 'vision_ai', 'rule'],
+      ai_only: ['text_ai', 'vision_ai'],
+    }
+    const allowed = allowedByCeiling[typeof resolutionCeiling === 'string' ? resolutionCeiling : 'deterministic_only']
+      ?? ['rule', 'text_ai', 'vision_ai']
+    const order = orderByDefault[typeof defaultResolution === 'string' ? defaultResolution : 'prefer_deterministic']
+      ?? ['rule', 'text_ai', 'vision_ai']
+    return {
+      ...raw,
+      schemaVersion: 8,
+      browserAi: restBrowserAi,
+      locator: raw.locator ?? { defaultPlan: { v: 2, order }, limits: { v: 2, allowed } },
     }
   }],
 ])

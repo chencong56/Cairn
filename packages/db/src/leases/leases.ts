@@ -14,7 +14,6 @@ import {
   OUTCOME_MANIFEST_PROTOCOL,
   SUITE_ADMISSION_PROTOCOL,
   RUNTIME_INVARIANT_MANIFEST_PROTOCOL,
-  RESOLUTION_PROTOCOL,
   LOCATOR_RESOLUTION_PROTOCOL,
   CONTROL_FLOW_PROTOCOL,
   CONTROL_FLOW_PROTOCOL_V2,
@@ -817,12 +816,6 @@ function claimEligiblePredicate(
     worker.protocolCapabilities?.includes(SUITE_ADMISSION_PROTOCOL)
       ? undefined
       : not(jsonHasKey(tx, runs.snapshot, 'suiteAdmission')),
-    worker.protocolCapabilities?.includes(RESOLUTION_PROTOCOL)
-      ? undefined
-      : or(
-          isNull(jsonText(tx, runs.snapshot, ['resolution', 'protocol'])),
-          not(jsonTextEquals(tx, runs.snapshot, ['resolution', 'protocol'], RESOLUTION_PROTOCOL)),
-        ),
     worker.protocolCapabilities?.includes(LOCATOR_RESOLUTION_PROTOCOL)
       ? undefined
       : or(

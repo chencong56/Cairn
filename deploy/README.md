@@ -1,6 +1,6 @@
 # deploy
 
-本机用 Podman 起 PostgreSQL 16 与 MinIO，给 `pnpm env:use local` 用。远端 shsnc-ah3 仍是 Docker + RustFS，见 `docs/deploy/2026-09-10-shsnc-ah3-infra.md`（未入库）。
+本机用 Podman 起 PostgreSQL 16、RustFS（S3 对象存储）与 Redis，给 `pnpm env:use local` 用。远端 shsnc-ah3 是 Docker + RustFS，见 `docs/deploy/2026-09-10-shsnc-ah3-infra.md`（未入库）。
 
 凭据与远端一致，只有地址不同：库和 S3 都听 `127.0.0.1`，端口仍是 `5432` / `9021` / `9022`。
 
@@ -18,22 +18,22 @@ pnpm env:use local   # 让仓库根 .env 指向本机画像
 pnpm db:migrate      # schema cairn 仍由迁移创建，不在 compose 里预建
 ```
 
-数据目录在仓库根 `.data/postgres` 与 `.data/minio`（已 gitignore）。`down` 默认保留数据。
+Postgres 数据目录在仓库根 `.data/postgres`（已 gitignore）；RustFS 数据在命名卷 `cairn-rustfs-data`（项目目录在 macOS 共享挂载上时 bind mount 权限不足，RustFS 也不支持 FUSE）。`down` 默认保留数据。
 
 ## 端口与账号
 
 | 服务 | 容器 | 本机地址 | 账号 |
 | --- | --- | --- | --- |
 | PostgreSQL | `cairn-postgres` | `127.0.0.1:5432` | 与远端相同的 `cairn` / 库名 `cairn` |
-| MinIO S3 | `cairn-minio` | `http://127.0.0.1:9021` | 与远端相同的 Access Key / Secret Key |
-| MinIO 控制台 | `cairn-minio` | `http://127.0.0.1:9022` | 同上（root 即管理员） |
+| RustFS S3 | `cairn-rustfs` | `http://127.0.0.1:9021` | 与远端相同的 Access Key / Secret Key |
+| RustFS 控制台 | `cairn-rustfs` | `http://127.0.0.1:9022` | 同上 |
 
-桶 `cairn-evidence` 由 `cairn-minio-init` 在 MinIO healthy 后创建。S3 客户端必须 `forcePathStyle: true`。
+桶 `cairn-evidence` 由 `cairn-rustfs-init` 在 RustFS healthy 后创建（幂等）。S3 客户端必须 `forcePathStyle: true`。
 
 ## 常用命令
 
 ```bash
-./scripts/infra.sh start             # 一键启动所有容器（Postgres, Redis, MinIO）并等待就绪
+./scripts/infra.sh start             # 一键启动所有容器（Postgres, Redis, RustFS）并等待就绪
 ./scripts/infra.sh stop              # 一键停止所有容器（保留 .data 数据卷）
 ./scripts/infra.sh restart           # 一键重启所有容器并等待就绪
 ./scripts/infra.sh status            # 查看各容器状态与健康探活
@@ -49,7 +49,7 @@ pnpm infra:logs                      # 跟踪日志
 pnpm infra:clean-test-dbs            # 一键清理测试残留孤儿数据库
 ```
 
-需要清盘时再 `podman compose -f deploy/compose.yml down -v`（或 `./scripts/infra.sh down`），并手动删 `.data/postgres`、`.data/minio`。
+需要清盘时再 `podman compose -f deploy/compose.yml down -v`（或 `./scripts/infra.sh down`），并手动删 `.data/postgres`（`down -v` 会一并删除 RustFS 命名卷）。
 
 数据库后端配置、受控迁移和运行观察提示通道见[数据库配置与受控迁移](database-backends.md)。当前只支持部署 PostgreSQL（默认用 LISTEN/NOTIFY）；MySQL 迁移链已冻结，仅为历史实例保留。
 

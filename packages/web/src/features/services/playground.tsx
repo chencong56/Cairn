@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
@@ -9,6 +10,7 @@ import {
 } from '@cairn/shared'
 import { ClipboardCopy, Download, Play, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import {
   createServicePlaygroundRun,
   downloadServiceOpenApi,
@@ -111,7 +113,7 @@ const snippetLabel: Record<ServiceSnippetLanguage, string> = {
 function newIdempotencyKey() {
   const suffix =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+      ? newUuid().replace(/-/g, '').slice(0, 12)
       : Math.random().toString(36).slice(2, 14)
   return `playground-${Date.now()}-${suffix}`
 }
@@ -233,10 +235,10 @@ export function ServicePlaygroundPanel({
       body: requestBody,
       baseUrl: codeBaseUrl,
     })
-    try {
-      await navigator.clipboard.writeText(code)
+    const ok = await copyToClipboard(code)
+    if (ok) {
       toast.success(`${snippetLabel[language]} 调用代码已复制`)
-    } catch {
+    } else {
       toast.error('无法复制代码，请手动复制')
     }
   }

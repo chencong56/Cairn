@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { newUuid } from '@/lib/uuid'
 import { useAuthStore } from '@/stores/auth-store'
 import { readSseStream } from '@/lib/sse'
 import type { BrowserTransport } from '@/features/runs/browser-view'
@@ -107,7 +108,7 @@ export function fetchSessionEvents(sessionId: string, cursor?: string): Promise<
 }
 
 export function newSessionIdempotencyKey(kind: string): string {
-  const id = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}`
+  const id = typeof crypto.randomUUID === 'function' ? newUuid() : `${Date.now()}`
   return `session-${kind}-${id}`
 }
 

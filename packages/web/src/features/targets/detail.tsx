@@ -18,6 +18,7 @@ import {
   KeyRound,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { ApiRequestError } from '@/lib/api-client'
 import {
   deleteTarget,
@@ -264,9 +265,13 @@ export function TargetDetailPage() {
                     </a>
                     <button
                       type='button'
-                      onClick={() => {
-                        void navigator.clipboard.writeText(target.entryUrl)
-                        toast.success('已复制入口 URL')
+                      onClick={async () => {
+                        const ok = await copyToClipboard(target.entryUrl)
+                        if (ok) {
+                          toast.success('已复制入口 URL')
+                        } else {
+                          toast.error('复制失败，请手动复制')
+                        }
                       }}
                       className='inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-text-primary'
                       title='复制入口 URL'

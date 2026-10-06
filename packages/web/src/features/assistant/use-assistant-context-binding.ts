@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useRouterState } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import {
@@ -43,7 +44,7 @@ export function useAssistantContextBinding(
   const contextRef = useRef(context)
   const [ownerToken] = useState(() =>
     typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
+      ? newUuid()
       : `owner-${Math.random().toString(36).slice(2)}`,
   )
 

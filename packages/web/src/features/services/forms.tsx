@@ -14,6 +14,7 @@ import {
   type ServiceScope,
 } from '@cairn/shared'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import {
   issueCredential,
   fetchServiceCredentialCatalog,
@@ -689,12 +690,14 @@ export function TokenDialog({
         <DialogFooter>
           <Button
             variant='outline'
-            onClick={() =>
-              void navigator.clipboard
-                .writeText(token)
-                .then(() => toast.success('已复制'))
-                .catch(() => toast.error('复制失败，请手动选择并复制'))
-            }
+            onClick={async () => {
+              const ok = await copyToClipboard(token)
+              if (ok) {
+                toast.success('已复制')
+              } else {
+                toast.error('复制失败，请手动选择并复制')
+              }
+            }}
           >
             复制 Key
           </Button>
@@ -833,10 +836,10 @@ export function CredentialCatalogSheet({
     queryFn: () => fetchServiceCredentialCatalog(callerId, credential.id),
   })
   const copy = async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value)
+    const ok = await copyToClipboard(value)
+    if (ok) {
       toast.success('调用模板已复制')
-    } catch {
+    } else {
       toast.error('无法复制调用模板，请手动复制')
     }
   }

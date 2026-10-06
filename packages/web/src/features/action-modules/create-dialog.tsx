@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { moduleKeySchema, type CreateModuleBody } from '@cairn/shared'
 import { toast } from 'sonner'
@@ -100,7 +101,7 @@ export function ActionModuleCreateDialog({
     setSubmitting(true)
     try {
       const body: CreateModuleBody = {
-        idempotencyKey: request.current.key || crypto.randomUUID(),
+        idempotencyKey: request.current.key || newUuid(),
         targetId: selectedTargetId,
         key: key.trim(),
         name: name.trim(),
@@ -109,7 +110,7 @@ export function ActionModuleCreateDialog({
       }
       const signature = JSON.stringify({ ...body, idempotencyKey: undefined })
       if (request.current.signature !== signature)
-        request.current = { signature, key: crypto.randomUUID() }
+        request.current = { signature, key: newUuid() }
       body.idempotencyKey = request.current.key
       const res = await createActionModule(body)
       toast.success('动作模块创建成功')

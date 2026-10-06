@@ -240,8 +240,8 @@ describe('createTargetAccountBodySchema', () => {
 })
 
 describe('LOGIN_FIELD_HEURISTICS', () => {
-  it('版本为 1，顺序与条数钉死', () => {
-    expect(LOGIN_HEURISTIC_VERSION).toBe(1)
+  it('版本为 2，顺序与条数钉死', () => {
+    expect(LOGIN_HEURISTIC_VERSION).toBe(2)
     expect(LOGIN_FIELD_HEURISTICS.username).toEqual([
       { by: 'id', value: 'username' },
       { by: 'id', value: 'user' },
@@ -266,8 +266,16 @@ describe('LOGIN_FIELD_HEURISTICS', () => {
       { by: 'css', value: 'button[type="submit"]' },
       { by: 'css', value: 'input[type="submit"]' },
       { by: 'id', value: 'login' },
+      { by: 'id', value: 'login_btn' },
+      { by: 'id', value: 'login-btn' },
+      { by: 'id', value: 'btn-login' },
+      { by: 'id', value: 'loginBtn' },
       { by: 'id', value: 'submit' },
+      { by: 'id', value: 'submit_btn' },
+      { by: 'id', value: 'submit-btn' },
       { by: 'name', value: 'login' },
+      { by: 'name', value: 'login_btn' },
+      { by: 'name', value: 'submit' },
     ])
   })
 

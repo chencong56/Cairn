@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -46,7 +47,7 @@ export function ModuleReplacePreviewDialog({
         moduleVersionId,
         baseRevision,
         parameterized: [],
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: newUuid(),
       })
       onOpenChange(false)
       toast.success('已用模块调用替换选中步骤')

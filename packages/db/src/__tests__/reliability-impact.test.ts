@@ -41,7 +41,7 @@ describe.each(DRIVERS)('%s reliability impact and batch upgrade domain operation
       entryUrl: 'https://example.com',
       status: 'active',
       sessionPolicy: { maxLifetimeSeconds: 3600, idleTimeoutSeconds: 300, maxTotalSessions: 5, accountStrategy: 'exclusive' },
-      resolutionPolicy: { preference: 'prefer_deterministic', ceiling: 'prefer_ai' },
+      resolutionPolicy: { plan: { v: 2, order: ['rule', 'text_ai', 'vision_ai'] } },
     })
 
     // Create action module

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 本地基础设施容器组件（PostgreSQL、Redis、MinIO）的启停与管理。
+# 本地基础设施容器组件（PostgreSQL、Redis、RustFS）的启停与管理。
 # 用于一键启动、停止、重启与健康探活容器组件。
 # 数据目录保存在 .data/，停止与重启操作不会清除数据。
 set -euo pipefail
@@ -81,19 +81,19 @@ resolve_services() {
   local target="${1:-all}"
   case "$target" in
     all)
-      echo "postgres minio redis"
+      echo "postgres rustfs redis"
       ;;
     postgres|pg|db|database)
       echo "postgres"
       ;;
-    minio|s3|storage)
-      echo "minio"
+    rustfs|minio|s3|storage)
+      echo "rustfs"
       ;;
     redis|cache)
       echo "redis"
       ;;
     *)
-      echo "未知服务组件: $target (可选: all, postgres, redis, minio)" >&2
+      echo "未知服务组件: $target (可选: all, postgres, redis, rustfs)" >&2
       exit 1
       ;;
   esac
@@ -103,13 +103,13 @@ compose_up_services() {
   local target="${1:-all}"
   case "$target" in
     all)
-      echo "postgres minio minio-init redis"
+      echo "postgres rustfs rustfs-init redis"
       ;;
     postgres|pg|db|database)
       echo "postgres"
       ;;
-    minio|s3|storage)
-      echo "minio minio-init"
+    rustfs|minio|s3|storage)
+      echo "rustfs rustfs-init"
       ;;
     redis|cache)
       echo "redis"
@@ -125,7 +125,7 @@ port_of() {
   case "$1" in
     postgres) echo "$(get_env_val "CAIRN_DB_PORT" "5432")" ;;
     redis)    echo "$(get_env_val "CAIRN_REDIS_PORT" "6379")" ;;
-    minio)    echo "$(get_env_val "CAIRN_S3_API_PORT" "9021")" ;;
+    rustfs)   echo "$(get_env_val "CAIRN_S3_API_PORT" "9021")" ;;
     *)        echo "" ;;
   esac
 }
@@ -232,7 +232,7 @@ status_one() {
     redis)
       port_desc="127.0.0.1:${port}"
       ;;
-    minio)
+    rustfs)
       local console_port; console_port="$(get_env_val "CAIRN_S3_CONSOLE_PORT" "9022")"
       port_desc="127.0.0.1:${port} (api), 127.0.0.1:${console_port} (console)"
       ;;
@@ -290,8 +290,8 @@ stop_cmd() {
   if [[ "$target" == "all" ]]; then
     run_compose stop
   else
-    if [[ "$target" == "minio" || "$target" == "s3" || "$target" == "storage" ]]; then
-      run_compose stop minio minio-init
+    if [[ "$target" == "rustfs" || "$target" == "minio" || "$target" == "s3" || "$target" == "storage" ]]; then
+      run_compose stop rustfs rustfs-init
     else
       run_compose stop $svcs
     fi
@@ -347,7 +347,7 @@ logs_cmd() {
         lines="$1"
         shift
         ;;
-      all|postgres|pg|db|database|redis|cache|minio|s3|storage)
+      all|postgres|pg|db|database|redis|cache|rustfs|minio|s3|storage)
         target="$1"
         shift
         ;;
@@ -447,10 +447,10 @@ case "$cmd" in
 用法: $0 {start|stop|restart|status|down|logs|clean-test-dbs} [服务组件]
 
 服务组件 (可选):
-  all        所有基础设施组件 (postgres, minio, redis) [默认]
+  all        所有基础设施组件 (postgres, rustfs, redis) [默认]
   postgres   仅 PostgreSQL 数据库 (别名: pg, db, database)
   redis      仅 Redis 缓存与变化提示 (别名: cache)
-  minio      仅 MinIO 对象存储 (别名: s3, storage)
+  rustfs     仅 RustFS 对象存储 (别名: minio, s3, storage)
 
 常用示例:
   $0 start              # 启动所有数据库、Redis 和对象存储容器并等待健康就绪
@@ -460,7 +460,7 @@ case "$cmd" in
   $0 clean-test-dbs     # 扫描并清理历史测试遗留的孤儿数据库
   $0 start redis        # 仅启动 Redis 容器
   $0 stop postgres      # 仅停止 PostgreSQL 容器
-  $0 restart minio      # 仅重启 MinIO 容器
+  $0 restart rustfs     # 仅重启 RustFS 容器
   $0 logs redis 100     # 查看 Redis 最近 100 行日志并跟踪
   $0 down               # 停止并移除容器和网络（数据目录仍保留）
 EOF

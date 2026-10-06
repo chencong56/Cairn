@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { SESSION_MAINTENANCE_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL } from '@cairn/shared'
+import { SESSION_MAINTENANCE_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL,
+  LOCATOR_RESOLUTION_PROTOCOL,
+} from '@cairn/shared'
 import { openContractDb, grantAdminScope } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
 import { newId } from '../id.js'
@@ -60,7 +62,7 @@ beforeEach(async () => {
     capacity: 8,
     maxSessions: 3,
     lostAfterSeconds: 60,
-    protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+    protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
   })
 })
 afterEach(async () => {

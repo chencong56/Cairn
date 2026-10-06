@@ -14,6 +14,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import {
   fetchOutboundChannels,
   fetchOutboundEvent,
@@ -489,10 +490,14 @@ function OutboundRecords({
                           <span
                             className='inline-flex items-center rounded border border-border-divider bg-muted/60 px-1 py-0.5 font-mono text-label text-muted-foreground hover:bg-muted cursor-pointer select-all'
                             title={`完整事件编号：${event.id}（点击复制）`}
-                            onClick={(e) => {
+                            onClick={async (e) => {
                               e.stopPropagation()
-                              navigator.clipboard.writeText(event.id)
-                              toast.success(`已复制事件编号：${event.id}`)
+                              const ok = await copyToClipboard(event.id)
+                              if (ok) {
+                                toast.success(`已复制事件编号：${event.id}`)
+                              } else {
+                                toast.error('复制失败，请手动复制')
+                              }
                             }}
                           >
                             #{event.id.slice(0, 8)}
@@ -669,9 +674,13 @@ function OutboundDetail({ id }: { id: string }) {
                     <span
                       className='rounded border border-border-divider bg-muted/60 px-1.5 py-0.5 hover:bg-muted cursor-pointer select-all text-text-primary'
                       title={`完整事件编号：${event.id}（点击复制）`}
-                      onClick={() => {
-                        navigator.clipboard.writeText(event.id)
-                        toast.success(`已复制事件编号：${event.id}`)
+                      onClick={async () => {
+                        const ok = await copyToClipboard(event.id)
+                        if (ok) {
+                          toast.success(`已复制事件编号：${event.id}`)
+                        } else {
+                          toast.error('复制失败，请手动复制')
+                        }
                       }}
                     >
                       {event.id}
@@ -784,9 +793,13 @@ function OutboundDetail({ id }: { id: string }) {
                   <span
                     className='rounded border border-border-divider bg-muted/60 px-1.5 py-0.5 hover:bg-muted cursor-pointer select-all text-text-primary'
                     title={`完整投递编号：${d.id}（点击复制）`}
-                    onClick={() => {
-                      navigator.clipboard.writeText(d.id)
-                      toast.success(`已复制投递编号：${d.id}`)
+                    onClick={async () => {
+                      const ok = await copyToClipboard(d.id)
+                      if (ok) {
+                        toast.success(`已复制投递编号：${d.id}`)
+                      } else {
+                        toast.error('复制失败，请手动复制')
+                      }
                     }}
                   >
                     {d.id}
@@ -796,9 +809,13 @@ function OutboundDetail({ id }: { id: string }) {
                     size='icon'
                     className='size-5 text-muted-foreground hover:text-foreground'
                     title='复制投递编号'
-                    onClick={() => {
-                      navigator.clipboard.writeText(d.id)
-                      toast.success(`已复制投递编号：${d.id}`)
+                    onClick={async () => {
+                      const ok = await copyToClipboard(d.id)
+                      if (ok) {
+                        toast.success(`已复制投递编号：${d.id}`)
+                      } else {
+                        toast.error('复制失败，请手动复制')
+                      }
                     }}
                   >
                     <Copy className='size-3' />

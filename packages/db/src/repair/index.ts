@@ -623,11 +623,7 @@ function findStepTargetInDocument(doc: any, stepId: string): unknown {
 
 function forceStepDeterministic(step: any) {
   if (!step) return
-  if (step.policy?.locatorPlan) {
-    step.policy = { ...step.policy, locatorPlan: { order: ['rule'], limits: ['rule'] } }
-  } else {
-    step.policy = { ...step.policy, resolution: 'deterministic_only' }
-  }
+  step.policy = { ...step.policy, locatorPlan: { v: 2, order: ['rule'] } }
 }
 
 function setStepDeterministicInDoc(doc: any, stepId: string): any {

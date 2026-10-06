@@ -3,17 +3,16 @@ import {
   COMPILER_VERSION,
   EXECUTABLE_STEP_TYPES,
   FACTORY_COMPILE_RESOLUTION,
+  FACTORY_PLATFORM_CONFIG,
   FORBIDDEN_CONTEXT_KEYS,
   LOCATOR_ROUTE_LABELS,
   LOCATOR_SKIP_LABELS,
   ScenarioValidationError,
   WAIT_KINDS_AVAILABLE_NOW,
   assertNoForwardFrom,
-  mergeEffectiveResolution,
   locatorReadiness,
   resolveLocatorPlansForSteps,
   outputShapeForStep,
-  policyAllowsAiRung,
   stepUsesBrowser,
   type CompileContext,
   type CompileDiagnostic,
@@ -21,6 +20,7 @@ import {
   type CompileResult,
   type OutcomeManifest,
   type OutcomeManifestEntry,
+  type PlatformConfigDocument,
   type ScenarioDocument,
   type Step,
   type TargetDescriptor,
@@ -110,9 +110,12 @@ export function compileScenarioDocument(document: ScenarioDocument, ctx: Compile
   const resolution = {
     ...FACTORY_COMPILE_RESOLUTION,
     ...ctx.resolution,
-    documentResolution: ctx.resolution?.documentResolution ?? document.resolution,
+    // 计划解析用的平台文档：未显式给时按出厂配置（模型未配置即只剩规则路线）。
+    // AI 就绪诊断只看显式传入的 locatorDocument，独立编译不额外报模型未就绪；
+    // 出厂默认文档下的路线跳过提示同属噪音，一并静音。
+    planDocument: ctx.resolution?.locatorDocument ?? FACTORY_PLATFORM_CONFIG,
+    muteLocatorSkips: ctx.resolution?.locatorDocument === undefined,
     documentLocatorPlan: ctx.resolution?.documentLocatorPlan ?? document.locatorPlan,
-    locatorProtocol: ctx.resolution?.locatorProtocol ?? document.locatorProtocol,
     waitKindsAvailable: ctx.resolution?.waitKindsAvailable ?? WAIT_KINDS_AVAILABLE_NOW,
   }
 
@@ -626,143 +629,70 @@ function addTargetResolutionDiagnostics(
   step: Step,
   target: TargetDescriptor | undefined,
   resolution: NonNullable<CompileContext['resolution']> & {
-    ceiling: string
-    default: string
+    planDocument: PlatformConfigDocument
+    muteLocatorSkips?: boolean
     waitKindsAvailable?: readonly string[]
   },
   release: boolean,
 ): void {
   if (!target) return
-  if (step.type === 'assert' && (resolution.locatorProtocol === 2 || resolution.documentLocatorPlan || step.policy?.locatorPlan)) {
-    if (target && target.candidates.length === 0) add(diagnostics, 'SCENARIO_TARGET_EMPTY', release ? 'error' : 'warning',
+  if (step.type === 'assert') {
+    if (target.candidates.length === 0) add(diagnostics, 'SCENARIO_TARGET_EMPTY', release ? 'error' : 'warning',
       `步骤「${step.name}」的成功条件只使用规则判定，请提供规则候选`,
       { stepId: step.id, fieldPath: ['input', 'target', 'candidates'] })
     return
   }
-  if ((resolution.locatorProtocol === 2 || resolution.documentLocatorPlan || step.policy?.locatorPlan) && resolution.locatorDocument) {
-    let plan
-    try {
-      plan = resolveLocatorPlansForSteps({
-        steps: [step],
-        document: resolution.locatorDocument,
-        target: resolution.locatorTarget,
-        scenarioPlan: resolution.documentLocatorPlan,
-        scenarioPolicy: resolution.documentResolution,
-      })[step.id]!
-    } catch (error) {
-      add(diagnostics, 'SCENARIO_LOCATOR_UNAVAILABLE', release ? 'error' : 'warning',
-        `步骤「${step.name}」定位方式不可用：${error instanceof Error ? error.message : '请检查模型配置'}`,
-        { stepId: step.id, fieldPath: ['policy', 'locatorPlan'] })
-      return
-    }
+  let plan
+  try {
+    plan = resolveLocatorPlansForSteps({
+      steps: [step],
+      document: resolution.planDocument,
+      target: resolution.locatorTarget,
+      scenarioPlan: resolution.documentLocatorPlan,
+    })[step.id]!
+  } catch (error) {
+    add(diagnostics, 'SCENARIO_LOCATOR_UNAVAILABLE', release ? 'error' : 'warning',
+      `步骤「${step.name}」定位方式不可用：${error instanceof Error ? error.message : '请检查模型配置'}`,
+      { stepId: step.id, fieldPath: ['policy', 'locatorPlan'] })
+    return
+  }
+  if (!resolution.muteLocatorSkips) {
     for (const skipped of plan.skipped) {
       add(diagnostics, 'SCENARIO_LOCATOR_SKIPPED', 'warning',
         `步骤「${step.name}」继承的${LOCATOR_ROUTE_LABELS[skipped.route]}定位路线已跳过：${LOCATOR_SKIP_LABELS[skipped.reason]}`,
         { stepId: step.id, fieldPath: ['policy', 'locatorPlan'] })
     }
-    if (!target) return
-    const usesModel = plan.actual.some((route) => route !== 'rule')
-    const hasRules = target.candidates.length > 0
-    if (plan.actual.includes('rule') && !hasRules) {
-      add(diagnostics, 'SCENARIO_TARGET_EMPTY', release ? 'error' : 'warning',
-        `步骤「${step.name}」的定位顺序包含规则，但没有规则定位候选`,
-        { stepId: step.id, fieldPath: ['input', 'target', 'candidates'] })
-    }
-    if (usesModel && !target.semantic?.trim() && (!hasRules || target.candidates.every((candidate) => candidate.by === 'css'))) {
-      add(diagnostics, 'SCENARIO_MODEL_DESCRIPTION_REQUIRED', 'error',
-        `步骤「${step.name}」请填写「要找的页面元素」；仅有 CSS 无法作为模型目标描述`,
-        { stepId: step.id, fieldPath: ['input', 'target', 'semantic'] })
-    }
-    if (usesModel && (step.effectType === 'SIDE_EFFECT' || step.effectType === 'IDEMPOTENT')) {
-      const identity = target.candidates.some((candidate) =>
-        candidate.by === 'role' ? Boolean(candidate.name?.trim())
-          : candidate.by === 'label' || candidate.by === 'text' || candidate.by === 'title' ? Boolean(candidate.value.trim()) : false)
-      const pureModel = Boolean(step.policy?.locatorPlan && step.policy.locatorPlan.order.every((route) => route !== 'rule'))
-      if (!identity) add(diagnostics, 'SCENARIO_MODEL_WRITE_IDENTITY_REQUIRED', pureModel ? 'warning' : release ? 'error' : 'warning',
-        pureModel
-          ? `步骤「${step.name}」显式选择纯模型写操作，缺少独立身份核对；请填写明确目标描述并检查运行证据`
-          : `步骤「${step.name}」缺少可核对的角色名称或可见文字，模型定位后会阻止写操作`,
-        { stepId: step.id, fieldPath: ['input', 'target', 'candidates'] })
-    }
-    return
   }
-  const explicit = step.policy?.resolution ?? resolution.documentResolution
-  const effective = mergeEffectiveResolution({
-    ceiling: resolution.ceiling,
-    defaultResolution: resolution.default,
-    targetCeiling: resolution.targetCeiling,
-    targetPreference: resolution.targetPreference,
-    document: resolution.documentResolution,
-    step: step.policy?.resolution,
-  })
-
-  if (explicit === 'ai_only' && effective !== 'ai_only') {
-    add(
-      diagnostics,
-      'SCENARIO_RESOLUTION_EXCEEDS_CEILING',
-      release ? 'error' : 'warning',
-      `步骤「${step.name}」要求仅用 AI 解析，但当前平台或目标系统上限不允许`,
-      { stepId: step.id, fieldPath: ['policy', 'resolution'] },
-    )
-  } else if (
-    (explicit === 'prefer_deterministic' || explicit === 'prefer_ai') &&
-    effective === 'deterministic_only'
-  ) {
-    add(
-      diagnostics,
-      'SCENARIO_RESOLUTION_DEGRADED',
-      'warning',
-      `步骤「${step.name}」的解析策略已被平台或目标系统上限降为仅规则`,
-      { stepId: step.id, fieldPath: ['policy', 'resolution'] },
-    )
+  const usesModel = plan.actual.some((route) => route !== 'rule')
+  const hasRules = target.candidates.length > 0
+  if (plan.actual.includes('rule') && !hasRules) {
+    add(diagnostics, 'SCENARIO_TARGET_EMPTY', release ? 'error' : 'warning',
+      `步骤「${step.name}」的定位顺序包含规则，但没有规则定位候选`,
+      { stepId: step.id, fieldPath: ['input', 'target', 'candidates'] })
   }
-
-  if (!target) return
-  const candidateCount = target.candidates?.length ?? 0
-  if (candidateCount === 0 && !target.semantic) {
-    add(
-      diagnostics,
-      'SCENARIO_TARGET_EMPTY',
-      'error',
-      `步骤「${step.name}」缺少定位候选和语义描述`,
-      { stepId: step.id, fieldPath: ['input', 'target'] },
-    )
-    return
+  if (usesModel && !target.semantic?.trim() && (!hasRules || target.candidates.every((candidate) => candidate.by === 'css'))) {
+    // 纯模型路线下 CSS 无法喂给模型，必失败，保持硬阻断；
+    // 含规则路线时规则仍可命中，模型兜底缺描述只是退化，提示即可。
+    const pureModel = !plan.actual.includes('rule')
+    add(diagnostics, 'SCENARIO_MODEL_DESCRIPTION_REQUIRED', pureModel ? 'error' : 'warning',
+      pureModel
+        ? `步骤「${step.name}」请填写「要找的页面元素」；仅有 CSS 无法作为模型目标描述`
+        : `步骤「${step.name}」只有 CSS 候选且缺少「要找的页面元素」，规则未命中时模型兜底不可用`,
+      { stepId: step.id, fieldPath: ['input', 'target', 'semantic'] })
   }
-  if (candidateCount === 0 && target.semantic) {
-    const allowAi = policyAllowsAiRung(effective)
-    add(
-      diagnostics,
-      'SCENARIO_TARGET_SEMANTIC_ONLY',
-      release && !allowAi ? 'error' : 'warning',
-      allowAi
-        ? `步骤「${step.name}」只有语义描述，没有确定性候选`
-        : `步骤「${step.name}」只有语义描述，当前部署无法解析该目标`,
-      { stepId: step.id, fieldPath: ['input', 'target', 'semantic'] },
-    )
-    if (step.effectType === 'SIDE_EFFECT' || step.effectType === 'IDEMPOTENT') {
-      if (effective === 'prefer_deterministic') {
-        add(
-          diagnostics,
-          'SCENARIO_SIDE_EFFECT_SEMANTIC_ONLY',
-          release ? 'error' : 'warning',
-          `步骤「${step.name}」是写步骤且只有语义描述，规则优先下 AI 定位会被交叉确认拒绝`,
-          { stepId: step.id, fieldPath: ['input', 'target', 'semantic'] },
-        )
-      } else if (effective === 'prefer_ai' || effective === 'ai_only') {
-        add(
-          diagnostics,
-          'SCENARIO_SIDE_EFFECT_SEMANTIC_ONLY',
-          'warning',
-          `步骤「${step.name}」是写步骤且仅有语义描述，AI 定位没有交叉确认`,
-          { stepId: step.id, fieldPath: ['input', 'target', 'semantic'] },
-        )
-      }
-    }
+  if (usesModel && (step.effectType === 'SIDE_EFFECT' || step.effectType === 'IDEMPOTENT')) {
+    const identity = target.candidates.some((candidate) =>
+      candidate.by === 'role' ? Boolean(candidate.name?.trim())
+        : candidate.by === 'label' || candidate.by === 'text' || candidate.by === 'title' ? Boolean(candidate.value.trim()) : false)
+    const pureModel = Boolean(step.policy?.locatorPlan && step.policy.locatorPlan.order.every((route) => route !== 'rule'))
+    if (!identity) add(diagnostics, 'SCENARIO_MODEL_WRITE_IDENTITY_REQUIRED', pureModel ? 'warning' : release ? 'error' : 'warning',
+      pureModel
+        ? `步骤「${step.name}」显式选择纯模型写操作，缺少独立身份核对；请填写明确目标描述并检查运行证据`
+        : `步骤「${step.name}」缺少可核对的角色名称或可见文字，模型定位后会阻止写操作`,
+      { stepId: step.id, fieldPath: ['input', 'target', 'candidates'] })
   }
-  const candidates = target.candidates ?? []
-  const hasSemanticLocator = candidates.some((candidate) => candidate.by !== 'css')
-  if (candidates.length > 0 && !hasSemanticLocator) {
+  const hasSemanticLocator = target.candidates.some((candidate) => candidate.by !== 'css')
+  if (target.candidates.length > 0 && !hasSemanticLocator) {
     add(
       diagnostics,
       'SCENARIO_WEAK_LOCATOR',

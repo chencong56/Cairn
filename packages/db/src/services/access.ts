@@ -25,7 +25,6 @@ import {
   hasAiSteps,
   requiredRunInputKeys,
   scenarioInputsToJsonSchema,
-  snapshotNeedsBrowserAi,
   isAiStepType,
   isAiCallEvidence,
   issueServiceCredentialSchema,
@@ -1660,10 +1659,9 @@ export async function createServiceRun(
           "相同幂等键对应不同的运行输入",
         );
       const existingRes = existing.snapshot.resolution;
-      const existingNeedsAi = existingRes?.protocol === "snapshot.resolution@2"
-        ? existing.snapshot.steps.some((step) => !step.disabled && isAiStepType(step.type)) ||
-          Object.values(existingRes.steps).some((plan) => plan.actual.some((route) => route !== "rule"))
-        : snapshotNeedsBrowserAi(existing.snapshot.steps, existingRes?.protocol === "snapshot.resolution@1" ? existingRes.steps : undefined);
+      const existingNeedsAi =
+        existing.snapshot.steps.some((step) => !step.disabled && isAiStepType(step.type)) ||
+        Object.values(existingRes?.steps ?? {}).some((plan) => plan.actual.some((route) => route !== "rule"));
       if (
         existingNeedsAi &&
         !credential.scopes.includes("ai:execute")
@@ -1711,7 +1709,7 @@ export async function createServiceRun(
       throw badRequest("SCENARIO_VERSION_NOT_PUBLISHED", "只能执行已发布版本");
     const layers = await loadResolutionLayers(tx as unknown as Db, resolved.targetId);
     if (
-      stepsNeedAiExecute(resolved.definition.steps, layers, resolved.definition.resolution) &&
+      stepsNeedAiExecute(resolved.definition.steps, layers, resolved.definition.locatorPlan) &&
       !credential.scopes.includes("ai:execute")
     )
       throw forbidden("SERVICE_SCOPE_DENIED", "服务凭据没有 AI 执行权限");

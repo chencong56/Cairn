@@ -4,7 +4,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { and, eq, isNull } from 'drizzle-orm'
 import {
   MODULE_MANIFEST_PROTOCOL,
-  RESOLUTION_PROTOCOL,
   LOCATOR_RESOLUTION_PROTOCOL,
   OUTCOME_MANIFEST_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
@@ -375,7 +374,7 @@ describe.each(DRIVERS)('%s 场景 V2 动作模块引用与展开（集成）', {
       capacity: 2,
       maxSessions: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL, RESOLUTION_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
+      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
     })
 
     // 注册 Worker B：具备 MODULE_MANIFEST_PROTOCOL
@@ -387,7 +386,7 @@ describe.each(DRIVERS)('%s 场景 V2 动作模块引用与展开（集成）', {
       capacity: 2,
       maxSessions: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, MODULE_MANIFEST_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL, RESOLUTION_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
+      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, MODULE_MANIFEST_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
     })
 
     // Worker A 领不到带有 moduleManifest 的 Run

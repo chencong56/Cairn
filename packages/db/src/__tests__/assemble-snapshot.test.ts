@@ -65,7 +65,7 @@ describe('assembleRunSnapshot', () => {
       runId: ids.run, createdAt: new Date('2026-09-26T00:00:00.000Z'), targetId: ids.target,
       scenarioId: ids.scenario, scenarioVersionId: ids.version, steps: [step], input: {},
       target: { entryUrl: 'https://erp.example/app', loginUrl: 'https://erp.example/login', authMethod: 'password', captchaMode: 'none', loginFields: null, sessionPolicy: null },
-      platformDocument: document, platformRevision: 3, locatorProtocol: 2 as const,
+      platformDocument: document, platformRevision: 3,
       authVerification, allowedOrigins: ['https://erp.example'], accessPolicy, mapConsumption: { mode: 'off' as const },
     }
     const snapshot = assembleRunSnapshot(input)
@@ -195,7 +195,7 @@ describe('assembleRunSnapshot', () => {
     expect(snapshot.secretRef?.secretId).toBe('00000000-0000-4000-8000-000000000032')
   })
 
-  it('目标系统上限能压住平台已开放的 AI 档，不冻结 resolution', () => {
+  it('目标系统只能收紧定位能力：收紧后实际只剩规则，不冻结 AI 执行', () => {
     const clickId = '00000000-0000-4000-8000-000000000041'
     const click: Step = {
       id: clickId,
@@ -213,7 +213,6 @@ describe('assembleRunSnapshot', () => {
         model: 'demo',
         modelFamily: 'doubao-seed',
         secretRef: { provider: 'local' as const, secretId: '00000000-0000-4000-8000-000000000033' },
-        resolutionCeiling: 'prefer_deterministic' as const,
       },
     }
     const closed = assembleRunSnapshot({
@@ -231,7 +230,7 @@ describe('assembleRunSnapshot', () => {
         captchaMode: 'none',
         loginFields: null,
         sessionPolicy: null,
-        resolutionPolicy: { ceiling: 'deterministic_only' },
+        resolutionPolicy: { limits: { v: 2, allowed: ['rule'] } },
       },
       platformDocument,
       platformRevision: 2,
@@ -240,7 +239,7 @@ describe('assembleRunSnapshot', () => {
       accessPolicy,
       mapConsumption: { mode: 'off' },
     })
-    expect(closed.resolution).toBeUndefined()
+    expect(closed.resolution?.steps[clickId]).toMatchObject({ actual: ['rule'], source: 'platform' })
     expect(closed.aiExecution).toBeUndefined()
 
     const open = assembleRunSnapshot({
@@ -258,7 +257,6 @@ describe('assembleRunSnapshot', () => {
         captchaMode: 'none',
         loginFields: null,
         sessionPolicy: null,
-        resolutionPolicy: { preference: 'prefer_deterministic' },
       },
       platformDocument,
       platformRevision: 2,
@@ -267,39 +265,8 @@ describe('assembleRunSnapshot', () => {
       accessPolicy,
       mapConsumption: { mode: 'off' },
     })
-    expect(open.resolution?.protocol).toBe('snapshot.resolution@1')
-    if (open.resolution?.protocol !== 'snapshot.resolution@1') throw new Error('snapshot.resolution@1 expected')
-    expect(open.resolution.ceiling).toBe('prefer_deterministic')
-    expect(open.resolution.targetPreference).toBe('prefer_deterministic')
-    expect(open.resolution.steps[clickId]).toBe('prefer_deterministic')
+    // 平台 AI 文本模型未配置，继承平台的 text_ai 路线被跳过，视觉路线照常冻结。
+    expect(open.resolution?.steps[clickId]).toMatchObject({ actual: ['rule', 'vision_ai'] })
     expect(open.aiExecution?.modelName).toBe('demo')
-
-    const leftover = assembleRunSnapshot({
-      runId: ids.run,
-      createdAt: new Date('2026-09-20T00:00:00.000Z'),
-      targetId: ids.target,
-      scenarioId: ids.scenario,
-      scenarioVersionId: ids.version,
-      steps: [click],
-      input: {},
-      target: {
-        entryUrl: 'https://erp.example/app',
-        loginUrl: 'https://erp.example/login',
-        authMethod: 'password',
-        captchaMode: 'none',
-        loginFields: null,
-        sessionPolicy: null,
-        resolutionPolicy: { ceiling: 'deterministic_only' },
-      },
-      platformDocument,
-      platformRevision: 2,
-      aiExecution: open.aiExecution,
-      authVerification,
-      allowedOrigins: ['https://erp.example'],
-      accessPolicy,
-      mapConsumption: { mode: 'off' },
-    })
-    expect(leftover.resolution).toBeUndefined()
-    expect(leftover.aiExecution).toBeUndefined()
   })
 })

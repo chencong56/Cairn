@@ -896,7 +896,8 @@ const AUTH_ISSUE_LABELS: Record<string, string> = {
   PAGE_REFRESH_UNSAFE: '当前页不适合刷新到登录页',
   OPERATION_INTERRUPTED: '操作被中断',
   PLATFORM_CONFIG_UNREADABLE: '平台配置读不出来，会话维护没开始',
-  AUTH_AUTO_LOGIN_PAUSED: '自动登录已暂停',
+  AUTH_AUTO_LOGIN_PAUSED:
+    '自动登录已暂停（此前自动登录失败或遇到验证码，系统不再自动重试以免锁号；请手动登录，或在账号设置里重新保存凭据后恢复自动登录）',
   AUTH_PROFILE_REQUIRED: '还没有可用的登录态检测规则',
   OUTCOME_UNKNOWN: '登录结果无法确认',
   BROWSER_UNAVAILABLE: '受管浏览器暂时不可用',
@@ -955,8 +956,8 @@ export function describeAuthWaitStage(code: string | null | undefined): string {
 
 export function describeManagedAuthWait(code: string | null | undefined): string {
   const issue = describeAuthIssue(code)
-  if (issue) return `${issue}。画面只发给当前处理登录的人。`
-  return '目标系统还没登录成功。画面只发给当前处理登录的人。'
+  if (issue) return `${issue}。画面只对有操作权限的人开放。`
+  return '目标系统还没登录成功。画面只对有操作权限的人开放。'
 }
 
 export const targetAuthProfileRevisionSchema = z.strictObject({

@@ -144,6 +144,8 @@ export const managedBrowserMetaSchema = z.strictObject({
   capabilities: managedBrowserCapabilitiesSchema,
   degradedReason: z.enum(['worker_unreachable', 'worker_generation_mismatch']).nullable(),
   lastAuthError: z.string().min(1).max(128).nullable().optional(),
+  /** 认证等待期的观看方式：readonly＝仅凭控制资格只读观看，未持有输入权。 */
+  viewMode: z.enum(['control', 'readonly']).optional(),
 })
 export type ManagedBrowserMeta = z.infer<typeof managedBrowserMetaSchema>
 
@@ -200,10 +202,13 @@ export function canObserveManagedFrames(input: {
   actorId: string
   controlActorId?: string | null
   controlExpiresAt?: Date | string | null
+  /** 调用方（API 已鉴权）是否具备取得输入权的资格；具备者认证等待期可只读观看。 */
+  actorCanControl?: boolean
   now?: number
 }): boolean {
   if (!['QUEUED', 'RUNNING', 'RECOVERING', 'WAITING_FOR_AUTH', 'HOLDING'].includes(input.runStatus)) return false
   if (input.runStatus !== 'WAITING_FOR_AUTH') return true
+  if (input.actorCanControl) return true
   if (!input.controlActorId || !input.controlExpiresAt) return false
   const expires =
     typeof input.controlExpiresAt === 'string'

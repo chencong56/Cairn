@@ -1,0 +1,2 @@
+# 仅用于容器内 pnpm deploy（构建时复制为 .npmrc，不提交生效到本机开发环境）
+inject-workspace-packages=true

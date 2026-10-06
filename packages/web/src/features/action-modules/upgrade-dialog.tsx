@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
 import {
   type ModuleInputBinding,
@@ -107,7 +108,7 @@ export function ModuleUpgradeDialog({
         baseRevision,
         bindingsPatch,
         confirmedWarnings: confirmed,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: newUuid(),
       })
       onOpenChange(false)
       onUpgraded(scenarioId)

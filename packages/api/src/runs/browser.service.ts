@@ -75,7 +75,7 @@ export class BrowserService {
       const raw = await this.workers.requestJson({
         ...this.callBase(target, actor, workerInternalPath('/meta'), 'headers'),
         method: 'GET',
-        query: { pageId },
+        query: { pageId, control: (await this.canControlRun(actor.id, runId)) ? '1' : undefined },
       })
       return managedBrowserMetaSchema.parse(raw)
     } catch (error) {
@@ -108,7 +108,10 @@ export class BrowserService {
         {
           ...this.callBase(target, input.actor, workerInternalPath('/frames'), 'stream'),
           method: 'GET',
-          query: { pageId: input.pageId },
+          query: {
+            pageId: input.pageId,
+            control: (await this.canControlRun(input.actor.id, input.runId)) ? '1' : undefined,
+          },
         },
         input.signal,
       )
@@ -260,6 +263,17 @@ export class BrowserService {
     }
   }
 
+  /** 认证等待期只读观看资格：与取得输入权同口径（session:control＋run:execute，目标范围内）。 */
+  private canControlRun(actorId: string, runId: string): Promise<boolean> {
+    return authorizeTargetRequest(this.db, actorId, {
+      runId,
+      permissions: ['session:control', 'run:execute'],
+    }).then(
+      () => true,
+      () => false,
+    )
+  }
+
   private async requireRunScope(runId: string, actorId: string, permissions: string[]): Promise<void> {
     await authorizeTargetRequest(this.db, actorId, { runId, permissions }).catch(rethrowDomain)
   }
@@ -390,6 +404,7 @@ export class BrowserService {
           actorId: accountId,
           controlActorId: target.session.authControlActorId,
           controlExpiresAt: target.session.authControlExpiresAt,
+          actorCanControl: await this.canControlRun(accountId, runId),
         })
       ) {
         return 'FORBIDDEN'

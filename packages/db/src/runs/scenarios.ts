@@ -12,11 +12,9 @@ import {
 import {
   ACTIVE_RUN_STATUSES,
   COMPILER_VERSION,
-  effectivePoliciesForSteps,
   FACTORY_COMPILE_RESOLUTION,
   resolutionCapabilitiesFromPlatform,
-  upgradeAuthoringLocatorDocument,
-  snapshotNeedsBrowserAi,
+  stepsNeedLocatorAiExecute,
   canonicalJson,
   syncSha256,
   ScenarioValidationError,
@@ -177,18 +175,11 @@ export type ScenarioCompileOptions = {
 }
 
 async function compileResolutionFromPlatform(db: Db, targetId?: string): Promise<CompileResolutionContext> {
-  const { minResolutionPolicy } = await import('@cairn/shared')
   const { loadResolutionLayers } = await import('./resolution-layers.js')
   const layers = await loadResolutionLayers(db, targetId)
   const caps = resolutionCapabilitiesFromPlatform(layers.document)
-  const effectiveCeiling = minResolutionPolicy(caps.ceiling, layers.targetCeiling ?? 'ai_only')
   return {
     ...FACTORY_COMPILE_RESOLUTION,
-    ceiling: caps.ceiling,
-    default: caps.default,
-    targetCeiling: layers.targetCeiling,
-    targetPreference: layers.targetPreference,
-    aiRungAvailable: caps.aiRungAvailable && effectiveCeiling !== 'deterministic_only',
     waitKindsAvailable: caps.waitKindsAvailable,
     locatorDocument: layers.document,
     locatorTarget: layers.targetPolicy,
@@ -209,9 +200,7 @@ function compileDocument(
     resolution: {
       ...FACTORY_COMPILE_RESOLUTION,
       ...options?.resolution,
-      documentResolution: options?.resolution?.documentResolution ?? document.resolution,
       documentLocatorPlan: options?.resolution?.documentLocatorPlan ?? document.locatorPlan,
-      locatorProtocol: options?.resolution?.locatorProtocol ?? document.locatorProtocol,
     },
     ...(outcomeManifest !== undefined ? { outcomeManifest } : {}),
   })
@@ -233,9 +222,7 @@ function parseDocument(input: unknown): ScenarioDocument {
         schemaVersion: input.schemaVersion,
         inputs: input.inputs,
         steps: authoringSteps(input),
-        ...(input.resolution ? { resolution: input.resolution } : {}),
         ...(input.locatorPlan ? { locatorPlan: input.locatorPlan } : {}),
-        ...(input.locatorProtocol === 2 ? { locatorProtocol: 2 as const } : {}),
       })
     }
     return parseScenarioDocument(input)
@@ -382,7 +369,6 @@ export async function expandWithLoader(
       resolution: {
         ...resolution,
         ...compilerCtx?.resolution,
-        documentResolution: compilerCtx?.resolution?.documentResolution ?? doc.resolution,
       },
     },
     fallbackEnabled: platform.document.moduleFallback.enabled,
@@ -522,9 +508,7 @@ async function toDetailDto(
       schemaVersion: 1,
       inputs: authoringDoc.inputs,
       steps: authoringSteps(authoringDoc),
-      ...(authoringDoc.resolution ? { resolution: authoringDoc.resolution } : {}),
       ...(authoringDoc.locatorPlan ? { locatorPlan: authoringDoc.locatorPlan } : {}),
-      ...(authoringDoc.locatorProtocol === 2 ? { locatorProtocol: 2 as const } : {}),
     }
     compiled = compileDocument(
       legacyDoc,
@@ -1044,29 +1028,23 @@ export async function saveScenarioDraft(
           '草稿已包含成功条件或运行期约束，旧客户端不能覆盖为 V1 文档。请更新编辑器。',
         )
       }
-      const resolution = await compileResolutionFromPlatform(tx as unknown as Db, current.targetId)
-      const savedDoc = upgradeAuthoringLocatorDocument({
-        document,
-        platform: resolution.locatorDocument!,
-        target: resolution.locatorTarget,
-      })
       await reconcileMapDraftBindingsTx(tx as unknown as Db, {
         scenarioId,
         targetId: current.targetId,
         revision: draft.revision + 1,
-        document: savedDoc,
+        document,
       })
       await tx
         .update(scenarioDrafts)
         .set({
           revision: draft.revision + 1,
-          document: savedDoc as any,
+          document: document as any,
           updatedByConsoleAccountId: input.actor.id,
           updatedAt: now,
         })
         .where(eq(scenarioDrafts.scenarioId, scenarioId))
       await tx.update(scenarios).set({ updatedAt: now }).where(eq(scenarios.id, scenarioId))
-      await syncScenarioModuleRefsTx(tx as unknown as Db, scenarioId, null, savedDoc)
+      await syncScenarioModuleRefsTx(tx as unknown as Db, scenarioId, null, document)
       await recordAudit(
         tx as unknown as Db,
         input.actor,
@@ -1125,10 +1103,7 @@ export async function publishScenarioDraft(
           'release',
           {
             executableTypes: input.executableTypes,
-            resolution: {
-              ...(await compileResolutionFromPlatform(tx as unknown as Db, current.targetId)),
-              documentResolution: expandResult.definition?.resolution,
-            },
+            resolution: await compileResolutionFromPlatform(tx as unknown as Db, current.targetId),
           },
           expandResult.outcomeManifest ?? { entries: [] },
         ),
@@ -1245,10 +1220,7 @@ export async function prepareTrialVersion(
           'release',
           {
             executableTypes: input.executableTypes,
-            resolution: {
-              ...trialResolution,
-              documentResolution: expandResult.definition?.resolution,
-            },
+            resolution: trialResolution,
           },
           expandResult.outcomeManifest ?? { entries: [] },
         ),
@@ -1261,15 +1233,12 @@ export async function prepareTrialVersion(
       }
       const { getOrCreatePlatformConfig } = await import('../platform-config/store.js')
       const platform = await getOrCreatePlatformConfig(tx as unknown as Db)
-      const effective = effectivePoliciesForSteps(
-        compiled.definition.steps,
-        {
-          ...trialResolution,
-          documentResolution: compiled.definition.resolution,
-        },
-        platform.document.browserAi.enabled,
-      )
-      if (snapshotNeedsBrowserAi(compiled.definition.steps, effective)) {
+      if (stepsNeedLocatorAiExecute({
+        steps: compiled.definition.steps,
+        document: platform.document,
+        target: trialResolution.locatorTarget,
+        scenarioPlan: compiled.definition.locatorPlan,
+      })) {
         const scope = await targetScopeFor(tx as unknown as Db, input.actor.id, 'ai:execute')
         if (!scope.all && !scope.ids.includes(current.targetId)) throw forbidden('AI_EXECUTE_FORBIDDEN', '缺少 ai:execute，不能运行含 AI 步骤或 AI 解析档位的场景')
       }

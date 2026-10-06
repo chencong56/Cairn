@@ -31,7 +31,6 @@ const samplePlatform = {
 const sampleDoc: ScenarioAuthoringDocumentV2 = {
   authoringSchemaVersion: 2,
   schemaVersion: 1,
-  locatorProtocol: 2,
   locatorPlan: { v: 2, order: ['rule', 'text_ai'] },
   inputs: [],
   nodes: [],

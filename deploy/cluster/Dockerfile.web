@@ -1,0 +1,13 @@
+# Cairn Web 入口镜像：静态产物 + Nginx（SPA 回退、/api 反代、SSE 保护）
+# 构建：podman build --platform linux/amd64 -f deploy/cluster/Dockerfile.web -t cairn-web:<tag> .
+FROM node:24-bookworm-slim AS builder
+WORKDIR /repo
+RUN corepack enable
+COPY .npmrc-build .npmrc
+COPY . .
+RUN pnpm install --frozen-lockfile --filter @cairn/web...
+RUN pnpm --filter @cairn/web... build
+
+FROM nginx:stable-alpine
+COPY deploy/cluster/nginx/entry.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /repo/packages/web/dist /usr/share/nginx/html

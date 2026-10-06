@@ -1,0 +1,19 @@
+# Cairn API 镜像（兼作迁移镜像：node_modules/@cairn/db/dist/bin/migrate-cli.js）
+# 构建：podman build --platform linux/amd64 -f deploy/cluster/Dockerfile.api -t cairn-api:<tag> .
+FROM node:24-bookworm-slim AS builder
+WORKDIR /repo
+RUN corepack enable
+COPY .npmrc-build .npmrc
+COPY . .
+RUN pnpm install --frozen-lockfile --filter @cairn/api...
+RUN pnpm --filter @cairn/api... build
+RUN pnpm --filter @cairn/api deploy --legacy --prod /out/api
+
+FROM node:24-bookworm-slim
+ENV NODE_ENV=production TZ=Asia/Shanghai
+WORKDIR /app
+COPY --from=builder /out/api ./
+USER node
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.CAIRN_API_PORT||3030)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "dist/main.js"]

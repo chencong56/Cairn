@@ -13,19 +13,11 @@ import {
 import { LOCAL_SECRET_PROVIDER, secretRefSchema } from './secret-ref.js'
 import { authoringCapabilitiesSchema, type AuthoringCapabilities } from './authoring-observation.js'
 import {
-  effectivePoliciesForSteps,
-  FACTORY_COMPILE_RESOLUTION,
   resolutionCapabilitiesSchema,
-  snapshotNeedsBrowserAi,
   WAIT_KINDS_AVAILABLE_NOW,
   type ResolutionCapabilities,
 } from './resolution.js'
 export type { ResolutionCapabilities }
-import {
-  FACTORY_RESOLUTION_CEILING,
-  FACTORY_RESOLUTION_DEFAULT,
-  type ResolutionPolicy,
-} from './resolution-policy.js'
 import type { LocatorPlan, LocatorRoute } from './locator-plan.js'
 import {
   AI_STEP_TYPES,
@@ -205,27 +197,17 @@ export function defaultAuthoringCapabilities(): AuthoringCapabilities {
 export function resolutionCapabilitiesFromPlatform(document: PlatformConfigDocument): ResolutionCapabilities {
   const textReady = Boolean(document.platformAi.enabled && document.platformAi.baseUrl && document.platformAi.model && document.platformAi.secretRef)
   const visionReady = Boolean(document.browserAi.enabled && document.browserAi.baseUrl && document.browserAi.model && document.browserAi.modelFamily && document.browserAi.secretRef)
-  const ceiling = document.browserAi.enabled
-    ? (document.browserAi.resolutionCeiling ?? FACTORY_RESOLUTION_CEILING)
-    : 'deterministic_only'
   const reasons: ResolutionCapabilities['reasons'] = []
   if (!document.browserAi.enabled) {
     reasons.push({ code: 'AI_DISABLED', message: '浏览器仿真 AI 未启用' })
   } else if (!document.browserAi.baseUrl || !document.browserAi.model || !document.browserAi.modelFamily || !document.browserAi.secretRef) {
     reasons.push({ code: 'AI_CONFIG_INVALID', message: '浏览器仿真 AI 配置不完整' })
-  }
-  if (document.browserAi.enabled && ceiling === 'deterministic_only') {
-    reasons.push({ code: 'CEILING_CLOSED', message: 'AI 定位能力上限未开放 AI 级' })
+  } else if (!document.locator.limits.allowed.some((route) => route !== 'rule')) {
+    reasons.push({ code: 'CEILING_CLOSED', message: '平台定位能力未开放模型定位' })
   }
   return {
-    ceiling,
-    default: document.browserAi.defaultResolution ?? FACTORY_RESOLUTION_DEFAULT,
     textReady,
     visionReady,
-    aiRungAvailable:
-      document.browserAi.enabled &&
-      ceiling !== 'deterministic_only' &&
-      !reasons.some((item) => item.code === 'AI_DISABLED' || item.code === 'AI_CONFIG_INVALID'),
     reasons,
     waitKindsAvailable: [...WAIT_KINDS_AVAILABLE_NOW],
   }
@@ -271,61 +253,20 @@ export function scenarioCapabilitiesFor(input: {
   }
 }
 
-export function runNeedsAiExecute(input: {
-  steps: readonly { id?: string; type: string; policy?: { resolution?: ResolutionPolicy } }[]
-  document: PlatformConfigDocument
-  documentResolution?: ResolutionPolicy
-  targetCeiling?: ResolutionPolicy
-  targetPreference?: ResolutionPolicy
-  effectiveSteps?: Readonly<Record<string, ResolutionPolicy>>
-}): boolean {
-  const resolution = resolutionCapabilitiesFromPlatform(input.document)
-  const effective =
-    input.effectiveSteps ??
-    (input.steps.every((step) => typeof step.id === 'string')
-      ? effectivePoliciesForSteps(
-          input.steps as unknown as { id: string; policy?: { resolution?: ResolutionPolicy } }[],
-          {
-            ...FACTORY_COMPILE_RESOLUTION,
-            ceiling: resolution.ceiling,
-            default: resolution.default,
-            targetCeiling: input.targetCeiling,
-            targetPreference: input.targetPreference,
-            documentResolution: input.documentResolution,
-            aiRungAvailable: resolution.aiRungAvailable,
-          },
-          input.document.browserAi.enabled,
-        )
-      : undefined)
-  return snapshotNeedsBrowserAi(input.steps as Step[], effective)
-}
-
 export function resolveAiExecutionFromPlatform(
-  steps: readonly { id?: string; type: string; disabled?: boolean; policy?: { timeoutMs?: number; retryLimit?: number; resolution?: ResolutionPolicy; locatorPlan?: LocatorPlan } }[],
+  steps: readonly { id?: string; type: string; disabled?: boolean; policy?: { timeoutMs?: number; retryLimit?: number; locatorPlan?: LocatorPlan } }[],
   document: PlatformConfigDocument,
   extras: {
     revision: number
     hangWaitMs: number
     policy?: ExecutionPolicy
-    documentResolution?: ResolutionPolicy
-    targetCeiling?: ResolutionPolicy
-    targetPreference?: ResolutionPolicy
-    effectiveSteps?: Readonly<Record<string, ResolutionPolicy>>
     requiredLocatorRoutes?: readonly LocatorRoute[]
   },
 ) {
   const explicitAiStep = steps.some((step) => !('disabled' in step && step.disabled) && isAiStepType(step.type))
   const needsLocator = extras.requiredLocatorRoutes?.some((route) => route !== 'rule') ?? false
-  const legacyNeedsAi = extras.requiredLocatorRoutes === undefined && runNeedsAiExecute({
-    steps,
-    document,
-    documentResolution: extras.documentResolution,
-    targetCeiling: extras.targetCeiling,
-    targetPreference: extras.targetPreference,
-    effectiveSteps: extras.effectiveSteps,
-  })
-  if (!explicitAiStep && !needsLocator && !legacyNeedsAi) return undefined
-  const needsVision = explicitAiStep || extras.requiredLocatorRoutes?.includes('vision_ai') === true || !extras.requiredLocatorRoutes
+  if (!explicitAiStep && !needsLocator) return undefined
+  const needsVision = explicitAiStep || extras.requiredLocatorRoutes?.includes('vision_ai') === true
   const needsText = extras.requiredLocatorRoutes?.includes('text_ai') === true
   if (needsVision && !document.browserAi.enabled) {
     throw Object.assign(new Error('浏览器仿真 AI 未启用'), { code: 'AI_DISABLED' })

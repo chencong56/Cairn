@@ -66,6 +66,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { getReliabilitySignalMeta, type IncidentSeverity, type MaintenanceUpgradeJobDto } from '@cairn/shared'
 import { getIncidentStatusMeta } from './index'
 
@@ -448,10 +449,13 @@ export function IncidentDetailPage() {
                           variant="ghost"
                           size="icon"
                           className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                          onClick={() => {
-                            void navigator.clipboard.writeText(incident.groupingKey).then(() => {
+                          onClick={async () => {
+                            const ok = await copyToClipboard(incident.groupingKey)
+                            if (ok) {
                               toast.success('已复制归并特征键')
-                            })
+                            } else {
+                              toast.error('复制失败，请手动复制')
+                            }
                           }}
                           title="复制归并键"
                         >
@@ -467,10 +471,13 @@ export function IncidentDetailPage() {
                           variant="ghost"
                           size="icon"
                           className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                          onClick={() => {
-                            void navigator.clipboard.writeText(incident.scopeDigest).then(() => {
+                          onClick={async () => {
+                            const ok = await copyToClipboard(incident.scopeDigest)
+                            if (ok) {
                               toast.success('已复制范围摘要')
-                            })
+                            } else {
+                              toast.error('复制失败，请手动复制')
+                            }
                           }}
                           title="复制范围摘要"
                         >
@@ -486,10 +493,13 @@ export function IncidentDetailPage() {
                           variant="ghost"
                           size="icon"
                           className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                          onClick={() => {
-                            void navigator.clipboard.writeText(incident.id).then(() => {
+                          onClick={async () => {
+                            const ok = await copyToClipboard(incident.id)
+                            if (ok) {
                               toast.success('已复制事件 ID')
-                            })
+                            } else {
+                              toast.error('复制失败，请手动复制')
+                            }
                           }}
                           title="复制事件 ID"
                         >
@@ -646,9 +656,13 @@ export function IncidentDetailPage() {
                                       size="icon"
                                       className="size-5 text-muted-foreground hover:text-foreground"
                                       title={`复制完整标识: ${rawRef}`}
-                                      onClick={() => {
-                                        navigator.clipboard?.writeText(rawRef)
-                                        toast.success('已复制引用标识')
+                                      onClick={async () => {
+                                        const ok = await copyToClipboard(rawRef)
+                                        if (ok) {
+                                          toast.success('已复制引用标识')
+                                        } else {
+                                          toast.error('复制失败，请手动复制')
+                                        }
                                       }}
                                     >
                                       <Copy className="size-3" />

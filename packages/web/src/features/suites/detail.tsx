@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import {
@@ -42,7 +43,7 @@ function nextMemberId(members: SuiteMember[]) {
 }
 
 function newIdempotencyKey() {
-  return `suite-${crypto.randomUUID()}`
+  return `suite-${newUuid()}`
 }
 
 const EMPTY_PERMISSIONS: string[] = []

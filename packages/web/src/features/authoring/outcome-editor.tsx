@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import {
   expectKindLabel,
   type AssertExpect,
@@ -36,7 +37,7 @@ const EXPECT_OPTIONS: { kind: AssertExpect['kind']; label: string }[] = [
 ]
 
 function newContractId(): string {
-  return crypto.randomUUID()
+  return newUuid()
 }
 
 function blankContract(scope: OutcomeContract['scope']): OutcomeContract {

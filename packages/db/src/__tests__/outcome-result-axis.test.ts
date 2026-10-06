@@ -51,7 +51,8 @@ const SCHEMA = `cairn_test_${Date.now().toString(36)}_outcome`
 const registerWorkerWith = (db: any, input: any) =>
   registerWorkerRaw(db, {
     ...input,
-    protocolCapabilities: [
+    protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL,
+      
       SESSION_OCCUPANCY_PROTOCOL,
       ...(input.protocolCapabilities ?? []),
     ],

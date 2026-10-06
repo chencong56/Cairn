@@ -1,19 +1,11 @@
 import { z } from 'zod'
 import { locatorPlanSchema } from './locator-plan.js'
-import type { LocatorPlan } from './locator-plan.js'
 import type { PlatformConfigDocument } from './platform-config.js'
 import type { TargetResolutionPolicy } from './resolution-policy.js'
 import { candidateTrySchema } from './browser-command.js'
 import { mapEvidenceRefSchema } from './map-c0.js'
-import {
-  FACTORY_RESOLUTION_CEILING,
-  FACTORY_RESOLUTION_DEFAULT,
-  mergeEffectiveResolution,
-  policyAllowsAiRung,
-  resolutionPolicySchema,
-  type ResolutionPolicy,
-} from './resolution-policy.js'
-import { hasAiSteps, isAiStepType, waitKindSchema, type Step, type WaitKind } from './step.js'
+import { resolutionPolicySchema } from './resolution-policy.js'
+import { waitKindSchema, type WaitKind } from './step.js'
 import { nextCursorSchema } from './rbac.js'
 import { entityIdSchema, utcInstantSchema } from './wire.js'
 
@@ -133,9 +125,6 @@ export type ResolutionUnavailableCode = (typeof RESOLUTION_UNAVAILABLE_CODES)[nu
 export const WAIT_KINDS_AVAILABLE_NOW = ['time', 'visible', 'hidden', 'url', 'text'] as const satisfies readonly WaitKind[]
 
 export const resolutionCapabilitiesSchema = z.strictObject({
-  ceiling: resolutionPolicySchema,
-  default: resolutionPolicySchema,
-  aiRungAvailable: z.boolean(),
   textReady: z.boolean().optional(),
   visionReady: z.boolean().optional(),
   reasons: z.array(
@@ -149,82 +138,12 @@ export const resolutionCapabilitiesSchema = z.strictObject({
 export type ResolutionCapabilities = z.infer<typeof resolutionCapabilitiesSchema>
 
 export type CompileResolutionContext = {
-  ceiling: ResolutionPolicy
-  default: ResolutionPolicy
-  targetCeiling?: ResolutionPolicy
-  targetPreference?: ResolutionPolicy
-  documentResolution?: ResolutionPolicy
-  documentLocatorPlan?: LocatorPlan
-  locatorProtocol?: 2
+  documentLocatorPlan?: import('./locator-plan.js').LocatorPlan
   locatorDocument?: PlatformConfigDocument
   locatorTarget?: TargetResolutionPolicy | null
-  aiRungAvailable?: boolean
   waitKindsAvailable?: readonly WaitKind[]
 }
 
 export const FACTORY_COMPILE_RESOLUTION: CompileResolutionContext = {
-  ceiling: FACTORY_RESOLUTION_CEILING,
-  default: FACTORY_RESOLUTION_DEFAULT,
-  aiRungAvailable: false,
   waitKindsAvailable: WAIT_KINDS_AVAILABLE_NOW,
-}
-
-export function effectivePoliciesForSteps(
-  steps: readonly { id: string; policy?: { resolution?: ResolutionPolicy } }[],
-  ctx: CompileResolutionContext,
-  browserAiEnabled = ctx.aiRungAvailable === true,
-): Record<string, ResolutionPolicy> {
-  const out: Record<string, ResolutionPolicy> = {}
-  for (const step of steps) {
-    out[step.id] = mergeEffectiveResolution({
-      ceiling: ctx.ceiling,
-      defaultResolution: ctx.default,
-      targetCeiling: ctx.targetCeiling,
-      targetPreference: ctx.targetPreference,
-      document: ctx.documentResolution,
-      step: step.policy?.resolution,
-      browserAiEnabled,
-    })
-  }
-  return out
-}
-
-export function snapshotNeedsBrowserAi(
-  steps: readonly Step[],
-  effectiveByStep?: Readonly<Record<string, ResolutionPolicy>>,
-): boolean {
-  const enabled = steps.filter((step) => !step.disabled)
-  if (hasAiSteps(enabled)) return true
-  if (!effectiveByStep) return false
-  return enabled.some((step) => !isAiStepType(step.type) && policyAllowsAiRung(effectiveByStep[step.id] ?? 'deterministic_only'))
-}
-
-export function deriveAuthoringResolutionMode(input: {
-  steps: readonly Step[]
-  effectiveByStep: Readonly<Record<string, ResolutionPolicy>>
-}): 'rule' | 'ai' | 'mixed' {
-  const business = input.steps.filter((step) => step.type !== 'echo' && step.type !== 'delay' && step.type !== 'fail')
-  const allAiSteps = business.length > 0 && business.every((step) => isAiStepType(step.type))
-  const allSemanticOnly =
-    business.length > 0 &&
-    business.every((step) => {
-      const target = targetOf(step)
-      return !target || (target.candidates.length === 0 && Boolean(target.semantic))
-    })
-  if (allAiSteps || allSemanticOnly) return 'ai'
-  const anyAiStep = business.some((step) => isAiStepType(step.type))
-  const anyAiRung = business.some((step) => policyAllowsAiRung(input.effectiveByStep[step.id] ?? 'deterministic_only'))
-  const anySemanticOnly = business.some((step) => {
-    const target = targetOf(step)
-    return Boolean(target && target.candidates.length === 0 && target.semantic)
-  })
-  if (anyAiStep || anyAiRung || anySemanticOnly) return 'mixed'
-  return 'rule'
-}
-
-function targetOf(step: Step): { candidates: { by: string }[]; semantic?: string } | undefined {
-  if (!('input' in step) || !step.input || typeof step.input !== 'object' || !('target' in step.input)) return undefined
-  const target = step.input.target
-  if (!target || typeof target !== 'object' || !('candidates' in target)) return undefined
-  return target as { candidates: { by: string }[]; semantic?: string }
 }

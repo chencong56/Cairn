@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { assistantRecordingSelectionError, authoringNodeId, expectKindLabel, normalizeAuthoringDocument, type AssistantRecordingProposalResult, type ConfirmRecordingOutcomeResult, type OutcomeRule, type RecordingInsertAnchor, type RecordingPreviewResult, type TargetDescriptor } from '@cairn/shared'
 import { Button } from '@/components/ui/button'
@@ -118,7 +119,7 @@ function RecordingProposalContent({ result, conversationId, turnId, go }: Record
     setPreview(undefined)
     const selection = await selectRecordingProposal(conversationId, turnId, { proposalDigest: result.candidateDigest!, selectedItemIds: selected })
     const value = await previewRecordingProposal(conversationId, selection.turnId, { destinationScenarioId, insertAnchor: insertAnchor ? JSON.stringify(insertAnchor) : undefined })
-    return { value, turnId: selection.turnId, proposalDigest: selection.proposalDigest, key: crypto.randomUUID() }
+    return { value, turnId: selection.turnId, proposalDigest: selection.proposalDigest, key: newUuid() }
   }, onSuccess: setPreview })
   const adoption = useMutation({ mutationFn: async () => {
     if (!preview) throw new Error('请先预览')

@@ -383,10 +383,7 @@ export async function acceptKnowledgeProposal(
     const now = await clockNow(tx)
     const nextRevision = draft.revision + 1
     const nextSavedDocument = isAuthoringDocumentV2(draft.document)
-      ? {
-          ...normalizeAuthoringDocument(nextDocument),
-          ...(draft.document.locatorProtocol === 2 ? { locatorProtocol: 2 as const } : {}),
-        }
+      ? normalizeAuthoringDocument(nextDocument)
       : nextDocument
     await tx
       .update(scenarioDrafts)

@@ -111,7 +111,7 @@ describe('BrowserView', () => {
         <BrowserView runId={meta.runId} runStatus="WAITING_FOR_AUTH" waitReason="LOGIN_PAGE_UNREACHABLE" />
       </QueryClientProvider>,
     )
-    await expect.element(screen.getByText('目标登录页打不开。画面只发给当前处理登录的人。')).toBeInTheDocument()
+    await expect.element(screen.getByText('目标登录页打不开。画面只对有操作权限的人开放。')).toBeInTheDocument()
   })
 
   it('等待认证时说明登录页打不开并展示当前页地址', async () => {
@@ -133,7 +133,7 @@ describe('BrowserView', () => {
     })
     signIn(['run:read', 'session:view', 'session:control', 'run:execute'])
     const screen = await renderView()
-    await expect.element(screen.getByText('目标登录页打不开。画面只发给当前处理登录的人。')).toBeInTheDocument()
+    await expect.element(screen.getByText('目标登录页打不开。画面只对有操作权限的人开放。')).toBeInTheDocument()
     await expect.element(screen.getByText(/当前页 空白页/)).toBeInTheDocument()
   })
 
@@ -148,17 +148,36 @@ describe('BrowserView', () => {
     await expect.element(screen.getByRole('button', { name: '放弃控制' })).toBeInTheDocument()
   })
 
-  it('等待认证且未持权时不订阅画面', async () => {
-    mocks.fetchManagedBrowser.mockResolvedValue({
-      ...meta,
-      framesAvailable: true,
-    })
+  it('等待认证且无画面资格时不订阅画面', async () => {
+    mocks.fetchManagedBrowser.mockResolvedValue({ ...meta, framesAvailable: false })
     signIn(['run:read', 'session:view', 'session:control', 'run:execute'])
     const screen = await renderView()
     await expect
-      .element(screen.getByText('取得登录权后才会显示认证画面，避免把验证码广播给其他观察者。'))
+      .element(screen.getByText('认证画面仅对有操作权限的用户开放，避免把验证码广播给其他观察者。'))
       .toBeInTheDocument()
     expect(mocks.subscribeBrowserFrames).not.toHaveBeenCalled()
+  })
+
+  it('等待认证时有控制资格者未取得输入权也能只读观看', async () => {
+    mocks.fetchManagedBrowser.mockResolvedValue({ ...meta, framesAvailable: true, viewMode: 'readonly' })
+    signIn(['run:read', 'session:view', 'session:control', 'run:execute'])
+    const screen = await renderView()
+    await expect.element(screen.getByText('只读观看中，点击「处理登录」后才能输入')).toBeInTheDocument()
+    await vi.waitFor(() => expect(mocks.subscribeBrowserFrames).toHaveBeenCalled())
+    expect(mocks.inputAuthControl).not.toHaveBeenCalled()
+  })
+
+  it('取得输入权失败时错误码与说明常驻界面', async () => {
+    mocks.acquireAuthControl.mockRejectedValue(
+      new ApiRequestError(409, { code: 'AUTH_HOLD_UNBOUND', message: '认证占用已过期', requestId: 'req-held' }),
+    )
+    signIn(['run:read', 'session:view', 'session:control', 'run:execute'])
+    const screen = await renderView()
+    await screen.getByRole('button', { name: '处理登录' }).click()
+    await expect
+      .element(screen.getByText('无法取得登录输入权：认证占用已过期（AUTH_HOLD_UNBOUND）'))
+      .toBeInTheDocument()
+    await expect.element(screen.getByRole('button', { name: '重试处理登录' })).toBeInTheDocument()
   })
 
   it('画面流失败不交还登录控制权', async () => {
@@ -190,7 +209,7 @@ describe('BrowserView', () => {
     const screen = await renderView()
     await expect.element(screen.getByText('由其他用户处理登录')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '处理登录' }).element()).toBeDisabled()
-    await expect.element(screen.getByText('取得登录权后才会显示认证画面，避免把验证码广播给其他观察者。')).toBeInTheDocument()
+    await expect.element(screen.getByText('认证画面仅对有操作权限的用户开放，避免把验证码广播给其他观察者。')).toBeInTheDocument()
   })
 
   it('试跑运行中自动展开并订阅画面', async () => {

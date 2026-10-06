@@ -1,4 +1,5 @@
 import { apiErrorSchema, REQUEST_ID_HEADER } from '@cairn/shared'
+import { newUuid } from '@/lib/uuid'
 import { ApiRequestError } from '@/lib/api-client'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -30,7 +31,7 @@ export async function assertSseResponseOk(res: Response, token: string | undefin
 }
 
 export function newSseRequestId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  if (typeof crypto.randomUUID === 'function') return newUuid()
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }

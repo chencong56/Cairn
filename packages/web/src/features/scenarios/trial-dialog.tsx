@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
 import { runInputSchema, type RunDetailDto, type ScenarioInputDecl } from '@cairn/shared'
 import { toast } from 'sonner'
@@ -68,7 +69,7 @@ function trialFailure(error: unknown): { message: string; diagnostics: string[] 
 }
 
 function newIdempotencyKey(): string {
-  const id = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}`
+  const id = typeof crypto.randomUUID === 'function' ? newUuid() : `${Date.now()}`
   return `trial-${id}`
 }
 

@@ -1,6 +1,8 @@
 import { inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { SESSION_OCCUPANCY_PROTOCOL, type Step } from '@cairn/shared'
+import { SESSION_OCCUPANCY_PROTOCOL, type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
+} from '@cairn/shared'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import {
@@ -85,7 +87,7 @@ describe.each(DRIVERS)('%s 领取公平性与扫描上界', { timeout: 90_000 },
       capacity: 8,
       maxSessions,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     return { workerId, instanceId }
   }

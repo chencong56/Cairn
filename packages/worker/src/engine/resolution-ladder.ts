@@ -3,11 +3,8 @@ import {
   crossCheckMatches,
   describeLocatorCandidates,
   isCrossCheckContainerTag,
-  policyAllowsAiRung,
-  policyStartsAtAiRung,
   resolvedSelector,
   syncSha256,
-  policyAllowsVisionAi,
   type BrowserCommand,
   type BrowserCommandResult,
   type ExecutionError,
@@ -142,99 +139,7 @@ export async function runResolutionLadder(input: {
     const followUp = await consumption.afterBaseline(ctx, step, result, command)
     return finalizeBrowser(followUp, result)
   }
-  if (frozen.protocol === 'snapshot.resolution@2') {
-    return runLocatorPlan({ ...input, command }, frozen.steps[step.id]?.actual ?? ['rule'])
-  }
-
-  const effective: ResolutionPolicy = frozen.steps[step.id] ?? 'deterministic_only'
-  const target = command.target
-  const rungs: ResolutionRungRecord[] = []
-  const semantic = target.semantic?.trim() || describeLocatorCandidates(target.candidates)
-  const semanticDigest = semantic ? syncSha256(semantic) : undefined
-
-  const record = async (
-    decision: ResolutionDecision['decision'],
-    reasonCode?: ResolutionReasonCode,
-  ) => persistResolutionDecision(handle, ctx, {
-    effectivePolicy: effective,
-    rungs,
-    decision,
-    reasonCode,
-    semanticDigest,
-    evidenceRefs: [],
-  })
-
-  if (policyStartsAtAiRung(effective)) {
-    const aiOutcome = await tryAiRung({ handle, ctx, step, command, target, effective, semantic, ai, browser, execute, rungs })
-    if (aiOutcome.kind === 'success' || aiOutcome.kind === 'failed') return aiOutcome.outcome
-    if (effective === 'ai_only') {
-      const persisted = await record('failed', aiOutcome.reason)
-      if (!persisted.ok) return failed(preferExistingError(aiOutcome.error ?? resolutionError(aiOutcome.reason ?? 'AI_NOT_FOUND', 'AI 定位未命中'), persisted.error))
-      return failed(aiOutcome.error ?? resolutionError(aiOutcome.reason ?? 'AI_NOT_FOUND', 'AI 定位未命中'))
-    }
-  }
-
-  const startedD = Date.now()
-  const deterministic = await execute(command)
-  rungs.push({
-    rung: 'D',
-    outcome: outcomeFromBrowser(deterministic),
-    spentMs: clampSpentMs(startedD),
-    candidatesTried: deterministic.diagnostics?.candidatesTried,
-  })
-  if (deterministic.ok) {
-    const followUp = await consumption.afterBaseline(ctx, step, deterministic, command)
-    const persisted = await record('deterministic')
-    if (!persisted.ok) return failed(persisted.error)
-    if (followUp.kind === 'blocked') return failed(followUp.error)
-    return finalizeBrowser(followUp, deterministic)
-  }
-  if (!isDeterministicMiss(deterministic)) {
-    const persisted = await record('failed', reasonFromBrowser(deterministic))
-    if (!persisted.ok) return failed(preferExistingError(deterministic.error, persisted.error), deterministic)
-    return failed(deterministic.error, deterministic)
-  }
-
-  if (!policyStartsAtAiRung(effective)) {
-    const startedM = Date.now()
-    const followUp = await consumption.afterBaseline(ctx, step, deterministic, command)
-    if (followUp.kind === 'replaced') {
-      rungs.push({
-        rung: 'M',
-        outcome: outcomeFromBrowser(followUp.result),
-        spentMs: clampSpentMs(startedM),
-        mapDecisionId: followUp.mapDecisionId,
-      })
-      const persisted = await record(followUp.result.ok ? 'map' : 'failed', followUp.result.ok ? undefined : 'TARGET_NOT_FOUND')
-      if (!persisted.ok) {
-        const existing = followUp.result.ok
-          ? persisted.error
-          : preferExistingError(followUp.result.error, persisted.error)
-        return followUp.result.ok ? failed(persisted.error) : failed(existing, followUp.result)
-      }
-      return finalizeBrowser(followUp, followUp.result)
-    }
-    if (followUp.kind === 'blocked') {
-      rungs.push({ rung: 'M', outcome: followUp.error.code, spentMs: clampSpentMs(startedM) })
-      const persisted = await record('failed', 'PERSISTENCE_FAILED')
-      if (!persisted.ok) return failed(preferExistingError(followUp.error, persisted.error))
-      return failed(followUp.error)
-    }
-    rungs.push({ rung: 'M', outcome: 'SKIPPED', spentMs: clampSpentMs(startedM) })
-  }
-
-  if (policyAllowsAiRung(effective) && !policyStartsAtAiRung(effective)) {
-    const aiOutcome = await tryAiRung({ handle, ctx, step, command, target, effective, semantic, ai, browser, execute, rungs })
-    if (aiOutcome.kind === 'success' || aiOutcome.kind === 'failed') return aiOutcome.outcome
-    const fallback = aiOutcome.error ?? deterministic.error
-    const persisted = await record('failed', aiOutcome.reason ?? 'TARGET_NOT_FOUND')
-    if (!persisted.ok) return failed(preferExistingError(fallback, persisted.error), deterministic)
-    return failed(fallback, deterministic)
-  }
-
-  const persisted = await record('failed', 'TARGET_NOT_FOUND')
-  if (!persisted.ok) return failed(preferExistingError(deterministic.error, persisted.error), deterministic)
-  return failed(deterministic.error, deterministic)
+  return runLocatorPlan({ ...input, command }, frozen.steps[step.id]?.actual ?? ['rule'])
 }
 
 function policyForRoutes(routes: readonly LocatorRoute[]): ResolutionPolicy {
@@ -271,6 +176,7 @@ async function runLocatorPlan(input: {
       evidenceRefs: [],
     })
   let lastError: ExecutionError = resolutionError('TARGET_NOT_FOUND', '未找到页面目标')
+  let lastResult: BrowserCommandResult | undefined
   for (const route of routes) {
     if (route === 'rule') {
       const startedD = Date.now()
@@ -288,6 +194,7 @@ async function runLocatorPlan(input: {
         return failed(persisted.ok ? result.error : preferExistingError(result.error, persisted.error), result)
       }
       lastError = result.error
+      lastResult = result
       const startedM = Date.now()
       const followUp = await consumption.afterBaseline(ctx, step, result, command)
       if (followUp.kind === 'replaced') {
@@ -301,6 +208,7 @@ async function runLocatorPlan(input: {
           return failed(persisted.ok ? followUp.result.error : preferExistingError(followUp.result.error, persisted.error), followUp.result)
         }
         lastError = followUp.result.error
+        lastResult = followUp.result
       } else if (followUp.kind === 'blocked') {
         rungs.push({ rung: 'M', outcome: followUp.error.code, spentMs: clampSpentMs(startedM) })
         const persisted = await record('failed', 'PERSISTENCE_FAILED')
@@ -318,7 +226,7 @@ async function runLocatorPlan(input: {
     if (aiOutcome.error) lastError = aiOutcome.error
   }
   const persisted = await record('failed', lastError.code === 'AI_NOT_FOUND' ? 'AI_NOT_FOUND' : 'TARGET_NOT_FOUND')
-  return failed(persisted.ok ? lastError : preferExistingError(lastError, persisted.error))
+  return failed(persisted.ok ? lastError : preferExistingError(lastError, persisted.error), lastResult)
 }
 
 async function tryAiRung(input: {
@@ -406,7 +314,7 @@ async function tryAiRung(input: {
       allowedOrigins: ctx.snapshot.allowedOrigins ?? [],
       loginOrigin: ctx.snapshot.loginOrigin,
       loginPath: ctx.snapshot.loginPath,
-      allowVision: policyAllowsVisionAi(effective),
+      allowVision: input.route !== 'text',
       ...(input.route ? { route: input.route } : {}),
     },
     ctx.signal,
@@ -498,7 +406,7 @@ async function tryAiRung(input: {
       candidate.by === 'role' ? Boolean(candidate.name?.trim())
         : candidate.by === 'label' || candidate.by === 'text' || candidate.by === 'title' ? Boolean(candidate.value.trim()) : false,
     )
-    const explicitPureModel = step.policy?.resolution === 'ai_only' || Boolean(step.policy?.locatorPlan && step.policy.locatorPlan.order.every((route) => route !== 'rule'))
+    const explicitPureModel = Boolean(step.policy?.locatorPlan && step.policy.locatorPlan.order.every((route) => route !== 'rule'))
     if (!hasBusinessIdentity && !explicitPureModel) {
       crossCheck = 'not_applicable'
       rungs.push({

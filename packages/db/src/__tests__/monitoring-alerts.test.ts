@@ -9,6 +9,7 @@ import {
   alertOpenKey,
   type AlertRule,
   type PlatformConfigDocument,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { eq } from 'drizzle-orm'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -104,7 +105,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const { workers } = schemaFor(handle.db)
     await handle.db.update(workers).set({ heartbeatExpiresAt: new Date(Date.now() - 1_000) }).where(eq(workers.id, workerId))
@@ -303,7 +304,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const { workers } = schemaFor(handle.db)
     await handle.db
@@ -342,7 +343,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     expect((await evaluateAlerts(handle.db)).resolved).toBe(1)
     const history = await listMonitorAlerts(handle.db, { view: 'history', limit: 20 })
@@ -383,7 +384,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const { workers } = schemaFor(handle.db)
     await handle.db
@@ -400,7 +401,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     await handle.db
       .update(workers)
@@ -417,7 +418,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     await handle.db
       .update(workers)

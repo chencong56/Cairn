@@ -14,6 +14,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from '@/components/ui/collapsible'
+import { copyToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 
 function stageLabel(stage: string | null, queuePos?: number | null): string {
@@ -82,12 +83,10 @@ export function ThinkingProcessBlock({
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (!thinkingText) return
-    try {
-      await navigator.clipboard.writeText(thinkingText)
+    const ok = await copyToClipboard(thinkingText)
+    if (ok) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // 忽略无法写入剪贴板的场景
     }
   }
 

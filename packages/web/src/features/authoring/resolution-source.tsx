@@ -1,17 +1,15 @@
 import { createContext, useContext, type ReactNode } from 'react'
-import type { LocatorPlan, ResolutionPolicy } from '@cairn/shared'
+import type { LocatorPlan } from '@cairn/shared'
 
-type ResolutionSource = { targetId?: string; scenarioPlan?: LocatorPlan; scenarioPolicy?: ResolutionPolicy; locatorProtocol?: 2 }
+type ResolutionSource = { targetId?: string; scenarioPlan?: LocatorPlan }
 const ResolutionSourceContext = createContext<ResolutionSource>({})
 
 export function ResolutionSourceProvider({
   targetId,
   scenarioPlan,
-  scenarioPolicy,
-  locatorProtocol,
   children,
 }: ResolutionSource & { children: ReactNode }) {
-  return <ResolutionSourceContext.Provider value={{ targetId, scenarioPlan, scenarioPolicy, locatorProtocol }}>{children}</ResolutionSourceContext.Provider>
+  return <ResolutionSourceContext.Provider value={{ targetId, scenarioPlan }}>{children}</ResolutionSourceContext.Provider>
 }
 
 export function useResolutionTargetId() {

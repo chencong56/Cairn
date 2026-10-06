@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   SESSION_OCCUPANCY_PROTOCOL,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb, grantAdminScope } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
@@ -398,7 +399,7 @@ describe.each(DRIVERS)('%s 失联处置策略', { timeout: 60_000 }, (driver) =>
       instanceId: newId(),
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const closed = (await getSessionById(handle.db, claimed.session.id))!
     expect(closed.status).toBe('CLOSED')

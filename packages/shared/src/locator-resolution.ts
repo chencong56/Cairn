@@ -6,19 +6,15 @@ import {
   type LocatorRoute,
   type LocatorSkip,
 } from './locator-plan.js'
-import {
-  mergeEffectiveResolution,
-  type ResolutionPolicy,
-} from './resolution-policy.js'
 import type { PlatformConfigDocument } from './platform-config.js'
 import type { TargetResolutionPolicy } from './resolution-policy.js'
-import type { AuthoringNode, ScenarioAuthoringDocumentV2 } from './authoring-document.js'
+import { isAiStepType } from './step.js'
 
-export type LocatorLayer = { plan?: LocatorPlan; policy?: ResolutionPolicy }
-export type LocatorLimitLayer = { limits?: LocatorLimits; ceiling?: ResolutionPolicy }
+export type LocatorLayer = { plan?: LocatorPlan }
+export type LocatorLimitLayer = { limits?: LocatorLimits }
 
 export type LocatorResolutionInput = {
-  platform: LocatorLayer & LocatorLimitLayer & { defaultPolicy: ResolutionPolicy; ceiling: ResolutionPolicy }
+  platform: { plan: LocatorPlan; limits: LocatorLimits }
   target?: LocatorLayer & LocatorLimitLayer
   scenario?: LocatorLayer
   step?: LocatorLayer
@@ -42,47 +38,19 @@ export class LocatorPlanError extends Error {
   }
 }
 
-export function legacyCeilingRoutes(ceiling: ResolutionPolicy): LocatorRoute[] {
-  if (ceiling === 'deterministic_only') return ['rule']
-  if (ceiling === 'prefer_deterministic_text' || ceiling === 'prefer_text_ai') return ['rule', 'text_ai']
-  return ['rule', 'text_ai', 'vision_ai']
-}
-
-/** 必须忠实映射 v1 的实际调用顺序，文本配置不齐时 v1 原本会跳过文本档。 */
-export function legacyPolicyRoutes(policy: ResolutionPolicy, textReady: boolean): LocatorRoute[] {
-  switch (policy) {
-    case 'deterministic_only': return ['rule']
-    case 'prefer_deterministic_text': return textReady ? ['rule', 'text_ai'] : ['rule']
-    case 'prefer_deterministic': return textReady ? ['rule', 'text_ai', 'vision_ai'] : ['rule', 'vision_ai']
-    case 'prefer_text_ai': return textReady ? ['text_ai', 'rule'] : ['rule']
-    case 'prefer_ai': return textReady ? ['text_ai', 'vision_ai', 'rule'] : ['vision_ai', 'rule']
-    case 'ai_only': return textReady ? ['text_ai', 'vision_ai'] : ['vision_ai']
-  }
-}
-
 export function resolveLocatorPlan(input: LocatorResolutionInput): LocatorResolution {
-  const platformAllowed = input.platform.limits?.allowed ?? legacyCeilingRoutes(input.platform.ceiling)
-  const targetAllowed = input.target?.limits?.allowed ?? (input.target?.ceiling ? legacyCeilingRoutes(input.target.ceiling) : platformAllowed)
+  const platformAllowed = input.platform.limits.allowed
+  const targetAllowed = input.target?.limits?.allowed ?? platformAllowed
   const allowed = platformAllowed.filter((route) => targetAllowed.includes(route))
 
-  const layer = input.step?.plan || input.step?.policy ? input.step
-    : input.scenario?.plan || input.scenario?.policy ? input.scenario
-    : input.target?.plan || input.target?.policy ? input.target
+  const layer = input.step?.plan ? input.step
+    : input.scenario?.plan ? input.scenario
+    : input.target?.plan ? input.target
     : input.platform
   const source: LocatorResolution['source'] = layer === input.step ? 'step'
     : layer === input.scenario ? 'scenario'
     : layer === input.target ? 'target' : 'platform'
-  const legacyEffective = mergeEffectiveResolution({
-    ceiling: input.platform.ceiling,
-    defaultResolution: input.platform.defaultPolicy,
-    targetCeiling: input.target?.ceiling,
-    targetPreference: input.target?.policy,
-    document: input.scenario?.policy,
-    step: input.step?.policy,
-  })
-  const requested = layer?.plan
-    ? [...locatorPlanSchema.parse(layer.plan).order]
-    : legacyPolicyRoutes(legacyEffective, input.textReady)
+  const requested = [...locatorPlanSchema.parse(layer.plan).order]
   const explicit = source === 'step' || source === 'scenario'
   const skipped: LocatorSkip[] = []
   const actual: LocatorRoute[] = []
@@ -112,24 +80,19 @@ export function locatorReadiness(document: PlatformConfigDocument): { textReady:
 }
 
 export function resolveLocatorPlansForSteps(input: {
-  steps: readonly { id: string; type?: string; input?: unknown; disabled?: boolean; policy?: { locatorPlan?: LocatorPlan; resolution?: ResolutionPolicy } }[]
+  steps: readonly { id: string; type?: string; input?: unknown; disabled?: boolean; policy?: { locatorPlan?: LocatorPlan } }[]
   document: PlatformConfigDocument
   target?: TargetResolutionPolicy | null
   scenarioPlan?: LocatorPlan
-  scenarioPolicy?: ResolutionPolicy
 }): Record<string, LocatorResolution> {
   const readiness = locatorReadiness(input.document)
   const platform = {
-    plan: input.document.locator?.defaultPlan,
-    limits: input.document.locator?.limits,
-    defaultPolicy: input.document.browserAi.defaultResolution,
-    ceiling: input.document.browserAi.resolutionCeiling,
+    plan: input.document.locator.defaultPlan,
+    limits: input.document.locator.limits,
   }
   const target = input.target ? {
     plan: input.target.plan,
     limits: input.target.limits,
-    policy: input.target.preference,
-    ceiling: input.target.ceiling,
   } : undefined
   const out: Record<string, LocatorResolution> = {}
   for (const step of input.steps) {
@@ -137,8 +100,8 @@ export function resolveLocatorPlansForSteps(input: {
     out[step.id] = resolveLocatorPlan({
       platform,
       target,
-      scenario: { plan: input.scenarioPlan, policy: input.scenarioPolicy },
-      step: { plan: step.policy?.locatorPlan, policy: step.policy?.resolution },
+      scenario: { plan: input.scenarioPlan },
+      step: { plan: step.policy?.locatorPlan },
       ...readiness,
     })
   }
@@ -152,62 +115,31 @@ export function stepHasActionTarget(step: { type?: string; input?: unknown }): b
   return Boolean(step.input && typeof step.input === 'object' && 'target' in step.input && step.input.target)
 }
 
-/** 新修订使用 v2；旧字段保留给尚未升级的已发布场景。 */
-export function upgradePlatformLocatorConfig(document: PlatformConfigDocument): PlatformConfigDocument {
-  if (document.locator) return document
-  const effective = mergeEffectiveResolution({
-    ceiling: document.browserAi.resolutionCeiling,
-    defaultResolution: document.browserAi.defaultResolution,
-    browserAiEnabled: document.browserAi.enabled,
-  })
-  return {
-    ...document,
-    locator: {
-      defaultPlan: { v: 2, order: legacyPolicyRoutes(effective, locatorReadiness(document).textReady && locatorReadiness(document).visionReady) },
-      limits: { v: 2, allowed: legacyCeilingRoutes(document.browserAi.resolutionCeiling) },
-    },
-  }
+/** 冻结的定位计划里只要实际会走模型路线，运行就需要 AI 执行权限。 */
+export function locatorPlansNeedAiExecute(plans: Record<string, LocatorResolution>): boolean {
+  return Object.values(plans).some((plan) => plan.actual.some((route) => route !== 'rule'))
 }
 
-/** 编辑旧草稿时升级其显式 v1 设置；未设置的层继续继承平台/目标。 */
-export function upgradeAuthoringLocatorDocument(input: {
-  document: ScenarioAuthoringDocumentV2
-  platform: PlatformConfigDocument
+/**
+ * 运行创建与凭据权限共用的判定：显式 AI 步骤一定需要 AI；
+ * 普通步骤按继承的定位计划解析，实际会走模型路线才算需要。
+ * 定位计划解析失败按需要 AI 处理（运行本身也会因计划不可用而失败）。
+ */
+export function stepsNeedLocatorAiExecute(input: {
+  steps: readonly { id?: string; type: string; disabled?: boolean; policy?: { locatorPlan?: LocatorPlan } }[]
+  document: PlatformConfigDocument
   target?: TargetResolutionPolicy | null
-}): ScenarioAuthoringDocumentV2 {
-  const { document, platform, target } = input
-  const textReady = locatorReadiness(platform).textReady && locatorReadiness(platform).visionReady
-  const oldPolicy = (step?: ResolutionPolicy): ResolutionPolicy => mergeEffectiveResolution({
-    ceiling: platform.browserAi.resolutionCeiling,
-    defaultResolution: platform.browserAi.defaultResolution,
-    targetCeiling: target?.ceiling,
-    targetPreference: target?.preference,
-    document: document.resolution,
-    step,
-    browserAiEnabled: platform.browserAi.enabled,
-  })
-  const convertNodes = (nodes: AuthoringNode[]): AuthoringNode[] => nodes.map((node): AuthoringNode => {
-    if (node.kind === 'step') {
-      const policy = node.step.policy
-      if (!policy?.resolution) return node
-      const { resolution: _old, ...rest } = policy
-      return { ...node, step: {
-        ...node.step,
-        policy: { ...rest, locatorPlan: { v: 2, order: legacyPolicyRoutes(oldPolicy(policy.resolution), textReady) } },
-      } } as AuthoringNode
-    }
-    if (node.kind !== 'block') return node
-    if ('then' in node) {
-      return { ...node, then: convertNodes(node.then), ...(node.else ? { else: convertNodes(node.else) } : {}) }
-    }
-    return { ...node, body: convertNodes(node.body) }
-  })
-  const { resolution: _old, ...rest } = document
-  return {
-    ...rest,
-    locatorProtocol: 2,
-    ...(document.locatorPlan ? { locatorPlan: document.locatorPlan }
-      : document.resolution ? { locatorPlan: { v: 2, order: legacyPolicyRoutes(oldPolicy(), textReady) } } : {}),
-    nodes: convertNodes(document.nodes),
+  scenarioPlan?: LocatorPlan
+}): boolean {
+  if (input.steps.some((step) => !step.disabled && isAiStepType(step.type))) return true
+  try {
+    return locatorPlansNeedAiExecute(resolveLocatorPlansForSteps({
+      document: input.document,
+      target: input.target,
+      scenarioPlan: input.scenarioPlan,
+      steps: input.steps.map((step, index) => ({ ...step, id: step.id ?? String(index) })),
+    }))
+  } catch {
+    return true
   }
 }

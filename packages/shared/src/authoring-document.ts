@@ -10,7 +10,6 @@ import { outcomeContractSchema, type OutcomeContract } from './outcome.js'
 import { runtimeInvariantSchema } from './runtime-invariant.js'
 import { outputFieldNameSchema } from './output-schema.js'
 import { scenarioOutputDeclSchema } from './run-output.js'
-import { resolutionPolicySchema } from './resolution-policy.js'
 import { locatorPlanSchema } from './locator-plan.js'
 import type { ScenarioDocument } from './scenario.js'
 import { conditionSchema, type Expr } from './expression.js'
@@ -308,12 +307,9 @@ export const scenarioAuthoringDocumentV2Schema = z
     scenarioOutcomes: z.array(outcomeContractSchema).optional(),
     runtimeInvariants: z.array(runtimeInvariantSchema).optional(),
     outputs: scenarioOutputDeclSchema.optional(),
-    resolution: resolutionPolicySchema.optional(),
     locatorPlan: locatorPlanSchema.optional(),
-    locatorProtocol: z.literal(2).optional(),
   })
   .superRefine((document, ctx) => {
-    if (document.resolution && document.locatorPlan) ctx.addIssue({ code: 'custom', path: ['locatorPlan'], message: '场景不能同时设置旧版与新版定位策略' })
     const inputKeys = new Set<string>()
     for (const [index, input] of document.inputs.entries()) {
       if (inputKeys.has(input.key)) {
@@ -548,9 +544,7 @@ export function normalizeAuthoringDocument(raw: unknown): ScenarioAuthoringDocum
         schemaVersion: doc.schemaVersion ?? RUNTIME_SCHEMA_VERSION,
         inputs: doc.inputs ?? [],
         ...(doc.outputs ? { outputs: doc.outputs } : {}),
-        ...(doc.resolution ? { resolution: doc.resolution } : {}),
         ...(doc.locatorPlan ? { locatorPlan: doc.locatorPlan } : {}),
-        ...(doc.locatorProtocol === 2 ? { locatorProtocol: 2 as const } : {}),
         nodes: (doc.steps as Step[]).map((step) => ({
           kind: 'step' as const,
           step,
@@ -993,9 +987,7 @@ export function canFlattenKnowledgeAuthoringDocument(document: ScenarioAuthoring
     !authoringHasModuleInvocations(document) &&
     !walkAuthoringNodes(document).some((item) => item.node.kind === 'step' && item.node.origin !== undefined) &&
     document.outputs === undefined &&
-    document.resolution === undefined &&
-    document.locatorPlan === undefined &&
-    (document.locatorProtocol === undefined || document.locatorProtocol === 2)
+    document.locatorPlan === undefined
 }
 
 /** V1 取 steps；V2 递归展平收集 StepNode，调用节点不计入。 */

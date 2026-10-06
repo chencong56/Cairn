@@ -1922,9 +1922,7 @@ export function expandAuthoringDocument(
       inputs: document.inputs,
       steps: expandedSteps,
       ...(document.outputs ? { outputs: document.outputs } : {}),
-      ...(document.resolution ? { resolution: document.resolution } : {}),
       ...(document.locatorPlan ? { locatorPlan: document.locatorPlan } : {}),
-      ...(document.locatorProtocol === 2 ? { locatorProtocol: 2 as const } : {}),
     }
     const parsedDef = scenarioDefinitionSchema.safeParse(defCandidate)
     if (parsedDef.success) {
@@ -1937,7 +1935,6 @@ export function expandAuthoringDocument(
         resolution: {
           ...FACTORY_COMPILE_RESOLUTION,
           ...ctx.compilerCtx?.resolution,
-          documentResolution: document.resolution ?? ctx.compilerCtx?.resolution?.documentResolution,
         },
         outcomeManifest: outcomeManifest ?? { entries: [] },
       })

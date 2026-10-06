@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
 import { Share2, Check } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { useBreadcrumb } from '@/stores/breadcrumb-store'
 import { createReportShareToken, fetchReport, fetchReportRevision } from '@/lib/reports-api'
@@ -39,10 +40,14 @@ export function ReportDetailPage() {
       setSharing(true)
       const res = await createReportShareToken(reportId)
       const fullUrl = `${window.location.origin}${res.url}`
-      await navigator.clipboard.writeText(fullUrl)
-      setCopied(true)
-      toast.success('免登录只读分享链接已复制到剪贴板（24小时内有效）')
-      setTimeout(() => setCopied(false), 3000)
+      const ok = await copyToClipboard(fullUrl)
+      if (ok) {
+        setCopied(true)
+        toast.success('免登录只读分享链接已复制到剪贴板（24小时内有效）')
+        setTimeout(() => setCopied(false), 3000)
+      } else {
+        toast.error('无法自动复制分享链接，请手动复制：' + fullUrl)
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : '生成分享链接失败')
     } finally {

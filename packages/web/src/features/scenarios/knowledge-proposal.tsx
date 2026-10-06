@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   authoringSteps,
@@ -89,7 +90,7 @@ function KnowledgeProposalContent(props: KnowledgeProposalProps) {
       }
       const signature = JSON.stringify(body)
       if (request.current?.signature !== signature)
-        request.current = { signature, key: `know:${crypto.randomUUID()}` }
+        request.current = { signature, key: `know:${newUuid()}` }
       return createKnowledgeProposal(props.scenarioId, {
         ...body,
         idempotencyKey: request.current.key,

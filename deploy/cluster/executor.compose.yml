@@ -1,0 +1,25 @@
+# Cairn 执行节点栈（ah2 / ah4 通用，仅跑一个 executor）
+# 应用产物挂载自 /data/wp/cairn/cluster/apps/worker（与 ah3 同步），镜像仅作运行时底座。
+# 用法：cd /data/wp/cairn/cluster/deploy && docker compose -f executor.compose.yml up -d
+# 与宿主存量容器（snclog* 等）零交集；数据面连接 ah3（192.168.3.203:15432 等，见 .env）。
+name: cairn-cluster
+
+services:
+  cairn-executor:
+    image: cairn-worker:${CAIRN_RUNTIME_TAG}
+    container_name: cairn-executor-${HOST_SHORT}
+    restart: unless-stopped
+    working_dir: /app
+    env_file: .env
+    mem_limit: 6g
+    volumes:
+      - ../apps/worker:/app
+      - ../browser-profiles:/data/cairn/browser-profiles
+    environment:
+      CAIRN_WORKER_ID: prod-executor-${HOST_SHORT}
+      CAIRN_WORKER_ROLES: executor
+      CAIRN_WORKER_INTERNAL_HOST: "0.0.0.0"
+      CAIRN_WORKER_INTERNAL_PORT: 8091
+      CAIRN_WORKER_ADVERTISE_URL: http://${HOST_IP}:8092
+    ports:
+      - "${HOST_IP}:8092:8091"

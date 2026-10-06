@@ -14,18 +14,12 @@ import {
   resolveAiTaskEvidence,
   frozenTargetAuthSchema,
   effectiveAccountSessionCap,
-  effectivePoliciesForSteps,
-  FACTORY_COMPILE_RESOLUTION,
-  freezeResolutionSnapshot,
   frozenLocatorResolutionSchema,
   LOCATOR_RESOLUTION_PROTOCOL,
   resolveLocatorPlansForSteps,
-  mergeResolutionCeiling,
   parseTargetResolutionPolicy,
   loginScopeFromTargetUrl,
   resolveAiExecutionFromPlatform,
-  resolutionCapabilitiesFromPlatform,
-  snapshotNeedsBrowserAi,
   resolveMapCapturePolicy,
   resolvePlatformEvidencePolicy,
   resolvePlatformExecutionPolicy,
@@ -46,7 +40,6 @@ import {
   type RuntimeInvariantManifest,
   type ControlFlowManifest,
   type PlatformConfigDocument,
-  type ResolutionPolicy,
   type LocatorPlan,
   type LocatorResolution,
   type LocatorRoute,
@@ -82,37 +75,15 @@ export function resolveAssembledAiExecution(input: {
   aiExecution?: AiExecutionConfig
   hangWaitMs?: number
   executionPolicyOverride?: ExecutionPolicy
-  documentResolution?: ResolutionPolicy
-  targetCeiling?: ResolutionPolicy
-  targetPreference?: ResolutionPolicy
-  effectiveSteps?: Readonly<Record<string, ResolutionPolicy>>
   locatorPlans?: Readonly<Record<string, LocatorResolution>>
 }): AiExecutionConfig | undefined {
   const document = input.platformDocument ?? FACTORY_PLATFORM_CONFIG
   const policy = resolvePlatformExecutionPolicy(input.executionPolicyOverride, document.execution)
-  const resolution = resolutionCapabilitiesFromPlatform(document)
-  const effective =
-    input.effectiveSteps ??
-    effectivePoliciesForSteps(
-      input.steps,
-      {
-        ...FACTORY_COMPILE_RESOLUTION,
-        ceiling: resolution.ceiling,
-        default: resolution.default,
-        targetCeiling: input.targetCeiling,
-        targetPreference: input.targetPreference,
-        documentResolution: input.documentResolution,
-        aiRungAvailable: resolution.aiRungAvailable,
-      },
-      document.browserAi.enabled,
-    )
   const requiredLocatorRoutes = input.locatorPlans
     ? [...new Set(Object.values(input.locatorPlans).flatMap((plan) => plan.actual))] as LocatorRoute[]
     : undefined
-  const needsAi = requiredLocatorRoutes
-    ? input.steps.some((step) => !step.disabled && (step.type === 'ai_action' || step.type === 'ai_extract' || step.type === 'ai_assert')) ||
-      requiredLocatorRoutes.some((route) => route !== 'rule')
-    : snapshotNeedsBrowserAi(input.steps, effective)
+  const needsAi = input.steps.some((step) => !step.disabled && (step.type === 'ai_action' || step.type === 'ai_extract' || step.type === 'ai_assert')) ||
+    requiredLocatorRoutes?.some((route) => route !== 'rule') === true
   if (!needsAi) return undefined
   let aiExecution = input.aiExecution
   if (!aiExecution) {
@@ -121,10 +92,6 @@ export function resolveAssembledAiExecution(input: {
         revision: input.platformRevision ?? 1,
         hangWaitMs: input.hangWaitMs ?? DEFAULT_BROWSER_AI_HANG_WAIT_MS,
         policy,
-        documentResolution: input.documentResolution,
-        targetCeiling: input.targetCeiling,
-        targetPreference: input.targetPreference,
-        effectiveSteps: effective,
         requiredLocatorRoutes,
       })
     } catch (error) {
@@ -191,9 +158,7 @@ export type AssembleRunSnapshotInput = {
   accessPolicy: FrozenTargetAccessPolicy
   mapConsumption: FrozenMapConsumption
   suiteAdmission?: SuiteAdmissionSnapshot
-  documentResolution?: ResolutionPolicy
   documentLocatorPlan?: LocatorPlan
-  locatorProtocol?: 2
   outputs?: ScenarioOutputDecl
   serviceDelivery?: ServiceDeliveryPolicy
   pauseBeforeStepId?: string
@@ -213,36 +178,18 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
     document.evidence,
   )
   const policy = resolvePlatformExecutionPolicy(input.executionPolicyOverride, document.execution)
-  const resolutionCaps = resolutionCapabilitiesFromPlatform(document)
   const targetResolution = parseTargetResolutionPolicy(input.target.resolutionPolicy)
-  const useLocatorV2 = Boolean(input.locatorProtocol === 2 || input.documentLocatorPlan || input.steps.some((step) => step.policy?.locatorPlan))
-  let locatorPlans: Record<string, LocatorResolution> | undefined
-  if (useLocatorV2) {
-    try {
-      locatorPlans = resolveLocatorPlansForSteps({
-        steps: input.steps,
-        document,
-        target: targetResolution,
-        scenarioPlan: input.documentLocatorPlan,
-        scenarioPolicy: input.documentResolution,
-      })
-    } catch (error) {
-      throw new AssembleRunSnapshotError('LOCATOR_ROUTE_UNAVAILABLE', error instanceof Error ? error.message : '定位计划不可用')
-    }
+  let locatorPlans: Record<string, LocatorResolution>
+  try {
+    locatorPlans = resolveLocatorPlansForSteps({
+      steps: input.steps,
+      document,
+      target: targetResolution,
+      scenarioPlan: input.documentLocatorPlan,
+    })
+  } catch (error) {
+    throw new AssembleRunSnapshotError('LOCATOR_ROUTE_UNAVAILABLE', error instanceof Error ? error.message : '定位计划不可用')
   }
-  const effectiveSteps = effectivePoliciesForSteps(
-    input.steps,
-    {
-      ...FACTORY_COMPILE_RESOLUTION,
-      ceiling: resolutionCaps.ceiling,
-      default: resolutionCaps.default,
-      targetCeiling: targetResolution?.ceiling,
-      targetPreference: targetResolution?.preference,
-      documentResolution: input.documentResolution,
-      aiRungAvailable: resolutionCaps.aiRungAvailable,
-    },
-    document.browserAi.enabled,
-  )
   const snapshotBase = {
     schemaVersion: RUNTIME_SCHEMA_VERSION,
     runId: input.runId,
@@ -322,10 +269,6 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
       aiExecution: input.aiExecution,
       hangWaitMs: input.hangWaitMs,
       executionPolicyOverride: input.executionPolicyOverride,
-      documentResolution: input.documentResolution,
-      targetCeiling: targetResolution?.ceiling,
-      targetPreference: targetResolution?.preference,
-      effectiveSteps,
       locatorPlans,
     }),
     mapCapturePolicy: resolveMapCapturePolicy(
@@ -342,25 +285,15 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
       return aiTaskEvidence ? { aiTaskEvidence } : {}
     })(),
   }
-  const frozenResolution = locatorPlans ? frozenLocatorResolutionSchema.parse({
+  const allowed = [...new Set(Object.values(locatorPlans).flatMap((plan) => plan.allowed))]
+  if (allowed.length === 0) allowed.push(...document.locator.limits.allowed)
+  const frozenResolution = frozenLocatorResolutionSchema.parse({
     protocol: LOCATOR_RESOLUTION_PROTOCOL,
-    allowed: [...new Set(Object.values(locatorPlans).flatMap((plan) => plan.allowed).concat(
-      Object.keys(locatorPlans).length === 0 ? (document.locator?.limits.allowed ?? ['rule']) : [],
-    ))],
+    allowed,
     steps: Object.fromEntries(Object.entries(locatorPlans).map(([id, plan]) => [id, {
       requested: plan.requested, actual: plan.actual, skipped: plan.skipped, source: plan.source,
     }])),
     ...(input.platformRevision ? { textConfigVersion: String(input.platformRevision), visionConfigVersion: String(input.platformRevision) } : {}),
-  }) : freezeResolutionSnapshot({
-    ceiling: mergeResolutionCeiling({
-      ceiling: resolutionCaps.ceiling,
-      targetCeiling: targetResolution?.ceiling,
-      browserAiEnabled: document.browserAi.enabled,
-    }),
-    scenarioDefault: targetResolution?.preference ?? resolutionCaps.default,
-    targetCeiling: targetResolution?.ceiling,
-    targetPreference: targetResolution?.preference,
-    steps: effectiveSteps,
   })
   const parsed = runSnapshotSchema.parse({
     ...snapshotBase,
@@ -369,7 +302,7 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
     mapConsumption: input.mapConsumption,
     ...(input.mapJob ? { mapJob: input.mapJob } : {}),
     ...(input.suiteAdmission ? { suiteAdmission: input.suiteAdmission } : {}),
-    ...(frozenResolution ? { resolution: frozenResolution } : {}),
+    resolution: frozenResolution,
   })
   const digest = computeSnapshotDigest(parsed)
   return runSnapshotSchema.parse({ ...parsed, digest }) as RunSnapshot & { digest: string }

@@ -1734,7 +1734,7 @@ describe('方案 A、B、C 全链路端到端集成测试 (Plans A+B+C E2E Verif
       expect(accepted.draftRevision).toBe(saved.draft!.revision + 1)
       const adopted = await getScenario(db, scenario.id)
       expect(adopted.draft?.document).toMatchObject({
-        authoringSchemaVersion: 2, locatorProtocol: 2,
+        authoringSchemaVersion: 2,
         nodes: [
           { kind: 'step', step: { name: '回显步骤' } },
           { kind: 'step', step: { name: '查询订单', input: { from: 'keyword' } } },

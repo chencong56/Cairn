@@ -891,7 +891,7 @@ export class BrowserSessionManager {
     return ensureRunPage.call(this, live, runId, leaseId)
   }
 
-  async describeRunBrowser(input: { runId: string; actorId: string; pageId?: string }): Promise<ManagedBrowserMeta> {
+  async describeRunBrowser(input: { runId: string; actorId: string; pageId?: string; actorCanControl?: boolean }): Promise<ManagedBrowserMeta> {
     return describeRunBrowser.call(this, input)
   }
 
@@ -984,6 +984,7 @@ export class BrowserSessionManager {
     runId: string
     actorId: string
     pageId?: string
+    actorCanControl?: boolean
     onFrame: (frame: ManagedBrowserFrame) => void
     signal: AbortSignal
   }): Promise<void> {
@@ -994,6 +995,7 @@ export class BrowserSessionManager {
     runId: string
     actorId: string
     pageId?: string
+    actorCanControl?: boolean
     onFrame: (frame: ManagedBrowserFrame) => void
     signal: AbortSignal
   }): Promise<void> {
@@ -1057,8 +1059,8 @@ export class BrowserSessionManager {
     return lookupRunSession.call(this, runId)
   }
 
-  async buildMeta(runId: string, actorId: string, viewPageId?: string): Promise<ManagedBrowserMeta> {
-    return buildMeta.call(this, runId, actorId, viewPageId)
+  async buildMeta(runId: string, actorId: string, viewPageId?: string, actorCanControl?: boolean): Promise<ManagedBrowserMeta> {
+    return buildMeta.call(this, runId, actorId, viewPageId, actorCanControl)
   }
 
   pageCount(sessionId: string): number {

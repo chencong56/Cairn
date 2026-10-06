@@ -3,7 +3,6 @@ import {
   EXECUTION_ERROR_CATEGORIES,
   type ExecutionErrorCategory,
   type OutputShape,
-  type ResolutionPolicy,
   type LocatorPlan,
   type Step,
 } from '@cairn/shared'
@@ -29,8 +28,8 @@ import { TargetFields } from './target'
 function policyHandlers(step: Step, onChange: (step: Step) => void) {
   return {
     policy: step.policy,
-    onPolicyChange: (policy: { resolution?: ResolutionPolicy; locatorPlan?: LocatorPlan; deepLocate?: boolean }) => {
-      const { resolution: _oldResolution, locatorPlan: _oldPlan, ...preserved } = step.policy ?? {}
+    onPolicyChange: (policy: { locatorPlan?: LocatorPlan; deepLocate?: boolean }) => {
+      const { locatorPlan: _oldPlan, ...preserved } = step.policy ?? {}
       onChange({ ...step, policy: { ...preserved, ...policy } })
     },
   }

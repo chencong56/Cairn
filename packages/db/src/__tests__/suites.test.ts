@@ -1,6 +1,8 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL, suiteDocumentSchema, type Step } from '@cairn/shared'
+import { SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL, suiteDocumentSchema, type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
+} from '@cairn/shared'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -141,7 +143,7 @@ describe.each(DRIVERS)('%s 场景集与放行', { timeout: 90_000 }, (driver) =>
       capacity: 2,
       maxSessions: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL],
     })
 
     const claimed = await claimRun(handle, { workerId, instanceId, leaseTtlSeconds: 60 })

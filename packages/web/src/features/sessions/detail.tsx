@@ -22,6 +22,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { canCloseAccountSession, describeAuthIssue, describeAuthWaitStage, hasPermission } from '@cairn/shared'
 import { ApiRequestError } from '@/lib/api-client'
 import {
@@ -548,12 +549,15 @@ export function SessionWorkbenchView({
     setExpandedSubSignals((prev) => ({ ...prev, [stepId]: !prev[stepId] }))
   }
 
-  const handleCopySessionId = (id: string) => {
-    void navigator.clipboard.writeText(id).then(() => {
+  const handleCopySessionId = async (id: string) => {
+    const ok = await copyToClipboard(id)
+    if (ok) {
       setCopiedId(true)
       toast.success('已复制会话实例 ID')
       setTimeout(() => setCopiedId(false), 2000)
-    })
+    } else {
+      toast.error('复制失败，请手动复制')
+    }
   }
 
   const bodyContent = (

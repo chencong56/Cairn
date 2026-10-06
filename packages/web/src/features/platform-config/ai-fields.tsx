@@ -2,16 +2,8 @@ import * as React from 'react'
 import { useFormContext } from 'react-hook-form'
 import { AlertTriangle, CheckCircle2 } from 'lucide-react'
 import {
-  FACTORY_RESOLUTION_CEILING,
-  FACTORY_RESOLUTION_DEFAULT,
-  RESOLUTION_CEILING_LABELS,
-  RESOLUTION_POLICIES,
-  RESOLUTION_PREFERENCE_LABELS,
   LOCATOR_PRESETS,
   LOCATOR_PRESET_LABELS,
-  legacyCeilingRoutes,
-  legacyPolicyRoutes,
-  mergeEffectiveResolution,
   locatorPresetFor,
   resolveLocatorPlan,
   locatorReadiness,
@@ -80,7 +72,7 @@ export function AiFields({
   if (locator) {
     try {
       const result = resolveLocatorPlan({
-        platform: { plan: locator.defaultPlan, limits: locator.limits, defaultPolicy: visual.defaultResolution, ceiling: visual.resolutionCeiling },
+        platform: { plan: locator.defaultPlan, limits: locator.limits },
         ...locatorReadiness(form.getValues()),
       })
       locatorPreview = `实际：${locatorRouteListLabel(result.actual)}${result.skipped.length ? `；跳过 ${locatorSkippedLabel(result.skipped)}` : ''}`
@@ -115,17 +107,11 @@ export function AiFields({
             <Badge variant={visionReady ? 'secondary' : 'outline'}>视觉定位：{visionReady ? '就绪' : '未就绪'}</Badge>
           </div>
           <div className='space-y-3 rounded-lg border border-border-default p-3'>
-            <div className='flex flex-wrap items-center justify-between gap-2'>
-              <div>
-                <p className='font-medium'>普通步骤的定位路线</p>
-                <p className='text-label text-muted-foreground'>允许的能力与尝试顺序分别设置；只影响点击、填写等普通步骤。</p>
-              </div>
-              {!locator ? <Button type='button' variant='outline' size='sm' disabled={!canWrite} onClick={() => form.setValue('locator', {
-                limits: { v: 2, allowed: legacyCeilingRoutes(visual.resolutionCeiling) },
-                defaultPlan: { v: 2, order: legacyPolicyRoutes(mergeEffectiveResolution({ ceiling: visual.resolutionCeiling, defaultResolution: visual.defaultResolution, browserAiEnabled: visual.enabled }), textReady && visionReady) },
-              }, { shouldDirty: true })}>升级为新版定位配置</Button> : null}
+            <div>
+              <p className='font-medium'>普通步骤的定位路线</p>
+              <p className='text-label text-muted-foreground'>允许的能力与尝试顺序分别设置；只影响点击、填写等普通步骤。</p>
             </div>
-            {!locator ? <p className='text-label text-muted-foreground'>旧版实际顺序：{locatorRouteListLabel(legacyPolicyRoutes(mergeEffectiveResolution({ ceiling: visual.resolutionCeiling, defaultResolution: visual.defaultResolution, browserAiEnabled: visual.enabled }), textReady && visionReady))}。升级后可独立设置路线和上限；旧版已发布场景仍按旧快照执行。</p> : (
+            {
               <div className='grid gap-3 sm:grid-cols-2'>
                 <div className='space-y-1.5'>
                   <Label>平台允许的定位能力</Label>
@@ -149,7 +135,7 @@ export function AiFields({
                 </div>
                 <p className='text-label text-muted-foreground sm:col-span-2'>请求：{locatorRouteListLabel(locator.defaultPlan.order)}；{locatorPreview}</p>
               </div>
-            )}
+            }
           </div>
           <SwitchGrid>
             <FormField
@@ -251,70 +237,6 @@ export function AiFields({
               label='每步骤调用上限'
               canWrite={canWrite}
             />
-            {!locator ? <FormField
-              name='browserAi.resolutionCeiling'
-              render={({ field }) => (
-                <FormItem>
-                  <SettingLabel
-                    label='AI 定位能力上限'
-                    help='只限制点击、填写等步骤找页面元素的方式。视觉操作会调用视觉模型；AI 提取和 AI 判断也可能回退视觉模型。'
-                  />
-                  <Select
-                    value={field.value || FACTORY_RESOLUTION_CEILING}
-                    disabled={!canWrite}
-                    onValueChange={(next) =>
-                      field.onChange(next || FACTORY_RESOLUTION_CEILING)
-                    }
-                  >
-                    <FormControl>
-                      <SelectTrigger className='w-full' aria-label='AI 定位能力上限'>
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {RESOLUTION_POLICIES.map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {RESOLUTION_CEILING_LABELS[value]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            /> : null}
-            {!locator ? <FormField
-              name='browserAi.defaultResolution'
-              render={({ field }) => (
-                <FormItem>
-                  <SettingLabel
-                    label='平台默认优先顺序'
-                    help='目标、场景和步骤都没有单独指定时使用。实际采用的方式不会超过上面的能力上限。'
-                  />
-                  <Select
-                    value={field.value || FACTORY_RESOLUTION_DEFAULT}
-                    disabled={!canWrite}
-                    onValueChange={(next) =>
-                      field.onChange(next || FACTORY_RESOLUTION_DEFAULT)
-                    }
-                  >
-                    <FormControl>
-                      <SelectTrigger className='w-full' aria-label='平台默认优先顺序'>
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {RESOLUTION_POLICIES.map((value) => (
-                        <SelectItem key={value} value={value}>
-                          {RESOLUTION_PREFERENCE_LABELS[value]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            /> : null}
             <NumberSetting
               name='browserAi.maxOutputTokens'
               label='单次输出 token 上限'

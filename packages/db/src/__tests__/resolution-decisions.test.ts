@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, type ResolutionDecision, type Step } from '@cairn/shared'
+import { LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, type ResolutionDecision, type Step } from '@cairn/shared'
 import { newId } from '../id.js'
 import { expose } from '../database.js'
 import { schemaFor } from '../native.js'
@@ -57,7 +57,7 @@ describe.each(DRIVERS)('%s 解析决策事实', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 2,
       lostAfterSeconds: 3600,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, RESOLUTION_PROTOCOL],
+      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
     })
     return { workerId, instanceId }
   }
@@ -82,7 +82,9 @@ describe.each(DRIVERS)('%s 解析决策事实', { timeout: 60_000 }, (driver) =>
       scenarioId: scenario.id,
       actor: { id: actorId },
     })
-    expect(created.detail.snapshot.resolution).toBeUndefined()
+    // 新快照一律冻结 @2 定位计划；该场景无模型路线，AI 执行配置仍不冻结。
+    expect(created.detail.snapshot.resolution?.protocol).toBe('snapshot.resolution@2')
+    expect(created.detail.snapshot.aiExecution).toBeUndefined()
     const worker = await readyWorker()
     const { runs } = schemaFor(handle.db)
     const all = await handle.db.select({ id: runs.id }).from(runs)
@@ -201,8 +203,6 @@ describe.each(DRIVERS)('%s 解析决策事实', { timeout: 60_000 }, (driver) =>
     const store = new TargetsStore(expose(handle), () => Buffer.from('unused'))
     const initial = await store.getTarget(targetId)
     expect(initial.resolutionPolicy).toBeNull()
-    expect(initial.effectiveResolution?.preference).toBe('prefer_deterministic')
-    expect(initial.effectiveResolution?.ceiling).toBe('deterministic_only')
     const actor = {
       id: actorId,
       displayName: 'resolution-decisions',
@@ -213,20 +213,16 @@ describe.each(DRIVERS)('%s 解析决策事实', { timeout: 60_000 }, (driver) =>
     }
     const updated = await store.updateResolutionPolicy(
       targetId,
-      { preference: 'prefer_ai', ceiling: 'deterministic_only' },
+      { plan: { v: 2, order: ['text_ai', 'rule'] }, limits: { v: 2, allowed: ['rule', 'text_ai'] } },
       actor,
     )
     expect(updated.resolutionPolicy).toEqual({
-      preference: 'prefer_ai',
-      ceiling: 'deterministic_only',
-    })
-    expect(updated.effectiveResolution).toEqual({
-      preference: 'prefer_ai',
-      ceiling: 'deterministic_only',
+      plan: { v: 2, order: ['text_ai', 'rule'] },
+      limits: { v: 2, allowed: ['rule', 'text_ai'] },
     })
     const cleared = await store.updateResolutionPolicy(
       targetId,
-      { preference: null, ceiling: null },
+      { plan: null, limits: null },
       actor,
     )
     expect(cleared.resolutionPolicy).toBeNull()

@@ -81,7 +81,7 @@ PostgreSQL 迁移前缀必须连续且唯一，只写 PG 一份；`mysql/`、`sq
 
 `pnpm env:use local` 把 `.env` 指到 `.env.local`（符号链接）。改连接改画像文件，不要直接改 `.env`。`pnpm env:status` 只打印 host / driver，不回显口令。
 
-本机 PostgreSQL / MinIO 由 `pnpm infra:up` 启动，说明见 [`deploy/README.md`](../deploy/README.md)。
+本机 PostgreSQL / RustFS 由 `pnpm infra:up` 启动，说明见 [`deploy/README.md`](../deploy/README.md)。
 
 ## 集成测试与数据库
 

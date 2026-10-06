@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ModuleInputDecl, Step } from '@cairn/shared'
 import { Check, Copy, Variable } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 
 export type ScopeVariable = {
@@ -50,17 +51,13 @@ export function ScopeVariablesBar({
   ]
 
   const handleCopy = async (variable: ScopeVariable) => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(variable.expression)
-      }
+    const ok = await copyToClipboard(variable.expression)
+    if (ok) {
       setCopiedKey(variable.key)
       toast.success(`已复制插值表达式 ${variable.expression}`)
       setTimeout(() => setCopiedKey(null), 1500)
-    } catch {
-      // 容错处理（部分未授权或非安全上下文环境）
-      setCopiedKey(variable.key)
-      setTimeout(() => setCopiedKey(null), 1500)
+    } else {
+      toast.error('复制失败')
     }
   }
 

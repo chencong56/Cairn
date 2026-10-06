@@ -6,6 +6,7 @@ import {
   createTargetBodySchema,
   serviceCallerBodySchema,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { listOperationAuditEvents } from '../audit/list.js'
 import * as api from '../index.js'
@@ -159,7 +160,7 @@ describe.each(DRIVERS)('%s controlled service execution', (driver) => {
           ...worker,
           capacity: 2,
           lostAfterSeconds: 60,
-          protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+          protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
         })
         const grant = (await api.claimRun(f.db, {
           ...worker,
@@ -901,7 +902,7 @@ describe.each(DRIVERS)('%s controlled service execution', (driver) => {
       ...worker,
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const grant = (await api.claimRun(f.db, {
       ...worker,
@@ -1166,7 +1167,7 @@ describe.each(DRIVERS)('%s controlled service execution', (driver) => {
       ...worker,
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const grant = (await api.claimRun(f.db, {
       ...worker,

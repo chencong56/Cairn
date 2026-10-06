@@ -13,6 +13,7 @@ import {
   KeyRound,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -82,19 +83,27 @@ export function RecordingStepInspector({
   const inputObj = candidateInput && typeof candidateInput === 'object' ? (candidateInput as Record<string, unknown>) : null
   const selector = typeof inputObj?.selector === 'string' ? inputObj.selector : null
 
-  const handleCopySelector = () => {
+  const handleCopySelector = async () => {
     if (!selector) return
-    void navigator.clipboard.writeText(selector)
-    setCopiedSelector(true)
-    toast.success('选择器已复制到剪贴板')
-    setTimeout(() => setCopiedSelector(false), 2000)
+    const ok = await copyToClipboard(selector)
+    if (ok) {
+      setCopiedSelector(true)
+      toast.success('选择器已复制到剪贴板')
+      setTimeout(() => setCopiedSelector(false), 2000)
+    } else {
+      toast.error('复制失败，请手动复制')
+    }
   }
 
-  const handleCopyJson = () => {
-    void navigator.clipboard.writeText(JSON.stringify(item, null, 2))
-    setCopiedJson(true)
-    toast.success('步骤完整 JSON 已复制')
-    setTimeout(() => setCopiedJson(false), 2000)
+  const handleCopyJson = async () => {
+    const ok = await copyToClipboard(JSON.stringify(item, null, 2))
+    if (ok) {
+      setCopiedJson(true)
+      toast.success('步骤完整 JSON 已复制')
+      setTimeout(() => setCopiedJson(false), 2000)
+    } else {
+      toast.error('复制失败，请手动复制')
+    }
   }
 
   return (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
 import { fetchRecording } from '@/lib/recordings-api'
 import { DemonstrationImportPanel } from './demonstration-import-panel'
@@ -813,7 +814,7 @@ function replaceFill(
 }
 
 function newStepId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  if (typeof crypto.randomUUID === 'function') return newUuid()
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   bytes[6] = (bytes[6] & 0x0f) | 0x40
   bytes[8] = (bytes[8] & 0x3f) | 0x80

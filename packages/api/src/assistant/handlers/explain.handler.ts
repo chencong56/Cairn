@@ -25,9 +25,7 @@ function requireFlatDocument(document: unknown): ScenarioDocument {
       inputs: authoring.inputs,
       steps: authoringSteps(authoring),
       ...(authoring.outputs ? { outputs: authoring.outputs } : {}),
-      ...(authoring.resolution ? { resolution: authoring.resolution } : {}),
       ...(authoring.locatorPlan ? { locatorPlan: authoring.locatorPlan } : {}),
-      ...(authoring.locatorProtocol ? { locatorProtocol: authoring.locatorProtocol } : {}),
     })
   }
   return parseScenarioDocument(document)

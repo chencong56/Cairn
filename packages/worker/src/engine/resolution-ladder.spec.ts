@@ -47,7 +47,15 @@ function grant(): RunGrant {
   }
 }
 
-function ctx(step: Step, policy: 'deterministic_only' | 'prefer_deterministic' | 'prefer_ai' | 'ai_only'): StepExecutionContext {
+/** 旧档位名称仅作为用例描述保留，冻结的是等价的 v2 定位路线。 */
+const ROUTES_BY_POLICY = {
+  deterministic_only: ['rule'],
+  prefer_deterministic: ['rule', 'text_ai', 'vision_ai'],
+  prefer_ai: ['vision_ai', 'rule'],
+  ai_only: ['text_ai', 'vision_ai'],
+} as const
+
+function ctx(step: Step, policy: keyof typeof ROUTES_BY_POLICY): StepExecutionContext {
   return {
     runId: RUN_ID,
     stepRunId: STEP_RUN_ID,
@@ -69,10 +77,16 @@ function ctx(step: Step, policy: 'deterministic_only' | 'prefer_deterministic' |
     grant: grant(),
     snapshot: {
       resolution: {
-        protocol: 'snapshot.resolution@1',
-        ceiling: policy,
-        scenarioDefault: policy,
-        steps: { [step.id]: policy },
+        protocol: 'snapshot.resolution@2',
+        allowed: ['rule', 'text_ai', 'vision_ai'],
+        steps: {
+          [step.id]: {
+            requested: [...ROUTES_BY_POLICY[policy]],
+            actual: [...ROUTES_BY_POLICY[policy]],
+            skipped: [],
+            source: 'platform',
+          },
+        },
       },
       aiExecution: {
         modelName: 'demo',
@@ -246,7 +260,7 @@ describe('解析阶梯', () => {
   })
 
   it('AI 决策写入失败时不执行 Playwright 动作', async () => {
-    const step = clickStep({ policy: { resolution: 'prefer_deterministic' } })
+    const step = clickStep({ policy: { locatorPlan: { v: 2, order: ['rule', 'text_ai', 'vision_ai'] } } })
     const execute = vi.fn(async () => missing())
     appendResolutionDecision.mockRejectedValueOnce(new Error('persist'))
     const bindResolvedFromPoint = vi.fn(async () => ({ ok: true, texts: ['查询'], tagName: 'BUTTON' }))
@@ -335,7 +349,7 @@ describe('解析阶梯', () => {
   })
 
   it('prefer_ai 跳过地图级', async () => {
-    const step = clickStep({ policy: { resolution: 'prefer_ai' } })
+    const step = clickStep({ policy: { locatorPlan: { v: 2, order: ['vision_ai', 'rule'] } } })
     const execute = vi.fn(async () => found())
     const afterBaseline = vi.fn(async () => ({ kind: 'passthrough' as const }))
     const locate = vi.fn(async () => ({ ok: false, error: { code: 'AI_NOT_FOUND', category: 'EXECUTOR', retryable: true, safeMessage: '未找到' } }))
@@ -484,7 +498,7 @@ describe('解析阶梯', () => {
   })
 
   it('prefer_ai 在 AI 取消后不再执行确定性动作', async () => {
-    const step = clickStep({ policy: { resolution: 'prefer_ai' } })
+    const step = clickStep({ policy: { locatorPlan: { v: 2, order: ['vision_ai', 'rule'] } } })
     const execute = vi.fn()
     const locate = vi.fn(async () => ({
       ok: false,

@@ -5,6 +5,7 @@ import {
   SESSION_MAINTENANCE_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb, grantAdminScope } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
@@ -105,7 +106,8 @@ describe.each(DRIVERS)('%s 同账号多独立会话', { timeout: 60_000 }, (driv
       capacity: 8,
       maxSessions: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL,
+      
         SESSION_OCCUPANCY_PROTOCOL,
         SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
         SESSION_MAINTENANCE_PROTOCOL,

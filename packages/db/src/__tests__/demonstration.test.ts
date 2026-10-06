@@ -16,6 +16,7 @@ import {
   type AiExecutionConfig,
   type ApplyDemonstrationBody,
   type DemonstrationSource,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import type { DbHandle } from '../client.js'
@@ -458,6 +459,7 @@ describe.each(DRIVERS)(
         expect(snapshot.aiAtomicActionsProtocol).toBe(AI_ATOMIC_ACTIONS_PROTOCOL)
         expect(snapshot.importedOutcomeProtocol).toBe(IMPORTED_OUTCOME_PROTOCOL)
         const protocols = [
+          LOCATOR_RESOLUTION_PROTOCOL,
           SESSION_OCCUPANCY_PROTOCOL,
           OUTCOME_MANIFEST_PROTOCOL,
           AI_ATOMIC_ACTIONS_PROTOCOL,

@@ -33,7 +33,7 @@ describe('ScenarioAuthoringDocument V2', () => {
         type: 'echo', effectType: 'READ_ONLY', input: { value: 'ok' },
       }],
     })
-    expect(canFlattenKnowledgeAuthoringDocument({ ...base, locatorProtocol: 2 })).toBe(true)
+    expect(canFlattenKnowledgeAuthoringDocument(base)).toBe(true)
     const withOutcome = scenarioAuthoringDocumentV2Schema.parse({
       ...base,
       scenarioOutcomes: [{

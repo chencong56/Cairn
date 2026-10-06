@@ -366,7 +366,7 @@ async function assertConsumerResources(db: Db, definition: ScheduleDefinition, a
     if (loaded.version.kind === 'trial') throw conflict('SCHEDULE_VERSION_INVALID', '正式调度只能使用已发布场景版本')
     assertRunFromResolved(loaded.version.definition.steps, consumer.input)
     const layers = await loadResolutionLayers(db, consumer.targetId)
-    if (stepsNeedAiExecute(loaded.version.definition.steps, layers, loaded.version.definition.resolution)) {
+    if (stepsNeedAiExecute(loaded.version.definition.steps, layers, loaded.version.definition.locatorPlan)) {
       await assertTargetPermission(db, actorId, consumer.targetId, 'ai:execute')
     }
     return
@@ -397,7 +397,7 @@ async function assertConsumerResources(db: Db, definition: ScheduleDefinition, a
     const layers = await loadResolutionLayers(db, consumer.targetId)
     for (const member of consumer.members) {
       const loaded = await loadScenarioVersion(db, member.scenarioId, member.scenarioVersionId)
-      if (stepsNeedAiExecute(loaded.version.definition.steps, layers, loaded.version.definition.resolution)) {
+      if (stepsNeedAiExecute(loaded.version.definition.steps, layers, loaded.version.definition.locatorPlan)) {
         await assertTargetPermission(db, actorId, consumer.targetId, 'ai:execute')
       }
     }

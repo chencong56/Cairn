@@ -1,0 +1,30 @@
+# Cairn Worker 镜像：四角色共用（executor/scheduler/analyst/maintenance），含 Chromium 与中文字体
+# 构建：podman build --platform linux/amd64 -f deploy/cluster/Dockerfile.worker -t cairn-worker:<tag> .
+FROM node:24-bookworm-slim AS builder
+# ONNXRUNTIME_NODE_INSTALL=skip：跳过 CUDA/TensorRT providers 下载（仅 NVIDIA GPU 加速需要，
+# CPU 部署用包内自带核心运行时；且 nuget.org 在部分内网返回 302 导致 postinstall 失败）。
+# 设为 ENV 而非单条 RUN 前缀：install 与 deploy --legacy 两个步骤都会重跑 postinstall。
+ENV ONNXRUNTIME_NODE_INSTALL=skip
+WORKDIR /repo
+RUN corepack enable
+COPY .npmrc-build .npmrc
+COPY . .
+RUN pnpm install --frozen-lockfile --filter @cairn/worker...
+RUN pnpm --filter @cairn/worker... build
+RUN pnpm --filter @cairn/worker deploy --legacy --prod /out/worker
+
+FROM node:24-bookworm-slim
+ENV NODE_ENV=production TZ=Asia/Shanghai PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends fonts-noto-cjk ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /out/worker ./
+# Playwright 自带 --no-sandbox（chromiumSandbox 默认关闭），无需特权；浏览器与依赖以 root 装好后切非 root。
+RUN ./node_modules/.bin/playwright install --with-deps chromium \
+  && rm -rf /var/lib/apt/lists/* \
+  && chown -R node:node /app /ms-playwright
+USER node
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
+  CMD node -e "const net=require('net');const s=net.connect(process.env.CAIRN_WORKER_INTERNAL_PORT||8091,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1))"
+CMD ["node", "dist/main.js"]

@@ -69,6 +69,20 @@ export function pageRefFor(
   }
 }
 
+/**
+ * 页面越界时给用户的提示：带上被拦站点（只含协议与主机端口，不含路径和查询）和配置入口。
+ * 消息不得出现 `http(s)://`：API 转发 Worker 错误时会把含 URL 的文案替换成「执行面暂时不可达」。
+ */
+export function describeOutOfScopeOrigin(pageUrl: string): string {
+  const hint = '请到「目标详情 → 访问策略」添加该来源（用途选「业务页面」或「认证页面」），保存后重新进入。'
+  try {
+    const parsed = new URL(pageUrl)
+    return `当前页站点 ${parsed.host}（协议 ${parsed.protocol.replace(':', '')}）不在目标允许范围内。${hint}`
+  } catch {
+    return `当前页不在目标允许范围内。${hint}`
+  }
+}
+
 export function originAllowed(
   url: string,
   allowedOrigins: readonly string[],

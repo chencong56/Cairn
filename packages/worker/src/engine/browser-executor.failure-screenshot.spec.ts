@@ -6,6 +6,12 @@ import type { StepExecutionContext } from './step-executor.js'
 
 const appendResolutionDecision = vi.hoisted(() => vi.fn())
 
+vi.mock('../map/consumption.service.js', () => ({
+  MapConsumptionService: class {
+    afterBaseline = async () => ({ kind: 'skipped' as const })
+  },
+}))
+
 vi.mock('@cairn/db', () => ({
   appendResolutionDecision: (...args: unknown[]) => appendResolutionDecision(...args),
   newId: () => '00000000-0000-4000-8000-000000000099',
@@ -64,10 +70,13 @@ function ctxFor(step: Step, policy: 'deterministic_only' | 'ai_only', signal = n
     grant: grant(),
     snapshot: {
       resolution: {
-        protocol: 'snapshot.resolution@1',
-        ceiling: policy,
-        scenarioDefault: policy,
-        steps: { [step.id]: policy },
+        protocol: 'snapshot.resolution@2',
+        allowed: ['rule', 'text_ai', 'vision_ai'],
+        steps: {
+          [step.id]: policy === 'ai_only'
+            ? { requested: ['text_ai', 'vision_ai'], actual: ['text_ai', 'vision_ai'], skipped: [], source: 'platform' }
+            : { requested: ['rule'], actual: ['rule'], skipped: [], source: 'platform' },
+        },
       },
       aiExecution: {
         modelName: 'demo',
@@ -80,7 +89,7 @@ function ctxFor(step: Step, policy: 'deterministic_only' | 'ai_only', signal = n
         maxOutputTokens: 1024,
         hangWaitMs: 20_000,
       },
-    } as StepExecutionContext['snapshot'],
+    } as unknown as StepExecutionContext['snapshot'],
   } as StepExecutionContext
 }
 

@@ -18,6 +18,7 @@ import {
   User,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
 import { Can } from '@/components/rbac/can'
@@ -86,9 +87,13 @@ export function RunHeroBanner({
   const durationText = formatDuration(run.startedAt, run.finishedAt)
   const policy = resolveEvidencePolicy(run.snapshot.evidencePolicy)
 
-  const copyRunId = () => {
-    void navigator.clipboard.writeText(run.id)
-    toast.success('已复制运行 ID')
+  const copyRunId = async () => {
+    const ok = await copyToClipboard(run.id)
+    if (ok) {
+      toast.success('已复制运行 ID')
+    } else {
+      toast.error('复制失败，请手动复制')
+    }
   }
 
   const handleRetryReport = async () => {

@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const LOGIN_LOCATOR_BY = ['id', 'name', 'css'] as const
 export type LoginLocatorBy = (typeof LOGIN_LOCATOR_BY)[number]
 
-export const LOGIN_HEURISTIC_VERSION = 1
+export const LOGIN_HEURISTIC_VERSION = 2
 
 export const loginLocatorSchema = z.strictObject({
   by: z.enum(LOGIN_LOCATOR_BY),
@@ -98,8 +98,16 @@ export const LOGIN_FIELD_HEURISTICS = {
     { by: 'css', value: 'button[type="submit"]' },
     { by: 'css', value: 'input[type="submit"]' },
     { by: 'id', value: 'login' },
+    { by: 'id', value: 'login_btn' },
+    { by: 'id', value: 'login-btn' },
+    { by: 'id', value: 'btn-login' },
+    { by: 'id', value: 'loginBtn' },
     { by: 'id', value: 'submit' },
+    { by: 'id', value: 'submit_btn' },
+    { by: 'id', value: 'submit-btn' },
     { by: 'name', value: 'login' },
+    { by: 'name', value: 'login_btn' },
+    { by: 'name', value: 'submit' },
   ],
 } as const satisfies Record<'username' | 'password' | 'totp' | 'submit', readonly LoginLocator[]>
 

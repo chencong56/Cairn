@@ -736,7 +736,7 @@ export function AccountFormDialog({
               粘贴 Playwright 导出的 storageState.json 或上传文件，包含 cookies 与 localStorage 免登凭据。系统将加密保存。
             </DialogDescription>
           </DialogHeader>
-          <div className='space-y-3 py-2'>
+          <div className='min-w-0 space-y-3 py-2'>
             <div className='flex items-center gap-2'>
               <input
                 type='file'
@@ -759,7 +759,8 @@ export function AccountFormDialog({
               placeholder='{"cookies": [...], "origins": [...]}'
               value={storageStateText}
               onChange={(e) => setStorageStateText(e.target.value)}
-              className='font-mono text-label'
+              spellCheck={false}
+              className='field-sizing-fixed h-48 max-h-[50vh] resize-none overflow-auto font-mono text-label break-all'
             />
           </div>
           <DialogFooter>

@@ -6,6 +6,7 @@ import {
   computeContextVersion,
   type AuthCheckpoint,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
@@ -308,7 +309,7 @@ describe.each(DRIVERS)('%s 运行中认证检查点', { timeout: 30_000 }, (driv
     const { request, session } = await manualRecovery()
     const { workers } = schemaFor(handle.db)
     await handle.db.update(workers).set({ heartbeatExpiresAt: new Date(0), status: 'LOST' }).where(eq(workers.id, request.workerId))
-    await registerWorker(handle.db, { workerId: request.workerId, instanceId: newId(), capacity: 4, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL] })
+    await registerWorker(handle.db, { workerId: request.workerId, instanceId: newId(), capacity: 4, lostAfterSeconds: 60, protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL] })
     expect((await getSessionById(handle.db, session.id))?.status).toBe('LOST')
     expect((await getSessionById(handle.db, session.id))?.authControlTokenHash).toBeNull()
     await reapSessionLeases(handle.db)

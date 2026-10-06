@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import {
@@ -21,7 +22,6 @@ import {
   insertNodeAt,
   replaceNode,
   toAuthoringDocumentV2,
-  FACTORY_COMPILE_RESOLUTION,
   hasPermission,
   isFixtureStepType,
   isAuthoringDocumentV2,
@@ -289,11 +289,6 @@ export function ScenarioDetailPage() {
     const policy = target?.resolutionPolicy
     if (!caps && !policy && !platformConfigQuery.data) return undefined
     return {
-      ceiling: caps?.ceiling ?? FACTORY_COMPILE_RESOLUTION.ceiling,
-      default: caps?.default ?? FACTORY_COMPILE_RESOLUTION.default,
-      targetCeiling: policy?.ceiling,
-      targetPreference: policy?.preference,
-      aiRungAvailable: caps?.aiRungAvailable,
       waitKindsAvailable: caps?.waitKindsAvailable,
       locatorDocument: platformConfigQuery.data?.document,
       locatorTarget: policy,
@@ -1049,7 +1044,7 @@ export function ScenarioDetailPage() {
     const v2 = isAuthoringDocumentV2(document) ? document : toAuthoringDocumentV2(document)
     const blockId =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
+        ? newUuid()
         : `blk_${Math.random().toString(36).slice(2, 10)}`
     const result = wrapNodesInIfBlock(v2, extractIds, { blockId, name: '满足条件时执行' })
     if (!result.ok) {
@@ -1082,7 +1077,7 @@ export function ScenarioDetailPage() {
       kind: 'block',
       blockId:
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
+          ? newUuid()
           : `blk_${Math.random().toString(36).slice(2, 10)}`,
       name: '若元素存在则处理',
       control: {
@@ -1167,7 +1162,7 @@ export function ScenarioDetailPage() {
   function insertModule(moduleId: string, versionId: string, name: string) {
     const invocation: ScenarioModuleInvocationNode = {
       kind: 'module',
-      invocationId: crypto.randomUUID(),
+      invocationId: newUuid(),
       name,
       moduleId,
       moduleVersionId: versionId,
@@ -1214,7 +1209,7 @@ export function ScenarioDetailPage() {
       const mod = draft.selectedNode
       const cloned: ScenarioModuleInvocationNode = {
         ...JSON.parse(JSON.stringify(mod)),
-        invocationId: crypto.randomUUID(),
+        invocationId: newUuid(),
         name: `${mod.name} (副本)`,
       }
       draft.insertNode(cloned, draft.selectedIndex)
@@ -1225,7 +1220,7 @@ export function ScenarioDetailPage() {
     }
     if (draft.selected) {
       const currentStep = draft.selected
-      const newId = crypto.randomUUID()
+      const newId = newUuid()
       let outputKey = currentStep.outputKey ? `${currentStep.outputKey}_copy` : undefined
       if (outputKey && documentContextKeysAny(document).has(outputKey)) {
         outputKey = `${outputKey}_${Math.floor(Math.random() * 1000)}`
@@ -1240,7 +1235,7 @@ export function ScenarioDetailPage() {
       if (isAuthoringDocumentV2(document)) {
         const clonedOutcomes =
           draft.selectedNode?.kind === 'step' && draft.selectedNode.outcomes
-            ? draft.selectedNode.outcomes.map((o) => ({ ...o, id: crypto.randomUUID() }))
+            ? draft.selectedNode.outcomes.map((o) => ({ ...o, id: newUuid() }))
             : undefined
         draft.insertNode({ kind: 'step', step: clonedStep, outcomes: clonedOutcomes }, after)
       } else {
@@ -2311,7 +2306,7 @@ export function ScenarioDetailPage() {
                     draft.selectedNode?.kind === 'step' ? draft.selectedNode.outcomes ?? [] : []
                   draft.updateOutcomes(current.id, [
                     ...existing,
-                    outcomeContractFromCandidate(candidate, crypto.randomUUID()),
+                    outcomeContractFromCandidate(candidate, newUuid()),
                   ])
                   return
                 }
@@ -2341,7 +2336,7 @@ export function ScenarioDetailPage() {
                 } as typeof current)
               }}
             >
-            <ResolutionSourceProvider targetId={scenario.targetId} scenarioPlan={draft.v2Document?.locatorPlan} scenarioPolicy={draft.v2Document?.resolution} locatorProtocol={draft.v2Document?.locatorProtocol}>
+            <ResolutionSourceProvider targetId={scenario.targetId} scenarioPlan={draft.v2Document?.locatorPlan}>
             <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
               {flowgram ? (
                 <div className='flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row overflow-hidden'>

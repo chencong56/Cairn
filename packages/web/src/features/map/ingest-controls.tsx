@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { arrivalTargetForName, type MapMenuEntryDto, type TargetStateRuleDto } from '@cairn/shared'
@@ -90,7 +91,7 @@ function MenuForm({ targetId, entry, onDone }: { targetId: string; entry?: MapMe
         arrivalName: resolvedArrival,
         arrivalTarget: entry?.arrivalName === resolvedArrival
           ? entry.arrivalTarget : arrivalTargetForName(resolvedArrival),
-        idempotencyKey: `menu:${crypto.randomUUID()}`,
+        idempotencyKey: `menu:${newUuid()}`,
       }
       return entry
         ? updateMapMenuEntry(targetId, entry.entryId, { ...values, expectedVersion: entry.version })
@@ -168,7 +169,7 @@ export function MapIngestControls({ targetId, targetName }: { targetId: string; 
   }
   const start = useMutation({
     mutationFn: ({ scope, entryIds }: { scope: 'full' | 'detect_top_menus' | 'entries'; entryIds?: string[] }) => createMapIngestion(targetId, {
-      manualId: `manual:${crypto.randomUUID()}`,
+      manualId: `manual:${newUuid()}`,
       expectedPolicyRevision: policy.data?.revision ?? 0,
       scope,
       ...(entryIds ? { entryIds } : {}),
@@ -179,14 +180,14 @@ export function MapIngestControls({ targetId, targetName }: { targetId: string; 
   const reorder = useMutation({
     mutationFn: (list: MapMenuEntryDto[]) => reorderMapMenuEntries(targetId, {
       entries: list.map(entry => ({ entryId: entry.entryId, expectedVersion: entry.version, enabled: entry.enabled })),
-      idempotencyKey: `menu-order:${crypto.randomUUID()}`,
+      idempotencyKey: `menu-order:${newUuid()}`,
     }),
     onSuccess: () => { void client.invalidateQueries({ queryKey: ['map', targetId, 'entries'] }) },
     onError: error => toast.error(errorText(error)),
   })
   const archive = useMutation({
     mutationFn: (entry: MapMenuEntryDto) => archiveMapMenuEntry(targetId, entry.entryId, {
-      expectedVersion: entry.version, idempotencyKey: `menu-archive:${crypto.randomUUID()}`,
+      expectedVersion: entry.version, idempotencyKey: `menu-archive:${newUuid()}`,
     }),
     onSuccess: () => { toast.success('菜单已归档'); refresh() },
     onError: error => toast.error(errorText(error)),
@@ -195,7 +196,7 @@ export function MapIngestControls({ targetId, targetName }: { targetId: string; 
     mutationFn: () => updateMapJobPolicy(targetId, {
       expectedRevision: policy.data?.revision ?? 0,
       manualJobsEnabled: !policy.data?.policy.manualJobsEnabled,
-      idempotencyKey: `ingest-policy:${crypto.randomUUID()}`,
+      idempotencyKey: `ingest-policy:${newUuid()}`,
       reason: '调整目标知识采集开关',
     }),
     onSuccess: refresh,

@@ -1,6 +1,8 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL, suiteDocumentSchema, type Step } from '@cairn/shared'
+import { SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL, suiteDocumentSchema, type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
+} from '@cairn/shared'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -172,8 +174,8 @@ describe.each(DRIVERS)('%s 场景集并发调度与账号互斥', { timeout: 90_
     const w2Id = `w2-${newId()}`
     const inst1 = newId()
     const inst2 = newId()
-    await registerWorker(handle.db, { workerId: w1Id, instanceId: inst1, capacity: 1, maxSessions: 1, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL] })
-    await registerWorker(handle.db, { workerId: w2Id, instanceId: inst2, capacity: 1, maxSessions: 1, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL] })
+    await registerWorker(handle.db, { workerId: w1Id, instanceId: inst1, capacity: 1, maxSessions: 1, lostAfterSeconds: 60, protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL] })
+    await registerWorker(handle.db, { workerId: w2Id, instanceId: inst2, capacity: 1, maxSessions: 1, lostAfterSeconds: 60, protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL] })
 
     const claim1 = await claimRun(handle, { workerId: w1Id, instanceId: inst1, leaseTtlSeconds: 60 })
     const claim2 = await claimRun(handle, { workerId: w2Id, instanceId: inst2, leaseTtlSeconds: 60 })

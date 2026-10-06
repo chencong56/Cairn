@@ -19,6 +19,7 @@ import {
 import { Link } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Can } from '@/components/rbac/can'
@@ -378,9 +379,13 @@ export function StepInspector({
               variant='ghost'
               size='sm'
               className='h-7 px-2 text-label'
-              onClick={() => {
-                void navigator.clipboard.writeText(JSON.stringify(run.context, null, 2))
-                toast.success('已复制步骤上下文数据')
+              onClick={async () => {
+                const ok = await copyToClipboard(JSON.stringify(run.context, null, 2))
+                if (ok) {
+                  toast.success('已复制步骤上下文数据')
+                } else {
+                  toast.error('复制失败，请手动复制')
+                }
               }}
             >
               <Copy className='mr-1 size-3' />

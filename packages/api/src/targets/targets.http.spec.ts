@@ -589,16 +589,16 @@ describe('Targets HTTP', () => {
   it('POST /targets/:id/resolution-policy 写入目标解析策略', async () => {
     await request(adminApp.getHttpServer())
       .post(`/targets/${target.id}/resolution-policy`)
-      .send({ preference: 'prefer_deterministic' })
+      .send({ plan: { v: 2, order: ['rule', 'text_ai'] } })
       .expect(200)
     expect(service.updateResolutionPolicy).toHaveBeenCalledWith(
       target.id,
-      { preference: 'prefer_deterministic' },
+      { plan: { v: 2, order: ['rule', 'text_ai'] } },
       expect.anything(),
     )
     await request(viewerApp.getHttpServer())
       .post(`/targets/${target.id}/resolution-policy`)
-      .send({ ceiling: 'deterministic_only' })
+      .send({ limits: { v: 2, allowed: ['rule'] } })
       .expect(403)
   })
 })

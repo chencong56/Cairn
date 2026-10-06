@@ -5,6 +5,7 @@ import {
   SESSION_MAINTENANCE_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
@@ -335,7 +336,7 @@ describe.each(DRIVERS)('%s 认证驱动保活', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
     })
     await requestMaintenanceOperation(handle.db, {
       key: { targetId, targetAccountId: accountId },
@@ -409,7 +410,7 @@ describe.each(DRIVERS)('%s 认证驱动保活', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
     })
     await requestMaintenanceOperation(handle.db, {
       key: { targetId, targetAccountId: accountId },
@@ -590,7 +591,7 @@ describe.each(DRIVERS)('%s 认证驱动保活', { timeout: 60_000 }, (driver) =>
       capacity: 4,
       maxSessions: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
     })
     const keepAccount = await makeAccount('sl13-keep')
     const retainAccount = await makeAccount('sl13-retain')
@@ -655,7 +656,7 @@ describe.each(DRIVERS)('%s 认证驱动保活', { timeout: 60_000 }, (driver) =>
       instanceId: oldInstance,
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const accountId = await makeAccount('sl14')
     const session = await openSession({

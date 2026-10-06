@@ -42,9 +42,7 @@ describe('browser AI 控制面', () => {
     expect(capabilities.defaults.execution.defaultTimeoutMs).toBe(30_000)
     expect(JSON.stringify(capabilities)).not.toMatch(/secretRef|model.example/)
     expect(capabilities.resolution).toMatchObject({
-      ceiling: 'deterministic_only',
-      default: 'prefer_deterministic',
-      aiRungAvailable: false,
+      reasons: [{ code: 'AI_DISABLED' }],
     })
     expect(capabilities.resolution?.waitKindsAvailable).not.toContain('semantic')
   })
@@ -122,65 +120,49 @@ describe('browser AI 控制面', () => {
     expect(resolveAiExecution([{ type: 'navigate' }], enabled, { revision: 1 })).toBeUndefined()
   })
 
-  it('有效档位含 A 级时要求 ai:execute', () => {
-    const step = {
-      id: '00000000-0000-4000-8000-0000000000c1',
-      type: 'click',
-      policy: { resolution: 'prefer_deterministic' as const },
-    }
-    const openCeiling = {
-      ...enabled,
-      browserAi: {
-        ...enabled.browserAi,
-        resolutionCeiling: 'prefer_deterministic' as const,
-        defaultResolution: 'prefer_deterministic' as const,
-      },
-    }
-    expect(() => assertAiExecutePermission(actor(['run:execute']), [step], { document: openCeiling })).toThrow(
-      DomainError,
-    )
-    expect(() =>
-      assertAiExecutePermission(actor(['run:execute', 'ai:execute']), [step], { document: openCeiling }),
-    ).not.toThrow()
-    expect(() =>
-      assertAiExecutePermission(actor(['run:execute']), [step], { document: FACTORY_PLATFORM_CONFIG }),
-    ).not.toThrow()
-  })
-
-  it('目标优先顺序抬高时要求 ai:execute，目标上限压低时不要求', () => {
+  it('平台默认定位计划含模型路线时要求 ai:execute', () => {
     const step = {
       id: '00000000-0000-4000-8000-0000000000c1',
       type: 'click',
       policy: {},
     }
-    const platformDefaultClosed = {
+    expect(() => assertAiExecutePermission(actor(['run:execute']), [step], { document: enabled })).toThrow(
+      DomainError,
+    )
+    expect(() =>
+      assertAiExecutePermission(actor(['run:execute', 'ai:execute']), [step], { document: enabled }),
+    ).not.toThrow()
+    // 平台能力仅规则时不需要
+    expect(() =>
+      assertAiExecutePermission(actor(['run:execute']), [step], { document: FACTORY_PLATFORM_CONFIG }),
+    ).not.toThrow()
+  })
+
+  it('目标系统只能收紧：平台仅规则时目标计划放不开，目标收紧为仅规则时不要求', () => {
+    const step = {
+      id: '00000000-0000-4000-8000-0000000000c1',
+      type: 'click',
+      policy: {},
+    }
+    const ruleOnlyPlatform = {
       ...enabled,
-      browserAi: {
-        ...enabled.browserAi,
-        resolutionCeiling: 'prefer_deterministic' as const,
-        defaultResolution: 'deterministic_only' as const,
-      },
+      locator: { defaultPlan: { v: 2 as const, order: ['rule' as const] }, limits: { v: 2 as const, allowed: ['rule' as const] } },
     }
     expect(() =>
-      assertAiExecutePermission(actor(['run:execute']), [step], { document: platformDefaultClosed }),
+      assertAiExecutePermission(actor(['run:execute']), [step], { document: ruleOnlyPlatform }),
     ).not.toThrow()
+    // 目标计划想放开模型路线，但平台 allowed 只有规则，实际仍仅规则
     expect(() =>
       assertAiExecutePermission(actor(['run:execute']), [step], {
-        document: platformDefaultClosed,
-        targetPreference: 'prefer_deterministic',
+        document: ruleOnlyPlatform,
+        targetPolicy: { plan: { v: 2, order: ['rule', 'text_ai', 'vision_ai'] } },
       }),
-    ).toThrow(DomainError)
+    ).not.toThrow()
+    // 平台放开、目标收紧为仅规则 → 实际仅规则
     expect(() =>
       assertAiExecutePermission(actor(['run:execute']), [step], {
-        document: {
-          ...enabled,
-          browserAi: {
-            ...enabled.browserAi,
-            resolutionCeiling: 'prefer_deterministic' as const,
-            defaultResolution: 'prefer_deterministic' as const,
-          },
-        },
-        targetCeiling: 'deterministic_only',
+        document: enabled,
+        targetPolicy: { limits: { v: 2, allowed: ['rule'] } },
       }),
     ).not.toThrow()
   })
@@ -193,7 +175,7 @@ describe('browser AI 控制面', () => {
       locator: { defaultPlan: { v: 2 as const, order: ['text_ai' as const] }, limits: { v: 2 as const, allowed: ['rule' as const, 'text_ai' as const] } },
     }
     const step = { id: '00000000-0000-4000-8000-0000000000c1', type: 'click', policy: { locatorPlan: { v: 2 as const, order: ['text_ai' as const] } } }
-    expect(() => assertAiExecutePermission(actor(['run:execute']), [step], { document: textOnly, locatorProtocol: 2 })).toThrow(DomainError)
+    expect(() => assertAiExecutePermission(actor(['run:execute']), [step], { document: textOnly })).toThrow(DomainError)
     expect(resolveAiExecutionFromPlatform([step], textOnly, {
       revision: 3, hangWaitMs: 20_000, requiredLocatorRoutes: ['text_ai'],
     })).toMatchObject({ visionEnabled: false, modelBaseUrl: textOnly.platformAi.baseUrl, platformAi: { secretRef: textOnly.platformAi.secretRef } })

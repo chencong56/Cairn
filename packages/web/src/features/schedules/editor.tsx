@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   accountAllowsMap,
@@ -703,7 +704,7 @@ export function ScheduleEditorDialog({
     if (saveRequest.current?.signature !== signature)
       saveRequest.current = {
         signature,
-        key: `schedule:${crypto.randomUUID()}`,
+        key: `schedule:${newUuid()}`,
       }
     return {
       expectedRevision: existing?.revision ?? 0,

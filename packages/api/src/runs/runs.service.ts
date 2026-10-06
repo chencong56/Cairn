@@ -351,11 +351,7 @@ export class RunsService {
       const layers = await loadResolutionLayers(this.db, scenario.targetId)
       assertAiExecutePermission(actor, version.definition.steps, {
         document: layers.document,
-        documentResolution: version.definition.resolution,
         documentLocatorPlan: version.definition.locatorPlan,
-        locatorProtocol: version.definition.locatorProtocol,
-        targetCeiling: layers.targetCeiling,
-        targetPreference: layers.targetPreference,
         targetPolicy: layers.targetPolicy,
       })
       const created = await createRunWithSnapshot(this.db, {

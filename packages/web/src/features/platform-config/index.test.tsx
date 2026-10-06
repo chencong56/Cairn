@@ -125,11 +125,11 @@ describe('PlatformConfigPage', () => {
       .element(screen.getByRole('button', { name: '保存并生效' }))
       .toBeInTheDocument()
     await expect
-      .element(screen.getByLabelText('AI 定位能力上限', { exact: true }))
-      .toHaveTextContent('仅规则')
+      .element(screen.getByLabelText('平台允许的定位能力', { exact: true }))
+      .toHaveTextContent('规则、文本模型和视觉模型')
     await expect
-      .element(screen.getByLabelText('平台默认优先顺序', { exact: true }))
-      .toHaveTextContent('规则优先，AI 兜底')
+      .element(screen.getByLabelText('平台默认定位顺序', { exact: true }))
+      .toHaveTextContent('规则优先，完整兜底')
     expect(screen.getByText('请选择').elements()).toHaveLength(0)
     expect(document.body.innerText).not.toMatch(/sk-|apiKey/)
     expect(JSON.stringify(current)).not.toMatch(/sk-|apiKey/)
@@ -170,26 +170,9 @@ describe('PlatformConfigPage', () => {
       .toBeInTheDocument()
   })
 
-  it('普通用户选定仅文本能力上限后保存，修订中保留所选档位', async () => {
-    signIn(PERMISSIONS)
-    const screen = await renderPage()
-    await screen.getByLabelText('AI 定位能力上限', { exact: true }).click()
-    await screen.getByRole('option', { name: /文本定位（规则/ }).click()
-    await expect
-      .element(screen.getByLabelText('AI 定位能力上限', { exact: true }))
-      .toHaveTextContent('文本定位')
-    await screen.getByLabelText('变更原因', { exact: true }).fill('仅文本验收')
-    await screen.getByRole('button', { name: '保存并生效' }).click()
-    await vi.waitFor(() => expect(mocks.updatePlatformConfig).toHaveBeenCalledTimes(1))
-    expect(mocks.updatePlatformConfig.mock.calls[0]![0].document.browserAi.resolutionCeiling)
-      .toBe('prefer_deterministic_text')
-    await expect.element(screen.getByText(/当前修订 2/)).toBeInTheDocument()
-  })
-
   it('新版配置把允许集合与默认顺序分开选择并预览', async () => {
     signIn(PERMISSIONS)
     const screen = await renderPage()
-    await screen.getByRole('button', { name: '升级为新版定位配置' }).click()
     await screen.getByLabelText('平台允许的定位能力').click()
     await screen.getByRole('option', { name: '规则和文本模型' }).click()
     await screen.getByLabelText('平台默认定位顺序').click()
@@ -201,56 +184,6 @@ describe('PlatformConfigPage', () => {
     expect(mocks.updatePlatformConfig.mock.calls[0]![0].document.locator).toMatchObject({
       limits: { allowed: ['rule', 'text_ai'] }, defaultPlan: { order: ['text_ai'] },
     })
-  })
-
-  it('载入已保存的仅文本上限时，选择框显示当前修订的值', async () => {
-    mocks.fetchPlatformConfig.mockResolvedValue({
-      ...current,
-      revision: 14,
-      document: {
-        ...FACTORY_PLATFORM_CONFIG,
-        browserAi: {
-          ...FACTORY_PLATFORM_CONFIG.browserAi,
-          resolutionCeiling: 'prefer_deterministic_text',
-        },
-      },
-    })
-    signIn(PERMISSIONS)
-    const screen = await renderPage()
-    await expect.element(screen.getByText(/当前修订 14/)).toBeInTheDocument()
-    await screen.getByLabelText('变更原因', { exact: true }).fill('回读检查')
-    await screen.getByRole('button', { name: '保存并生效' }).click()
-    await vi.waitFor(() => expect(mocks.updatePlatformConfig).toHaveBeenCalledTimes(1))
-    expect(mocks.updatePlatformConfig.mock.calls[0]![0].document.browserAi.resolutionCeiling)
-      .toBe('prefer_deterministic_text')
-    await expect
-      .element(screen.getByLabelText('AI 定位能力上限', { exact: true }))
-      .toHaveTextContent('文本定位')
-  })
-
-  it('存量文档缺解析上限时仍显示出厂仅规则', async () => {
-    const { resolutionCeiling: _ceiling, defaultResolution: _default, ...browserAi } =
-      FACTORY_PLATFORM_CONFIG.browserAi
-    mocks.fetchPlatformConfig.mockResolvedValue({
-      ...current,
-      document: {
-        ...FACTORY_PLATFORM_CONFIG,
-        browserAi: {
-          ...browserAi,
-          resolutionCeiling: '',
-          defaultResolution: '',
-        },
-      },
-    })
-    signIn(PERMISSIONS)
-    const screen = await renderPage()
-    await expect
-      .element(screen.getByLabelText('AI 定位能力上限', { exact: true }))
-      .toHaveTextContent('仅规则')
-    await expect
-      .element(screen.getByLabelText('平台默认优先顺序', { exact: true }))
-      .toHaveTextContent('规则优先，AI 兜底')
-    expect(screen.getByText('请选择').elements()).toHaveLength(0)
   })
 
   it('执行默认值展示模块映射三项配置', async () => {
@@ -658,47 +591,6 @@ describe('PlatformConfigPage', () => {
     await expect
       .element(screen.getByRole('tab', { name: '平台 AI' }))
       .toHaveAttribute('data-state', 'active')
-  })
-
-  it('平台 AI 页保存时，未挂载的浏览器 AI 解析空串按出厂补齐', async () => {
-    const secretRef = {
-      provider: 'local' as const,
-      secretId: '00000000-0000-4000-8000-000000000099',
-    }
-    mocks.fetchPlatformConfig.mockResolvedValue({
-      ...current,
-      document: {
-        ...FACTORY_PLATFORM_CONFIG,
-        browserAi: {
-          ...FACTORY_PLATFORM_CONFIG.browserAi,
-          resolutionCeiling: '',
-          defaultResolution: '',
-        },
-        platformAi: {
-          ...FACTORY_PLATFORM_CONFIG.platformAi,
-          enabled: true,
-          provider: 'deepseek',
-          baseUrl: 'https://api.deepseek.com',
-          model: 'deepseek-chat',
-          secretRef,
-        },
-      },
-    })
-    window.history.replaceState({}, '', '/platform-config?tab=platform-ai')
-    signIn(PERMISSIONS)
-    const screen = await renderPage()
-    await screen.getByLabelText('变更原因', { exact: true }).fill('补选提供商')
-    await screen.getByRole('button', { name: '保存并生效' }).click()
-    await vi.waitFor(() => expect(mocks.updatePlatformConfig).toHaveBeenCalledTimes(1))
-    expect(mocks.updatePlatformConfig.mock.calls[0]![0]).toMatchObject({
-      document: {
-        browserAi: {
-          resolutionCeiling: 'deterministic_only',
-          defaultResolution: 'prefer_deterministic',
-        },
-        platformAi: { provider: 'deepseek' },
-      },
-    })
   })
 
   it('未选提供商时不能启用识途助手', async () => {

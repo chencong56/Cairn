@@ -7,6 +7,7 @@ import {
   createTargetBodySchema,
   serviceCallerBodySchema,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import * as api from '../index.js'
 import { expose } from '../database.js'
@@ -360,7 +361,7 @@ describe.each(DRIVERS)('%s service webhook facts', (driver) => {
       ...legacy,
       capacity: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     await expect(
       api.saveServiceWebhook(

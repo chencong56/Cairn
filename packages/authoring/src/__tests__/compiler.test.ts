@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { compileScenarioDocument } from '../compiler.js'
-import type { ScenarioDocument, Step } from '@cairn/shared'
+import { FACTORY_PLATFORM_CONFIG, type ScenarioDocument, type Step } from '@cairn/shared'
 
 const ids = {
   a: '00000000-0000-4000-8000-000000000071',
@@ -315,7 +315,7 @@ describe('compileScenarioDocument', () => {
     )
   })
 
-  it('仅语义目标在默认上限下阻断发布，显式 ai_only 超上限报错', () => {
+  it('仅语义目标发布阻断：顺序包含规则就必须给规则候选', () => {
     const semanticOnly = document([
       {
         id: ids.a,
@@ -325,109 +325,48 @@ describe('compileScenarioDocument', () => {
         input: { target: { semantic: '查询按钮', candidates: [], framePath: [] } },
       },
     ])
-    const saved = compileScenarioDocument(semanticOnly, { mode: 'save' })
-    expect(saved.diagnostics).toEqual(
-      expect.arrayContaining([expect.objectContaining({ code: 'SCENARIO_TARGET_SEMANTIC_ONLY', severity: 'warning' })]),
-    )
     const released = compileScenarioDocument(semanticOnly, { mode: 'release' })
     expect(released.ok).toBe(false)
     expect(released.diagnostics).toEqual(
-      expect.arrayContaining([expect.objectContaining({ code: 'SCENARIO_TARGET_SEMANTIC_ONLY', severity: 'error' })]),
-    )
-
-    const aiOnly = document([
-      {
-        id: ids.b,
-        name: '点',
-        type: 'click',
-        effectType: 'SIDE_EFFECT',
-        policy: { resolution: 'ai_only' },
-        input: { target: { framePath: [], candidates: [{ by: 'text', value: '查询' }] } },
-      },
-    ])
-    expect(
-      compileScenarioDocument(aiOnly, { mode: 'release' }).diagnostics,
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'SCENARIO_RESOLUTION_EXCEEDS_CEILING', severity: 'error' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ code: 'SCENARIO_TARGET_EMPTY' })]),
     )
   })
 
-  it('作者显式 prefer_* 被上限压低时给降级警告', () => {
-    const source = document([
-      {
-        id: ids.a,
-        name: '点',
-        type: 'click',
-        effectType: 'SIDE_EFFECT',
-        policy: { resolution: 'prefer_deterministic' },
-        input: { target: { framePath: [], candidates: [{ by: 'text', value: '查询' }] } },
-      },
-    ])
+  it('显式定位路线被平台或目标能力拒绝时报不可用', () => {
+    const ruleOnlyPlatform = {
+      ...FACTORY_PLATFORM_CONFIG,
+      locator: { defaultPlan: { v: 2, order: ['rule' as const] }, limits: { v: 2, allowed: ['rule' as const] } },
+    } as typeof FACTORY_PLATFORM_CONFIG
+    const step = {
+      id: ids.a,
+      name: '点',
+      type: 'click',
+      effectType: 'SIDE_EFFECT',
+      policy: { locatorPlan: { v: 2 as const, order: ['text_ai' as const] } },
+      input: { target: { framePath: [], candidates: [{ by: 'text', value: '查询' }] } },
+    } as Step
+    const source = document([step])
+    expect(
+      compileScenarioDocument(source, {
+        mode: 'release',
+        resolution: { locatorDocument: ruleOnlyPlatform },
+      }).diagnostics,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'SCENARIO_LOCATOR_UNAVAILABLE', message: expect.stringContaining('平台定位能力上限') }),
+      ]),
+    )
     expect(
       compileScenarioDocument(source, {
         mode: 'release',
         resolution: {
-          ceiling: 'deterministic_only',
-          default: 'prefer_deterministic',
+          locatorDocument: FACTORY_PLATFORM_CONFIG,
+          locatorTarget: { limits: { v: 2 as const, allowed: ['rule'] as const } },
         },
       }).diagnostics,
     ).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: 'SCENARIO_RESOLUTION_DEGRADED', severity: 'warning' }),
-      ]),
-    )
-  })
-
-  it('目标系统上限也能压低作者显式档位', () => {
-    const source = document([
-      {
-        id: ids.a,
-        name: '点',
-        type: 'click',
-        effectType: 'SIDE_EFFECT',
-        policy: { resolution: 'prefer_ai' },
-        input: { target: { framePath: [], candidates: [{ by: 'text', value: '查询' }] } },
-      },
-    ])
-    expect(
-      compileScenarioDocument(source, {
-        mode: 'release',
-        resolution: {
-          ceiling: 'prefer_ai',
-          default: 'prefer_deterministic',
-          targetCeiling: 'deterministic_only',
-        },
-      }).diagnostics,
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'SCENARIO_RESOLUTION_DEGRADED', severity: 'warning' }),
-      ]),
-    )
-  })
-
-  it('写步骤仅语义且规则优先时发布阻断', () => {
-    const source = document([
-      {
-        id: ids.a,
-        name: '点',
-        type: 'click',
-        effectType: 'SIDE_EFFECT',
-        input: { target: { semantic: '查询按钮', candidates: [], framePath: [] } },
-      },
-    ])
-    const result = compileScenarioDocument(source, {
-      mode: 'release',
-      resolution: {
-        ceiling: 'prefer_deterministic',
-        default: 'prefer_deterministic',
-      },
-    })
-    expect(result.ok).toBe(false)
-    expect(result.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: 'SCENARIO_SIDE_EFFECT_SEMANTIC_ONLY', severity: 'error' }),
+        expect.objectContaining({ code: 'SCENARIO_LOCATOR_UNAVAILABLE', message: expect.stringContaining('目标系统定位能力上限') }),
       ]),
     )
   })

@@ -180,6 +180,20 @@ describe('auth-stage frame visibility', () => {
       expect(canObserveManagedFrames({ runStatus, actorId: 'viewer' })).toBe(false)
     }
   })
+  it('等待认证时有控制资格者无需持有输入权即可只读观看，无资格者仍不可见', () => {
+    const base = { runStatus: 'WAITING_FOR_AUTH', actorId: 'viewer', controlActorId: null, controlExpiresAt: null }
+    expect(canObserveManagedFrames({ ...base, actorCanControl: true })).toBe(true)
+    expect(canObserveManagedFrames({ ...base, actorCanControl: false })).toBe(false)
+    expect(
+      canObserveManagedFrames({
+        ...base,
+        controlActorId: 'other',
+        controlExpiresAt: '2999-01-01T00:00:00.000Z',
+        actorCanControl: true,
+      }),
+    ).toBe(true)
+    expect(canObserveManagedFrames({ runStatus: 'FAILED', actorId: 'viewer', actorCanControl: true })).toBe(false)
+  })
   it('等待认证时只有未过期的当前控制者能看画面', () => {
     const now = Date.parse('2026-09-13T00:00:20.000Z')
     expect(

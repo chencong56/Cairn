@@ -1,0 +1,30 @@
+# 构建上下文裁剪：镜像构建只需要 workspace 清单、锁文件与 packages/*/ 源码。
+.git
+**/node_modules
+**/dist
+**/.data
+**/coverage
+**/.turbo
+vendor
+# docs 只排除非构建依赖的子目录；web 构建引用 docs/design/front/tokens.css（设计 Token SSOT）
+docs/spec
+docs/reviews
+docs/plan
+docs/arch
+docs/targets
+docs/deploy
+tools
+scripts
+tmp
+logs
+.run
+.zcode
+.agents
+.claude
+.env
+.env.local
+.env.remote
+.env.production
+deploy/singe
+deploy/cluster/dist
+deploy/compose.yml

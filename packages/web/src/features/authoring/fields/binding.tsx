@@ -1,4 +1,5 @@
 import type { OutputShape } from '@cairn/shared'
+import { newUuid } from '@/lib/uuid'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -155,7 +156,7 @@ export function BindingFields({
             type='button'
             className='rounded bg-muted/80 px-2 py-0.5 text-label hover:bg-muted text-foreground transition-colors font-medium border border-border-divider/50'
             onClick={() => {
-              const uuid = crypto.randomUUID()
+              const uuid = newUuid()
               onBinding('', uuid)
             }}
             title='生成标准 UUID'

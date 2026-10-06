@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import {
   AUTH_CONTROL_HEARTBEAT_SECONDS,
   describeManagedAuthWait,
@@ -55,8 +56,8 @@ function viewPlaceholder(input: {
   if (input.streamError) return input.streamError
   if (!isLiveViewRun(input.runStatus))
     return '运行已结束，实时画面已关闭。本次录像与步骤截图在结果里。'
-  if (input.waiting && !input.controlling)
-    return '取得登录权后才会显示认证画面，避免把验证码广播给其他观察者。'
+  if (input.waiting && !input.controlling && !input.framesAvailable)
+    return '认证画面仅对有操作权限的用户开放，避免把验证码广播给其他观察者。'
   if (input.degradedReason === 'worker_generation_mismatch')
     return '执行面已更换，不能继续看这一轮画面。'
   if (input.degradedReason === 'worker_unreachable')
@@ -190,6 +191,7 @@ export function BrowserView({
   const [viewPageId, setViewPageId] = useState<string | undefined>()
   const [streamError, setStreamError] = useState<string | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [acquireError, setAcquireError] = useState<{ code: string; message: string } | null>(null)
   const [closingPageId, setClosingPageId] = useState<string | null>(null)
   const seq = useRef(0)
   const composing = useRef(false)
@@ -204,6 +206,8 @@ export function BrowserView({
   // 运行进入可实时观看的状态时自动展开画面（切换运行或状态变化时重新判断）。
   useResetOnChange(`${runId}:${runStatus}:${sessionMode}`, () => {
     if (!sessionMode && isLiveViewRun(runStatus)) setOpen(true)
+    // 认证等待时用户最需要看画面排查原因，有控制资格者直接展开只读画面。
+    if (sessionMode && runStatus === 'WAITING_FOR_AUTH' && canControl) setOpen(true)
   })
 
   useEffect(() => {
@@ -279,12 +283,9 @@ export function BrowserView({
 
   const streamFailToastAt = useRef(0)
 
-  // 等待认证时只有持有控制权的一方看画面；不满足条件就不订阅，并清掉上一段画面与错误。
-  const streamEnabled =
-    open &&
-    canView &&
-    Boolean(meta?.framesAvailable) &&
-    !(runStatus === 'WAITING_FOR_AUTH' && !(token || meta?.authControl?.heldByViewer))
+  // 等待认证时画面门禁由服务端判定（持有输入权或具备控制资格才有 framesAvailable）；
+  // 不满足条件就不订阅，并清掉上一段画面与错误。
+  const streamEnabled = open && canView && Boolean(meta?.framesAvailable)
   useResetOnChange(streamEnabled, (enabled) => {
     if (enabled) return
     setFrame(null)
@@ -427,7 +428,7 @@ export function BrowserView({
       deltaX: clampedDeltaX,
       deltaY: clampedDeltaY,
       pageRef: frame.pageRef,
-      commandId: crypto.randomUUID(),
+      commandId: newUuid(),
       seq: seq.current,
       frameId: frame.frameId,
       viewport: { width: frame.width, height: frame.height },
@@ -511,7 +512,7 @@ export function BrowserView({
   const connecting = isBrowserViewConnecting({
     open,
     hasFrame: Boolean(frame),
-    waitingWithoutControl: waiting && !controlling,
+    waitingWithoutControl: waiting && !controlling && !meta?.framesAvailable,
     degradedReason: meta?.degradedReason ?? null,
   })
   const remain =
@@ -534,7 +535,7 @@ export function BrowserView({
     const command = {
       ...partial,
       pageRef: frame.pageRef,
-      commandId: crypto.randomUUID(),
+      commandId: newUuid(),
       seq: seq.current,
       frameId: frame.frameId,
       viewport: { width: frame.width, height: frame.height },
@@ -562,6 +563,7 @@ export function BrowserView({
 
   const handleAcquire = () => {
     setAuthError(null)
+    setAcquireError(null)
     setBusy(true)
     void acquireAuthControl(runId)
       .then((granted) => {
@@ -573,13 +575,17 @@ export function BrowserView({
         toast.success(sessionMode ? '已取得手动操作权' : '已取得登录输入权')
       })
       .catch((error) => {
-        toast.error(
+        const message =
           error instanceof ApiRequestError
             ? error.message
             : sessionMode
               ? '无法取得操作权'
               : '无法取得输入权'
-        )
+        setAcquireError({
+          code: error instanceof ApiRequestError ? error.payload.code : 'UNKNOWN',
+          message,
+        })
+        toast.error(message)
       })
       .finally(() => setBusy(false))
   }
@@ -829,6 +835,11 @@ export function BrowserView({
           </div>
         </div>
       )}
+      {waiting && meta?.currentPage?.url ? (
+        <p className='mt-3 break-all text-small text-muted-foreground'>
+          当前页：{meta.currentPage.url}
+        </p>
+      ) : null}
       {waiting && canControl && !controlling ? (
         <div className='mt-4 flex flex-wrap gap-2'>
           <Button
@@ -840,8 +851,18 @@ export function BrowserView({
             }
             onClick={handleAcquire}
           >
-            处理登录
+            {acquireError ? '重试处理登录' : '处理登录'}
           </Button>
+          {meta?.viewMode === 'readonly' && !acquireError ? (
+            <p className='self-center text-small text-muted-foreground'>
+              只读观看中，点击「处理登录」后才能输入
+            </p>
+          ) : null}
+          {acquireError ? (
+            <p role='alert' className='w-full text-small font-medium text-destructive'>
+              无法取得登录输入权：{acquireError.message}（{acquireError.code}）
+            </p>
+          ) : null}
           {meta?.authControl?.actorId && !meta.authControl.heldByViewer ? (
             <p className='self-center text-small text-muted-foreground'>
               由其他用户处理登录

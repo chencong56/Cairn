@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
 import type { ActionModuleVersionDto, ModulePublicationStatus } from '@cairn/shared'
 import { Button } from '@/components/ui/button'
@@ -71,7 +72,7 @@ export function ModulePublicationDialog({
           scenarioIds: publishedUsers.map((item) => item.scenarioId),
           confirm: true,
           reason: reason.trim(),
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: newUuid(),
         })
       }
       onOpenChange(false)

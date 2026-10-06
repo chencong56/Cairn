@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   authoringSteps,
@@ -71,7 +72,7 @@ export function CandidateReviewDialog({
       const value = { ...action, expectedRevision: candidate.revision }
       const signature = canonicalJson(value)
       if (request.current?.signature !== signature)
-        request.current = { signature, key: `candidate:${crypto.randomUUID()}` }
+        request.current = { signature, key: `candidate:${newUuid()}` }
       return reviewAnalysisCandidate(candidate.candidateId, {
         ...value,
         idempotencyKey: request.current.key,

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import {
   RUNTIME_INVARIANT_KINDS,
   createRuntimeInvariant,
@@ -54,7 +55,7 @@ export function RuntimeInvariantEditor({
           disabled={disabled}
           onValueChange={(kind) => {
             if (!kind) return
-            onChange([...invariants, createRuntimeInvariant(kind as RuntimeInvariantKind, crypto.randomUUID())])
+            onChange([...invariants, createRuntimeInvariant(kind as RuntimeInvariantKind, newUuid())])
           }}
         >
           <SelectTrigger className='w-auto' size='sm' aria-label='添加运行期约束'>

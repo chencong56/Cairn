@@ -5,7 +5,6 @@ import { compileScenarioDocument } from '../compiler.js'
 const id = '00000000-0000-4000-8000-000000000101'
 const base = {
   schemaVersion: 1,
-  locatorProtocol: 2,
   inputs: [],
   steps: [{
     id, name: '查询按钮', type: 'click', effectType: 'SIDE_EFFECT',
@@ -18,7 +17,7 @@ const platform = {
 }
 const compile = (raw: unknown, config = platform) => compileScenarioDocument(scenarioDocumentSchema.parse(raw), {
   mode: 'release', target: { exists: true, status: 'active' },
-  resolution: { ceiling: config.browserAi.resolutionCeiling, default: config.browserAi.defaultResolution, locatorDocument: config, locatorProtocol: 2 },
+  resolution: { locatorDocument: config },
 })
 
 describe('v2 定位编排诊断', () => {

@@ -10,6 +10,7 @@ import { Link } from '@tanstack/react-router'
 import type { ServiceCallerDto, ServiceCredentialDto } from '@cairn/shared'
 import { Archive, ClipboardCopy, Pencil, Plus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { subscribeRunEvents } from '@/lib/runs-api'
 import {
   archiveService,
@@ -91,10 +92,10 @@ function RequestLogSheet({
     queryFn: () => fetchServiceRequestLog(callerId, logId),
   })
   const copyRequestId = async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value)
+    const ok = await copyToClipboard(value)
+    if (ok) {
       toast.success('Request ID 已复制')
-    } catch {
+    } else {
       toast.error('无法复制 Request ID，请手动复制')
     }
   }
@@ -600,10 +601,10 @@ export function ServicesPage() {
   const copyCredentialReference = useCallback(
     async (credential: ServiceCredentialDto) => {
       const reference = `cairn_sk_${credential.id}`
-      try {
-        await navigator.clipboard.writeText(reference)
+      const ok = await copyToClipboard(reference)
+      if (ok) {
         toast.success('Key 引用已复制')
-      } catch {
+      } else {
         toast.error('无法复制 Key 引用，请手动复制')
       }
     },

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useAssistantCollectionContext } from '@/features/assistant/use-assistant-context-binding'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
@@ -129,7 +130,7 @@ export function SuitesPage() {
     if (!item.publishedVersionNo || item.status !== 'active') return
     setLaunchingId(item.id)
     try {
-      const idempotencyKey = `suite-${crypto.randomUUID()}`
+      const idempotencyKey = `suite-${newUuid()}`
       const preview = await previewSuiteRun({
         suiteId: item.id,
         idempotencyKey,

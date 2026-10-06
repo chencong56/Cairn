@@ -82,7 +82,10 @@ describe('内部 HTTP', () => {
     })
     const ok = await fetch(`http://127.0.0.1:${addr.port}${path}`, { headers })
     expect(ok.status).toBe(200)
-    expect(sessions.describeRunBrowser).toHaveBeenCalledWith({ runId, actorId, pageId: undefined })
+    expect(sessions.describeRunBrowser).toHaveBeenCalledWith({ runId, actorId, pageId: undefined, actorCanControl: false })
+    const withControl = await fetch(`http://127.0.0.1:${addr.port}${path}?control=1`, { headers })
+    expect(withControl.status).toBe(200)
+    expect(sessions.describeRunBrowser).toHaveBeenLastCalledWith({ runId, actorId, pageId: undefined, actorCanControl: true })
     expect(await ok.text()).not.toContain('/api/runs')
   })
 

@@ -156,4 +156,69 @@ describe('画面订阅生命周期', () => {
     expect(frames).toBeGreaterThanOrEqual(2)
     vi.mocked(db.getRun).mockResolvedValue({ status: 'RUNNING', placement: {} } as never)
   })
+
+  describe('认证等待期画面门禁', () => {
+    function waitingManager() {
+      const { manager, live } = subscribeManager()
+      const original = manager.requireLiveAuthSession.bind(manager)
+      const waitingRun = { id: runId, status: 'WAITING_FOR_AUTH', placement: { sessionId } }
+      Object.assign(manager, {
+        requireLiveAuthSession: async (id: string) => ({
+          ...(await original(id)),
+          run: waitingRun,
+        }),
+        // 定时复核走 lookupRunSession：必须同样返回等待登录态，才能覆盖「复核时漏传控制资格」的回归。
+        lookupRunSession: async () => ({
+          run: waitingRun,
+          session: {
+            id: sessionId,
+            generation: 1,
+            ownerWorkerId: 'test-worker',
+            ownerWorkerInstanceId: 'test-worker',
+            authControlActorId: null,
+            authControlExpiresAt: null,
+          },
+          live,
+        }),
+      })
+      return manager
+    }
+
+    it('无控制资格且未持有输入权时拒绝出帧', async () => {
+      const manager = waitingManager()
+      await expect(
+        manager.subscribeRunFrames({
+          runId,
+          actorId,
+          onFrame: () => undefined,
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toMatchObject({ code: 'AUTH_CONTROL_INVALID' })
+    })
+
+    it('有控制资格者未取得输入权也能持续只读出帧（不会在定时复核时被判无权断流）', async () => {
+      const manager = waitingManager()
+      const controller = new AbortController()
+      let frames = 0
+      let ended = false
+      const done = manager
+        .subscribeRunFrames({
+          runId,
+          actorId,
+          actorCanControl: true,
+          onFrame: () => {
+            frames += 1
+            if (frames >= 3) controller.abort()
+          },
+          signal: controller.signal,
+        })
+        .then(() => {
+          ended = true
+        })
+      await vi.waitFor(() => expect(frames).toBeGreaterThanOrEqual(3), { timeout: 4000 })
+      await done
+      expect(ended).toBe(true)
+      expect(controller.signal.aborted).toBe(true)
+    })
+  })
 })

@@ -128,12 +128,14 @@ async function handleRequest(
   entityIdSchema.parse(actorId)
   entityIdSchema.parse(runId)
   const pageId = url.searchParams.get('pageId') ?? undefined
+  // 由已鉴权的 API 依 session:control 权限生成；仅用于认证等待期只读观看，不授予输入权。
+  const actorCanControl = url.searchParams.get('control') === '1'
   if (req.method === 'GET' && url.pathname === workerInternalPath('/meta')) {
-    writeJson(res, 200, await ctx.sessions.describeRunBrowser({ runId, actorId, pageId }))
+    writeJson(res, 200, await ctx.sessions.describeRunBrowser({ runId, actorId, pageId, actorCanControl }))
     return
   }
   if (req.method === 'GET' && url.pathname === workerInternalPath('/frames')) {
-    await streamFrames(req, res, ctx.sessions, { runId, actorId, pageId })
+    await streamFrames(req, res, ctx.sessions, { runId, actorId, pageId, actorCanControl })
     return
   }
   if (req.method === 'POST' && url.pathname === workerInternalPath('/auth-control/acquire')) {
@@ -248,7 +250,7 @@ async function streamFrames(
   req: IncomingMessage,
   res: ServerResponse,
   sessions: BrowserSessionManager,
-  input: { runId: string; actorId: string; pageId?: string },
+  input: { runId: string; actorId: string; pageId?: string; actorCanControl?: boolean },
 ): Promise<void> {
   const controller = new AbortController()
   bindSseAbort(req, res, controller)

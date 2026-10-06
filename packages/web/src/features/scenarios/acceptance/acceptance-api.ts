@@ -11,6 +11,7 @@ import {
   type AcceptancePreviewRequestBody,
   type AcceptancePreviewResponse,
 } from '@cairn/shared'
+import { newUuid } from '@/lib/uuid'
 import {
   createAssistantConversation,
   createAssistantTurn,
@@ -22,7 +23,7 @@ import { apiFetch, toQueryString } from '@/lib/api-client'
 const TERMINAL_TURN_STATUSES = new Set<AssistantTurn['status']>(['COMPLETED', 'CLARIFY', 'FAILED', 'CANCELLED', 'INTERRUPTED'])
 
 function clientId(prefix: string): string {
-  const id = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  const id = typeof crypto.randomUUID === 'function' ? newUuid() : `${Date.now()}-${Math.random().toString(16).slice(2)}`
   return `${prefix}-${id}`
 }
 

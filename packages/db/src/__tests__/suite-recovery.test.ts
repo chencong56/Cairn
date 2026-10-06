@@ -1,6 +1,8 @@
 import { eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL, type SuiteDocumentInput } from '@cairn/shared'
+import { SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL, type SuiteDocumentInput,
+  LOCATOR_RESOLUTION_PROTOCOL,
+} from '@cairn/shared'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -54,7 +56,7 @@ describe.each(DRIVERS)('%s 集合取消、证据收敛与输入快照', (driver)
     const { runs } = schemaFor(handle.db)
     const excluded = await handle.db.select({ id: runs.id }).from(runs).where(ne(runs.id, childId))
     const worker = { workerId: `suite-${newId()}`, instanceId: newId() }
-    await registerWorker(handle.db, { ...worker, capacity: 2, maxSessions: 2, lostAfterSeconds: 60, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL] })
+    await registerWorker(handle.db, { ...worker, capacity: 2, maxSessions: 2, lostAfterSeconds: 60, protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SUITE_ADMISSION_PROTOCOL] })
     const grant = await claimRun(handle, { ...worker, leaseTtlSeconds: 60, excludeRunIds: excluded.map((row) => row.id) })
     expect(grant?.runId).toBe(childId)
     await cancelSuiteRun(handle.db, observation.id, actor())

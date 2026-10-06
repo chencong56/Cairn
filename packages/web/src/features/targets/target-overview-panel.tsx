@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
 import { canOnTarget } from '@/lib/rbac'
 import { useAuthStore } from '@/stores/auth-store'
+import { copyToClipboard } from '@/lib/clipboard'
 import { TargetIdentityIcon } from './target-identity-icon'
 import { AUTH_METHOD_LABELS, CAPTCHA_MODE_LABELS, TARGET_STATUS_LABELS } from './labels'
 import { ACCOUNT_SESSION_STATUS_LABELS, ACCOUNT_SESSION_STATUS_TONE } from '@/features/sessions/labels'
@@ -30,12 +31,14 @@ export function TargetOverviewPanel({
   const accounts = item.accounts.state === 'available' ? item.accounts.value : null
 
   const copyUrl = async () => {
-    try {
-      await navigator.clipboard.writeText(target.entryUrl)
+    const success = await copyToClipboard(target.entryUrl)
+    if (success) {
       setCopied(true)
       toast.success('已复制系统入口')
       window.setTimeout(() => setCopied(false), 2000)
-    } catch { toast.error('复制失败，请手动复制') }
+    } else {
+      toast.error('复制失败，请手动复制')
+    }
   }
 
   return <aside id={compact ? undefined : 'target-overview'} aria-label='系统概览' className={compact ? 'min-w-0 bg-card' : 'min-w-0 overflow-hidden rounded-xl border border-border-card bg-card shadow-card'}>
@@ -77,7 +80,7 @@ export function TargetOverviewPanel({
       </div>
 
       <div className='flex min-w-0 items-center gap-1 rounded-md border border-border-divider bg-surface-subtle px-2 py-1'>
-        <span className='min-w-0 flex-1 truncate font-mono text-label text-text-secondary' title={target.entryUrl}>{target.entryUrl}</span>
+        <span className='min-w-0 flex-1 truncate font-mono text-label text-text-secondary select-all' title={target.entryUrl}>{target.entryUrl}</span>
         <Button variant='ghost' size='icon' className='size-7 shrink-0' onClick={() => void copyUrl()} aria-label='复制系统入口' title='复制系统入口'>{copied ? <Check className='size-3.5' /> : <Copy className='size-3.5' />}</Button>
         <Button variant='ghost' size='icon' className='size-7 shrink-0' asChild><a href={target.entryUrl} target='_blank' rel='noopener noreferrer' aria-label='打开系统入口' title='打开系统入口'><ExternalLink className='size-3.5' /></a></Button>
       </div>

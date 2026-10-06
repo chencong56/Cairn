@@ -4,7 +4,7 @@ import type { RunSnapshot, Step } from '@cairn/shared'
 export function snapshotForDebugStep(snapshot: RunSnapshot, stepId: string, editedStep?: Step): RunSnapshot {
   const frozen = snapshot.resolution
   const order = editedStep?.policy?.locatorPlan?.order
-  if (!order || frozen?.protocol !== 'snapshot.resolution@2') return snapshot
+  if (!order || !frozen) return snapshot
   if (!frozen.steps[stepId]) throw new Error('当前步骤没有冻结的定位计划，请重新创建试跑')
   for (const route of order) {
     if (!frozen.allowed.includes(route)) throw new Error('本次运行冻结的定位能力不允许所选路线，请重新创建试跑')

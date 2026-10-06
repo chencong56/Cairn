@@ -88,7 +88,7 @@ describe('运行页解析决策', () => {
     await renderDecisions()
     await expect.element(page.getByText('经 AI 定位')).toBeVisible()
     await expect.element(page.getByText(/提交查询/)).toBeVisible()
-    await expect.element(page.getByText(/规则优先，AI 兜底/)).toBeVisible()
+    await expect.element(page.getByText(/prefer_deterministic/)).toBeVisible()
     await expect.element(page.getByText(/规则\(未找到目标\) → 地图修复\(未尝试\) → 模型\(命中\)/)).toBeVisible()
   })
 

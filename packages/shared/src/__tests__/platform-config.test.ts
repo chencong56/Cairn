@@ -47,6 +47,7 @@ describe('平台配置默认值单源', () => {
       session: FACTORY_PLATFORM_CONFIG.session,
       evidence: FACTORY_PLATFORM_CONFIG.evidence,
       browserAi: FACTORY_PLATFORM_CONFIG.browserAi,
+      locator: FACTORY_PLATFORM_CONFIG.locator,
     }
     expect(platformConfigDocumentSchema.parse(minimal)).toEqual(FACTORY_PLATFORM_CONFIG)
   })
@@ -337,26 +338,25 @@ describe('平台配置文档版本升级', () => {
     expect(() => platformConfigWriteDocumentSchema.parse(FACTORY_PLATFORM_CONFIG)).not.toThrow()
   })
 
-  it('浏览器 AI 解析档位空串按出厂补齐，不把英文枚举错误抛给保存', () => {
-    const parsed = platformConfigWriteDocumentSchema.parse({
-      ...FACTORY_PLATFORM_CONFIG,
+  it('v7 存量文档升级时按旧字段换算 locator 并删除旧键', () => {
+    const legacy = {
+      ...JSON.parse(JSON.stringify(FACTORY_PLATFORM_CONFIG)),
+      schemaVersion: 7,
       browserAi: {
         ...FACTORY_PLATFORM_CONFIG.browserAi,
-        resolutionCeiling: '',
-        defaultResolution: '',
+        enabled: true,
+        secretRef: { provider: 'local', secretId: '00000000-0000-4000-8000-000000000099' },
+        resolutionCeiling: 'prefer_deterministic_text',
+        defaultResolution: 'prefer_ai',
       },
-      platformAi: {
-        ...FACTORY_PLATFORM_CONFIG.platformAi,
-        provider: '',
-      },
-    })
-    expect(parsed.browserAi.resolutionCeiling).toBe(
-      FACTORY_PLATFORM_CONFIG.browserAi.resolutionCeiling,
-    )
-    expect(parsed.browserAi.defaultResolution).toBe(
-      FACTORY_PLATFORM_CONFIG.browserAi.defaultResolution,
-    )
-    expect(parsed.platformAi.provider).toBeUndefined()
+    }
+    delete legacy.locator
+    const parsed = upgradePlatformConfigDocument(legacy)
+    expect(parsed.schemaVersion).toBe(PLATFORM_CONFIG_SCHEMA_VERSION)
+    expect(parsed.locator.defaultPlan.order).toEqual(['text_ai', 'vision_ai', 'rule'])
+    expect(parsed.locator.limits.allowed).toEqual(['rule', 'text_ai'])
+    expect('resolutionCeiling' in parsed.browserAi).toBe(false)
+    expect('defaultResolution' in parsed.browserAi).toBe(false)
   })
 
   it('启用知识分析但未配置平台模型时报错', () => {

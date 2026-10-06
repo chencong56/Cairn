@@ -386,7 +386,7 @@ async function createSuiteRunTx(db: Db, input: CreateSuiteRunBody, actor: Execut
   const layers = await loadResolutionLayers(db, suite.targetId)
   for (const member of preview.members) {
     const loaded = await loadScenarioVersion(db, member.scenarioId, member.scenarioVersionId)
-    if (stepsNeedAiExecute(loaded.version.definition.steps, layers, loaded.version.definition.resolution)) {
+    if (stepsNeedAiExecute(loaded.version.definition.steps, layers, loaded.version.definition.locatorPlan)) {
       await assertTargetPermission(db, actor.id, suite.targetId, 'ai:execute')
       break
     }

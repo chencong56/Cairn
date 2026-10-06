@@ -433,9 +433,10 @@ describe('Worker 广告入口与终结点解析', () => {
     ).toBe('https://worker-a.internal:8443')
   })
 
-  it('通配监听与 port=0 配广告 URL 拒启', () => {
-    expect(workerEnvSchema.safeParse({ ...WORKER_SECRETS,  CAIRN_WORKER_INTERNAL_HOST: '0.0.0.0' }).success).toBe(false)
-    expect(workerEnvSchema.safeParse({ ...WORKER_SECRETS,  CAIRN_WORKER_INTERNAL_HOST: '::' }).success).toBe(false)
+  it('通配监听合法，非本地地址与 port=0 配广告 URL 拒启', () => {
+    expect(workerEnvSchema.safeParse({ ...WORKER_SECRETS,  CAIRN_WORKER_INTERNAL_HOST: '0.0.0.0' }).success).toBe(true)
+    expect(workerEnvSchema.safeParse({ ...WORKER_SECRETS,  CAIRN_WORKER_INTERNAL_HOST: '::' }).success).toBe(true)
+    expect(workerEnvSchema.safeParse({ ...WORKER_SECRETS,  CAIRN_WORKER_INTERNAL_HOST: '192.168.1.100' }).success).toBe(false)
     expect(
       workerEnvSchema.safeParse({ ...WORKER_SECRETS, 
         CAIRN_WORKER_INTERNAL_PORT: '0',

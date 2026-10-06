@@ -3,8 +3,10 @@ import { entityIdSchema } from './wire.js'
 import type { LocatorCandidate } from './target-descriptor.js'
 import { locatorLimitsSchema, locatorPlanSchema } from './locator-plan.js'
 
-export const RESOLUTION_PROTOCOL = 'snapshot.resolution@1' as const
-
+/**
+ * 解析决策记录的有效策略标签：由定位路线反向归并出一个紧凑档位，
+ * 只用于决策事实的展示与统计，不参与运行时的定位计划解析。
+ */
 export const RESOLUTION_POLICIES = [
   'deterministic_only',
   'prefer_deterministic_text',
@@ -16,72 +18,17 @@ export const RESOLUTION_POLICIES = [
 export type ResolutionPolicy = (typeof RESOLUTION_POLICIES)[number]
 export const resolutionPolicySchema = z.enum(RESOLUTION_POLICIES)
 
-export const RESOLUTION_POLICY_RANK: Record<ResolutionPolicy, number> = {
-  deterministic_only: 0,
-  prefer_deterministic_text: 1,
-  prefer_deterministic: 2,
-  prefer_text_ai: 3,
-  prefer_ai: 4,
-  ai_only: 5,
-}
-
-export const FACTORY_RESOLUTION_CEILING = 'deterministic_only' as const
-export const FACTORY_RESOLUTION_DEFAULT = 'prefer_deterministic' as const
-
-export function minResolutionPolicy(left: ResolutionPolicy, right: ResolutionPolicy): ResolutionPolicy {
-  return RESOLUTION_POLICY_RANK[left] <= RESOLUTION_POLICY_RANK[right] ? left : right
-}
-
-export function mergeResolutionCeiling(input: {
-  ceiling: ResolutionPolicy
-  targetCeiling?: ResolutionPolicy
-  browserAiEnabled?: boolean
-}): ResolutionPolicy {
-  const platform = input.browserAiEnabled === false ? 'deterministic_only' : input.ceiling
-  return input.targetCeiling ? minResolutionPolicy(platform, input.targetCeiling) : platform
-}
-
-export function mergeEffectiveResolution(input: {
-  ceiling: ResolutionPolicy
-  defaultResolution: ResolutionPolicy
-  targetCeiling?: ResolutionPolicy
-  targetPreference?: ResolutionPolicy
-  document?: ResolutionPolicy
-  step?: ResolutionPolicy
-  browserAiEnabled?: boolean
-}): ResolutionPolicy {
-  const ceiling = mergeResolutionCeiling(input)
-  const requested = requestedResolution(input)
-  return minResolutionPolicy(ceiling, requested)
-}
-
-export function requestedResolution(input: {
-  defaultResolution: ResolutionPolicy
-  targetPreference?: ResolutionPolicy
-  document?: ResolutionPolicy
-  step?: ResolutionPolicy
-}): ResolutionPolicy {
-  return input.step ?? input.document ?? input.targetPreference ?? input.defaultResolution
-}
-
 export const targetResolutionPolicySchema = z
   .strictObject({
-    preference: resolutionPolicySchema.optional(),
-    ceiling: resolutionPolicySchema.optional(),
     plan: locatorPlanSchema.optional(),
     limits: locatorLimitsSchema.optional(),
   })
-  .refine((value) => value.preference !== undefined || value.ceiling !== undefined || value.plan !== undefined || value.limits !== undefined, {
-    message: '至少指定解析优先顺序或该系统解析上限',
-  })
-  .refine((value) => !(value.preference || value.ceiling) || !(value.plan || value.limits), {
-    message: '同一层不能同时使用旧版与新版定位策略',
+  .refine((value) => value.plan !== undefined || value.limits !== undefined, {
+    message: '至少指定该系统默认定位顺序或允许的定位能力',
   })
 export type TargetResolutionPolicy = z.infer<typeof targetResolutionPolicySchema>
 
 export const targetResolutionPolicyPatchSchema = z.strictObject({
-  preference: resolutionPolicySchema.nullable().optional(),
-  ceiling: resolutionPolicySchema.nullable().optional(),
   plan: locatorPlanSchema.nullable().optional(),
   limits: locatorLimitsSchema.nullable().optional(),
 })
@@ -91,13 +38,11 @@ export function parseTargetResolutionPolicy(value: unknown): TargetResolutionPol
   if (value == null) return null
   const parsed = z
     .strictObject({
-      preference: resolutionPolicySchema.optional(),
-      ceiling: resolutionPolicySchema.optional(),
       plan: locatorPlanSchema.optional(),
       limits: locatorLimitsSchema.optional(),
     })
     .parse(value)
-  if (parsed.preference === undefined && parsed.ceiling === undefined && parsed.plan === undefined && parsed.limits === undefined) return null
+  if (parsed.plan === undefined && parsed.limits === undefined) return null
   return targetResolutionPolicySchema.parse(parsed)
 }
 
@@ -105,82 +50,12 @@ export function applyTargetResolutionPolicyPatch(
   current: TargetResolutionPolicy | null,
   patch: TargetResolutionPolicyPatch,
 ): TargetResolutionPolicy | null {
-  const next: { preference?: ResolutionPolicy; ceiling?: ResolutionPolicy; plan?: import('./locator-plan.js').LocatorPlan; limits?: import('./locator-plan.js').LocatorLimits } = { ...current }
-  if (patch.preference === null) delete next.preference
-  else if (patch.preference !== undefined) next.preference = patch.preference
-  if (patch.ceiling === null) delete next.ceiling
-  else if (patch.ceiling !== undefined) next.ceiling = patch.ceiling
+  const next: { plan?: import('./locator-plan.js').LocatorPlan; limits?: import('./locator-plan.js').LocatorLimits } = { ...current }
   if (patch.plan === null) delete next.plan
-  else if (patch.plan !== undefined) { next.plan = patch.plan; delete next.preference; delete next.ceiling }
+  else if (patch.plan !== undefined) next.plan = patch.plan
   if (patch.limits === null) delete next.limits
-  else if (patch.limits !== undefined) { next.limits = patch.limits; delete next.ceiling; delete next.preference }
+  else if (patch.limits !== undefined) next.limits = patch.limits
   return parseTargetResolutionPolicy(next)
-}
-
-export const RESOLUTION_CEILING_LABELS: Record<ResolutionPolicy, string> = {
-  deterministic_only: '仅规则定位（不使用 AI 找元素）',
-  prefer_deterministic_text: '文本定位（规则 + 平台文本 AI，不使用视觉找元素）',
-  prefer_deterministic: '完整多模态定位（规则 + 文本 AI + 视觉 AI 兜底）',
-  prefer_text_ai: '允许文本 AI 优先',
-  prefer_ai: '允许视觉 AI 优先',
-  ai_only: '允许仅 AI',
-}
-
-export const RESOLUTION_PREFERENCE_LABELS: Record<ResolutionPolicy, string> = {
-  deterministic_only: '仅规则',
-  prefer_deterministic_text: '规则优先，平台文本 AI 兜底（低成本，不调用视觉）',
-  prefer_deterministic: '规则优先，AI 兜底（完整多模态：文本 → 视觉）',
-  prefer_text_ai: '平台文本 AI 优先，规则兜底',
-  prefer_ai: '视觉 AI 优先，规则兜底',
-  ai_only: '仅 AI',
-}
-
-export function policyAllowsAiRung(policy: ResolutionPolicy): boolean {
-  return policy !== 'deterministic_only'
-}
-
-export function policyAllowsVisionAi(policy: ResolutionPolicy): boolean {
-  return policy !== 'deterministic_only' && policy !== 'prefer_deterministic_text' && policy !== 'prefer_text_ai'
-}
-
-export function policyStartsAtAiRung(policy: ResolutionPolicy): boolean {
-  return policy === 'prefer_text_ai' || policy === 'prefer_ai' || policy === 'ai_only'
-}
-
-export function policyStartsAtVisionAi(policy: ResolutionPolicy): boolean {
-  return policy === 'prefer_ai'
-}
-
-export function policyStartsAtTextAi(policy: ResolutionPolicy): boolean {
-  return policy === 'prefer_text_ai'
-}
-
-export const frozenResolutionSchema = z.strictObject({
-  protocol: z.literal(RESOLUTION_PROTOCOL),
-  ceiling: resolutionPolicySchema,
-  scenarioDefault: resolutionPolicySchema,
-  targetCeiling: resolutionPolicySchema.optional(),
-  targetPreference: resolutionPolicySchema.optional(),
-  steps: z.record(entityIdSchema, resolutionPolicySchema),
-})
-export type FrozenResolution = z.infer<typeof frozenResolutionSchema>
-
-export function freezeResolutionSnapshot(input: {
-  ceiling: ResolutionPolicy
-  scenarioDefault: ResolutionPolicy
-  targetCeiling?: ResolutionPolicy
-  targetPreference?: ResolutionPolicy
-  steps: Readonly<Record<string, ResolutionPolicy>>
-}): FrozenResolution | undefined {
-  if (!Object.values(input.steps).some(policyAllowsAiRung)) return undefined
-  return frozenResolutionSchema.parse({
-    protocol: RESOLUTION_PROTOCOL,
-    ceiling: input.ceiling,
-    scenarioDefault: input.scenarioDefault,
-    ...(input.targetCeiling ? { targetCeiling: input.targetCeiling } : {}),
-    ...(input.targetPreference ? { targetPreference: input.targetPreference } : {}),
-    steps: input.steps,
-  })
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -268,26 +143,4 @@ export function crossCheckMatches(
       .map(normalizeCrossCheckText)
     return needles.some((needle) => needle && hay.some((item) => item.includes(needle)))
   })
-}
-
-export const RESOLUTION_MODE_LABELS = {
-  rule: '规则',
-  mixed: '规则 · AI 兜底',
-  ai: 'AI',
-} as const
-export type ResolutionModeKind = keyof typeof RESOLUTION_MODE_LABELS
-
-export function deriveStepResolutionBadge(input: {
-  effective: ResolutionPolicy
-  hasCandidates: boolean
-  aiRungAvailable: boolean
-}): { kind: ResolutionModeKind; unavailable?: string } {
-  const unavailable = input.aiRungAvailable ? undefined : '当前未开放 AI 解析'
-  if (input.effective === 'ai_only' || (input.effective !== 'deterministic_only' && !input.hasCandidates)) {
-    return { kind: 'ai', ...(unavailable ? { unavailable } : {}) }
-  }
-  if (policyAllowsAiRung(input.effective)) {
-    return { kind: 'mixed', ...(unavailable ? { unavailable } : {}) }
-  }
-  return { kind: 'rule' }
 }

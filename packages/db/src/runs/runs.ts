@@ -2,7 +2,7 @@ import { resolveAccountCurrentCredential } from '../credentials/index.js'
 import { freezeRunReportContext } from '../reports/profiles.js'
 import { computeSnapshotDigest } from './digest.js'
 import { freezeAuthVerificationForRun } from '../sessions/auth-profile.js'
-import { assembleRunSnapshot, AssembleRunSnapshotError, resolveAssembledAiExecution } from './assemble-snapshot.js'
+import { assembleRunSnapshot, AssembleRunSnapshotError } from './assemble-snapshot.js'
 import { settleRunOutput } from './output.js'
 import { assertDemonstrationExecutorRolloutTx, saveRunValidationContextTx, markValidationInterventionTx } from './validation.js'
 import { ensureFrozenAccessPolicyTx } from '../map/access.js'
@@ -39,7 +39,6 @@ import {
   FIXTURE_STEPS_DISABLED_CODE,
   FIXTURE_STEPS_DISABLED_MESSAGE,
   isFixtureStepType,
-  parseTargetResolutionPolicy,
   sessionPolicyOverrideSchema,
   stepRunFor,
   idempotentRequestMatches,
@@ -1215,26 +1214,7 @@ export async function writeRunWithSnapshot(
 
   const runId = newId()
   const now = new Date()
-  let aiExecution = input.aiExecution
-  try {
-    const targetResolution = parseTargetResolutionPolicy(target.resolutionPolicy)
-    aiExecution = version.definition.locatorProtocol === 2 || version.definition.locatorPlan || version.definition.steps.some((step) => step.policy?.locatorPlan)
-      ? undefined
-      : resolveAssembledAiExecution({
-      steps: version.definition.steps,
-      platformDocument: document,
-      platformRevision: platform?.revision,
-      aiExecution: input.aiExecution,
-      hangWaitMs: input.hangWaitMs,
-      executionPolicyOverride: input.policy,
-      documentResolution: version.definition.resolution,
-      targetCeiling: targetResolution?.ceiling,
-      targetPreference: targetResolution?.preference,
-    })
-  } catch (error) {
-    if (error instanceof AssembleRunSnapshotError) throw badRequest(error.code, error.message)
-    throw error
-  }
+  const aiExecution = input.aiExecution
   try {
     await atomic(db, async (tx) => {
       const access = await ensureFrozenAccessPolicyTx(tx as unknown as Db, {
@@ -1283,9 +1263,7 @@ export async function writeRunWithSnapshot(
           executionPolicyOverride: input.policy,
           mapCapturePolicyOverride: input.mapCapturePolicy,
           mapJob: input.mapJob,
-          documentResolution: version.definition.resolution,
           documentLocatorPlan: version.definition.locatorPlan,
-          locatorProtocol: version.definition.locatorProtocol,
           target,
           maxConcurrentSessions,
           platformDocument: document,

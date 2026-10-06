@@ -11,18 +11,15 @@ import {
   LOCATOR_PRESETS,
   LOCATOR_PRESET_LABELS,
   locatorPresetFor,
-  legacyPolicyRoutes,
   resolveLocatorPlan,
   locatorReadiness,
   type LocatorPlan,
   type LocatorBy,
   type RelativeAnchorScope,
-  type ResolutionPolicy,
   type TargetDescriptor,
   type TargetObservation,
 } from '@cairn/shared'
 import { toast } from 'sonner'
-import { fetchScenarioCapabilities } from '@/lib/scenarios-api'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
@@ -65,17 +62,13 @@ export function TargetFields({
   target: TargetDescriptor
   disabled?: boolean
   optional?: boolean
-  policy?: { resolution?: ResolutionPolicy; locatorPlan?: LocatorPlan; deepLocate?: boolean }
+  policy?: { locatorPlan?: LocatorPlan; deepLocate?: boolean }
   onChange: (target: TargetDescriptor) => void
-  onPolicyChange?: (policy: { resolution?: ResolutionPolicy; locatorPlan?: LocatorPlan; deepLocate?: boolean }) => void
+  onPolicyChange?: (policy: { locatorPlan?: LocatorPlan; deepLocate?: boolean }) => void
   forceAdvanced?: boolean
   ruleOnly?: boolean
 }) {
   const observe = useAuthoringObserve()
-  const capabilities = useQuery({
-    queryKey: ['scenarios', 'capabilities'],
-    queryFn: fetchScenarioCapabilities,
-  }).data?.resolution
   const resolutionSource = useResolutionSource()
   const boundTargetId = resolutionSource.targetId
   const targetPolicy = useQuery({
@@ -84,16 +77,15 @@ export function TargetFields({
     enabled: Boolean(boundTargetId),
   }).data?.resolutionPolicy
   const platform = useQuery({ queryKey: ['platform-config'], queryFn: fetchPlatformConfig }).data?.document
-  const textReady = platform ? locatorReadiness(platform).textReady : capabilities?.textReady === true
   const presetKeys = Object.keys(LOCATOR_PRESETS) as Array<keyof typeof LOCATOR_PRESETS>
   let planPreview = ''
   if (platform) {
     try {
       const result = resolveLocatorPlan({
-        platform: { plan: platform.locator?.defaultPlan, limits: platform.locator?.limits, defaultPolicy: platform.browserAi.defaultResolution, ceiling: platform.browserAi.resolutionCeiling },
-        target: targetPolicy ? { plan: targetPolicy.plan, limits: targetPolicy.limits, policy: targetPolicy.preference, ceiling: targetPolicy.ceiling } : undefined,
-        scenario: { plan: resolutionSource.scenarioPlan, policy: resolutionSource.scenarioPolicy },
-        step: { plan: policy?.locatorPlan, policy: policy?.resolution },
+        platform: { plan: platform.locator.defaultPlan, limits: platform.locator.limits },
+        target: targetPolicy ? { plan: targetPolicy.plan, limits: targetPolicy.limits } : undefined,
+        scenario: { plan: resolutionSource.scenarioPlan },
+        step: { plan: policy?.locatorPlan },
         ...locatorReadiness(platform),
       })
       planPreview = `本步请求：${locatorRouteListLabel(result.requested)}；实际：${locatorRouteListLabel(result.actual)}${result.skipped.length ? `；跳过：${locatorSkippedLabel(result.skipped)}` : ''}`
@@ -106,7 +98,7 @@ export function TargetFields({
   const frames = target.framePath ?? []
   const observeDisabled = disabled && !observe.livePage
   const [advanced, setAdvanced] = useState(
-    Boolean(forceAdvanced || target.anchor || frames.length > 0 || policy?.resolution || policy?.locatorPlan || policy?.deepLocate),
+    Boolean(forceAdvanced || target.anchor || frames.length > 0 || policy?.locatorPlan || policy?.deepLocate),
   )
 
   return (
@@ -272,7 +264,7 @@ export function TargetFields({
         <CollapsibleTrigger asChild>
           <Button type='button' variant='ghost' size='sm' className='gap-1.5 text-muted-foreground hover:text-foreground'>
             <span>{advanced ? '收起高级定位' : ruleOnly ? '高级：规则候选与锚点' : '高级：规则候选、锚点与定位顺序'}</span>
-            {!advanced && (frames.length > 0 || Boolean(target.anchor) || candidates.filter(c => c.value.trim()).length > 1 || Boolean(!ruleOnly && (policy?.locatorPlan || policy?.resolution))) && (
+            {!advanced && (frames.length > 0 || Boolean(target.anchor) || candidates.filter(c => c.value.trim()).length > 1 || Boolean(!ruleOnly && policy?.locatorPlan)) && (
               <div className='flex items-center gap-1 ml-1' data-testid='target-active-pills'>
                 {frames.length > 0 && (
                   <span className='rounded bg-muted px-1.5 py-0.2 text-3xs font-mono text-muted-foreground'>
@@ -289,7 +281,7 @@ export function TargetFields({
                     {candidates.filter(c => c.value.trim()).length}个候选
                   </span>
                 )}
-                {!ruleOnly && Boolean(policy?.locatorPlan || policy?.resolution) && (
+                {!ruleOnly && Boolean(policy?.locatorPlan) && (
                   <span className='rounded bg-muted px-1.5 py-0.2 text-3xs text-muted-foreground'>
                     {policy?.locatorPlan
                       ? (locatorPresetFor(policy.locatorPlan)
@@ -543,11 +535,11 @@ export function TargetFields({
                   </FieldHelp>
                 </div>
                 <Select
-                  value={policy?.locatorPlan ? locatorPresetFor(policy.locatorPlan) ?? 'custom' : policy?.resolution ? `old_${policy.resolution}` : 'inherit'}
+                  value={policy?.locatorPlan ? locatorPresetFor(policy.locatorPlan) ?? 'custom' : 'inherit'}
                   disabled={disabled}
                   onValueChange={(value) => {
-                    if (value === 'custom' || value.startsWith('old_')) return
-                    const { resolution: _old, locatorPlan: _plan, ...rest } = policy ?? {}
+                    if (value === 'custom') return
+                    const { locatorPlan: _plan, ...rest } = policy ?? {}
                     onPolicyChange(value === 'inherit' ? rest : { ...rest, locatorPlan: { v: 2, order: [...LOCATOR_PRESETS[value as keyof typeof LOCATOR_PRESETS].order] } })
                   }}
                 >
@@ -556,7 +548,6 @@ export function TargetFields({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value='inherit'>继承场景／目标／平台</SelectItem>
-                    {policy?.resolution ? <SelectItem value={`old_${policy.resolution}`}>旧版：{locatorRouteListLabel(legacyPolicyRoutes(policy.resolution, textReady && Boolean(platform && locatorReadiness(platform).visionReady)))}</SelectItem> : null}
                     {policy?.locatorPlan && !locatorPresetFor(policy.locatorPlan) ? <SelectItem value='custom'>当前顺序：{locatorRouteListLabel(policy.locatorPlan.order)}</SelectItem> : null}
                     {presetKeys.map((key) => <SelectItem key={key} value={key}>{LOCATOR_PRESET_LABELS[key]}</SelectItem>)}
                   </SelectContent>

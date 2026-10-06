@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
 import { suggestionToBinding } from '@cairn/authoring'
 import {
@@ -57,7 +58,7 @@ type InsertModuleDialogProps = {
 }
 
 function newKey(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`
+  return `${prefix}-${newUuid()}`
 }
 
 function matchReason(candidate: ModuleResolveCandidate) {

@@ -1,4 +1,5 @@
 import type { ZodType } from 'zod'
+import { newUuid } from '@/lib/uuid'
 import { apiErrorSchema, REQUEST_ID_HEADER, type ApiError } from '@cairn/shared'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -45,7 +46,7 @@ export function toQueryString(params?: Record<string, unknown>): string {
  * `getRandomValues` 不受该限制。
  */
 function newRequestId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  if (typeof crypto.randomUUID === 'function') return newUuid()
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }

@@ -121,8 +121,8 @@ export async function probeErrorSurface(
   })
 }
 
-export async function describeRunBrowser(this: SessionManagerContext, input: { runId: string; actorId: string; pageId?: string }): Promise<ManagedBrowserMeta> {
-    return this.buildMeta(input.runId, input.actorId, input.pageId)
+export async function describeRunBrowser(this: SessionManagerContext, input: { runId: string; actorId: string; pageId?: string; actorCanControl?: boolean }): Promise<ManagedBrowserMeta> {
+    return this.buildMeta(input.runId, input.actorId, input.pageId, input.actorCanControl)
   }
 
 export function invalidateObserveGrant(this: SessionManagerContext, runId: string): void {
@@ -344,6 +344,7 @@ export function subscribeRunFrames(this: SessionManagerContext, input: {
     runId: string
     actorId: string
     pageId?: string
+    actorCanControl?: boolean
     onFrame: (frame: ManagedBrowserFrame) => void
     signal: AbortSignal
   }): Promise<void> {
@@ -371,6 +372,7 @@ export async function pipeFrames(this: SessionManagerContext, input: {
     runId: string
     actorId: string
     pageId?: string
+    actorCanControl?: boolean
     onFrame: (frame: ManagedBrowserFrame) => void
     signal: AbortSignal
   }): Promise<void> {
@@ -381,9 +383,10 @@ export async function pipeFrames(this: SessionManagerContext, input: {
         actorId: input.actorId,
         controlActorId: session.authControlActorId,
         controlExpiresAt: session.authControlExpiresAt,
+        actorCanControl: input.actorCanControl,
       })
     ) {
-      throw conflict('AUTH_CONTROL_INVALID', '认证阶段仅当前控制者可看画面')
+      throw conflict('AUTH_CONTROL_INVALID', '认证阶段仅有操作权限的用户可看画面')
     }
     await touchViewedSession(this.dbHandle, session, true)
     const entry = this.pageForView(live, input.runId, input.pageId)
@@ -443,6 +446,7 @@ export async function pipeFrames(this: SessionManagerContext, input: {
                   actorId: input.actorId,
                   controlActorId: latestSession.authControlActorId,
                   controlExpiresAt: latestSession.authControlExpiresAt,
+                  actorCanControl: input.actorCanControl,
                 })
               ) {
                 finish()
@@ -639,7 +643,7 @@ export async function lookupRunSession(this: SessionManagerContext, runId: strin
     return { run, session: null, live: undefined }
   }
 
-export async function buildMeta(this: SessionManagerContext, runId: string, actorId: string, viewPageId?: string): Promise<ManagedBrowserMeta> {
+export async function buildMeta(this: SessionManagerContext, runId: string, actorId: string, viewPageId?: string, actorCanControl = false): Promise<ManagedBrowserMeta> {
     const { run, session, live } = await this.lookupRunSession(runId)
     const liveOk = Boolean(live && session && this.sessionOwnedHere(session))
     if (liveOk && session) await touchViewedSession(this.dbHandle, session)
@@ -652,7 +656,8 @@ export async function buildMeta(this: SessionManagerContext, runId: string, acto
       )
     const heldByViewer = session?.authControlActorId === actorId && controlLive
     const capabilities: ManagedBrowserCapabilities = { ...DEFAULT_MANAGED_BROWSER_CAPABILITIES }
-    const framesAvailable = liveOk && (!waiting || heldByViewer) && capabilities.screencast !== 'closed'
+    const framesAvailable =
+      liveOk && (!waiting || heldByViewer || actorCanControl) && capabilities.screencast !== 'closed'
     const current = live && liveOk ? this.ensureRunPage(live, runId) : undefined
     const isRunning = run.status === 'RUNNING'
     const pages: ManagedPageSummary[] =
@@ -709,6 +714,7 @@ export async function buildMeta(this: SessionManagerContext, runId: string, acto
         : null,
       capabilities,
       lastAuthError: session?.lastAuthError ?? null,
+      ...(waiting && framesAvailable ? { viewMode: heldByViewer ? ('control' as const) : ('readonly' as const) } : {}),
       degradedReason: liveOk
         ? null
         : session && !this.sessionOwnedHere(session)

@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { SESSION_OCCUPANCY_PROTOCOL, type Step } from '@cairn/shared'
+import { SESSION_OCCUPANCY_PROTOCOL, type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
+} from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import { enterAuthWaitForRun, forceGrantForRun } from './lease-harness.js'
 import { newId } from '../id.js'
@@ -41,7 +43,7 @@ let targetAccounts = pg_targetAccounts
 let targets = pg_targets
 let workers = pg_workers
 
-const registerWorker: typeof registerWorkerRaw = (db, input) => registerWorkerRaw(db, { protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL], ...input })
+const registerWorker: typeof registerWorkerRaw = (db, input) => registerWorkerRaw(db, { protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL], ...input })
 
 const echoStep: Step = {
   id: '00000000-0000-4000-8000-000000000091',

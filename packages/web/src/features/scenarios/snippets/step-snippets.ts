@@ -1,4 +1,5 @@
 import type { Step } from '@cairn/shared'
+import { newUuid } from '@/lib/uuid'
 import { uniqueOutputKey as sharedUniqueOutputKey } from '@/features/authoring/document'
 
 export interface StepSnippetTemplate {
@@ -164,7 +165,7 @@ export function instantiateSnippet(
   const currentUsed = new Set(usedContextKeys)
 
   return template.createSteps({
-    generateId: () => crypto.randomUUID(),
+    generateId: () => newUuid(),
     allocateOutputKey: (base: string) => {
       const allocated = sharedUniqueOutputKey(base, currentUsed)
       currentUsed.add(allocated)

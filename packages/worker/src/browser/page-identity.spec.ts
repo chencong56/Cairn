@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createManagedPage, originAllowed, pickPopupHandoff } from './page-identity'
+import { createManagedPage, describeOutOfScopeOrigin, originAllowed, pickPopupHandoff } from './page-identity'
 
 describe('popup handoff selection', () => {
   const page = { isClosed: () => false } as import('playwright').Page
@@ -81,5 +81,19 @@ describe('popup handoff selection', () => {
     expect(
       pickPopupHandoff([{ page, url: 'https://app.example/admin' }], ['https://app.example'], scope),
     ).toMatchObject({ ok: false, code: 'PAGE_HANDOFF_OUT_OF_SCOPE' })
+  })
+})
+
+describe('describeOutOfScopeOrigin', () => {
+  it('带上被拦站点与配置入口，且不含路径、查询与 URL 形态（避免被 API 转发时脱敏成「执行面不可达」）', () => {
+    const message = describeOutOfScopeOrigin('http://eipxcuat.tower0788.cn:9000/eip/index?token=secret')
+    expect(message).toContain('eipxcuat.tower0788.cn:9000')
+    expect(message).toContain('协议 http')
+    expect(message).toContain('访问策略')
+    expect(message).not.toMatch(/https?:\/\/|token|secret|\/eip/)
+  })
+
+  it('地址无法解析时仍给出配置入口', () => {
+    expect(describeOutOfScopeOrigin('not a url')).toContain('访问策略')
   })
 })

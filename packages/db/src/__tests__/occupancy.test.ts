@@ -6,6 +6,7 @@ import {
   PLATFORM_CONFIG_SINGLETON_ID,
   SESSION_OCCUPANCY_PROTOCOL,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb, grantAdminScope } from './contract-fixture.js'
 import { afterSeconds, schemaFor } from '../native.js'
@@ -151,7 +152,7 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
         instanceId: newId(),
         capacity: 2,
         lostAfterSeconds: 60,
-        protocolCapabilities: [MAP_JOBS_PROTOCOL],
+        protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, MAP_JOBS_PROTOCOL],
       }),
     ).rejects.toMatchObject({ code: 'WORKER_PROTOCOL_UNSUPPORTED' })
     const ready = await seedWorker(handle, `ready-${newId().slice(0, 8)}`)
@@ -556,7 +557,7 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
       capacity: 2,
       maxSessions: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const tinyRun = await queueRun(other)
     const tinyGrant = await forceGrantForRun(handle, tinyRun.detail.id, tinyId)
@@ -689,7 +690,7 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
       instanceId,
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const queued = await requestSessionOperation(handle.db, {
       key: { targetId, targetAccountId: accountId },

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { type ModuleBatchUpgradeResponse, latestSelectableVersion } from '@cairn/shared'
@@ -51,7 +52,7 @@ export function ActionModuleReferencesPanel({ moduleId }: { moduleId: string }) 
       const result = await batchUpgradeActionModuleDrafts(moduleId, {
         toVersionId: latest.id,
         scenarioIds: selected,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: newUuid(),
       })
       setBatch(result)
       const upgraded = result.results.filter((item) => item.status === 'upgraded').length

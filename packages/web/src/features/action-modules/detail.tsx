@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { compileModuleContent } from '@cairn/authoring'
@@ -552,7 +553,7 @@ function ActionModuleEditor({
                 }
                 onClick={() => {
                   setConfirmed([])
-                  setPublishKey(crypto.randomUUID())
+                  setPublishKey(newUuid())
                   setError('')
                   setPublishOpen(true)
                 }}
@@ -1593,7 +1594,7 @@ function ActionModuleEditor({
             }
           }
           const newFixture: ModuleTestFixture = {
-            id: crypto.randomUUID(),
+            id: newUuid(),
             name,
             inputs: parsedInputs,
             lastRun,

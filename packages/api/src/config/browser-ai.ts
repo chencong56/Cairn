@@ -8,14 +8,11 @@ import {
   hasPermission,
   platformRuntimeDefaultsFrom,
   resolutionCapabilitiesFromPlatform,
-  resolveLocatorPlansForSteps,
+  stepsNeedLocatorAiExecute,
   resolveAiExecutionFromPlatform,
-  runNeedsAiExecute,
   scenarioCapabilitiesFor,
   type AiExecutionConfig,
   type PlatformConfigDocument,
-  type ResolutionPolicy,
-  type LocatorPlan,
   type TargetResolutionPolicy,
   type ScenarioCapabilities,
 } from '@cairn/shared'
@@ -61,33 +58,19 @@ export function resolveAiExecution(
 
 export function assertAiExecutePermission(
   actor: RequestAccount,
-  steps: readonly { id?: string; type: string; policy?: { resolution?: ResolutionPolicy; locatorPlan?: LocatorPlan } }[],
+  steps: readonly { id?: string; type: string; disabled?: boolean; policy?: { locatorPlan?: import('@cairn/shared').LocatorPlan } }[],
   extras?: {
     document?: PlatformConfigDocument
-    documentResolution?: ResolutionPolicy
-    targetCeiling?: ResolutionPolicy
-    targetPreference?: ResolutionPolicy
-    documentLocatorPlan?: LocatorPlan
-    locatorProtocol?: 2
+    documentLocatorPlan?: import('@cairn/shared').LocatorPlan
     targetPolicy?: TargetResolutionPolicy | null
   },
 ): void {
   const document = extras?.document ?? FACTORY_PLATFORM_CONFIG
-  const v2 = Boolean(extras?.locatorProtocol === 2 || extras?.documentLocatorPlan || steps.some((step) => step.policy?.locatorPlan))
-  const needsAi = v2
-    ? steps.some((step) => step.type.startsWith('ai_')) || Object.values(resolveLocatorPlansForSteps({
-      steps: steps.map((step, index) => ({ ...step, id: step.id ?? String(index) })),
-      document,
-      target: extras?.targetPolicy,
-      scenarioPlan: extras?.documentLocatorPlan,
-      scenarioPolicy: extras?.documentResolution,
-    })).some((plan) => plan.actual.some((route) => route !== 'rule'))
-    : runNeedsAiExecute({
+  const needsAi = stepsNeedLocatorAiExecute({
     steps,
     document,
-    documentResolution: extras?.documentResolution,
-    targetCeiling: extras?.targetCeiling,
-    targetPreference: extras?.targetPreference,
+    target: extras?.targetPolicy,
+    scenarioPlan: extras?.documentLocatorPlan,
   })
   if (!needsAi) return
   if (!hasPermission(actor.permissions, 'ai:execute')) {

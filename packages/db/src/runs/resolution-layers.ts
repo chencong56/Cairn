@@ -1,9 +1,10 @@
 import { eq } from 'drizzle-orm'
 import {
   parseTargetResolutionPolicy,
-  runNeedsAiExecute,
+  stepsNeedLocatorAiExecute,
+  type LocatorPlan,
   type PlatformConfigDocument,
-  type ResolutionPolicy,
+  type TargetResolutionPolicy,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { schemaFor } from '../native.js'
@@ -11,9 +12,7 @@ import { getOrCreatePlatformConfig } from '../platform-config/store.js'
 
 export async function loadResolutionLayers(db: Db, targetId?: string) {
   const platform = await getOrCreatePlatformConfig(db)
-  let targetCeiling: ResolutionPolicy | undefined
-  let targetPreference: ResolutionPolicy | undefined
-  let targetPolicy: ReturnType<typeof parseTargetResolutionPolicy> = null
+  let targetPolicy: TargetResolutionPolicy | null = null
   if (targetId) {
     const { targets } = schemaFor(db)
     const [row] = await db
@@ -21,34 +20,27 @@ export async function loadResolutionLayers(db: Db, targetId?: string) {
       .from(targets)
       .where(eq(targets.id, targetId))
       .limit(1)
-    const policy = parseTargetResolutionPolicy(row?.resolutionPolicy)
-    targetPolicy = policy
-    targetCeiling = policy?.ceiling
-    targetPreference = policy?.preference
+    targetPolicy = parseTargetResolutionPolicy(row?.resolutionPolicy)
   }
   return {
     document: platform.document,
     revision: platform.revision,
-    targetCeiling,
-    targetPreference,
     targetPolicy,
   }
 }
 
 export function stepsNeedAiExecute(
-  steps: readonly { id?: string; type: string; policy?: { resolution?: ResolutionPolicy } }[],
+  steps: readonly { id?: string; type: string; disabled?: boolean; policy?: { locatorPlan?: LocatorPlan } }[],
   layers: {
     document: PlatformConfigDocument
-    targetCeiling?: ResolutionPolicy
-    targetPreference?: ResolutionPolicy
+    targetPolicy?: TargetResolutionPolicy | null
   },
-  documentResolution?: ResolutionPolicy,
+  scenarioPlan?: LocatorPlan,
 ): boolean {
-  return runNeedsAiExecute({
+  return stepsNeedLocatorAiExecute({
     steps,
     document: layers.document,
-    documentResolution,
-    targetCeiling: layers.targetCeiling,
-    targetPreference: layers.targetPreference,
+    target: layers.targetPolicy,
+    scenarioPlan,
   })
 }

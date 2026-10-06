@@ -4,6 +4,7 @@ import {
   OUTCOME_MANIFEST_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import type { DbHandle } from '../client.js'
@@ -78,7 +79,7 @@ describe.each(DRIVERS)('CFA-14: listOutputProtocol Worker 领取门控 (%s)', (d
       instanceId: newId(),
       capacity: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL],
     }
     await registerWorker(handle.db, oldWorker)
 
@@ -94,7 +95,7 @@ describe.each(DRIVERS)('CFA-14: listOutputProtocol Worker 领取门控 (%s)', (d
       instanceId: newId(),
       capacity: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL, LIST_OUTPUT_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL, LIST_OUTPUT_PROTOCOL],
     }
     await registerWorker(handle.db, newWorker)
 

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { newUuid } from '@/lib/uuid'
 import {
   applyDemonstrationBodySchema,
   createDemonstrationBodySchema,
@@ -15,7 +16,7 @@ import {
 import { apiFetch, apiFetchBlob } from './api-client'
 
 export function newDemonstrationId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  if (typeof crypto.randomUUID === 'function') return newUuid()
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   bytes[6] = (bytes[6] & 15) | 64
   bytes[8] = (bytes[8] & 63) | 128

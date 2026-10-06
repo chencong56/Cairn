@@ -296,7 +296,7 @@ export class BrowserSessionsService {
         runId: target.ownerId,
         sessionGeneration: target.session.generation,
         path: workerInternalPath('/meta'),
-        query: { pageId },
+        query: { pageId, control: (await this.canControlSession(actor, target.session.targetId)) ? '1' : undefined },
         method: 'GET',
         endpoint: target.endpoint,
         timeout: 'headers',
@@ -332,7 +332,10 @@ export class BrowserSessionsService {
           runId: target.ownerId,
           sessionGeneration: target.session.generation,
           path: workerInternalPath('/frames'),
-          query: { pageId: input.pageId },
+          query: {
+            pageId: input.pageId,
+            control: (await this.canControlSession(input.actor, target.session.targetId)) ? '1' : undefined,
+          },
           method: 'GET',
           endpoint: target.endpoint,
           timeout: 'stream',
@@ -575,6 +578,18 @@ export class BrowserSessionsService {
     return Date.now() + 12 * 3600 * 1000
   }
 
+  /** 认证等待期只读观看资格：与取得输入权同口径（session:control，且在目标范围内）。 */
+  private async canControlSession(
+    actor: { id: string; permissions: string[] },
+    targetId: string,
+  ): Promise<boolean> {
+    if (!hasPermission(actor.permissions, 'session:control')) return false
+    return assertTargetPermission(this.handle, actor.id, targetId, 'session:control').then(
+      () => true,
+      () => false,
+    )
+  }
+
   private async recheck(
     accountId: string,
     expiresAt: number,
@@ -602,6 +617,7 @@ export class BrowserSessionsService {
           actorId: accountId,
           controlActorId: session.authControlActorId,
           controlExpiresAt: session.authControlExpiresAt,
+          actorCanControl: await this.canControlSession(account, session.targetId),
         })
       ) {
         return 'FORBIDDEN'

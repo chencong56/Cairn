@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query'
 import {
   type ResolutionDecision,
   type RunDetailDto,
-  RESOLUTION_PREFERENCE_LABELS,
 } from '@cairn/shared'
 import { fetchRunResolutionDecisions } from '@/lib/runs-api'
 import { useCan } from '@/hooks/use-permissions'
@@ -62,7 +61,7 @@ export function RunResolutionDecisions(props: RunResolutionDecisionsProps) {
   if (!canRead) return null
   return (
     <div className='space-y-3'>
-      {props.resolution?.protocol === 'snapshot.resolution@2' ? (
+      {props.resolution ? (
         <details className='rounded-md border border-border-default p-3 text-label'>
           <summary className='cursor-pointer font-medium'>创建运行时冻结的定位计划</summary>
           <div className='mt-2 space-y-2 text-muted-foreground'>
@@ -142,8 +141,9 @@ function DecisionPage({
   const stepName = (stepRunIdValue: string) =>
     steps?.find((step) => step.id === stepRunIdValue)?.name ?? `步骤 ${stepRunIdValue.slice(0, 8)}`
   const planLabel = (item: ResolutionDecision) => {
-    if (!item.plan) return RESOLUTION_PREFERENCE_LABELS[item.effectivePolicy]
-    const frozen = resolution?.protocol === 'snapshot.resolution@2' ? resolution.steps[item.stepId] : undefined
+    // 极早期的运行没有冻结定位计划，只剩有效策略标签可显示。
+    if (!item.plan) return item.effectivePolicy
+    const frozen = resolution?.steps[item.stepId]
     const overridden = frozen && frozen.actual.join(',') !== item.plan.order.join(',')
     return `${overridden ? '调试覆盖' : '计划'} ${locatorRouteListLabel(item.plan.order)}`
   }

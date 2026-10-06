@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import type { JsonValue } from '@cairn/shared'
 import {
   BookmarkPlus,
@@ -145,7 +146,7 @@ export function ModuleFixturesPanel({
       toast.success('已更新测试用例')
     } else {
       const newFixture: ModuleTestFixture = {
-        id: crypto.randomUUID(),
+        id: newUuid(),
         name: formName.trim(),
         description: formDesc.trim() || undefined,
         inputs: parsedInputs,

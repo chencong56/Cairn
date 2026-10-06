@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { moduleKeySchema, type ModuleExtractParameter } from '@cairn/shared'
@@ -84,7 +85,7 @@ export function ModuleExtractWizard({
         parameterized,
         confirmedPostconditionStepIds: confirmedPost,
         description: description.trim() || undefined,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: newUuid(),
       })
       onOpenChange(false)
       void navigate({ to: '/action-modules/$moduleId', params: { moduleId: created.id } })

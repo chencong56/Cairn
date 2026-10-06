@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { FACTORY_MAP_JOB_POLICY, MAP_JOBS_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, arrivalTargetForName,
-  targetStateRuleSchema } from '@cairn/shared'
+  targetStateRuleSchema,
+  LOCATOR_RESOLUTION_PROTOCOL,
+} from '@cairn/shared'
 import { eq } from 'drizzle-orm'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
@@ -33,7 +35,7 @@ describe('统一地图采集作业', { timeout: 60_000 }, () => {
     await handle.db.insert(consoleAccounts).values({ id: actorId, displayName: '采集测试', email: `ingest-${actorId}@example.com`, status: 'active' })
     await handle.db.insert(targets).values({ id: targetId, code: `ingest-${targetId}`, name: '采集目标', entryUrl: 'https://shop.example/home', loginUrl: 'https://shop.example/login' })
     await handle.db.insert(targetAccounts).values({ id: accountId, targetId, displayName: '采集账号', username: `ops-${accountId}`, status: 'active', usage: 'both', mapUsageGuard: 'Y' })
-    await registerWorker(handle.db, { workerId, instanceId, capacity: 2, lostAfterSeconds: 3600, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, MAP_JOBS_PROTOCOL] })
+    await registerWorker(handle.db, { workerId, instanceId, capacity: 2, lostAfterSeconds: 3600, protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, MAP_JOBS_PROTOCOL] })
     await handle.db.insert(browserSessions).values({
       id: newId(), targetId, targetAccountId: accountId, status: 'OPEN', health: 'HEALTHY', authState: 'AUTHENTICATED',
       ownerWorkerId: workerId, ownerWorkerInstanceId: instanceId, generation: 1, fencingToken: 1,

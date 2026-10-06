@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import { useFormContext } from 'react-hook-form'
 import {
   ALERTABLE_METRIC_KEYS,
@@ -323,7 +324,7 @@ export function AlertingFields({
           onClick={() => {
             const custom: AlertRule = {
               kind: 'threshold',
-              id: `custom.${crypto.randomUUID().replace(/-/g, '')}`,
+              id: `custom.${newUuid().replace(/-/g, '')}`,
               name: '自定义阈值',
               metricKey: ALERTABLE_METRIC_KEYS[0]!,
               scope: requiredAlertMetricScope(ALERTABLE_METRIC_KEYS[0]!),

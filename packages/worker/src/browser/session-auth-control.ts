@@ -33,7 +33,8 @@ import {
   type ExecutionError,
   type RecoveryRule,
   type RunSnapshot,
-  type SessionGrant
+  type SessionGrant,
+  redactAuthUrl,
 } from '@cairn/shared'
 import { verifyAuthProfile } from './session-auth'
 import { gotoPage, probeAuth, probeAuthOnPage, runWithOccupancy } from './runtime'
@@ -45,7 +46,7 @@ import {
   viewportMatches
 } from './managed-helpers'
 import { openedEntryDuringVerify } from './landing-settle.js'
-import { originAllowed, pageRefFor } from './page-identity'
+import { describeOutOfScopeOrigin, originAllowed, pageRefFor } from './page-identity'
 import { type LiveHandle, type SessionManagerContext } from './session-live.js'
 
 export async function acquireRunAuthControl(this: SessionManagerContext, input: {
@@ -202,11 +203,28 @@ export async function executeAuthInput(this: SessionManagerContext, params: {
     }
     const pageUrl = typeof entry.page.url === 'function' ? entry.page.url() : ''
     if (live.allowedOrigins.length > 0 && pageUrl && !originAllowed(pageUrl, live.allowedOrigins, live.accessScope)) {
-      throw conflict('AUTH_INPUT_REJECTED', '当前页超出目标系统允许范围')
+      throw conflict('AUTH_INPUT_REJECTED', describeOutOfScopeOrigin(pageUrl))
     }
     this.assertSessionOwnedHere(latest)
     await this.assertOwnLiveRegistration()
+    const urlBefore = redactAuthUrl(pageUrl)
     await applyAuthInput(entry.page, input.command)
+    // 排查「点了没反应」：只记命令类型、坐标、视口与页面变化，不记输入文本；地址已去掉查询串。
+    this.logger?.log(
+      {
+        sessionId,
+        commandType: input.command.type,
+        ...(input.command.type === 'mouse_click' || input.command.type === 'mouse_wheel'
+          ? { x: input.command.x, y: input.command.y }
+          : {}),
+        frame: { width: input.command.viewport.width, height: input.command.viewport.height },
+        viewport: entry.page.viewportSize(),
+        urlBefore,
+        urlAfter: redactAuthUrl(typeof entry.page.url === 'function' ? entry.page.url() : ''),
+        pageCount: [...live.pages.values()].filter((item) => !item.page.isClosed()).length,
+      },
+      '认证输入已落地',
+    )
     live.lastSeq = input.command.seq
     return rememberReceipt(live.receipts, {
       commandId: input.command.commandId,

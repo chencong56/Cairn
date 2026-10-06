@@ -23,6 +23,7 @@ import {
   type LocatorCandidate,
   type TargetDescriptor,
 } from '@cairn/shared'
+import { newUuid } from '@/lib/uuid'
 import {
   documentContextKeys,
   priorOutputShapes,
@@ -104,7 +105,7 @@ export function nodeId(node: ScenarioAuthoringNode): string {
 export function createBlankBlockNode(name?: string): AuthoringBlockNode {
   const genId =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
+      ? newUuid()
       : `blk_${Math.random().toString(36).slice(2, 10)}`
   return {
     kind: 'block',

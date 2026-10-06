@@ -17,6 +17,7 @@ import {
 } from '@cairn/shared'
 import { Plus, Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { copyToClipboard } from '@/lib/clipboard'
 import { ApiRequestError } from '@/lib/api-client'
 import {
   cancelRun,
@@ -692,11 +693,15 @@ export function RunsPage() {
                               <span
                                 className='inline-flex items-center rounded border border-border-divider bg-muted/60 px-1 py-0.5 font-mono text-label text-muted-foreground hover:bg-muted cursor-pointer select-all'
                                 title={`完整运行编号：${item.id}（点击复制）`}
-                                onClick={(e) => {
+                                onClick={async (e) => {
                                   e.preventDefault()
                                   e.stopPropagation()
-                                  navigator.clipboard.writeText(item.id)
-                                  toast.success(`已复制运行编号：${item.id}`)
+                                  const ok = await copyToClipboard(item.id)
+                                  if (ok) {
+                                    toast.success(`已复制运行编号：${item.id}`)
+                                  } else {
+                                    toast.error('复制失败，请手动复制')
+                                  }
                                 }}
                               >
                                 #{item.id.slice(0, 8)}

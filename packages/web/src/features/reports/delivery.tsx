@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import {
   useInfiniteQuery,
   useQuery,
@@ -226,7 +227,7 @@ export function ExportJobCard({
                   setBusy(true)
                   try {
                     setRetried(
-                      await retryReportJob(id, `retry-${crypto.randomUUID()}`)
+                      await retryReportJob(id, `retry-${newUuid()}`)
                     )
                   } catch (error) {
                     toast.error(
@@ -377,7 +378,7 @@ export function ReportDelivery({
                 void act(() =>
                   exportReport(report.id, selected, {
                     formats,
-                    idempotencyKey: `history-${crypto.randomUUID()}`,
+                    idempotencyKey: `history-${newUuid()}`,
                   })
                 )
               }
@@ -430,7 +431,7 @@ export function ReportDelivery({
                     reportRevisionId: revisionId!,
                     formats,
                     includeChildReports: includeChildren,
-                    idempotencyKey: `bundle-${crypto.randomUUID()}`,
+                    idempotencyKey: `bundle-${newUuid()}`,
                   })
                 )
               }
@@ -486,12 +487,12 @@ export function ReportDelivery({
                         config: childTitle.trim()
                           ? { title: childTitle.trim() }
                           : undefined,
-                        idempotencyKey: `member-${crypto.randomUUID()}`,
+                        idempotencyKey: `member-${newUuid()}`,
                       }
                     )
                     return exportReport(child.id, child.currentRevision!.id, {
                       formats,
-                      idempotencyKey: `member-export-${crypto.randomUUID()}`,
+                      idempotencyKey: `member-export-${newUuid()}`,
                     })
                   })
                 }

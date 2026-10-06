@@ -10,6 +10,7 @@ import {
   unknownMetric,
   type MonitorMetricNumber,
   type Step,
+  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { and, eq } from 'drizzle-orm'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -205,7 +206,7 @@ describe.each(DRIVERS)('%s 监控只读聚合', { timeout: 60_000 }, (driver) =>
       capacity: 8,
       maxSessions: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     for (const workerId of [drainId, stopId, lostId]) {
       await registerWorker(handle.db, {
@@ -214,7 +215,7 @@ describe.each(DRIVERS)('%s 监控只读聚合', { timeout: 60_000 }, (driver) =>
         capacity: 1,
         maxSessions: 2,
         lostAfterSeconds: 60,
-        protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+        protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
       })
     }
     expect(await markWorkerDraining(handle.db, drainId, (await getWorkerById(handle.db, drainId))!.instanceId)).toBe(true)
@@ -439,7 +440,7 @@ describe.each(DRIVERS)('%s 监控只读聚合', { timeout: 60_000 }, (driver) =>
       instanceId: newId(),
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const afterGate = await summarizeQueues(handle.db)
     expect(known(afterGate.data.claimableRuns)).toBe(known(before.data.claimableRuns) + 2)
@@ -450,7 +451,7 @@ describe.each(DRIVERS)('%s 监控只读聚合', { timeout: 60_000 }, (driver) =>
       instanceId: newId(),
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, MODULE_MANIFEST_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, MODULE_MANIFEST_PROTOCOL],
     })
     const afterCover = await summarizeQueues(handle.db)
     expect(known(afterCover.data.claimableRuns)).toBe(known(afterGate.data.claimableRuns))
@@ -608,7 +609,7 @@ describe.each(DRIVERS)('%s 监控只读聚合', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
     })
     const holdAccount = await makeAccount(`hold-${workerId}`)
     const created = await createRunWithSnapshot(handle.db, {

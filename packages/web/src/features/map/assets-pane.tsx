@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { newUuid } from '@/lib/uuid'
 import {
   keepPreviousData,
   useMutation,
@@ -143,7 +144,7 @@ export function MapAssetsPane({
       }
       const signature = JSON.stringify({ targetId, ...body })
       if (termRequest.current?.signature !== signature) {
-        termRequest.current = { signature, key: `term:${crypto.randomUUID()}` }
+        termRequest.current = { signature, key: `term:${newUuid()}` }
       }
       return createMapTerm(targetId, {
         ...body,

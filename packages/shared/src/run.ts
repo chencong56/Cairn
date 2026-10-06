@@ -1,8 +1,6 @@
 import { z } from 'zod'
 import { frozenOutboundPolicySchema } from './outbound.js'
 import { aiExecutionConfigSchema } from './ai-runtime.js'
-import { snapshotNeedsBrowserAi } from './resolution.js'
-import { frozenResolutionSchema } from './resolution-policy.js'
 import { frozenLocatorResolutionSchema } from './locator-plan.js'
 import { evidencePolicySchema } from './evidence-policy.js'
 import { pageRefSchema } from './managed-browser.js'
@@ -481,10 +479,10 @@ export const runSnapshotSchema = z
      */
     runtimeInvariantManifest: runtimeInvariantManifestSchema.optional(),
     /**
-     * 冻结的有效解析策略。可选：旧快照无字段按 deterministic_only 解释。
+     * 冻结的定位计划。可选：极早期的快照无字段，按仅规则解释。
      * 严禁增加 .default()，避免存量快照重算 digest 漂移。
      */
-    resolution: z.union([frozenResolutionSchema, frozenLocatorResolutionSchema]).optional(),
+    resolution: frozenLocatorResolutionSchema.optional(),
     /**
      * 冻结的场景业务输出声明。可选：存量快照没有此字段仍可解析。
      * 严禁增加 .default()，避免存量快照重算 digest 漂移。
@@ -763,10 +761,8 @@ export const runSnapshotSchema = z
       })
     }
     const resolution = snapshot.resolution
-    const needsAiExecution = resolution?.protocol === 'snapshot.resolution@2'
-      ? snapshot.steps.some((step) => !step.disabled && isAiStepType(step.type)) ||
-        Object.values(resolution.steps).some((plan) => plan.actual.some((route) => route !== 'rule'))
-      : snapshotNeedsBrowserAi(snapshot.steps, resolution ? resolution.steps : undefined)
+    const needsAiExecution = snapshot.steps.some((step) => !step.disabled && isAiStepType(step.type)) ||
+      Object.values(resolution?.steps ?? {}).some((plan) => plan.actual.some((route) => route !== 'rule'))
     if (needsAiExecution && !snapshot.aiExecution) {
       ctx.addIssue({
         code: 'custom',
