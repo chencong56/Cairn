@@ -7,6 +7,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common'
 import { z } from 'zod'
+import { withAuthControlActorName } from '../common/meta-actor-name'
 import { JwtService } from '@nestjs/jwt'
 import type { Response } from 'express'
 import {
@@ -19,6 +20,7 @@ import {
   getOrCreatePlatformConfig,
   getSessionById,
   getRunSessionOwner,
+  assertRunDebugOwner,
   findAuthWaitLeaseForRun,
   getSessionDto,
   getSessionOperation,
@@ -251,8 +253,16 @@ export class BrowserSessionsService {
     )
   }
 
+  /** 实例被运行占用时，经会话入口的拾取与关标签页同样只给运行的交互发起人（与运行入口口径一致）。 */
+  private async requireRunOwnerForSession(sessionId: string, actor: RequestAccount, includeRunning: boolean) {
+    const target = await this.resolveOwner(sessionId)
+    if (target.ownerId === sessionId) return
+    await assertRunDebugOwner(this.handle, { runId: target.ownerId, actorId: actor.id, includeRunning }).catch(rethrowDomain)
+  }
+
   async observe(sessionId: string, body: unknown, actor: RequestAccount) {
     const operation = observeOperationSchema.parse(body)
+    await this.requireRunOwnerForSession(sessionId, actor, false)
     const raw = await this.forwardJson(
       sessionId,
       actor,
@@ -266,6 +276,7 @@ export class BrowserSessionsService {
   }
 
   async closeManagedPage(ownerId: string, pageId: string, actor: RequestAccount) {
+    await this.requireRunOwnerForSession(ownerId, actor, true)
     const raw = await this.forwardJson(
       ownerId,
       actor,
@@ -307,7 +318,7 @@ export class BrowserSessionsService {
         endpoint: target.endpoint,
         timeout: 'headers',
       })
-      return managedBrowserMetaSchema.parse(raw)
+      return await withAuthControlActorName(this.handle, managedBrowserMetaSchema.parse(raw))
     } catch (error) {
       this.rethrowForward(error)
     }
@@ -515,7 +526,12 @@ export class BrowserSessionsService {
     const session = await getSessionById(this.handle, ownerId)
     if (!session) return this.resolveRunOwner(ownerId)
     const lease = await findActiveLeaseForSession(this.handle, session.id)
-    if (lease?.runId) return this.resolveRunOwner(lease.runId)
+    if (lease?.runId) {
+      // 会话已知（运行占用中）：沿用已读出的会话行，不再经运行的占用放置反查，
+      // 否则执行中的运行查不到会话，围观画面会降级为「执行面不可达」。
+      const run = await getRunSessionOwner(this.handle, lease.runId)
+      return this.withWorker(session, run.status, lease.runId)
+    }
     if (lease?.operationId) return this.resolveOwner(lease.operationId)
     return this.withWorker(session, session.status === 'OPEN' ? 'RUNNING' : 'FAILED', ownerId)
   }

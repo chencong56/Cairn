@@ -115,3 +115,5 @@ export {
 export { settleRunOutput } from './output.js'
 export { readOverviewAnalytics } from './analytics.js'
 export * from './ai-path-learning.js'
+
+export { assertRunDebugOwner } from './debug-owner.js'

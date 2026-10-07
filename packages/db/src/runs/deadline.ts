@@ -5,6 +5,8 @@ import { appendRunEvents } from '../observe/events.js'
 import type { ScanBatchResult } from '../runtime/scan-batch.js'
 import { settleRunCancellationTx } from './recover.js'
 import { lockRunAccountScope } from './lock-scope.js'
+import { loadLiveAccountSessions } from '../sessions/account-session-concurrency.js'
+import { accountDisplayName, manualControlLive } from '../sessions/manual-control.js'
 
 export function scheduledStartDeadlineExpired(db: Db, now: Date) {
   const { runs, scheduleOccurrences } = schemaFor(db)
@@ -52,7 +54,9 @@ export async function expireRunDeadlines(
       const now = await clockNow(tx)
       const [current] = await locked(
         tx,
-        tx.select({ id: runs.id, deadlineAt: runs.deadlineAt }).from(runs).where(due(now, row.id)),
+        tx
+          .select({ id: runs.id, deadlineAt: runs.deadlineAt, targetId: runs.targetId, targetAccountId: runs.targetAccountId })
+          .from(runs).where(due(now, row.id)),
       )
       if (!current) return false
       const reason = current.deadlineAt && current.deadlineAt <= now ? 'RUN_DEADLINE_EXCEEDED' : 'SCHEDULE_START_DEADLINE_ELAPSED'
@@ -64,10 +68,22 @@ export async function expireRunDeadlines(
           updatedAt: now,
         })
         .where(eq(runs.id, row.id))
+      // 因手动操作排队而错过开始窗口：事件里写明持有人，调度与运行详情据此给出归因。
+      let blockedBy: { actorId: string; actorName: string | null } | null = null
+      if (reason === 'SCHEDULE_START_DEADLINE_ELAPSED' && current.targetAccountId) {
+        const { lives, leases } = await loadLiveAccountSessions(tx, {
+          targetId: current.targetId,
+          targetAccountId: current.targetAccountId,
+        })
+        const held = lives.find((session) => !leases.has(session.id) && manualControlLive(session, now))
+        if (held?.authControlActorId) {
+          blockedBy = { actorId: held.authControlActorId, actorName: await accountDisplayName(tx, held.authControlActorId) }
+        }
+      }
       await appendRunEvents(tx, row.id, [
         {
           type: 'run.cancel_requested',
-          payload: { reason },
+          payload: blockedBy ? { reason, waitReason: 'SESSION_IN_MANUAL_CONTROL', blockedBy } : { reason },
         },
       ])
       await settleRunCancellationTx(tx, row.id, now)

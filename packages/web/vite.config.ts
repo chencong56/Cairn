@@ -105,6 +105,8 @@ export default defineConfig({
     browser: {
       enabled: true,
       provider: playwright(),
+      // 默认无头：直接跑 `vitest` 也不会弹浏览器窗口；要看画面调试时设 CAIRN_TEST_HEADED=1。
+      headless: process.env.CAIRN_TEST_HEADED !== '1',
       instances: [{ browser: 'chromium' }],
     },
     coverage: {

@@ -167,6 +167,7 @@ export const finishRunIfDrained = operation(impl0.finishRunIfDrained);
 export const getRun = consoleScopedOperation(impl0.getRun, 1);
 /** Browser session owner routing may inspect status/placement without granting run:read. */
 export const getRunSessionOwner = operation(impl0.getRunSessionOwner);
+export const assertRunDebugOwner = operation(impl0.assertRunDebugOwner);
 export const previewDeleteRun = operation(impl0.previewDeleteRun);
 export const deleteRun = operation(impl0.deleteRun);
 export const getRunCleanupStatus = operation(impl0.getRunCleanupStatus);
@@ -309,6 +310,7 @@ export { profileKeyFor } from "./sessions/index.js";
 export const findLiveSession = operation(impl2.findLiveSession);
 export const findLiveSessions = operation(impl2.findLiveSessions);
 export const getSessionById = operation(impl2.getSessionById);
+export const accountDisplayNames = operation(impl2.accountDisplayNames);
 export const getLeaseById = operation(impl2.getLeaseById);
 export const countOpenSessionsForWorker = operation(
   impl2.countOpenSessionsForWorker,
@@ -324,6 +326,7 @@ export const touchSessionUsed = operation(impl2.touchSessionUsed);
 export const enterRunWaitingForAuth = operation(impl2.enterRunWaitingForAuth);
 export const acquireAuthControl = operation(impl2.acquireAuthControl);
 export const heartbeatAuthControl = operation(impl2.heartbeatAuthControl);
+export const touchAuthControlActivity = operation(impl2.touchAuthControlActivity);
 export const releaseAuthControl = operation(impl2.releaseAuthControl);
 export const expireStaleAuthControl = operation(impl2.expireStaleAuthControl);
 export const findSessionByAuthWaitRun = operation(

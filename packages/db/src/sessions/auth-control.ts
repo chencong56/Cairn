@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
-import { AUTH_CONTROL_TTL_SECONDS, authCheckpointSchema, computeContextVersion, canonicalJson, type AuthCheckpoint, type RunGrant, type RunSnapshot } from '@cairn/shared'
+import { AUTH_CONTROL_IDLE_SECONDS, AUTH_CONTROL_TTL_SECONDS, authCheckpointSchema, computeContextVersion, canonicalJson, type AuthCheckpoint, type RunGrant, type RunSnapshot } from '@cairn/shared'
 import { recordAudit, type AuditActor } from '../audit/record.js'
 import { assertSessionAccountActive, assertSessionActorPermission } from './access.js'
 import { appendSessionEvent } from './session-events.js'
@@ -15,6 +15,7 @@ import type { BrowserSessionRow } from '../records.js'
 import type { SessionLeaseRow } from '../records.js'
 import { findAuthWaitLeaseForOperation, findAuthWaitLeaseForRun, getSessionOperation, transitionSessionUse, lockWorkerRow } from './occupancy.js'
 import { findActiveLeaseForSession, getSessionById, type SessionRecord } from './sessions.js'
+import { accountDisplayName, findPendingDestructiveOperation, operationRequestedBy, revokeManualControl } from './manual-control.js'
 
 export function hashAuthControlToken(token: string): string {
   return createHash('sha256').update(token).digest('hex')
@@ -160,6 +161,18 @@ export async function acquireAuthControl(
       if (activeLease) {
         throw conflict('SESSION_OCCUPIED', '会话正在被运行占用，不能授予交互控制权')
       }
+      const pending = await findPendingDestructiveOperation(tx as unknown as Db, {
+        targetAccountId: session.targetAccountId,
+        sessionId: input.sessionId,
+      })
+      if (pending) {
+        const requester = operationRequestedBy(pending)
+        const name = requester ? await accountDisplayName(tx as unknown as Db, requester) : '系统'
+        throw conflict('SESSION_PENDING_DESTRUCTIVE', `${name} 已请求重建该实例，暂不能手动操作`, {
+          operationId: pending.id,
+          kind: pending.kind,
+        })
+      }
     } else {
       const operation = await getSessionOperation(tx, input.runId)
       const run = operation ?? await lockRunRow(tx as unknown as Db, input.runId)
@@ -201,6 +214,7 @@ export async function acquireAuthControl(
         authControlTokenHash: tokenHash,
         authControlExpiresAt: expires,
         authControlPageId: input.pageId ?? session.authControlPageId,
+        authControlLastActivityAt: now,
         lastUsedAt: now,
         updatedAt: now,
       },
@@ -233,9 +247,30 @@ export async function heartbeatAuthControl(
     token: string
     workerInstanceId: string
     ttlSeconds?: number
+    /** `input`：本次续期伴随真实输入，刷新活动时间；`beat`（默认）：纯心跳，空闲过久则收回。 */
+    source?: 'beat' | 'input'
   },
 ): Promise<{ expiresAt: Date; epoch: number }> {
   const { browserSessions } = schemaFor(db)
+  const idleRevoked = await db.transaction(async (tx) => {
+    const session = await lockSessionRow(tx as unknown as Db, input.sessionId)
+    const now = await clockNow(tx as unknown as Db)
+    await assertOwnerControl(tx, input.runId, input.actorId)
+    const isDirectSession = input.runId === input.sessionId
+    if (isDirectSession && session && input.source !== 'input') {
+      const last = session.authControlLastActivityAt
+      if (
+        session.authControlActorId === input.actorId &&
+        last &&
+        now.getTime() - last.getTime() > AUTH_CONTROL_IDLE_SECONDS * 1000
+      ) {
+        await revokeManualControl(tx as unknown as Db, session, 'idle')
+        return true
+      }
+    }
+    return false
+  })
+  if (idleRevoked) throw conflict('AUTH_CONTROL_IDLE', '长时间无操作，已退出手动操作')
   return db.transaction(async (tx) => {
     const session = await lockSessionRow(tx as unknown as Db, input.sessionId)
     const now = await clockNow(tx as unknown as Db)
@@ -261,7 +296,12 @@ export async function heartbeatAuthControl(
     const [row] = await updateRows(
       tx,
       browserSessions,
-      { authControlExpiresAt: expires, lastUsedAt: now, updatedAt: now },
+      {
+        authControlExpiresAt: expires,
+        lastUsedAt: now,
+        updatedAt: now,
+        ...(input.source === 'input' && isDirectSession ? { authControlLastActivityAt: now } : {}),
+      },
       and(
         eq(browserSessions.id, input.sessionId),
         eq(browserSessions.authControlTokenHash, hashAuthControlToken(input.token)),
@@ -533,4 +573,16 @@ function assertLiveControl(
   if (!session.authControlExpiresAt || session.authControlExpiresAt.getTime() <= now.getTime()) {
     throw conflict('AUTH_CONTROL_INVALID', '认证输入权已过期')
   }
+}
+
+/** 持有人本人的指认、读取预览也算手动操作的活动，避免只看不点被判空闲。 */
+export async function touchAuthControlActivity(db: Db, input: { sessionId: string; actorId: string }): Promise<void> {
+  const { browserSessions } = schemaFor(db)
+  const now = await clockNow(db)
+  await updateRows(
+    db,
+    browserSessions,
+    { authControlLastActivityAt: now },
+    and(eq(browserSessions.id, input.sessionId), eq(browserSessions.authControlActorId, input.actorId)),
+  )
 }

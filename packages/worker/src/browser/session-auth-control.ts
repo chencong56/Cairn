@@ -121,6 +121,7 @@ export async function inputRunAuthControl(this: SessionManagerContext, input: {
       actorId: input.actorId,
       token: input.token,
       workerInstanceId: this.workerInstanceId,
+      source: 'input',
     })
     const boundEpoch = session.authControlEpoch
     const boundGeneration = session.generation

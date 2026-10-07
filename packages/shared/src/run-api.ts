@@ -168,9 +168,12 @@ export const runPlacementSchema = z.strictObject({
       'PROFILE_AFFINITY_WAIT',
       'NO_ELIGIBLE_WORKER',
       'SESSION_ACCOUNT_AT_CAPACITY',
+      'SESSION_IN_MANUAL_CONTROL',
     ])
     .nullable()
     .default(null),
+  /** 排队原因是手动操作时，持有人（排队的运行在等他结束）。 */
+  manualControlActor: z.strictObject({ id: entityIdSchema, name: z.string().nullable() }).nullable().default(null),
   occupyingRunId: entityIdSchema.nullable().default(null),
   occupyingOperationId: entityIdSchema.nullable().default(null),
   targetWorkerId: z.string().min(1).max(128).nullable().default(null),
@@ -213,6 +216,8 @@ export const runSummarySchema = z.object({
   lease: runListLeaseSchema,
   debugMode: debugModeSchema.default('runThrough'),
   executionOrigin: executionOriginSchema.default('standalone'),
+  /** 交互发起人；调度、套件、批量、服务调用的运行不应当作「本人」。仅详情返回。 */
+  createdByConsoleAccountId: entityIdSchema.nullable().optional(),
   suiteRunId: entityIdSchema.nullable().optional(),
   suiteMemberId: z.string().nullable().optional(),
   outputSummary: z.string().nullable().optional(),

@@ -1,3 +1,4 @@
+import { describeOccupancyBy } from '@/features/scenarios/studio-instances'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, getRouteApi, useNavigate } from '@tanstack/react-router'
@@ -332,7 +333,7 @@ export function SessionWorkbenchView({
   const instances = useMemo(() => {
     if (detail.data?.instances?.length) return detail.data.instances
     if (detail.data?.session) {
-      return [{ ...detail.data.session, occupancy: detail.data.occupancy }]
+      return [{ ...detail.data.session, occupancy: detail.data.occupancy, manualControl: null, pendingDestructive: null }]
     }
     return []
   }, [detail.data])
@@ -665,6 +666,12 @@ export function SessionWorkbenchView({
                     <StatusBadge tone={selected.isolation === 'SHARED' ? 'info' : 'neutral'}>
                       {selected.isolation === 'SHARED' ? '共享宿主' : '独立进程'}
                     </StatusBadge>
+                  ) : null}
+                  {selected?.manualControl ? (
+                    <StatusBadge tone="info">{selected.manualControl.actorName ?? '其他用户'} 正在手动操作</StatusBadge>
+                  ) : null}
+                  {selected?.occupancy?.by ? (
+                    <StatusBadge tone="neutral">{describeOccupancyBy(selected.occupancy.by)}占用中</StatusBadge>
                   ) : null}
                   {instances.length > 1 ? (
                     <Select value={selected?.id} onValueChange={setSelectedSessionId}>

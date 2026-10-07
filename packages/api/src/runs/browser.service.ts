@@ -13,6 +13,7 @@ import {
   DomainError,
   getRun,
   authHoldFromLease,
+  assertRunDebugOwner,
   findAuthWaitLeaseForRun,
   resolveWorkerRoute,
   type DbHandle,
@@ -54,6 +55,7 @@ import {
 import { config } from '../config/env'
 import { AuthService } from '../auth/auth.service'
 import type { RequestAccount } from '../common/request-account'
+import { withAuthControlActorName } from '../common/meta-actor-name'
 import { classifyAccountRecheck, rethrowDomain } from '../common/domain-error'
 import { DB_HANDLE } from '../db/db.module'
 import { WorkerForwardError, WorkerInternalClient } from './worker-internal.client'
@@ -78,7 +80,7 @@ export class BrowserService {
         method: 'GET',
         query: { pageId, control: (await this.canControlRun(actor.id, runId)) ? '1' : undefined },
       })
-      return managedBrowserMetaSchema.parse(raw)
+      return await withAuthControlActorName(this.db, managedBrowserMetaSchema.parse(raw))
     } catch (error) {
       if (error instanceof WorkerForwardError && error.code === 'WORKER_UNREACHABLE') {
         return await this.degraded(target, 'worker_unreachable')
@@ -168,7 +170,8 @@ export class BrowserService {
     return this.mutate(runId, actor, workerInternalPath('/auth-control/release'), JSON.stringify(body))
   }
 
-  closePage(runId: string, pageId: string, actor: RequestAccount) {
+  async closePage(runId: string, pageId: string, actor: RequestAccount) {
+    await this.requireDebugOwner(runId, actor, true)
     return this.mutate(
       runId,
       actor,
@@ -187,7 +190,8 @@ export class BrowserService {
     }
   }
 
-  observe(runId: string, body: ObserveOperation, actor: RequestAccount) {
+  async observe(runId: string, body: ObserveOperation, actor: RequestAccount) {
+    await this.requireDebugOwner(runId, actor)
     const parsed = observeOperationSchema.parse(body)
     const schema =
       parsed.op === 'structure'
@@ -210,6 +214,7 @@ export class BrowserService {
   }
 
   async debug(runId: string, body: DebugAction, actor: RequestAccount) {
+    await this.requireDebugOwner(runId, actor)
     await this.mutate(
       runId,
       actor,
@@ -227,6 +232,7 @@ export class BrowserService {
 
   async debugPresence(runId: string, body: DebugPresenceBody, actor: RequestAccount): Promise<DebugPresenceResponse> {
     const parsed = debugPresenceBodySchema.parse(body)
+    await this.requireDebugOwner(runId, actor)
     const res = await this.mutate(
       runId,
       actor,
@@ -275,6 +281,11 @@ export class BrowserService {
       () => true,
       () => false,
     )
+  }
+
+  /** 调试挂起的运行只归交互发起人；其他人只读围观（取消运行不受此限）。 */
+  private async requireDebugOwner(runId: string, actor: RequestAccount, includeRunning = false): Promise<void> {
+    await assertRunDebugOwner(this.db, { runId, actorId: actor.id, includeRunning }).catch(rethrowDomain)
   }
 
   private async requireRunScope(runId: string, actorId: string, permissions: string[]): Promise<void> {

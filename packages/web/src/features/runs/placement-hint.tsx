@@ -26,6 +26,7 @@ export function PlacementHint({
       }
     >
       {copy}
+      {placement.manualControlActor ? `（${placement.manualControlActor.name ?? '其他用户'} 正在手动操作）` : null}
       {placement.sessionId && targetId && accountId ? (
         <>
           {' '}

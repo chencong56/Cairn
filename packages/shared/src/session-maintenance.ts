@@ -330,6 +330,8 @@ export const requestSessionOperationBodySchema = z
       expectedSessionId: optionalId,
       expectedGeneration: z.number().int().positive().optional(),
       force: z.boolean().optional(),
+      /** 并发模式下新开一个实例：不复用空闲实例、不跟随他人进行中的准备；与 expectedSessionId 互斥。 */
+      newInstance: z.boolean().optional(),
       originContext: z.enum(['INTERACTIVE', 'UNATTENDED']).optional(),
     }),
     z.strictObject({
@@ -515,6 +517,50 @@ export function isFilterAllowedInBucket(
   return BUCKET_ALLOWED_FILTERS[bucket].includes(filter)
 }
 
+/** 占用方的展示归属：谁（或哪类调度）占着实例。运行取交互发起人；调度、套件、批量、服务调用不算任何人的「本人」。 */
+export const OCCUPANCY_ACTOR_KINDS = ['user', 'schedule', 'suite', 'batch', 'service', 'system'] as const
+export const occupancyActorSchema = z.strictObject({
+  kind: z.enum(OCCUPANCY_ACTOR_KINDS),
+  id: entityIdSchema.nullable(),
+  name: z.string().nullable(),
+})
+export type OccupancyActor = z.infer<typeof occupancyActorSchema>
+
+const occupancyBlockSchema = z.strictObject({
+  purpose: z.string(),
+  occupyingRunId: entityIdSchema.nullable(),
+  occupyingOperationId: entityIdSchema.nullable(),
+  by: occupancyActorSchema.nullable().default(null),
+})
+
+/** 直连会话上仍然有效的手动操作权。 */
+export const instanceManualControlSchema = z.strictObject({
+  actorId: entityIdSchema,
+  actorName: z.string().nullable(),
+  expiresAt: utcInstantSchema,
+})
+export type InstanceManualControl = z.infer<typeof instanceManualControlSchema>
+
+/** 实例上已受理的关闭／重建／清除登录数据；此时不再发放手动操作权。 */
+export const instancePendingDestructiveSchema = z.strictObject({
+  operationId: entityIdSchema,
+  kind: z.string(),
+  requestedByName: z.string().nullable(),
+})
+
+export const activeSessionOperationSchema = z.strictObject({
+  id: entityIdSchema,
+  kind: z.string(),
+  status: z.string(),
+  origin: z.string(),
+  sessionId: entityIdSchema.nullable(),
+  newInstance: z.boolean(),
+  requestedBy: z.strictObject({ id: entityIdSchema, name: z.string().nullable() }).nullable(),
+  queueDeadlineAt: utcInstantSchema,
+  waitReason: sessionOperationWaitReasonSchema.nullable(),
+})
+export type ActiveSessionOperation = z.infer<typeof activeSessionOperationSchema>
+
 export const accountSessionDetailSchema = z.strictObject({
   targetId: entityIdSchema,
   targetName: z.string().min(1),
@@ -575,25 +621,15 @@ export const accountSessionDetailSchema = z.strictObject({
         accountSlot: z.number().int().min(1).max(16).optional(),
         isolation: browserIsolationSchema.nullable().optional(),
         hostId: z.string().nullable().optional(),
-        occupancy: z
-          .strictObject({
-            purpose: z.string(),
-            occupyingRunId: entityIdSchema.nullable(),
-            occupyingOperationId: entityIdSchema.nullable(),
-          })
-          .nullable(),
+        occupancy: occupancyBlockSchema.nullable(),
+        manualControl: instanceManualControlSchema.nullable().default(null),
+        pendingDestructive: instancePendingDestructiveSchema.nullable().default(null),
       }),
     )
     .default([]),
   liveCount: z.number().int().nonnegative().default(0),
   effectiveCap: z.number().int().positive().default(1),
-  occupancy: z
-    .strictObject({
-      purpose: z.string(),
-      occupyingRunId: entityIdSchema.nullable(),
-      occupyingOperationId: entityIdSchema.nullable(),
-    })
-    .nullable(),
+  occupancy: occupancyBlockSchema.nullable(),
   retention: z
     .strictObject({
       retainUntil: utcInstantSchema,
@@ -612,8 +648,11 @@ export const accountSessionDetailSchema = z.strictObject({
       reusedRunId: entityIdSchema.nullable(),
       queueDeadlineAt: utcInstantSchema,
       waitReason: sessionOperationWaitReasonSchema.nullable(),
+      sessionId: entityIdSchema.nullable().default(null),
+      requestedBy: z.strictObject({ id: entityIdSchema, name: z.string().nullable() }).nullable().default(null),
     })
     .nullable(),
+  activeOperations: z.array(activeSessionOperationSchema).default([]),
   actions: z.array(sessionActionSchema),
   asOf: utcInstantSchema,
 })

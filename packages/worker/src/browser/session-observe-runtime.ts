@@ -14,6 +14,7 @@ import {
   getSessionById,
   getWorkerById,
   touchSessionUsed,
+  touchAuthControlActivity,
   updateRunDebugOverlay,
   insertLogEvidence,
   type SessionRecord
@@ -187,6 +188,14 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
     }
     if (!sessionAuthoring && run.status !== 'HOLDING') {
       throw conflict('RUN_NOT_HOLDING', '只有调试挂起中的运行允许观察页面')
+    }
+    if (sessionAuthoring) {
+      // 手动操作持有人自己的指认与预览也算活动，不被空闲收回误伤。
+      try {
+        await touchAuthControlActivity(this.dbHandle, { sessionId: session.id, actorId: input.actorId })
+      } catch {
+        // 活动时间只用于空闲收回，写不进去不影响指认。
+      }
     }
     if (detail?.stepRuns.some((step) => step.attempts.some((attempt) => attempt.status === 'RUNNING'))) {
       throw conflict('WAITING_FOR_STABLE_HOLD', '在途业务动作尚未停稳，不能签发观察授权')
@@ -744,6 +753,7 @@ export async function buildMeta(this: SessionManagerContext, runId: string, acto
         ? {
             epoch: session.authControlEpoch,
             actorId: session.authControlActorId,
+            actorName: null,
             expiresAt: session.authControlExpiresAt?.toISOString() ?? null,
             heldByViewer,
           }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -38,6 +38,24 @@ import {
   sessionBrowserTransport,
 } from '@/lib/sessions-api'
 import { useSessionObservation } from '@/features/sessions/use-session-observation'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  canCancelOperation,
+  describeOccupancyBy,
+  findFollowableOperation,
+  instanceOccupancyText,
+  isInstanceIdle,
+  pickViewInstance,
+  projectDetailToInstance,
+  readPreferredInstance,
+  writePreferredInstance,
+} from './studio-instances'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -46,7 +64,7 @@ import { BrowserView } from '@/features/runs/browser-view'
 import { RunVideoSection } from '@/features/runs/run-video'
 import { PlacementHint } from '@/features/runs/placement-hint'
 import { useRunObservation } from '@/features/runs/use-run-observation'
-import { RUN_STATUS_LABELS, runStatusTone } from '@/features/runs/labels'
+import { RUN_STATUS_LABELS, runStatusTone, WAIT_REASON_COPY } from '@/features/runs/labels'
 import { computeScreenAlignment } from '@/features/authoring/observe'
 import { cn } from '@/lib/utils'
 
@@ -86,13 +104,15 @@ export function StudioScreen({
   const canExecute = Boolean(user && hasPermission(user.permissions, 'run:execute'))
   const canReadSession = Boolean(user && hasPermission(user.permissions, 'session:read'))
   const canControlSession = Boolean(user && hasPermission(user.permissions, 'session:control'))
+  const canDisposeSession = Boolean(user && hasPermission(user.permissions, 'session:dispose'))
+  const myId = user?.id ?? null
   const { run, evidence, refresh, eventSeq, query } = useRunObservation(
     runId ?? '',
     Boolean(runId && canRead),
   )
 
   // 接入会话 SSE 订阅：后端事件实时触发缓存失效
-  useSessionObservation(targetId, targetAccountId)
+  const { eventSeq: sessionEventSeq } = useSessionObservation(targetId, targetAccountId)
 
   const [videoOpen, setVideoOpen] = useState(false)
   const [connecting, setConnecting] = useState(false)
@@ -101,6 +121,11 @@ export function StudioScreen({
   const [connectError, setConnectError] = useState<string | null>(null)
   const [pendingOperationId, setPendingOperationId] = useState<string | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
+  const [preferredInstanceId, setPreferredInstanceId] = useState<string | null>(() =>
+    readPreferredInstance(targetId, targetAccountId),
+  )
+  // 取消后同一个进行中的操作在刷新前仍会短暂可见，记下已放弃的操作避免立刻再次跟随。
+  const dismissedOps = useRef(new Set<string>())
 
   // 目标或账号切换时及时重置连接与失败状态，防止历史状态泄漏
   useEffect(() => {
@@ -108,6 +133,7 @@ export function StudioScreen({
     setPrepareFailed(false)
     setPendingOperationId(null)
     setConnectError(null)
+    setPreferredInstanceId(readPreferredInstance(targetId, targetAccountId))
   }, [targetId, targetAccountId])
 
   const sessionQuery = useQuery({
@@ -115,7 +141,12 @@ export function StudioScreen({
     queryFn: () => fetchAccountSession(targetId!, targetAccountId!),
     enabled: Boolean(targetId && targetAccountId && canReadSession),
   })
-  const session = sessionQuery.data
+  const accountDetail = sessionQuery.data
+  const runSessionId = (run as { placement?: { sessionId?: string | null } } | undefined)?.placement?.sessionId ?? null
+  const viewInstance = pickViewInstance(accountDetail, { preferredId: preferredInstanceId, myId, runSessionId })
+  // 账号有多个实例时，其余界面仍按「一个会话」读取：这里把详情投影到当前看的实例。
+  const session = projectDetailToInstance(accountDetail, viewInstance)
+  const instances = accountDetail?.instances ?? []
 
   const activeOpId = session?.currentOperation?.id ?? pendingOperationId
   const operationQuery = useQuery({
@@ -162,7 +193,11 @@ export function StudioScreen({
   const sessionViewId = occupyingOperationId ?? session?.session?.id
   const isLiveState = Boolean(run && LIVE_RUN_STATUSES.includes(run.status))
   const isFinished = Boolean(run && isFinishedRunStatus(run.status))
-  const showRunLive = isLiveState
+  // 本页试跑还在排队时不切到运行画面：继续显示当前实例，并说明在等什么。
+  const ownRunQueued = Boolean(run && ['QUEUED', 'SCHEDULED'].includes(run.status))
+  const showRunLive = isLiveState && !(ownRunQueued && sessionOpen && sessionViewId)
+  // 实例被别人的运行占用：只读围观，不给手动操作与调试入口。
+  const occupiedByOtherRun = Boolean(occupyingRunId && occupyingRunId !== runId)
 
   const connectState = classifyStudioSessionConnect(session, pendingOperationId, operationQuery.data)
   const isWaitingForAuth = Boolean(
@@ -173,7 +208,10 @@ export function StudioScreen({
   )
 
   const showSessionLive = Boolean(
-    !showRunLive && (sessionOpen || isWaitingForAuth) && sessionViewId && !occupyingRunId,
+    !showRunLive &&
+      (sessionOpen || isWaitingForAuth) &&
+      sessionViewId &&
+      (!occupyingRunId || occupiedByOtherRun),
   )
   const sessionPending = Boolean(
     targetId && targetAccountId && canReadSession && sessionQuery.isPending,
@@ -210,10 +248,10 @@ export function StudioScreen({
 
   const alignmentBanner =
     (alignmentStatus === 'behind' || alignmentStatus === 'session_initial') && selectedStepId ? (
-      <div className='mx-3 mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 p-2.5 text-small'>
-        <div className='flex items-center gap-2'>
-          <span className='size-2 rounded-full bg-status-warning' />
-          <span className='text-foreground'>
+      <div className='mx-3 mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-caption'>
+        <div className='flex items-center gap-1.5 min-w-0'>
+          <span className='size-1.5 shrink-0 rounded-full bg-status-warning' />
+          <span className='text-foreground truncate'>
             当前画面处于【{alignmentStatus === 'session_initial' ? '系统初始页' : '前序步骤'}】，选中的步骤是【{selectedStepName || '当前步骤'}】
           </span>
         </div>
@@ -235,9 +273,9 @@ export function StudioScreen({
         </div>
       </div>
     ) : alignmentStatus === 'aligned' && selectedStepId ? (
-      <div className='mx-3 mt-2 flex items-center gap-2 rounded-md border border-status-success/30 bg-status-success/10 px-3 py-1.5 text-label text-status-success-foreground'>
-        <span className='size-2 rounded-full bg-status-success' />
-        <span>画面已对齐至步骤「{selectedStepName || '当前步骤'}」前置，可在画面上精准指认目标</span>
+      <div className='mx-3 mt-1.5 flex items-center gap-2 rounded-md border border-status-success/30 bg-status-success/10 px-2.5 py-1 text-caption font-medium text-status-success-foreground'>
+        <span className='size-1.5 shrink-0 rounded-full bg-status-success' />
+        <span className='truncate'>画面已对齐至步骤「{selectedStepName || '当前步骤'}」前置，可在画面上精准指认目标</span>
       </div>
     ) : !selectedStepId && selectedIsFirst === false && showSessionLive ? (
       <Alert variant='info' className='mx-3 mt-2'>
@@ -318,6 +356,74 @@ export function StudioScreen({
     return () => window.clearTimeout(timer)
   }, [connecting])
 
+  // 别人已经在准备同一个实例：自动跟随它的进度，不另发请求，也不会撞上「已有操作」的冲突。
+  const followOp = findFollowableOperation(accountDetail, viewInstance)
+  const followOpId = followOp && ['QUEUED', 'RUNNING'].includes(followOp.status) ? followOp.id : null
+  useEffect(() => {
+    if (!followOpId || sessionOpen || connecting || prepareFailed) return
+    if (dismissedOps.current.has(followOpId)) return
+    setConnecting(true)
+    setPendingOperationId(followOpId)
+  }, [followOpId, sessionOpen, connecting, prepareFailed])
+  const followedRequester =
+    session?.currentOperation?.requestedBy && session.currentOperation.requestedBy.id !== myId
+      ? session.currentOperation.requestedBy
+      : null
+  // 只有发起人或会话管理员能取消别人排上的操作；自己刚发起、尚未回读时放行。
+  const canCancelPrepare =
+    !session?.currentOperation ||
+    canCancelOperation(session.currentOperation, { myId, canDispose: canDisposeSession })
+
+  // 「新开实例」只在并发模式、没到上限、又没有空闲就绪实例时出现；建好后自动切过去。
+  const knownInstanceIds = useRef<Set<string> | null>(null)
+  const awaitingNewInstance = useRef(false)
+  useEffect(() => {
+    const ids = new Set(instances.map((item) => item.id))
+    const known = knownInstanceIds.current
+    knownInstanceIds.current = ids
+    if (!known || !awaitingNewInstance.current) return
+    const added = instances.find((item) => !known.has(item.id))
+    if (added) {
+      awaitingNewInstance.current = false
+      setPreferredInstanceId(added.id)
+      writePreferredInstance(targetId, targetAccountId, added.id)
+    }
+  }, [instances, targetId, targetAccountId])
+  const canOpenNewInstance = Boolean(
+    canControlSession &&
+      accountDetail &&
+      accountDetail.effectiveCap > 1 &&
+      instances.length >= 1 &&
+      accountDetail.liveCount < accountDetail.effectiveCap &&
+      !instances.some(isInstanceIdle) &&
+      !accountDetail.activeOperations?.some((op) => op.newInstance),
+  )
+  async function openNewInstance() {
+    if (!targetId || !targetAccountId) return
+    try {
+      awaitingNewInstance.current = true
+      await requestAccountSessionOperation(targetId, targetAccountId, {
+        kind: 'PREPARE',
+        idempotencyKey: newSessionIdempotencyKey('PREPARE'),
+        newInstance: true,
+      })
+      toast.info('正在新开一个浏览器实例，就绪后自动切换')
+      await sessionQuery.refetch()
+    } catch (error) {
+      awaitingNewInstance.current = false
+      toast.error(error instanceof ApiRequestError ? error.message : '新开实例失败')
+    }
+  }
+
+  function switchInstance(id: string) {
+    setPreferredInstanceId(id)
+    writePreferredInstance(targetId, targetAccountId, id)
+    setConnecting(false)
+    setPrepareFailed(false)
+    setPendingOperationId(null)
+    setConnectError(null)
+  }
+
   async function connectSession() {
     if (!targetId || !targetAccountId || !canControlSession) {
       onStartTrial?.()
@@ -390,6 +496,7 @@ export function StudioScreen({
   async function cancelConnecting() {
     const opId = activeOpId
     if (opId) {
+      dismissedOps.current.add(opId)
       try {
         await cancelSessionOperation(opId)
         toast.success('已取消会话准备')
@@ -499,13 +606,32 @@ export function StudioScreen({
               </Link>
             </Button>
           ) : null}
+          {canOpenNewInstance ? (
+            <Button size='sm' variant='outline' className='h-7 px-2 text-label' onClick={() => void openNewInstance()}>
+              新开实例
+            </Button>
+          ) : null}
+          {instances.length >= 2 ? (
+            <Select value={viewInstance?.id} onValueChange={switchInstance}>
+              <SelectTrigger aria-label='选择浏览器实例' className='h-7 w-auto min-w-[150px] text-label'>
+                <SelectValue placeholder='选择实例' />
+              </SelectTrigger>
+              <SelectContent>
+                {instances.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    实例 #{item.accountSlot ?? 1} · {instanceOccupancyText(item, myId)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
           {headerAction}
         </div>
       </div>
 
       <div className='flex min-h-0 flex-1 flex-col justify-start overflow-y-auto'>
         {showRunLive && run ? (
-          <div className='space-y-2'>
+          <div className='space-y-1.5'>
             {alignmentBanner}
             {run.authCheckpoint ? (
               <div className='mx-3 mt-2 space-y-1 rounded-md border border-border-card bg-muted/40 p-3 text-small'>
@@ -530,7 +656,7 @@ export function StudioScreen({
             />
           </div>
         ) : showSessionLive && sessionViewId ? (
-          <div className='space-y-2'>
+          <div className='space-y-1.5'>
             {isWaitingForAuth ? (
               <Alert variant='warning' className='mx-3 mt-2 border-warning/40 bg-warning/10 text-foreground'>
                 <AlertDescription className='flex flex-wrap items-center justify-between gap-3'>
@@ -539,7 +665,7 @@ export function StudioScreen({
                     {describeAuthIssue(session?.lastAuthError) ?? '目标系统需要完成人机验证（滑块/验证码）或登录'}。请在下方画面中点击「取得控制权」完成操作。
                   </div>
                   <div className='flex items-center gap-2'>
-                    {activeOpId ? (
+                    {activeOpId && canCancelPrepare ? (
                       <Button
                         size='sm'
                         variant='outline'
@@ -549,16 +675,41 @@ export function StudioScreen({
                         取消准备
                       </Button>
                     ) : null}
-                    <Button
-                      size='sm'
-                      variant='destructive'
-                      className='h-7 text-label'
-                      disabled={abandoning}
-                      onClick={() => void abandonTakeover()}
-                    >
-                      {abandoning ? '正在关闭…' : '放弃接管并关闭'}
-                    </Button>
+                    {canCancelPrepare ? (
+                      <Button
+                        size='sm'
+                        variant='destructive'
+                        className='h-7 text-label'
+                        disabled={abandoning}
+                        onClick={() => void abandonTakeover()}
+                      >
+                        {abandoning ? '正在关闭…' : '放弃接管并关闭'}
+                      </Button>
+                    ) : null}
                   </div>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {occupiedByOtherRun ? (
+              <Alert variant='info' className='mx-3 mt-2'>
+                <AlertDescription>
+                  该实例正被 {describeOccupancyBy(session?.occupancy?.by)} 占用，只读观看；运行结束后可手动操作。
+                  {occupyingRunId && canRead ? (
+                    <>
+                      {' '}
+                      <Link to='/runs/$runId' params={{ runId: occupyingRunId }} className='font-medium text-link underline'>
+                        查看运行
+                      </Link>
+                    </>
+                  ) : null}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {ownRunQueued ? (
+              <Alert variant='info' className='mx-3 mt-2'>
+                <AlertDescription>
+                  你的试跑在排队，等当前实例空出来后自动开始
+                  {run?.placement?.waitReason ? `：${WAIT_REASON_COPY[run.placement.waitReason] ?? run.placement.waitReason}` : '。'}
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -569,8 +720,10 @@ export function StudioScreen({
               sessionMode
               defaultOpen
               transport={occupyingOperationId ? operationTransport : sessionTransport}
+              eventSeq={sessionEventSeq}
               onRunChanged={() => void sessionQuery.refetch()}
               waitReason={session?.lastAuthError}
+              readOnly={occupiedByOtherRun}
               embedded
             />
             {isFinished && run ? (
@@ -652,6 +805,11 @@ export function StudioScreen({
             >
               {stageInfo.detail}
             </p>
+            {!prepareFailed && followedRequester ? (
+              <p className='mt-1 text-label text-muted-foreground'>
+                正在跟随 {followedRequester.name ?? '其他用户'} 发起的会话准备
+              </p>
+            ) : null}
 
             {/* 四阶段 Stepper 进度条 */}
             <div className='my-5 flex items-center justify-between w-full px-2'>
@@ -749,12 +907,12 @@ export function StudioScreen({
                     {abandoning ? '正在关闭…' : '彻底重置会话'}
                   </Button>
                 </>
-              ) : (
+              ) : canCancelPrepare ? (
                 <Button size='sm' variant='outline' onClick={() => void cancelConnecting()}>
                   <XCircle className='size-3.5 mr-1 text-destructive' />
                   取消准备
                 </Button>
-              )}
+              ) : null}
               <Link
                 to='/sessions/$targetId/$accountId'
                 params={{ targetId: targetId!, accountId: targetAccountId! }}
@@ -796,7 +954,9 @@ export function StudioScreen({
                 <Play />
                 唤起受管环境
               </Button>
-            ) : null}
+            ) : (
+              <p className='mt-3 text-label text-muted-foreground'>暂无可看的会话，需要有会话控制权限的成员先连接。</p>
+            )}
           </div>
         ) : (
           <p className='p-6 text-center text-small text-muted-foreground'>

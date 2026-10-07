@@ -13,6 +13,7 @@ import {
   type SessionAcquireReason,
 } from '@cairn/shared'
 import { assertMaintenanceAuthorized, assertSessionActorPermission } from './access.js'
+import { isDestructiveOperationKind, manualControlHeldByOther, manualControlLive, operationRequestedBy } from './manual-control.js'
 import { appendSessionEvent } from './session-events.js'
 import type { Db } from '../client.js'
 import { newId } from '../id.js'
@@ -319,6 +320,24 @@ export async function claimSessionOperation(
       if (candidate.origin === 'BACKGROUND') {
         const targetSessionId = candidate.expectedSessionId ?? (livePreview.length === 1 ? livePreview[0]?.id : null)
         const busy = targetSessionId ? await findActiveLeaseRow(tx, targetSessionId) : null
+        const targetLive = targetSessionId ? await getSessionById(tx, targetSessionId) : null
+        if (!busy && targetLive && manualControlLive(targetLive, now)) {
+          // 后台保活遇到有人手动操作：不抢、不计失败，留到下一个保活周期。
+          await updateRows(
+            tx,
+            sessionOperations,
+            { status: 'CANCELLED', errorCode: 'MANUAL_CONTROL_ACTIVE', finishedAt: now, updatedAt: now },
+            and(eq(sessionOperations.id, candidate.id), eq(sessionOperations.status, 'QUEUED')),
+          )
+          await appendSessionEvent(tx, {
+            key: candidate,
+            type: 'operation.cancelled',
+            operationId: candidate.id,
+            sessionId: targetLive.id,
+            payload: { errorCode: 'MANUAL_CONTROL_ACTIVE' },
+          })
+          continue
+        }
         if (busy) {
           await recordOperationWait(tx, candidate, now, 'SESSION_BUSY', {
             sessionId: targetSessionId,
@@ -349,6 +368,31 @@ export async function claimSessionOperation(
             type: 'operation.finished',
             operationId: candidate.id,
             payload: { status: 'FAILED', errorCode: 'SESSION_GENERATION_CHANGED' },
+          })
+          continue
+        }
+      }
+      if (isDestructiveOperationKind(candidate.kind)) {
+        // 受理后才有人取得手动操作权的兜底：领取时再看一次，别人在手动操作就取消，不关他的浏览器。
+        const target =
+          candidate.expectedSessionId
+            ? await getSessionById(tx, candidate.expectedSessionId)
+            : livePreview.length === 1
+              ? livePreview[0]!
+              : null
+        if (target && manualControlHeldByOther(target, operationRequestedBy(candidate), now)) {
+          await updateRows(
+            tx,
+            sessionOperations,
+            { status: 'CANCELLED', errorCode: 'AUTH_CONTROL_HELD', finishedAt: now, updatedAt: now },
+            and(eq(sessionOperations.id, candidate.id), eq(sessionOperations.status, 'QUEUED')),
+          )
+          await appendSessionEvent(tx, {
+            key: candidate,
+            type: 'operation.cancelled',
+            operationId: candidate.id,
+            sessionId: target.id,
+            payload: { errorCode: 'AUTH_CONTROL_HELD' },
           })
           continue
         }
@@ -561,6 +605,7 @@ export async function claimSessionOperation(
           evictionPriority: lifecycle.evictionPriority,
           isolation: policy.browserIsolation,
           touchLastUsed: !['VERIFY_AUTH', 'RENEW_AUTH', 'SETTLE_LANDING'].includes(candidate.kind),
+          newInstance: candidate.kindParams?.newInstance === true,
         })
         if (!claimed.ok) {
           await rollbackClaim(tx, candidate, now, claimFailureWait(claimed))

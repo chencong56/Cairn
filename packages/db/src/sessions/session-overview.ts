@@ -34,6 +34,13 @@ import { readAccountSessionCap } from './account-session-concurrency.js'
 import { loadCurrentAuthProfile } from './auth-profile.js'
 import type { SessionOperationRow } from '../records.js'
 import { effectiveOperationWaitReason } from './operation-queue.js'
+import { resolveOccupancyActors } from './occupancy-actors.js'
+import {
+  accountDisplayNames,
+  isDestructiveOperationKind,
+  manualControlLive,
+  operationRequestedBy,
+} from './manual-control.js'
 import type { SessionLeaseRow } from '../schema/session.js'
 import type { SessionKey, SessionRecord } from './sessions.js'
 
@@ -1128,6 +1135,26 @@ export async function getAccountSessionDetail(db: Db, key: SessionKey): Promise<
       .limit(1)
     lastAuthError = recent?.lastAuthError ?? null
   }
+  const detailLeases = facts.instances.flatMap((item) => (item.lease ? [item.lease] : []))
+  if (facts.lease && !detailLeases.some((l) => l.id === facts.lease!.id)) detailLeases.push(facts.lease)
+  const occupancyActors = await resolveOccupancyActors(db, detailLeases)
+  const controlHolderIds = facts.instances.flatMap((item) =>
+    item.session.authControlActorId ? [item.session.authControlActorId] : [],
+  )
+  const requesterIds = facts.activeOps.flatMap((op) => {
+    const id = operationRequestedBy(op)
+    return id ? [id] : []
+  })
+  const holderNames = await accountDisplayNames(db, [...controlHolderIds, ...requesterIds])
+  const occupancyBlock = (lease: SessionLeaseRow | null) =>
+    lease
+      ? {
+          purpose: lease.purpose,
+          occupyingRunId: lease.runId,
+          occupyingOperationId: lease.operationId,
+          by: occupancyActors.get(lease.id) ?? null,
+        }
+      : null
   return {
     targetId: account.targetId,
     targetName: account.targetName,
@@ -1193,23 +1220,34 @@ export async function getAccountSessionDetail(db: Db, key: SessionKey): Promise<
       accountSlot: item.session.accountSlot ?? 1,
       isolation: (item.session.isolation as 'SHARED' | 'DEDICATED') ?? null,
       hostId: item.session.hostId ?? null,
-      occupancy: item.lease
-        ? {
-            purpose: item.lease.purpose,
-            occupyingRunId: item.lease.runId,
-            occupyingOperationId: item.lease.operationId,
-          }
-        : null,
+      occupancy: occupancyBlock(item.lease),
+      manualControl:
+        !item.lease && manualControlLive(item.session, now)
+          ? {
+              actorId: item.session.authControlActorId!,
+              actorName: holderNames.get(item.session.authControlActorId!) ?? null,
+              expiresAt: item.session.authControlExpiresAt!.toISOString(),
+            }
+          : null,
+      pendingDestructive: (() => {
+        const pending = facts.activeOps.find(
+          (op) =>
+            op.expectedSessionId === item.session.id &&
+            ['QUEUED', 'RUNNING'].includes(op.status) &&
+            isDestructiveOperationKind(op.kind),
+        )
+        if (!pending) return null
+        const requester = operationRequestedBy(pending)
+        return {
+          operationId: pending.id,
+          kind: pending.kind,
+          requestedByName: requester ? (holderNames.get(requester) ?? null) : null,
+        }
+      })(),
     })),
     liveCount: facts.instances.length,
     effectiveCap: cap.effectiveCap,
-    occupancy: facts.lease
-      ? {
-          purpose: facts.lease.purpose,
-          occupyingRunId: facts.lease.runId,
-          occupyingOperationId: facts.lease.operationId,
-        }
-      : null,
+    occupancy: occupancyBlock(facts.lease),
     retention: intent
       ? {
           retainUntil: intent.retainUntil.toISOString(),
@@ -1231,8 +1269,29 @@ export async function getAccountSessionDetail(db: Db, key: SessionKey): Promise<
               : null,
           queueDeadlineAt: facts.activeOp.queueDeadlineAt.toISOString(),
           waitReason: await effectiveOperationWaitReason(db, facts.activeOp),
+          sessionId: facts.activeOp.expectedSessionId,
+          requestedBy: (() => {
+            const id = operationRequestedBy(facts.activeOp)
+            return id ? { id, name: holderNames.get(id) ?? null } : null
+          })(),
         }
       : null,
+    activeOperations: await Promise.all(
+      facts.activeOps.map(async (op) => {
+        const id = operationRequestedBy(op)
+        return {
+          id: op.id,
+          kind: op.kind,
+          status: op.status,
+          origin: op.origin,
+          sessionId: op.expectedSessionId,
+          newInstance: op.kindParams?.newInstance === true,
+          requestedBy: id ? { id, name: holderNames.get(id) ?? null } : null,
+          queueDeadlineAt: op.queueDeadlineAt.toISOString(),
+          waitReason: await effectiveOperationWaitReason(db, op),
+        }
+      }),
+    ),
     actions: actionsFor(
       status,
       retained,

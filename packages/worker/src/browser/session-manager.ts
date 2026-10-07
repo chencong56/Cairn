@@ -1211,7 +1211,7 @@ export class BrowserSessionManager {
     return closeRunPage.call(this, leaseId)
   }
 
-  async closeManagedPage(input: { ownerId: string; pageId: string }): Promise<{ closed: boolean; pageId: string; activePageId: string }> {
+  async closeManagedPage(input: { ownerId: string; pageId: string; actorId?: string }): Promise<{ closed: boolean; pageId: string; activePageId: string }> {
     return closeManagedPage.call(this, input)
   }
 }

@@ -42,6 +42,7 @@ import {
   type SessionRecord,
 } from './sessions.js'
 import { lockOperationRow, lockSession, lockWorkerRow, toGrant } from './occupancy-tx.js'
+import { manualControlLive, resolveClaimerActorId, revokeManualControl } from './manual-control.js'
 import { findActiveLeaseRow, readSessionScheduling } from './occupancy-read.js'
 import { getSessionProfile, transferProfileLocation, upsertSessionProfile } from './occupancy-profile.js'
 import { applyPendingRetentionIntent } from './session-retention-intent.js'
@@ -67,6 +68,8 @@ export type ClaimSessionUseInput = {
   sessionId?: string | null
   pickIdle?: 'oldest' | 'worst'
   isolation?: 'SHARED' | 'DEDICATED' | null
+  /** 并发模式「新开实例」：不复用空闲实例。 */
+  newInstance?: boolean
 }
 
 export type ClaimSessionUseResult =
@@ -211,6 +214,7 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
 
       const { revision } = await readSessionScheduling(tx)
       const { lives, leases } = await loadLiveAccountSessions(tx, input.key)
+      const claimerActorId = await resolveClaimerActorId(tx, input.owner)
       for (const existing of lives) {
         const lease = leases.get(existing.id)
         if (!lease) continue
@@ -249,6 +253,8 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
         purpose: input.purpose,
         expectedSessionId: input.sessionId,
         pickIdle: input.pickIdle ?? (input.purpose === 'MAINTENANCE' ? 'worst' : 'oldest'),
+        claimerActorId,
+        newInstance: input.newInstance,
       })
       if (decision.action === 'reject') {
         return {
@@ -313,6 +319,10 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
         }
         const bumped = await bumpSessionFence(tx, session.id, input.touchLastUsed !== false)
         if (!bumped) return { ok: false as const, code: 'SESSION_NOT_CLAIMABLE' as const }
+        if (manualControlLive(session, await clockNow(tx))) {
+          // 决策已保证持有人就是领取方本人：收回他的手动操作权，运行立即开始。
+          await revokeManualControl(tx, session, 'own_run_started')
+        }
         const lease = await insertLease(tx, {
           sessionId: bumped.id,
           generation: bumped.generation,

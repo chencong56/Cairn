@@ -33,6 +33,7 @@ export const WAIT_REASON_COPY: Record<RunWaitReason, string> = {
   WORKER_SESSION_CAPACITY: '目标 Worker 会话位已满，排队中。',
   PROFILE_AFFINITY_WAIT: '等待原节点领取，以复用已保存的登录数据。',
   NO_ELIGIBLE_WORKER: '当前没有可领取的执行节点。',
+  SESSION_IN_MANUAL_CONTROL: '同一账号会话正在被人手动操作，结束后自动开始。',
 }
 
 export function runStatusTone(status: RunStatus): StatusTone {

@@ -103,6 +103,7 @@ const openSession = {
   currentOperation: null,
   actions: [],
   instances: [],
+  activeOperations: [],
   liveCount: 1,
   effectiveCap: 1,
   asOf: '2026-09-21T06:20:00.000Z',
@@ -278,6 +279,7 @@ describe('StudioScreen Component', () => {
         kind: 'PREPARE',
         status: 'QUEUED',
         reusedRunId: null,
+        requestedBy: { id: 'u1', name: '测试' },
       },
     })
     sessionMocks.requestAccountSessionOperation.mockResolvedValue({
@@ -325,6 +327,7 @@ describe('StudioScreen Component', () => {
         kind: 'PREPARE',
         status: 'WAITING_FOR_AUTH',
         reusedRunId: null,
+        requestedBy: { id: 'u1', name: '测试' },
       },
     })
 
@@ -349,6 +352,7 @@ describe('StudioScreen Component', () => {
         kind: 'PREPARE',
         status: 'RUNNING',
         reusedRunId: null,
+        requestedBy: { id: 'u1', name: '测试' },
       },
     })
     sessionMocks.requestAccountSessionOperation.mockResolvedValue({
@@ -469,6 +473,7 @@ describe('StudioScreen Component', () => {
         kind: 'PREPARE',
         status: 'WAITING_FOR_AUTH',
         reusedRunId: null,
+        requestedBy: { id: 'u1', name: '测试' },
       },
     })
     sessionMocks.requestAccountSessionOperation.mockResolvedValue({
@@ -625,5 +630,131 @@ describe('StudioScreen Component', () => {
       .element(screen.getByText(/正在展示历史试跑留存现场截图（离线参考）/))
       .toBeInTheDocument()
     await expect.element(screen.getByAltText('离线步骤历史截图')).toBeInTheDocument()
+  })
+
+  describe('多实例与共享观看', () => {
+    const instanceOf = (id: string, slot: number, patch: Record<string, unknown> = {}) => ({
+      id,
+      status: 'OPEN',
+      generation: 1,
+      ownerWorkerId: 'worker-1',
+      ownerWorkerOnline: true,
+      authState: 'AUTHENTICATED',
+      identityState: null,
+      observedTier: null,
+      lastAuthCheckedAt: null,
+      lastAuthSuccessAt: null,
+      authValidUntil: null,
+      lastExpectedIdentity: null,
+      retainUntil: null,
+      accountSlot: slot,
+      occupancy: null,
+      manualControl: null,
+      pendingDestructive: null,
+      ...patch,
+    })
+
+    it('账号有多个实例时展示切换器并连上画面，不再停在「画面未连接」', async () => {
+      observation.run = null
+      sessionMocks.fetchAccountSession.mockResolvedValue({
+        ...openSession,
+        session: null,
+        instances: [
+          instanceOf('inst-1', 1, {
+            manualControl: { actorId: 'u2', actorName: 'Bob', expiresAt: new Date(Date.now() + 30000).toISOString() },
+          }),
+          instanceOf('inst-2', 2),
+        ],
+        liveCount: 2,
+        effectiveCap: 2,
+      })
+      const screen = await renderScreen({ targetId: TARGET_ID, targetAccountId: ACCOUNT_ID })
+      await expect.element(screen.getByTestId('mock-browser-view')).toBeInTheDocument()
+      await expect.element(screen.getByRole('combobox', { name: '选择浏览器实例' })).toBeInTheDocument()
+    })
+
+    it('别人在准备同一实例时自动跟随，且没有取消权限就不显示「取消准备」', async () => {
+      observation.run = null
+      sessionMocks.fetchAccountSession.mockResolvedValue({
+        ...openSession,
+        session: null,
+        status: 'unprepared',
+        instances: [],
+        activeOperations: [
+          {
+            id: 'op-follow',
+            kind: 'PREPARE',
+            status: 'RUNNING',
+            origin: 'USER',
+            sessionId: null,
+            newInstance: false,
+            requestedBy: { id: 'u2', name: 'Bob' },
+            queueDeadlineAt: new Date(Date.now() + 180000).toISOString(),
+            waitReason: null,
+          },
+        ],
+        currentOperation: {
+          id: 'op-follow',
+          kind: 'PREPARE',
+          status: 'RUNNING',
+          reusedRunId: null,
+          queueDeadlineAt: new Date(Date.now() + 180000).toISOString(),
+          waitReason: null,
+          sessionId: null,
+          requestedBy: { id: 'u2', name: 'Bob' },
+        },
+      })
+      sessionMocks.fetchSessionOperation.mockResolvedValue({
+        id: 'op-follow',
+        status: 'RUNNING',
+        queueDeadlineAt: new Date(Date.now() + 180000).toISOString(),
+        createdAt: new Date().toISOString(),
+      })
+      const screen = await renderScreen({ targetId: TARGET_ID, targetAccountId: ACCOUNT_ID })
+      await expect.element(screen.getByText(/正在跟随 Bob 发起的会话准备/)).toBeInTheDocument()
+      await expect.element(screen.getByRole('button', { name: '取消准备' })).not.toBeInTheDocument()
+    })
+
+    it('实例被别人的运行占用时只读围观并说明是谁占用', async () => {
+      observation.run = null
+      sessionMocks.fetchAccountSession.mockResolvedValue({
+        ...openSession,
+        occupancy: {
+          purpose: 'EXECUTION',
+          occupyingRunId: RUN_ID,
+          occupyingOperationId: null,
+          by: { kind: 'user', id: 'u2', name: 'Bob' },
+        },
+      })
+      const screen = await renderScreen({ targetId: TARGET_ID, targetAccountId: ACCOUNT_ID })
+      await expect.element(screen.getByTestId('mock-browser-view')).toBeInTheDocument()
+      await expect.element(screen.getByText(/Bob 的运行 占用，只读观看/)).toBeInTheDocument()
+    })
+
+    it('并发模式下没有空闲实例且未到上限时出现「新开实例」，点击发起 newInstance 准备', async () => {
+      observation.run = null
+      sessionMocks.requestAccountSessionOperation.mockClear()
+      sessionMocks.requestAccountSessionOperation.mockResolvedValue({ operationId: 'op-new', created: true, reusedRunId: null })
+      sessionMocks.fetchAccountSession.mockResolvedValue({
+        ...openSession,
+        session: null,
+        instances: [
+          instanceOf('inst-1', 1, {
+            manualControl: { actorId: 'u2', actorName: 'Bob', expiresAt: new Date(Date.now() + 30000).toISOString() },
+          }),
+        ],
+        liveCount: 1,
+        effectiveCap: 2,
+      })
+      const screen = await renderScreen({ targetId: TARGET_ID, targetAccountId: ACCOUNT_ID })
+      await screen.getByRole('button', { name: '新开实例' }).click()
+      await vi.waitFor(() =>
+        expect(sessionMocks.requestAccountSessionOperation).toHaveBeenCalledWith(
+          TARGET_ID,
+          ACCOUNT_ID,
+          expect.objectContaining({ kind: 'PREPARE', newInstance: true }),
+        ),
+      )
+    })
   })
 })

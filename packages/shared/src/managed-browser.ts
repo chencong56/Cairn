@@ -13,6 +13,8 @@ export const pageRefSchema = z.strictObject({
 export type PageRef = z.infer<typeof pageRefSchema>
 
 export const AUTH_CONTROL_TTL_SECONDS = 30
+/** 直连会话的手动操作连续这么久没有输入或指认，服务端自动收回操作权。 */
+export const AUTH_CONTROL_IDLE_SECONDS = 600
 export const AUTH_CONTROL_HEARTBEAT_SECONDS = 5
 export const DEFAULT_MANAGED_VIEWPORT = { width: 1920, height: 1080 } as const
 export const BROWSER_FRAME_MAX_EDGE = 1920
@@ -125,6 +127,7 @@ export const managedBrowserAuthHoldSchema = z.strictObject({
 export const managedBrowserAuthControlSchema = z.strictObject({
   epoch: z.number().int().nonnegative(),
   actorId: entityIdSchema.nullable(),
+  actorName: z.string().nullable().default(null),
   expiresAt: utcInstantSchema.nullable(),
   heldByViewer: z.boolean(),
 })

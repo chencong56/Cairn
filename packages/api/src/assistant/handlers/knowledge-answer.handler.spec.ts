@@ -1744,6 +1744,7 @@ describe('handleKnowledgeAnswer (P0-B & Entity Boundaries CQ-03..CQ-14)', () => 
       occupancy: null,
       retention: null,
       currentOperation: null,
+      activeOperations: [],
       actions: [{ kind: 'LOGIN', enabled: true, disabledReason: null }],
       asOf: new Date().toISOString(),
     })

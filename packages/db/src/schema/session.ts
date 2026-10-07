@@ -55,6 +55,7 @@ export const browserSessions = cairnSchema.table(
     authControlTokenHash: text('auth_control_token_hash'),
     authControlExpiresAt: timestamp('auth_control_expires_at', { withTimezone: true }),
     authControlPageId: uuid('auth_control_page_id'),
+    authControlLastActivityAt: timestamp('auth_control_last_activity_at', { withTimezone: true }),
     lastAuthCheckedAt: timestamp('last_auth_checked_at', { withTimezone: true }),
     lastAuthSuccessAt: timestamp('last_auth_success_at', { withTimezone: true }),
     lastAuthGeneration: integer('last_auth_generation'),

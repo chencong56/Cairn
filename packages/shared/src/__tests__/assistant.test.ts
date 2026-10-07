@@ -202,6 +202,7 @@ const observation: RunObservation = {
       generation: null,
       acquireReason: null,
       profileFallback: null,
+      manualControlActor: null,
     },
   },
   evidence: { items: [] },

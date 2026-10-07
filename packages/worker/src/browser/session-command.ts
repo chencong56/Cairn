@@ -1,4 +1,4 @@
-import { appendRunEvents, conflict, recordInlineLogEvidence, setSessionProbe } from '@cairn/db'
+import { appendRunEvents, conflict, getSessionById, recordInlineLogEvidence, setSessionProbe } from '@cairn/db'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -727,11 +727,23 @@ export async function closeRunPage(this: SessionManagerContext, leaseId: string)
 
 export async function closeManagedPage(
   this: SessionManagerContext,
-  input: { ownerId: string; pageId: string },
+  input: { ownerId: string; pageId: string; actorId?: string },
 ): Promise<{ closed: boolean; pageId: string; activePageId: string }> {
   const { session, live, run } = await this.lookupRunSession(input.ownerId)
   if (!live || !session || !this.sessionOwnedHere(session)) {
     throw conflict('SESSION_NOT_LIVE', '受管会话未在当前节点运行')
+  }
+  // 直连会话上别人正在手动操作：不能替他关页面（持有人本人除外）。
+  if (input.ownerId === session.id && input.actorId) {
+    const latest = await getSessionById(this.dbHandle, session.id)
+    if (
+      latest?.authControlActorId &&
+      latest.authControlActorId !== input.actorId &&
+      latest.authControlExpiresAt &&
+      latest.authControlExpiresAt.getTime() > Date.now()
+    ) {
+      throw conflict('AUTH_CONTROL_HELD', '有其他用户正在手动操作，不能关闭页面')
+    }
   }
 
   const entry = live.pages.get(input.pageId)

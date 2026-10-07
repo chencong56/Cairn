@@ -435,6 +435,8 @@ export async function findEvictableSession(
            WHERE l.session_id = ${browserSessions.id}
              AND l.status = 'ACTIVE'
         )`,
+        // 有人正在手动操作的实例不参与容量驱逐。
+        sql`(${browserSessions.authControlExpiresAt} IS NULL OR ${browserSessions.authControlExpiresAt} <= ${databaseNow(db)})`,
       ),
     )
     .orderBy(

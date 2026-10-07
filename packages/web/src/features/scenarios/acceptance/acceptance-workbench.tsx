@@ -254,9 +254,11 @@ export function AcceptanceWorkbench({
           stopped = true
           if (timer) clearInterval(timer)
           toast.warning(
-            err.status === 401 || err.status === 403
-              ? '没有继续该调试挂起的权限，已停止心跳'
-              : '调试会话已超时或已失效',
+            err.payload.code === 'RUN_NOT_OWNED'
+              ? err.message
+              : err.status === 401 || err.status === 403
+                ? '没有继续该调试挂起的权限，已停止心跳'
+                : '调试会话已超时或已失效',
           )
         }
       }

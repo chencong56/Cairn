@@ -469,6 +469,14 @@ export {
   sessionSystemOverviewResponseSchema,
   accountSessionDetailSchema,
   sessionOperationAcceptedSchema,
+  OCCUPANCY_ACTOR_KINDS,
+  occupancyActorSchema,
+  type OccupancyActor,
+  instanceManualControlSchema,
+  type InstanceManualControl,
+  instancePendingDestructiveSchema,
+  activeSessionOperationSchema,
+  type ActiveSessionOperation,
   sessionEventDtoSchema,
   sessionEventListResponseSchema,
   sessionObserveQuerySchema,
@@ -2941,6 +2949,7 @@ export {
 export {
   pageRefSchema,
   AUTH_CONTROL_TTL_SECONDS,
+  AUTH_CONTROL_IDLE_SECONDS,
   AUTH_CONTROL_HEARTBEAT_SECONDS,
   DEFAULT_MANAGED_VIEWPORT,
   BROWSER_FRAME_MAX_EDGE,
@@ -3763,6 +3772,7 @@ export {
   runtimeInvariantSchema,
   runtimeInvariantManifestSchema,
   createRuntimeInvariant,
+  defaultPageHealthInvariants,
   authValidityViolated,
   isNavigationBoundaryError,
   redactErrorSurfaceText,
@@ -3772,7 +3782,6 @@ export {
   FACTORY_RUNTIME_INVARIANT_DEFAULTS,
   platformRuntimeInvariantDefaultsSchema,
   type RuntimeInvariantKind,
-  defaultPageHealthInvariants,
   type RuntimeInvariantEvaluateAt,
   type RuntimeInvariant,
   type RuntimeInvariantManifest,
@@ -3784,6 +3793,7 @@ export {
   type JoinedRuntimeInvariantEvaluation,
   type PlatformRuntimeInvariantDefaults,
 } from './runtime-invariant.js'
+export * from './page-health.js'
 export {
   OUTCOME_TEXT_TRUNCATE_LIMIT,
   OUTCOME_CANDIDATE_PROVENANCES,
@@ -3793,7 +3803,6 @@ export {
   proposeOutcomeCandidate,
   outcomeContractFromCandidate,
   expectKindLabel,
-export * from './page-health.js'
   outcomeCandidateMeaning,
   type OutcomeCandidateProvenance,
   type OutcomeTextStability,

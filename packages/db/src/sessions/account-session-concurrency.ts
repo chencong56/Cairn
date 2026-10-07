@@ -13,6 +13,7 @@ import { databaseNow, schemaFor, updateRows } from '../native.js'
 import type { SessionLeaseRow } from '../records.js'
 import { loadResolvedSessionPolicyForTarget } from './session-policy.js'
 import { findLiveSessions, isClaimable, type SessionKey, type SessionRecord } from './sessions.js'
+import { manualControlHeldByOther, manualControlLive } from './manual-control.js'
 
 export type SessionProfileKey = SessionKey & { accountSlot: number }
 
@@ -276,7 +277,7 @@ export async function retireSurplusIdleSessions(
   const surplusCount = input.lives.length - input.effectiveCap
 
   const idleSessions = input.lives
-    .filter((s) => s.status === 'OPEN' && !input.leases.has(s.id))
+    .filter((s) => s.status === 'OPEN' && !input.leases.has(s.id) && !manualControlLive(s, new Date()))
     .sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0))
 
   const toRetire = idleSessions.slice(0, surplusCount)
@@ -319,8 +320,14 @@ export async function decideAccountSessionClaim(
     purpose: 'EXECUTION' | 'MAINTENANCE'
     expectedSessionId?: string | null
     pickIdle: 'oldest' | 'worst'
+    /** 领取方对应的交互发起人；手动操作权正好是 TA 持有时，该实例对 TA 视为可领取。 */
+    claimerActorId?: string | null
+    /** 并发模式「新开实例」：不复用任何空闲实例，直接新建。 */
+    newInstance?: boolean
   },
 ): Promise<SessionClaimDecision> {
+  const now = new Date()
+  const blockedByControl = (session: SessionRecord) => manualControlHeldByOther(session, input.claimerActorId, now)
   const cap = await readAccountSessionCap(db, input.key)
   const requireConcurrency = concurrencyProtocolRequired(cap.effectiveCap, input.lives.length)
   if (requireConcurrency && !workerHasConcurrencyProtocol(input.holderProtocols)) {
@@ -377,6 +384,17 @@ export async function decideAccountSessionClaim(
     if (session.status === 'OPEN' && !isClaimable(session)) {
       return { action: 'reject', code: 'SESSION_NOT_CLAIMABLE' }
     }
+    if (!input.leases.has(session.id) && blockedByControl(session)) {
+      return {
+        action: 'reject',
+        code: 'SESSION_BUSY',
+        waitReason: 'SESSION_IN_MANUAL_CONTROL',
+        operationWait: {
+          reason: 'SESSION_IN_MANUAL_CONTROL',
+          detail: { sessionId: session.id, actorId: session.authControlActorId },
+        },
+      }
+    }
     if (input.leases.has(session.id)) {
       const lease = input.leases.get(session.id)
       return {
@@ -399,12 +417,14 @@ export async function decideAccountSessionClaim(
   const localIdle = localReusableSessions(input.lives, {
     workerId: input.holderWorkerId,
     instanceId: input.holderInstanceId,
-  }).filter((session) => !input.leases.has(session.id))
+  }).filter((session) => !input.leases.has(session.id) && !blockedByControl(session) && !input.newInstance)
   const local = input.pickIdle === 'worst' ? pickWorstIdle(localIdle) : pickOldestReusable(localIdle)
   if (local) return { action: 'reuse', session: local }
 
-  const foreign = await findEligibleForeignIdle(db, {
-    lives: input.lives,
+  const foreign = input.newInstance
+    ? null
+    : await findEligibleForeignIdle(db, {
+    lives: input.lives.filter((session) => !blockedByControl(session)),
     leases: input.leases,
     holderWorkerId: input.holderWorkerId,
     holderInstanceId: input.holderInstanceId,
@@ -426,6 +446,17 @@ export async function decideAccountSessionClaim(
   if (input.lives.length >= cap.effectiveCap) {
     const lostOnly = input.lives.every((row) => row.status === 'LOST')
     const exclusiveLost = cap.effectiveCap === 1 && input.lives.some((row) => row.status === 'LOST')
+    const manualHeld =
+      cap.effectiveCap === 1 && input.lives.some((row) => !input.leases.has(row.id) && blockedByControl(row))
+    if (manualHeld && !exclusiveLost) {
+      return {
+        action: 'reject',
+        code: input.purpose === 'MAINTENANCE' ? 'SESSION_ACCOUNT_CAP_EXCEEDED' : 'SESSION_BUSY',
+        waitReason: 'SESSION_IN_MANUAL_CONTROL',
+        message: '会话正在被人手动操作',
+        operationWait: { reason: 'SESSION_IN_MANUAL_CONTROL' },
+      }
+    }
     return {
       action: 'reject',
       code: input.purpose === 'MAINTENANCE' ? 'SESSION_ACCOUNT_CAP_EXCEEDED' : 'SESSION_BUSY',

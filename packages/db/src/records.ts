@@ -598,6 +598,7 @@ export type BrowserSessionRow = {
   authControlTokenHash: string | null
   authControlExpiresAt: Date | null
   authControlPageId: string | null
+  authControlLastActivityAt: Date | null
   lastAuthCheckedAt: Date | null
   lastAuthSuccessAt: Date | null
   lastAuthGeneration: number | null
@@ -651,6 +652,7 @@ export type NewBrowserSession = {
   authControlTokenHash?: string | null | undefined
   authControlExpiresAt?: Date | null | undefined
   authControlPageId?: string | null | undefined
+  authControlLastActivityAt?: Date | null | undefined
   retainUntil?: Date | null | undefined
   nextAuthCheckAt?: Date | null | undefined
   reclaimMode?: 'IDLE' | 'AUTH_DRIVEN' | undefined

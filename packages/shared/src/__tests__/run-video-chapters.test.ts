@@ -44,6 +44,7 @@ function mockRun(overrides: Partial<RunDetailDto> = {}): RunDetailDto {
       generation: null,
       acquireReason: null,
       profileFallback: null,
+      manualControlActor: null,
     },
     snapshot: {
       schemaVersion: 1,

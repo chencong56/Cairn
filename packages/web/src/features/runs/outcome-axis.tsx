@@ -70,14 +70,14 @@ type TableCheckDetails = {
   totalRowsChecked?: number
   violatingRowsCount?: number | null
   violatingRows?: { rowIndex: number; reasonSummary?: string }[]
+  /** 条件行检查：一句人话、命中的行、找不到时最接近的名称 */
+  lookup?: { summary?: string; matched?: { rowIndex: number; cells: { column: string; text: string }[] }[]; closest?: string[] }
 }
 
 function tableCheckOf(result: { details?: Record<string, unknown> | null } | undefined): {
   table: TableCheckDetails | null
   message: string | null
 } {
-  /** 条件行检查：一句人话、命中的行、找不到时最接近的名称 */
-  lookup?: { summary?: string; matched?: { rowIndex: number; cells: { column: string; text: string }[] }[]; closest?: string[] }
   const details = result?.details
   const table = details && typeof details.table === 'object' && details.table ? (details.table as TableCheckDetails) : null
   const message = details && typeof details.safeMessage === 'string' ? details.safeMessage : null
@@ -92,14 +92,8 @@ function TableCheckResult({ result }: { result: { details?: Record<string, unkno
   return (
     <div className='space-y-1 text-label text-muted-foreground' data-testid='table-check-result'>
       {table?.totalRowsChecked !== undefined ? <p>检查了 {table.totalRowsChecked} 行数据</p> : null}
-      {message ? <p>{message}</p> : null}
-      {rows.length > 0 ? (
-        <ul className='list-disc pl-4'>
-          {rows.map((row, i) => (
-            <li key={`${row.rowIndex}-${i}`}>
-              {row.reasonSummary ?? `第 ${row.rowIndex + 1} 行不满足`}
       {table?.lookup?.summary && table.lookup.summary !== message ? <p>{table.lookup.summary}</p> : null}
-            </li>
+      {message ? <p>{message}</p> : null}
       {table?.lookup?.matched && table.lookup.matched.length > 0 ? (
         <table className='w-full border-collapse text-[11px]' aria-label='命中的行'>
           <thead>
@@ -132,6 +126,12 @@ function TableCheckResult({ result }: { result: { details?: Record<string, unkno
           </ul>
         </div>
       ) : null}
+      {rows.length > 0 ? (
+        <ul className='list-disc pl-4'>
+          {rows.map((row, i) => (
+            <li key={`${row.rowIndex}-${i}`}>
+              {row.reasonSummary ?? `第 ${row.rowIndex + 1} 行不满足`}
+            </li>
           ))}
           {total > rows.length ? <li>另有 {total - rows.length} 处未列出</li> : null}
         </ul>

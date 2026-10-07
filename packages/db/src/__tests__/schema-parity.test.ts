@@ -415,6 +415,7 @@ describe.skipIf(!parsed.success)('迁移与 Drizzle schema 一致性（集成）
       { column_name: 'auth_control_actor_id', is_nullable: 'YES' },
       { column_name: 'auth_control_epoch', is_nullable: 'NO' },
       { column_name: 'auth_control_expires_at', is_nullable: 'YES' },
+      { column_name: 'auth_control_last_activity_at', is_nullable: 'YES' },
       { column_name: 'auth_control_page_id', is_nullable: 'YES' },
       { column_name: 'auth_control_token_hash', is_nullable: 'YES' },
       { column_name: 'auth_expiry_source', is_nullable: 'YES' },

@@ -22,6 +22,15 @@ import {
   recordOperationWait,
 } from './operation-queue.js'
 import { lockOperationRow } from './occupancy-tx.js'
+import {
+  accountDisplayName,
+  assertNotHeldByOther,
+  canCancelSessionOperation,
+  isBuildOperationKind,
+  isDestructiveOperationKind,
+  manualControlHeldByOther,
+  manualControlLive,
+} from './manual-control.js'
 
 export async function requestMaintenanceOperation(
   db: Db,
@@ -90,20 +99,55 @@ export async function requestMaintenanceOperation(
     if (destructive && instances.length > 1 && !input.body.expectedSessionId) {
       throw conflict('SESSION_INSTANCE_REQUIRED', '多个会话时必须指定要操作的会话')
     }
-    const selected =
-      instances.find((item) => item.session.id === input.body.expectedSessionId) ??
-      (instances.length === 1 ? instances[0] : null)
+    const newInstance = 'newInstance' in input.body && input.body.newInstance === true
+    if (newInstance && (input.body.kind !== 'PREPARE' || input.body.expectedSessionId)) {
+      throw conflict('SESSION_POLICY_INVALID', '新开实例只能用于不指定实例的 PREPARE')
+    }
+    const selected = newInstance
+      ? null
+      : (instances.find((item) => item.session.id === input.body.expectedSessionId) ??
+        (instances.length === 1 ? instances[0] : null))
     const selectedLease = selected?.lease ?? null
     const selectedLive = selected?.session ?? null
-    const selectedOp =
-      facts.activeOps?.find((op) => op.expectedSessionId && op.expectedSessionId === selectedLive?.id) ??
-      (instances.length <= 1 ? facts.activeOp : null)
+    const selectedOp = newInstance
+      ? null
+      : (facts.activeOps?.find((op) => op.expectedSessionId && op.expectedSessionId === selectedLive?.id) ??
+        (instances.length <= 1 ? facts.activeOp : null))
+    if (newInstance) {
+      // 已有实例加上正在新建的实例不得超过账号并发上限。
+      const cap = await readAccountSessionCap(tx, input.key)
+      const pendingNew = (facts.activeOps ?? []).filter(
+        (op) => !op.expectedSessionId && ['PREPARE', 'LOGIN'].includes(op.kind),
+      ).length
+      if (instances.length + pendingNew >= cap.effectiveCap) {
+        throw conflict('SESSION_ACCOUNT_CAP_EXCEEDED', `账号并发实例已达上限（${instances.length + pendingNew}/${cap.effectiveCap}）`)
+      }
+    }
     if (origin === 'BACKGROUND') {
+      if (selectedLive && manualControlLive(selectedLive, await clockNow(tx)))
+        return { operation: selectedOp ?? facts.activeOp, created: false, reusedRunId: null, eligibleWorkers: null }
       if (selectedLease || selected?.holding)
         return { operation: selectedOp ?? facts.activeOp, created: false, reusedRunId: null, eligibleWorkers: null }
     }
     if (origin === 'BACKGROUND' && selectedOp)
       return { operation: selectedOp, created: false, reusedRunId: null, eligibleWorkers: null }
+    // 交互式 PREPARE / LOGIN 遇到同一实例（或同为新建实例）上进行中的建立类操作：跟随它，不再报冲突。
+    if (!newInstance && origin === 'USER' && (input.body.kind === 'PREPARE' || input.body.kind === 'LOGIN')) {
+      const followable = (facts.activeOps ?? []).find((op) => {
+        if (!isBuildOperationKind(op.kind) || op.kindParams?.newInstance === true) return false
+        if (input.body.expectedSessionId) return op.expectedSessionId === input.body.expectedSessionId
+        if (instances.length <= 1) return true
+        return op.expectedSessionId == null
+      })
+      if (followable) {
+        return {
+          operation: followable,
+          created: false,
+          reusedRunId: typeof followable.kindParams?.reusedRunId === 'string' ? followable.kindParams.reusedRunId : null,
+          eligibleWorkers: null,
+        }
+      }
+    }
     if (selectedOp && input.body.kind !== 'REFRESH_LOGIN_PAGE')
       throw conflict('SESSION_OPERATION_CONFLICT', '已有会话操作尚未完成', {
         occupyingOperationId: selectedOp.id,
@@ -118,6 +162,31 @@ export async function requestMaintenanceOperation(
         (input.body.expectedGeneration != null && selectedLive.generation !== input.body.expectedGeneration)
       ) {
         throw conflict('SESSION_GENERATION_CHANGED', '会话实例已重建，请刷新后重试')
+      }
+    }
+    if (selectedLive && !selectedLease) {
+      const now = await clockNow(tx)
+      if (isDestructiveOperationKind(input.body.kind)) {
+        if (manualControlHeldByOther(selectedLive, input.actor?.id, now)) {
+          assertNotHeldByOther(
+            selectedLive,
+            input.actor?.id,
+            now,
+            await accountDisplayName(tx, selectedLive.authControlActorId!),
+          )
+        }
+      } else if (
+        origin === 'USER' &&
+        ['VERIFY_AUTH', 'RENEW_AUTH', 'LOGIN'].includes(input.body.kind) &&
+        manualControlHeldByOther(selectedLive, input.actor?.id, now)
+      ) {
+        assertNotHeldByOther(
+          selectedLive,
+          input.actor?.id,
+          now,
+          await accountDisplayName(tx, selectedLive.authControlActorId!),
+          `${await accountDisplayName(tx, selectedLive.authControlActorId!)} 正在手动操作，暂不能执行该操作`,
+        )
       }
     }
     if (selected?.holding || selectedLease?.purpose === 'EXECUTION') {
@@ -183,6 +252,7 @@ export async function requestMaintenanceOperation(
         requestDigest,
         ...(input.body.kind === 'REFRESH_LOGIN_PAGE' ? { pageRef: input.body.pageRef } : {}),
         ...(input.body.kind === 'RESET_PROFILE' ? { confirmAccountId: input.body.confirmAccountId } : {}),
+        ...(newInstance ? { newInstance: true } : {}),
         ...(selectedLease?.purpose === 'AUTH_WAIT'
           ? { reusedRunId: selectedLease.runId, reusedOperationId: selectedLease.operationId }
           : {}),
@@ -254,6 +324,9 @@ export async function cancelSessionOperation(
         .where(eq(targetAccounts.id, row.targetAccountId)),
     )
     if (input.actor) await assertSessionActorPermission(tx, input.actor.id, 'session:control')
+    if (input.actor && !(await canCancelSessionOperation(tx, { actorId: input.actor.id, operation: row }))) {
+      throw conflict('OPERATION_NOT_OWNED', '只有发起人或会话管理员可以取消')
+    }
     const checkedAt = await clockNow(tx)
     if (row.status === 'QUEUED' && row.queueDeadlineAt <= checkedAt) {
       // 已过排队截止：取消就是收掉它，返回真实的过期终态而不是报「不能取消」。

@@ -45,6 +45,7 @@ export const RUN_WAIT_REASONS = [
   'PROFILE_AFFINITY_WAIT',
   'NO_ELIGIBLE_WORKER',
   'SESSION_ACCOUNT_AT_CAPACITY',
+  'SESSION_IN_MANUAL_CONTROL',
 ] as const
 export type RunWaitReason = (typeof RUN_WAIT_REASONS)[number]
 export const runWaitReasonSchema = z.enum(RUN_WAIT_REASONS)
@@ -73,6 +74,7 @@ export const SESSION_OPERATION_WAIT_REASONS = [
   'SESSION_BUSY',
   'SESSION_ON_OTHER_WORKER',
   'WORKER_PROTOCOL_MISSING',
+  'SESSION_IN_MANUAL_CONTROL',
 ] as const
 export type SessionOperationWaitReason = (typeof SESSION_OPERATION_WAIT_REASONS)[number]
 export const sessionOperationWaitReasonSchema = z.enum(SESSION_OPERATION_WAIT_REASONS)

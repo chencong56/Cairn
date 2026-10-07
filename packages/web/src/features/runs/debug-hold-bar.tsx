@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
 import { debugRun } from '@/lib/runs-api'
 import { useRunObservation } from '@/features/runs/use-run-observation'
+import { useAuthStore } from '@/stores/auth-store'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -61,7 +62,10 @@ export function DebugHoldBar({
   run: RunDetailDto
   onChanged?: () => void
 }) {
+  const myId = useAuthStore((state) => state.auth.user?.id)
   const debug = run.debugMode !== 'runThrough'
+  // 调试挂起的运行停在发起人的现场：别人只读围观（仍可取消运行），调试命令由服务端拒绝。
+  const notOwner = Boolean(run.createdByConsoleAccountId && myId && run.createdByConsoleAccountId !== myId)
   const holding = run.status === 'HOLDING' && debug
   const running = run.status === 'RUNNING' && debug
   const { step, status } = currentStep(run)
@@ -76,6 +80,16 @@ export function DebugHoldBar({
   const expectActual = expectActualFrom(latestAttempt?.output)
 
   if (!holding && !running) return null
+  if (notOwner) {
+    return (
+      <div
+        aria-label='调试挂起操作'
+        className='sticky bottom-0 z-20 rounded-lg border border-border-card bg-card px-4 py-3 text-small text-muted-foreground shadow-card'
+      >
+        这是其他用户发起的调试运行，只能只读观看。如需接手，请先取消该运行，再自行重跑。
+      </div>
+    )
+  }
 
   const send = (action: DebugAction) => {
     setBusy(true)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { newUuid } from '@/lib/uuid'
 import {
   AUTH_CONTROL_HEARTBEAT_SECONDS,
+  AUTH_CONTROL_IDLE_SECONDS,
   describeManagedAuthWait,
   hasAllPermissions,
   managedPageBadge,
@@ -25,7 +26,7 @@ import {
   resumeRunAuth as runResumeRunAuth,
   subscribeBrowserFrames as runSubscribeBrowserFrames,
 } from '@/lib/runs-api'
-import { Loader2, X } from 'lucide-react'
+import { Globe, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
 import { useAuthoringObserve } from '@/features/authoring'
@@ -141,6 +142,8 @@ type Props = {
   onSettleLanding?: () => Promise<unknown>
   embedded?: boolean
   waitReason?: string | null
+  /** 只读围观：不显示手动操作入口（例如实例被他人的运行占用）。 */
+  readOnly?: boolean
 }
 
 export function BrowserView({
@@ -155,6 +158,7 @@ export function BrowserView({
   onSettleLanding,
   embedded = false,
   waitReason = null,
+  readOnly = false,
 }: Props) {
   const {
     fetchManagedBrowser,
@@ -175,6 +179,7 @@ export function BrowserView({
     ])
   )
   const canControl = Boolean(
+    !readOnly &&
     user &&
     hasAllPermissions(
       user.permissions,
@@ -199,6 +204,9 @@ export function BrowserView({
   const seq = useRef(0)
   const composing = useRef(false)
   const tokenRef = useRef<string | null>(null)
+  // 手动操作的最近一次输入时间：服务端空闲 10 分钟会收回，这里提前一分钟提醒。
+  const lastActivityRef = useRef(0)
+  const idleWarnedRef = useRef(false)
   const inputId = useId()
   const now = useNow(Boolean(expiresAt))
   // 回调与后续 effect 读最新 token；effect 按声明顺序执行，这里先同步。
@@ -400,6 +408,23 @@ export function BrowserView({
   ])
 
   useEffect(() => {
+    if (!token || !canControl || !sessionMode) return
+    lastActivityRef.current = Date.now()
+    idleWarnedRef.current = false
+    let timer = 0
+    const check = () => {
+      const idleFor = Date.now() - lastActivityRef.current
+      if (!idleWarnedRef.current && idleFor > (AUTH_CONTROL_IDLE_SECONDS - 60) * 1000) {
+        idleWarnedRef.current = true
+        toast.warning('1 分钟内无操作将自动退出手动操作')
+      }
+      timer = window.setTimeout(check, 15_000)
+    }
+    timer = window.setTimeout(check, 15_000)
+    return () => window.clearTimeout(timer)
+  }, [token, canControl, sessionMode])
+
+  useEffect(() => {
     if (!token || !canControl) return
     let cancelled = false
     let timer = 0
@@ -409,10 +434,18 @@ export function BrowserView({
         .then((next) => {
           if (!cancelled && next) setExpiresAt(next.expiresAt)
         })
-        .catch(() => {
+        .catch((error) => {
           if (!cancelled) {
             setToken(null)
-            toast.error('登录控制权已失效')
+            if (error instanceof ApiRequestError && error.payload.code === 'AUTH_CONTROL_IDLE') {
+              toast.warning('长时间无操作，已退出手动操作')
+              return
+            }
+            toast.error(
+              sessionMode
+                ? '手动操作权已失效：可能被运行或维护占用、长时间无操作，或实例已关闭'
+                : '登录控制权已失效',
+            )
           }
         })
         .finally(() => {
@@ -482,6 +515,8 @@ export function BrowserView({
       viewport: { width: frame.width, height: frame.height },
     } as BrowserAuthInputCommand
 
+    lastActivityRef.current = Date.now()
+    idleWarnedRef.current = false
     void Promise.resolve(inputAuthControl(runId, { token, command }))
       .catch((error) => {
         if (
@@ -572,6 +607,11 @@ export function BrowserView({
   const highlightBox = observe.highlight?.preview?.box
   const tableMarkers = observe.tableMarkers
   const controlling = Boolean(token && canControl)
+  // 他人持有该实例的手动操作权：按钮置灰并写明是谁，观看不受影响。
+  const heldByOther = Boolean(
+    sessionMode && meta?.authControl?.actorId && !meta.authControl.heldByViewer && !controlling,
+  )
+  const holderLabel = `${meta?.authControl?.actorName ?? '其他用户'} 正在手动操作`
   const connecting = isBrowserViewConnecting({
     open,
     hasFrame: Boolean(frame),
@@ -603,6 +643,8 @@ export function BrowserView({
       frameId: frame.frameId,
       viewport: { width: frame.width, height: frame.height },
     } as BrowserAuthInputCommand
+    lastActivityRef.current = Date.now()
+    idleWarnedRef.current = false
     void Promise.resolve(inputAuthControl(runId, { token, command })).catch((error) => {
       if (
         error instanceof ApiRequestError &&
@@ -700,6 +742,96 @@ export function BrowserView({
       })
   }
 
+  const activePage =
+    meta?.pages.find(
+      (p) =>
+        (viewPageId ?? meta.currentPage?.pageRef.pageId) ===
+        p.pageRef.pageId,
+    ) ?? meta?.currentPage
+
+  const activeCaption = activePage
+    ? managedPageCaption(activePage)
+    : meta?.currentPage
+      ? managedPageCaption(meta.currentPage)
+      : null
+
+  const renderTabStrip = () => {
+    if (!meta || meta.pages.length <= 1) return null
+
+    return (
+      <div
+        role='tablist'
+        aria-label='受管页面标签'
+        className='flex items-stretch gap-1 overflow-x-auto no-scrollbar border-b border-border-divider/70 bg-muted/40 px-2 pt-1.5'
+      >
+        {meta.pages.map((page) => {
+          const selected =
+            (viewPageId ?? meta.currentPage?.pageRef.pageId) ===
+            page.pageRef.pageId
+          const duplicateCount = meta.pages.filter(
+            (p) => managedPageCaption(p) === managedPageCaption(page),
+          ).length
+          const isClosing = closingPageId === page.pageRef.pageId
+          const caption = managedPageCaption(page)
+          const badge = managedPageBadge(page.kind)
+          const fullUrl = page.url ?? caption
+
+          return (
+            <div
+              key={page.pageRef.pageId}
+              role='presentation'
+              className={cn(
+                'group relative flex min-w-[130px] max-w-[280px] flex-1 items-center rounded-t-md border-t-2 border-x transition-colors',
+                selected
+                  ? 'border-t-primary border-x-border-default/80 bg-card text-foreground shadow-xs z-10'
+                  : 'border-t-transparent border-x-transparent bg-transparent text-muted-foreground hover:bg-card/60 hover:text-foreground',
+              )}
+            >
+              <button
+                type='button'
+                title={fullUrl}
+                className={cn(
+                  'flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-small outline-none cursor-pointer',
+                  page.canClose && canControl ? 'pl-2.5 pr-1' : 'px-2.5',
+                )}
+                onClick={() => setViewPageId(page.pageRef.pageId)}
+              >
+                {duplicateCount > 1 || page.kind === 'popup' ? (
+                  <span className='shrink-0 text-caption font-medium text-muted-foreground mr-0.5'>
+                    [{badge}]
+                  </span>
+                ) : null}
+                <span className='min-w-0 flex-1 truncate font-medium'>{caption}</span>
+                {page.currentExecution ? ' · 当前页' : ''}
+              </button>
+              {page.canClose && canControl ? (
+                <button
+                  type='button'
+                  aria-label={`关闭标签页 ${caption}`}
+                  disabled={isClosing}
+                  className={cn(
+                    'mr-1.5 rounded-xs p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer shrink-0',
+                    isClosing && 'opacity-50 pointer-events-none',
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleClosePage(page.pageRef.pageId)
+                  }}
+                >
+                  {isClosing ? (
+                    <Loader2 className='size-3 animate-spin' />
+                  ) : (
+                    <X className='size-3' />
+                  )}
+                </button>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <section
       aria-label='受管浏览器'
@@ -711,93 +843,104 @@ export function BrowserView({
       )}
     >
       {embedded ? (
-        <div className='flex items-center justify-between gap-2 px-3 pt-2 pb-1 text-label text-muted-foreground'>
-          <span className='truncate'>
-            {meta?.currentPage ? (
-              <>
-                当前页 {managedPageCaption(meta.currentPage)}
-                {frame ? ` · ${frame.width}×${frame.height}` : ''}
-              </>
-            ) : (
-              '受管浏览器画面'
-            )}
-          </span>
-          <div className='flex items-center gap-2 shrink-0'>
-            {meta?.degradedReason ? (
-              <StatusBadge tone='warning'>画面不可用</StatusBadge>
-            ) : null}
-            {controlling ? (
-              <StatusBadge tone='warning'>
-                {sessionMode ? '正在手动操作' : '正在输入'}
-              </StatusBadge>
-            ) : null}
-            {sessionMode && canControl && !waiting && !controlling ? (
+        <div className='flex flex-col bg-card'>
+          {open ? renderTabStrip() : null}
+          <div className='flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border-divider/60 bg-surface-header/40 text-label text-muted-foreground'>
+            <div className='flex items-center gap-2 min-w-0 flex-1 max-w-xl rounded-md border border-border-default/60 bg-muted/30 hover:bg-muted/50 px-2.5 py-1 transition-[background-color,border-color]'>
+              <Globe className='size-3.5 shrink-0 text-muted-foreground' />
+              <span
+                className='truncate font-mono text-foreground select-all text-small'
+                title={activePage?.url ?? activeCaption ?? undefined}
+              >
+                {activeCaption ? `当前页 ${activeCaption}` : '受管浏览器画面'}
+              </span>
+              {frame ? (
+                <span className='shrink-0 pl-1.5 font-mono text-caption text-muted-foreground border-l border-border-divider/50'>
+                  {frame.width}×{frame.height}
+                </span>
+              ) : null}
+            </div>
+            <div className='flex items-center gap-2 shrink-0'>
+              {meta?.degradedReason ? (
+                <StatusBadge tone='warning'>画面不可用</StatusBadge>
+              ) : null}
+              {controlling ? (
+                <StatusBadge tone='warning'>
+                  {sessionMode ? '正在手动操作' : '正在输入'}
+                </StatusBadge>
+              ) : null}
+              {sessionMode && canControl && !waiting && !controlling && heldByOther ? (
+                <StatusBadge tone='info'>{holderLabel}</StatusBadge>
+              ) : null}
+              {sessionMode && canControl && !waiting && !controlling ? (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={busy || heldByOther}
+                  title={heldByOther ? `${holderLabel}，结束后才能接手` : undefined}
+                  onClick={handleAcquire}
+                >
+                  手动操作
+                </Button>
+              ) : null}
+              {sessionMode && canControl && !waiting && controlling ? (
+                <>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={busy}
+                    title='向下翻页滚动目标页面'
+                    onClick={() => sendCommand({ type: 'key', key: 'PageDown' })}
+                  >
+                    向下翻页
+                  </Button>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={busy}
+                    title='向上翻页滚动目标页面'
+                    onClick={() => sendCommand({ type: 'key', key: 'PageUp' })}
+                  >
+                    向上翻页
+                  </Button>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={busy}
+                    onClick={handleRelease}
+                  >
+                    退出操作
+                  </Button>
+                </>
+              ) : null}
+              {sessionMode && canControl && !waiting && !controlling && onSettleLanding ? (
+                <Button
+                  size='sm'
+                  variant='outline'
+                  disabled={busy}
+                  onClick={() => {
+                    setBusy(true)
+                    void onSettleLanding()
+                      .then(() => toast.success('已提交整理页面'))
+                      .catch((error) =>
+                        toast.error(
+                          error instanceof ApiRequestError ? error.message : '无法整理页面',
+                        ),
+                      )
+                      .finally(() => setBusy(false))
+                  }}
+                >
+                  整理页面
+                </Button>
+              ) : null}
               <Button
                 size='sm'
                 variant='outline'
-                disabled={busy}
-                onClick={handleAcquire}
+                onClick={() => setOpen((value) => !value)}
               >
-                手动操作
+                {open ? '收起画面' : '展开画面'}
               </Button>
-            ) : null}
-            {sessionMode && canControl && !waiting && controlling ? (
-              <>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={busy}
-                  title='向下翻页滚动目标页面'
-                  onClick={() => sendCommand({ type: 'key', key: 'PageDown' })}
-                >
-                  向下翻页
-                </Button>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={busy}
-                  title='向上翻页滚动目标页面'
-                  onClick={() => sendCommand({ type: 'key', key: 'PageUp' })}
-                >
-                  向上翻页
-                </Button>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={busy}
-                  onClick={handleRelease}
-                >
-                  退出操作
-                </Button>
-              </>
-            ) : null}
-            {sessionMode && canControl && !waiting && !controlling && onSettleLanding ? (
-              <Button
-                size='sm'
-                variant='outline'
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true)
-                  void onSettleLanding()
-                    .then(() => toast.success('已提交整理页面'))
-                    .catch((error) =>
-                      toast.error(
-                        error instanceof ApiRequestError ? error.message : '无法整理页面',
-                      ),
-                    )
-                    .finally(() => setBusy(false))
-                }}
-              >
-                整理页面
-              </Button>
-            ) : null}
-            <Button
-              size='sm'
-              variant='outline'
-              onClick={() => setOpen((value) => !value)}
-            >
-              {open ? '收起画面' : '展开画面'}
-            </Button>
+            </div>
           </div>
         </div>
       ) : (
@@ -832,10 +975,14 @@ export function BrowserView({
                 {sessionMode ? '正在手动操作' : '正在输入'}
               </StatusBadge>
             ) : null}
+            {sessionMode && canControl && !waiting && !controlling && heldByOther ? (
+              <StatusBadge tone='info'>{holderLabel}</StatusBadge>
+            ) : null}
             {sessionMode && canControl && !waiting && !controlling ? (
               <Button
                 variant='outline'
-                disabled={busy}
+                disabled={busy || heldByOther}
+                title={heldByOther ? `${holderLabel}，结束后才能接手` : undefined}
                 onClick={handleAcquire}
               >
                 手动操作
@@ -1001,93 +1148,26 @@ export function BrowserView({
         </div>
       ) : null}
       {open ? (
-        <div className={cn(embedded ? 'mt-1.5 space-y-2.5' : 'mt-4 space-y-4')}>
-          {meta && meta.pages.length > 1 ? (
-            <div className='space-y-2'>
-              <p className='text-label text-muted-foreground'>
-                {sessionMode
-                  ? '切换页签可查看其他受管页；手动操作与指认都作用于正在查看的页。'
-                  : '查看其他受管页不会改变执行当前页。'}
-              </p>
-              <div className='flex flex-wrap gap-2'>
-                {meta.pages.map((page) => {
-                  const selected =
-                    (viewPageId ?? meta.currentPage?.pageRef.pageId) ===
-                    page.pageRef.pageId
-                  const duplicateCount = meta.pages.filter(
-                    (p) => managedPageCaption(p) === managedPageCaption(page),
-                  ).length
-                  const isClosing = closingPageId === page.pageRef.pageId
-                  return (
-                    <div
-                      key={page.pageRef.pageId}
-                      className={cn(
-                        'inline-flex items-center rounded-md border text-small font-medium transition-[background-color,border-color,box-shadow,color]',
-                        selected
-                          ? 'border-transparent bg-secondary text-secondary-foreground shadow-sm'
-                          : 'border-border-default bg-background hover:bg-muted text-foreground',
-                      )}
-                    >
-                      <button
-                        type='button'
-                        className={cn(
-                          'inline-flex items-center gap-1.5 py-1.5 outline-none',
-                          page.canClose && canControl ? 'pl-3 pr-1' : 'px-3',
-                        )}
-                        onClick={() => setViewPageId(page.pageRef.pageId)}
-                      >
-                        {duplicateCount > 1 || page.kind === 'popup' ? (
-                          <span className='text-label text-muted-foreground mr-0.5'>
-                            [{managedPageBadge(page.kind)}]
-                          </span>
-                        ) : null}
-                        <span className='truncate max-w-[200px]'>
-                          {managedPageCaption(page)}
-                        </span>
-                        {page.currentExecution ? ' · 当前页' : ''}
-                      </button>
-                      {page.canClose && canControl ? (
-                        <button
-                          type='button'
-                          aria-label={`关闭标签页 ${managedPageCaption(page)}`}
-                          disabled={isClosing}
-                          className={cn(
-                            'mr-1.5 rounded-sm p-1 hover:bg-card-hover text-muted-foreground hover:text-foreground transition-colors cursor-pointer',
-                            isClosing && 'opacity-50 pointer-events-none',
-                          )}
-                          onClick={() => handleClosePage(page.pageRef.pageId)}
-                        >
-                          {isClosing ? (
-                            <Loader2 className='size-3 animate-spin' />
-                          ) : (
-                            <X className='size-3' />
-                          )}
-                        </button>
-                      ) : null}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ) : null}
-          {meta?.viewingOtherPage ? (
-            <p className='text-small text-status-warning-foreground'>
-              {sessionMode
-                ? '正在查看非当前页：手动操作与指认作用于此页。'
-                : '正在查看其他页面，不会改变执行当前页。'}
-            </p>
-          ) : null}
-          {observe.pickMode && pickBlockedOnOtherPage ? (
-            <p className='text-small text-status-warning-foreground'>
-              步骤将在执行当前页上运行，请切回当前页再指认。
-            </p>
-          ) : null}
+        <div className={cn(embedded ? 'flex flex-col' : 'mt-4 flex flex-col space-y-3')}>
+          {!embedded ? renderTabStrip() : null}
           {!embedded &&
-            (meta?.currentPage ? (
-              <p className='text-label text-muted-foreground'>
-                当前页 {managedPageCaption(meta.currentPage)}
-                {frame ? ` · ${frame.width}×${frame.height}` : ''}
-              </p>
+            (activeCaption ? (
+              <div className='flex items-center justify-between gap-2 px-3 py-1.5 rounded-md border border-border-default/60 bg-muted/30 text-label text-muted-foreground'>
+                <div className='flex items-center gap-2 min-w-0 flex-1 truncate'>
+                  <Globe className='size-3.5 shrink-0 text-muted-foreground' />
+                  <span
+                    className='truncate font-mono text-foreground select-all text-small'
+                    title={activePage?.url ?? activeCaption ?? undefined}
+                  >
+                    当前页 {activeCaption}
+                  </span>
+                  {frame ? (
+                    <span className='shrink-0 pl-1.5 font-mono text-caption text-muted-foreground border-l border-border-divider/50'>
+                      {frame.width}×{frame.height}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
             ) : (
               <p className='text-small text-muted-foreground'>
                 {meta?.degradedReason === 'worker_unreachable'
@@ -1097,6 +1177,18 @@ export function BrowserView({
                     : '还没有可观察的受管页面。'}
               </p>
             ))}
+          {meta?.viewingOtherPage ? (
+            <p className='text-small text-status-warning-foreground px-3 py-1 bg-status-warning/10 border-y border-status-warning/20'>
+              {sessionMode
+                ? '正在查看非当前页：手动操作与指认作用于此页。'
+                : '正在查看其他页面，不会改变执行当前页。'}
+            </p>
+          ) : null}
+          {observe.pickMode && pickBlockedOnOtherPage ? (
+            <p className='text-small text-status-warning-foreground px-3 py-1 bg-status-warning/10 border-y border-status-warning/20'>
+              步骤将在执行当前页上运行，请切回当前页再指认。
+            </p>
+          ) : null}
           {frame && meta?.capabilities.screencast !== 'closed' ? (
             <div className='w-full'>
               <button

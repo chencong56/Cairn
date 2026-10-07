@@ -47,6 +47,7 @@ export {
   enterRunWaitingForAuth,
   acquireAuthControl,
   heartbeatAuthControl,
+  touchAuthControlActivity,
   releaseAuthControl,
   expireStaleAuthControl,
   findSessionByAuthWaitRun,
@@ -162,3 +163,5 @@ export {
   type SessionSnapshotContent,
 } from './session-snapshots.js'
 
+
+export { accountDisplayNames, canCancelSessionOperation } from './manual-control.js'

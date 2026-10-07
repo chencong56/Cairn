@@ -2,6 +2,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import type { PlatformSessionScheduling, RunPlacement, RunStatus } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { clockNow, databaseNow, schemaFor } from '../native.js'
+import { accountDisplayName, manualControlLive } from './manual-control.js'
 import {
   assignMinFreeSlot,
   decideAccountSessionClaim,
@@ -166,6 +167,7 @@ export async function computeOccupancyPlacement(
     generation: null as number | null,
     acquireReason: null as RunPlacement['acquireReason'],
     profileFallback: null as boolean | null,
+    manualControlActor: null as RunPlacement['manualControlActor'],
   }
   if (
     run.status === 'SUCCEEDED' ||
@@ -182,8 +184,14 @@ export async function computeOccupancyPlacement(
   const key = { targetId: run.targetId, targetAccountId: run.targetAccountId }
   const { lives, leases } = await loadLiveAccountSessions(db, key)
   const cap = await readAccountSessionCap(db, key)
+  const nowForControl = await clockNow(db)
+  // 有人在手动操作的实例不算空闲：运行不能把他的浏览器领走。
   const localIdle = lives.find(
-    (session) => session.status === 'OPEN' && session.health !== 'UNHEALTHY' && !leases.has(session.id),
+    (session) =>
+      session.status === 'OPEN' &&
+      session.health !== 'UNHEALTHY' &&
+      !leases.has(session.id) &&
+      !manualControlLive(session, nowForControl),
   )
   if (localIdle) {
     const withSession = {
@@ -240,6 +248,20 @@ export async function computeOccupancyPlacement(
     const busy = lives.find((row) => leases.has(row.id))
     const lease = busy ? leases.get(busy.id) : null
     const wait = leaseWaitFacts(lease ?? null)
+    const manual = lives.find((row) => !leases.has(row.id) && manualControlLive(row, nowForControl))
+    if (!busy && manual && !allLost) {
+      const actorId = manual.authControlActorId!
+      return {
+        state: 'owner_required',
+        ...base,
+        sessionId: manual.id,
+        ownerWorkerId: manual.ownerWorkerId,
+        sessionStatus: manual.status,
+        generation: manual.generation,
+        waitReason: cap.effectiveCap === 1 ? 'SESSION_IN_MANUAL_CONTROL' : 'SESSION_ACCOUNT_AT_CAPACITY',
+        manualControlActor: { id: actorId, name: await accountDisplayName(db, actorId) },
+      }
+    }
     return {
       state: 'owner_required',
       ...base,
