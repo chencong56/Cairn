@@ -239,7 +239,7 @@ describe('知识建议', () => {
       }],
     }
     const screen = await renderCard({ document: v2 })
-    await expect.element(screen.getByText(/只支持独立步骤且无额外编排设置/)).toBeVisible()
+    await expect.element(screen.getByText('知识建议', { exact: true })).not.toBeInTheDocument()
     await expect.element(screen.getByRole('button', { name: '生成知识建议' })).not.toBeInTheDocument()
   })
 

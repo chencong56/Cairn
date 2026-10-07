@@ -147,6 +147,7 @@ import { stepTypeLabel } from './labels'
 import { StepTypeIcon } from './step-type-icon'
 import { MapStepBinding } from '@/features/map/step-binding'
 import { KnowledgeProposal } from '@/features/scenarios/knowledge-proposal'
+import { SectionMapKnowledge } from '@/features/scenarios/components/inspector/section-map-knowledge'
 import { RecordingImportPanel } from './recording-import-panel'
 import { ScenarioValidationSummary } from './validation-summary'
 import { StudioToolbar } from './studio-toolbar'
@@ -1794,31 +1795,33 @@ export function ScenarioDetailPage() {
                   setTypeChange(type)
                 }}
               />
-              <MapStepBinding
-                targetId={scenario!.targetId}
-                scenarioId={scenario!.id}
-                stepId={draft.selected.id}
-                draftRevision={scenario!.draft?.revision ?? 0}
-                disabled={disabled}
-              />
-              {document && scenario?.draft ? (
-                <KnowledgeProposal
-                  scenarioId={scenario.id}
-                  draftRevision={scenario.draft.revision}
-                  document={document}
-                  disabled={disabled || draft.dirty || draft.hasFieldDrafts || draft.conflict || draft.remoteStale}
-                  onAccepted={(revision, next) => {
-                    queryClient.setQueryData(['scenarios', scenarioId], {
-                      ...scenario,
-                      draft: { ...scenario.draft, revision, document: next },
-                    })
-                    if (draft.dirty || draft.hasFieldDrafts) {
-                      draft.setConflict(true)
-                      toast.error('建议已保存到服务器，编辑中的本地输入已保留，请处理草稿冲突。')
-                    } else draft.acceptServer({ revision, document: next })
-                  }}
+              <SectionMapKnowledge>
+                <MapStepBinding
+                  targetId={scenario!.targetId}
+                  scenarioId={scenario!.id}
+                  stepId={draft.selected.id}
+                  draftRevision={scenario!.draft?.revision ?? 0}
+                  disabled={disabled}
                 />
-              ) : null}
+                {document && scenario?.draft ? (
+                  <KnowledgeProposal
+                    scenarioId={scenario.id}
+                    draftRevision={scenario.draft.revision}
+                    document={document}
+                    disabled={disabled || draft.dirty || draft.hasFieldDrafts || draft.conflict || draft.remoteStale}
+                    onAccepted={(revision, next) => {
+                      queryClient.setQueryData(['scenarios', scenarioId], {
+                        ...scenario,
+                        draft: { ...scenario.draft, revision, document: next },
+                      })
+                      if (draft.dirty || draft.hasFieldDrafts) {
+                        draft.setConflict(true)
+                        toast.error('建议已保存到服务器，编辑中的本地输入已保留，请处理草稿冲突。')
+                      } else draft.acceptServer({ revision, document: next })
+                    }}
+                  />
+                ) : null}
+              </SectionMapKnowledge>
               <div className='flex flex-wrap gap-2 pt-2 border-t border-border-divider'>
                 <Button
                   size='sm'

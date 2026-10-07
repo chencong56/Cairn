@@ -158,13 +158,7 @@ function KnowledgeProposalContent(props: KnowledgeProposalProps) {
         error instanceof ApiRequestError ? error.message : '读取建议失败'
       ),
   })
-  if (!(canWrite && canReadMap && canReadTarget)) return null
-  if (!flatDocument)
-    return (
-      <p className='text-small text-muted-foreground'>
-        知识建议目前只支持独立步骤且无额外编排设置的草稿；请在场景编排器中维护当前定义。
-      </p>
-    )
+  if (!(canWrite && canReadMap && canReadTarget) || !flatDocument) return null
   const busy =
     generate.isPending || accept.isPending || reject.isPending || load.isPending
   const stale =
@@ -362,11 +356,7 @@ function KnowledgeProposalContent(props: KnowledgeProposalProps) {
               sources={proposal.sources}
             />
           </div>
-        ) : (
-          <p className='text-small text-muted-foreground'>
-            基于已确认术语和已发布做法生成可编辑步骤，不会自动发布或试跑。
-          </p>
-        )}
+        ) : null}
       </CardContent>
     </Card>
   )

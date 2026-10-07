@@ -54,7 +54,7 @@ describe('步骤地图绑定', () => {
     })
   })
 
-  it('绑定入口说明关联用于变更影响', async () => {
+  it('绑定入口只保留对象选择，不附带说明文案', async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
@@ -71,8 +71,11 @@ describe('步骤地图绑定', () => {
     await expect
       .element(screen.getByText('地图对象', { exact: true }))
       .toBeVisible()
-    await expect.element(screen.getByText(/便于查看变更影响/)).toBeVisible()
-    await expect.element(screen.getByText(/相似扫描只给候选/)).toBeVisible()
+    await expect
+      .element(screen.getByRole('combobox', { name: '选择地图对象' }))
+      .toHaveTextContent('选择要绑定的对象')
+    await expect.element(screen.getByText(/便于查看变更影响/)).not.toBeInTheDocument()
+    await expect.element(screen.getByText(/相似扫描只给候选/)).not.toBeInTheDocument()
   })
   it('仅加载当前步骤的草稿绑定，历史版本绑定不能被解除', async () => {
     mocks.fetchMapReferences.mockResolvedValue({
@@ -101,7 +104,9 @@ describe('步骤地图绑定', () => {
         />
       </QueryClientProvider>
     )
-    await expect.element(screen.getByText(/尚未绑定/)).toBeVisible()
+    await expect
+      .element(screen.getByRole('combobox', { name: '选择地图对象' }))
+      .toHaveTextContent('选择要绑定的对象')
     expect(mocks.fetchMapReferences).toHaveBeenCalledWith(TARGET_ID, {
       limit: 100,
       scenarioId: SCENARIO_ID,
@@ -153,7 +158,9 @@ describe('步骤地图绑定', () => {
         />
       </QueryClientProvider>
     )
-    await expect.element(screen.getByText(/当前绑定：/)).toBeVisible()
+    await expect
+      .element(screen.getByRole('combobox', { name: '选择地图对象' }))
+      .toHaveTextContent('保存')
     const unbindBtn = screen.getByRole('button', { name: '解除绑定' })
     await expect.element(unbindBtn).toBeVisible()
     await unbindBtn.click()

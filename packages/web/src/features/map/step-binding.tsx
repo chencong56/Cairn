@@ -135,35 +135,21 @@ export function MapStepBinding({
   )
 
   return (
-    <div className='rounded-lg border border-border-divider/60 bg-muted/20 p-3 space-y-2.5'>
-      <div className='flex items-center justify-between gap-2'>
-        <div className='flex items-center gap-1.5'>
-          <Label className='text-label font-semibold text-muted-foreground uppercase tracking-wider'>地图对象</Label>
-          <span className='rounded bg-muted px-1.5 py-0.2 text-label font-medium text-muted-foreground'>选填</span>
-        </div>
-        <span className='text-label text-muted-foreground'>
-          便于查看变更影响
-        </span>
+    <div className='space-y-1.5'>
+      <div className='flex items-center gap-1.5'>
+        <Label className='text-label'>地图对象</Label>
+        {current?.resolution === 'pending_confirmation' ? (
+          <span className='rounded bg-status-warning/10 px-1.5 py-0.2 text-caption text-status-warning-foreground'>
+            拆分后待确认
+          </span>
+        ) : null}
       </div>
       {referencesQuery.isError ? (
         <QueryErrorState
           description={referencesQuery.error?.message}
           onRetry={() => void referencesQuery.refetch()}
         />
-      ) : referencesQuery.isPending ? (
-        <p className='text-small text-muted-foreground'>正在读取绑定…</p>
-      ) : current ? (
-        <p className='text-small'>
-          当前绑定：{current.assetRefKey}
-          {current.resolution === 'pending_confirmation'
-            ? ' · 拆分后待确认'
-            : ''}
-        </p>
-      ) : (
-        <p className='text-small text-muted-foreground'>
-          尚未绑定（可选配置，不影响执行）。相似扫描只给候选，不算确切引用。
-        </p>
-      )}
+      ) : null}
 
       <div className='flex items-center gap-2'>
         <Popover open={open} onOpenChange={setOpen}>
@@ -183,10 +169,12 @@ export function MapStepBinding({
               }
               className='w-full justify-between font-normal text-left'
             >
-              <span className='truncate'>
-                {current
-                  ? (currentObject?.name ?? current.assetRefKey)
-                  : '选择要绑定的对象'}
+              <span className='truncate' title={current?.assetRefKey}>
+                {referencesQuery.isPending
+                  ? '正在读取绑定…'
+                  : current
+                    ? (currentObject?.name ?? current.assetRefKey)
+                    : '选择要绑定的对象'}
               </span>
               <ChevronsUpDown className='ml-2 size-4 shrink-0 opacity-50' />
             </Button>
