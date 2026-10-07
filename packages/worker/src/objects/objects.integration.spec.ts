@@ -21,7 +21,7 @@ import {
   targets,
   type DbHandle,
 } from '@cairn/db/testing'
-import { OBJECT_MISSING_REASONS, writeRunVideoPayload, type Step } from '@cairn/shared'
+import { OBJECT_MISSING_REASONS, ObjectStoreError, writeRunVideoPayload, type Step } from '@cairn/shared'
 import { LocalObjectStore, type ObjectStore } from '@cairn/storage'
 import { ObjectService } from './object.service.js'
 
@@ -255,10 +255,12 @@ describe('对象存储托管协议（集成）', { timeout: 30_000 }, () => {
       },
       probe: store.probe.bind(store),
     }
+    let clock = Date.now()
     const svc = new ObjectService(handle, failing, {
       retainDays: 30,
       pendingTtlSeconds: 3600,
       maxBytes: 1024,
+      now: () => new Date(clock),
     })
     const blocked = await objects.putObject({
       runId,
@@ -279,11 +281,64 @@ describe('对象存储托管协议（集成）', { timeout: 30_000 }, () => {
       .where(eq(storedObjects.id, other.objectId))
 
     await svc.purgeExpiredObjects({ limit: 100 })
+    // 退避窗口内不会被再次选中，失败次数不变
+    await svc.purgeExpiredObjects({ limit: 100 })
+    expect((await getStoredObjectById(handle.db, blocked.objectId))?.purgeAttempts).toBe(1)
+    clock += 3 * 60_000
     await svc.purgeExpiredObjects({ limit: 100 })
     const blockedRow = await getStoredObjectById(handle.db, blocked.objectId)
     expect(blockedRow?.status).toBe('available')
-    expect(blockedRow?.purgeAttempts).toBeGreaterThanOrEqual(2)
+    expect(blockedRow?.purgeAttempts).toBe(2)
     expect((await getStoredObjectById(handle.db, other.objectId))?.status).toBe('purged')
+  })
+
+  it('对象存储整体不可用：本轮中止，不累计对象失败次数，恢复后继续清理', async () => {
+    let down = true
+    let deletes = 0
+    const flaky: ObjectStore = {
+      put: store.put.bind(store),
+      putFile: store.putFile.bind(store),
+      get: store.get.bind(store),
+      delete: async (key: string) => {
+        deletes += 1
+        if (down) throw new ObjectStoreError('OBJECT_STORE_UNAVAILABLE', 'connect ECONNREFUSED')
+        return store.delete(key)
+      },
+      probe: store.probe.bind(store),
+    }
+    const svc = new ObjectService(handle, flaky, {
+      retainDays: 30,
+      pendingTtlSeconds: 3600,
+      maxBytes: 1024,
+    })
+    const ids: string[] = []
+    for (let i = 0; i < 6; i += 1) {
+      const put = await objects.putObject({
+        runId,
+        body: new TextEncoder().encode(`outage-${i}`),
+        contentType: 'text/plain',
+      })
+      ids.push(put.objectId)
+    }
+    for (const id of ids) {
+      await handle.db
+        .update(storedObjects)
+        .set({ retainUntil: new Date(Date.now() - 1000) })
+        .where(eq(storedObjects.id, id))
+    }
+
+    const result = await svc.purgeExpiredObjects({ limit: 100 })
+    expect(result.purged).toBe(0)
+    expect(deletes).toBeLessThan(ids.length)
+    for (const id of ids) {
+      expect((await getStoredObjectById(handle.db, id))?.purgeAttempts).toBe(0)
+    }
+
+    down = false
+    await svc.purgeExpiredObjects({ limit: 100 })
+    for (const id of ids) {
+      expect((await getStoredObjectById(handle.db, id))?.status).toBe('purged')
+    }
   })
 
   it('put 失败后证据 object_key 为空且带 missing_reason', async () => {

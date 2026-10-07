@@ -76,6 +76,16 @@ describe('decideVerdict', () => {
     assert.equal(isFailure('STACK_OK'), false)
   })
 
+  it('对象存储不可达是 STACK_UNHEALTHY，未配置（不传）则跳过', () => {
+    const verdict = decideVerdict({
+      ...healthy,
+      objectStore: { ok: false, endpoint: 'http://127.0.0.1:1', error: '不可达' },
+    })
+    assert.equal(verdict.result, 'STACK_UNHEALTHY')
+    assert.match(verdict.fail, /对象存储/)
+    assert.equal(decideVerdict({ ...healthy, objectStore: { ok: true, endpoint: 'x' } }).result, 'STACK_OK')
+  })
+
   it('端口没起来是 STACK_DOWN', () => {
     const verdict = decideVerdict({ ...healthy, apiListen: false })
     assert.equal(verdict.result, 'STACK_DOWN')

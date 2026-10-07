@@ -206,7 +206,23 @@ if (scope.web && webListen) {
   webHealth = { ok: false, error: '未监听' }
 }
 
+// 对象存储探测：只在配置了 S3 endpoint 且本次检查含 api / worker 时做 TCP 可达探测，
+// 抓 endpoint 写错、容器端口变了这类「进程都在听、证据却写不进去」的问题。
+let objectStore
+if ((scope.api || scope.worker) && (process.env.CAIRN_S3_ENDPOINT ?? '').trim()) {
+  const endpoint = process.env.CAIRN_S3_ENDPOINT.trim()
+  try {
+    const url = new URL(endpoint)
+    const port = Number(url.port) || (url.protocol === 'https:' ? 443 : 80)
+    const ok = await probeListen(url.hostname, port, timeoutMs)
+    objectStore = ok ? { ok: true, endpoint } : { ok: false, endpoint, error: `${endpoint} 不可达（检查 CAIRN_S3_ENDPOINT 与对象存储容器端口）` }
+  } catch {
+    objectStore = { ok: false, endpoint, error: `CAIRN_S3_ENDPOINT=${endpoint} 不是合法地址` }
+  }
+}
+
 const verdict = decideVerdict({
+  objectStore,
   requireApi: scope.api,
   requireWorker: scope.worker,
   requireWeb: scope.web,
@@ -246,6 +262,7 @@ console.log(`scope: ${scopeName}${strict ? ' --strict' : ''}`)
 console.log(`S1 listen     ${s1}`)
 console.log(`S2 health     ${s2}`)
 console.log(`S3 wire       ${s3}`)
+console.log(`S4 objects    ${objectStore ? `${mark(objectStore.ok)} ${objectStore.endpoint}` : 'skip'}`)
 console.log(`RESULT        ${verdict.result}${verdict.fail ? `  ${verdict.fail}` : verdict.note ? `  ${verdict.note}` : ''}`)
 
 if (verdict.result === 'STACK_DOWN') {

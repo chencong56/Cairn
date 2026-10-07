@@ -1,7 +1,7 @@
 import type { StoredObjectRow } from '../records.js'
 import { atomic, schemaFor } from '../native.js'
 import { updateRows, locked } from '../native.js'
-import { and, asc, eq, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm'
 import {
   OBJECT_MISSING_REASONS,
   ObjectStoreError,
@@ -191,6 +191,29 @@ export async function commitStoredObject(
   return toRecord(updated)
 }
 
+/** 清理失败后的重试退避：60s * 2^失败次数，封顶 1 小时。 */
+const PURGE_BACKOFF_BASE_SECONDS = 60
+const PURGE_BACKOFF_MAX_SECONDS = 3600
+
+function purgeBackoffClause(storedObjects: ReturnType<typeof schemaFor>['storedObjects'], now: Date) {
+  const clauses: SQL[] = [isNull(storedObjects.lastPurgeErrorAt)]
+  let attempts = 0
+  for (;;) {
+    const seconds = Math.min(PURGE_BACKOFF_BASE_SECONDS * 2 ** attempts, PURGE_BACKOFF_MAX_SECONDS)
+    const before = new Date(now.getTime() - seconds * 1000)
+    const capped = seconds >= PURGE_BACKOFF_MAX_SECONDS
+    clauses.push(
+      and(
+        capped ? gte(storedObjects.purgeAttempts, attempts) : eq(storedObjects.purgeAttempts, attempts),
+        lt(storedObjects.lastPurgeErrorAt, before),
+      )!,
+    )
+    if (capped) break
+    attempts += 1
+  }
+  return or(...clauses)!
+}
+
 export async function listPurgeCandidates(
   db: Db,
   input: { now: Date; pendingTtlSeconds: number; limit: number },
@@ -201,13 +224,16 @@ export async function listPurgeCandidates(
     .select()
     .from(storedObjects)
     .where(
-      or(
-        and(eq(storedObjects.status, 'available'), lt(storedObjects.retainUntil, input.now)),
-        and(eq(storedObjects.status, 'pending'), lt(storedObjects.createdAt, pendingBefore)),
-        and(
-          or(eq(storedObjects.status, 'pending'), eq(storedObjects.status, 'available')),
-          isNotNull(storedObjects.deleteRequestedAt),
+      and(
+        or(
+          and(eq(storedObjects.status, 'available'), lt(storedObjects.retainUntil, input.now)),
+          and(eq(storedObjects.status, 'pending'), lt(storedObjects.createdAt, pendingBefore)),
+          and(
+            or(eq(storedObjects.status, 'pending'), eq(storedObjects.status, 'available')),
+            isNotNull(storedObjects.deleteRequestedAt),
+          ),
         ),
+        purgeBackoffClause(storedObjects, input.now),
       ),
     )
     .orderBy(asc(storedObjects.purgeAttempts), asc(storedObjects.retainUntil))

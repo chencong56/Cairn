@@ -42,6 +42,10 @@ export const OBJECT_STORE = Symbol('OBJECT_STORE')
 export const OBJECT_SERVICE_OPTIONS = Symbol('OBJECT_SERVICE_OPTIONS')
 
 export const PURGE_ATTEMPT_WARN_AT = 8
+/** 达到告警阈值后，每隔多少次失败再告警一次。 */
+export const PURGE_ATTEMPT_WARN_EVERY = 50
+/** 本轮一个都没删成功时，连续这么多次存储不可用即判定为存储故障。 */
+export const PURGE_STORE_OUTAGE_AFTER = 3
 
 export type ObjectServiceOptions = {
   retainDays: number
@@ -409,6 +413,11 @@ export class ObjectService {
       limit,
     })
     let purged = 0
+    // 对象存储整体不可用（连接拒绝、超时、鉴权）与单个对象删除失败要分开：
+    // 一个都没删成功却连续失败，说明是存储故障，本轮中止且不累计对象的失败次数。
+    const failed: { id: string; objectKey: string; message: string }[] = []
+    let consecutiveUnavailable = 0
+    let aborted = false
     for (const candidate of candidates) {
       try {
         await this.store.delete(candidate.objectKey)
@@ -424,13 +433,37 @@ export class ObjectService {
           now,
         })
         if (marked.updated) purged += 1
+        consecutiveUnavailable = 0
       } catch (error) {
-        const attempts = await markStoredObjectPurgeFailed(this.handle, { id: candidate.id, now })
         const message = error instanceof Error ? error.message : String(error)
-        if (attempts >= PURGE_ATTEMPT_WARN_AT) {
+        failed.push({ id: candidate.id, objectKey: candidate.objectKey, message })
+        if (isObjectStoreError(error) && error.code === 'OBJECT_STORE_UNAVAILABLE') {
+          consecutiveUnavailable += 1
+          if (purged === 0 && consecutiveUnavailable >= PURGE_STORE_OUTAGE_AFTER) {
+            aborted = true
+            break
+          }
+        } else {
+          consecutiveUnavailable = 0
+        }
+      }
+    }
+    if (aborted) {
+      this.logger.warn(
+        { failedProbes: failed.length, sample: failed[0]?.message },
+        '对象存储不可用，本轮对象清理中止（不计入单对象失败，恢复后自动继续）',
+      )
+    } else {
+      for (const item of failed) {
+        const attempts = await markStoredObjectPurgeFailed(this.handle, { id: item.id, now })
+        // 达到阈值打一次，之后每 PURGE_ATTEMPT_WARN_EVERY 次再打，避免每轮刷屏。
+        if (
+          attempts >= PURGE_ATTEMPT_WARN_AT &&
+          (attempts - PURGE_ATTEMPT_WARN_AT) % PURGE_ATTEMPT_WARN_EVERY === 0
+        ) {
           this.logger.warn(
-            { objectKey: candidate.objectKey, purgeAttempts: attempts },
-            `对象删除持续失败：${message}`,
+            { objectKey: item.objectKey, purgeAttempts: attempts },
+            `对象删除持续失败：${item.message}`,
           )
         }
       }

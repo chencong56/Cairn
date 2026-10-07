@@ -199,6 +199,10 @@ export function decideVerdict(input) {
   if (input.requireWeb && !input.webListen) {
     return { result: 'STACK_DOWN', fail: 'web 未监听' }
   }
+  // 对象存储探测：未配置 S3 endpoint（本地存储）时由调用方不传，视为跳过。
+  if (input.objectStore && !input.objectStore.ok) {
+    return { result: 'STACK_UNHEALTHY', fail: `对象存储 ${input.objectStore.error ?? '不可达'}` }
+  }
   if (input.requireApi) {
     if (!input.apiHealth?.ok) {
       return { result: 'STACK_UNHEALTHY', fail: `api /health ${input.apiHealth?.error ?? '不可达'}` }

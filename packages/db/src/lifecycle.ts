@@ -7,6 +7,7 @@ import {
   type DeletePreviewBlocker,
   type DeleteResourceResult,
   type ResourceDeletedBy,
+  DEFAULT_OBJECT_PENDING_TTL_SECONDS,
 } from '@cairn/shared'
 import type { Db } from './client.js'
 import { schemaFor, updateRows } from './native.js'
@@ -103,36 +104,73 @@ export function activeRunBlockers(
   }))
 }
 
+/** 提示里最多逐个列出的 Run 数，其余折叠。 */
+const PENDING_BLOCKER_RUN_LIMIT = 3
+
+/**
+ * 仍在写入证据的 Run。只有「新鲜」的 pending（创建未满 pendingTtl）才算写入方；
+ * 超过 TTL 的 pending 是清理候选（Worker 按同一判据回收），不得阻塞删除。
+ */
 export async function pendingWriteBlockers(
   tx: Db,
   runIds: string[],
+  options: { now?: Date; pendingTtlSeconds?: number } = {},
 ): Promise<DeletePreviewBlocker[]> {
   if (runIds.length === 0) return []
+  const now = options.now ?? new Date()
+  const ttl = options.pendingTtlSeconds ?? DEFAULT_OBJECT_PENDING_TTL_SECONDS
+  const freshAfter = new Date(now.getTime() - ttl * 1000)
   const { evidences, storedObjects } = schemaFor(tx)
-  const [pendingObject] = await tx
-    .select({ id: storedObjects.id })
+  const objectRows = await tx
+    .select({ runId: storedObjects.runId, createdAt: storedObjects.createdAt })
     .from(storedObjects)
     .where(
       and(
         inArray(storedObjects.runId, runIds),
         eq(storedObjects.status, 'pending'),
         isNull(storedObjects.deleteRequestedAt),
+        gte(storedObjects.createdAt, freshAfter),
       ),
     )
-    .limit(1)
-  const [pendingEvidence] = await tx
-    .select({ id: evidences.id })
+  const evidenceRows = await tx
+    .select({ runId: evidences.runId, createdAt: evidences.createdAt })
     .from(evidences)
-    .where(and(inArray(evidences.runId, runIds), eq(evidences.status, 'pending')))
-    .limit(1)
-  if (!pendingObject && !pendingEvidence) return []
-  return [
-    {
-      id: 'pending_writes',
+    .where(
+      and(
+        inArray(evidences.runId, runIds),
+        eq(evidences.status, 'pending'),
+        gte(evidences.createdAt, freshAfter),
+      ),
+    )
+  const perRun = new Map<string, { count: number; earliest: Date }>()
+  for (const row of [...objectRows, ...evidenceRows]) {
+    if (!row.runId) continue
+    const entry = perRun.get(row.runId)
+    if (!entry) perRun.set(row.runId, { count: 1, earliest: row.createdAt })
+    else {
+      entry.count += 1
+      if (row.createdAt < entry.earliest) entry.earliest = row.createdAt
+    }
+  }
+  if (perRun.size === 0) return []
+  const resumeHint = `最长约 ${Math.max(1, Math.ceil(ttl / 60))} 分钟后自动恢复`
+  const entries = [...perRun.entries()]
+  const blockers = entries.slice(0, PENDING_BLOCKER_RUN_LIMIT).map(([runId, entry]) => {
+    const minutes = Math.max(0, Math.floor((now.getTime() - entry.earliest.getTime()) / 60_000))
+    return {
+      id: runId,
       code: 'RESOURCE_BUSY',
-      message: '仍有证据正在写入，无法删除',
-    },
-  ]
+      message: `运行 ${runId} 仍有 ${entry.count} 个证据对象在写入（最早 ${minutes} 分钟前），${resumeHint}`,
+    }
+  })
+  if (entries.length > PENDING_BLOCKER_RUN_LIMIT) {
+    blockers.push({
+      id: 'pending_writes_more',
+      code: 'RESOURCE_BUSY',
+      message: `另有 ${entries.length - PENDING_BLOCKER_RUN_LIMIT} 个运行仍有证据在写入`,
+    })
+  }
+  return blockers
 }
 
 export async function assertResourceIdle(
@@ -170,7 +208,7 @@ export async function assertResourceIdle(
     if (input.checkPendingWrites) {
       const pending = await pendingWriteBlockers(tx, runIds)
       if (pending.length > 0) {
-        throw conflict('RESOURCE_BUSY', pending[0]!.message)
+        throw conflict('RESOURCE_BUSY', pending.map((item) => item.message).join('；'))
       }
     }
   }
