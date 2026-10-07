@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Page } from 'playwright'
 import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
+import { evaluateTableExpectation, tableDetectedSchema, tableExpectRuleSchema } from '@cairn/shared'
 import { detectTable } from './table-read-v2.js'
 import { centerOf, deps, plan, run, startHarness, valueOf, type FixtureHarness } from '../testing/table-read-test-kit.js'
 
@@ -186,6 +187,73 @@ describe('table.read@2 × 真实老系统结构靶场', { timeout: 180_000 }, ()
     }
     const layout = await detectTable(page, { kind: 'point', ...(await centerOf(page, '.parameter-container td')) }, deps)
     if (layout.outcome === 'FOUND') expect(layout.detected.shape).not.toBe('finereport')
+    await page.close()
+  })
+
+  it('EasyUI 报表清单：找到某一行再检查它（按名称找行，检查使用次数 / 最新数据）', async ({ skip }) => {
+    if (!available) skip()
+    const page = await open('easyui-edc.html')
+    const sample = await run(
+      page,
+      plan('#report-grid', [
+        { key: 'name', name: '报表名称', field: 'item1' },
+        { key: 'uses', name: '使用次数', field: 'item4', valueType: 'number', numericKind: 'integer' },
+        { key: 'date', name: '最新数据', field: 'item2', valueType: 'number', numericKind: 'integer' },
+      ]),
+    )
+    const exact = { mode: 'fixed', scale: 8, rounding: 'half_away_from_zero' }
+    const rule = (name: string, extra: Record<string, unknown> = {}) =>
+      tableExpectRuleSchema.parse({
+        rule: 'row_lookup',
+        where: [{ column: 'name', predicate: { op: 'eq', value: name } }],
+        expect: [{ column: 'uses', predicate: { op: 'gt', value: 100 } }, { column: 'date', predicate: { op: 'neq', value: 0, numericPolicy: exact } }],
+        ...extra,
+      })
+    // 5G 订单统计表使用次数 668 > 100，且最新数据不为 0
+    expect(evaluateTableExpectation(sample, rule('本年累计5G订单统计表')).passed).toBe(true)
+    // 4G 订单统计表使用次数只有 35：找到了，但不满足 > 100
+    const low = evaluateTableExpectation(sample, rule('本年累计4G订单统计表'))
+    expect(low.passed).toBe(false)
+    expect(low.reasonMessage).toContain('「使用次数」是 35')
+    // 这张表有分页，只读了本页：本页没有 ≠ 没有，只能“无法确认”，不能判业务不通过
+    const paged = evaluateTableExpectation(sample, rule('本年累计5G订单统计报表'))
+    expect(paged.passed).toBe(false)
+    expect(paged.factsUnavailable).toBe(true)
+    expect(paged.reasonCode).toBe('ROW_NOT_FOUND_PAGED')
+    await page.close()
+
+    // 没有分页的表：名称打错 → 业务不通过，并给出最接近的名称
+    const flat = await open('elementui-table.html')
+    const names = await run(flat, plan('.report-table', [{ key: 'name', name: '报表名称' }, { key: 'cycle', name: '更新周期' }]))
+    const miss = evaluateTableExpectation(
+      names,
+      tableExpectRuleSchema.parse({ rule: 'row_lookup', where: [{ column: 'name', predicate: { op: 'eq', value: '楼宇覆盖面积统计报表' } }], expect: [{ column: 'cycle', predicate: { op: 'is_not_empty' } }] }),
+    )
+    expect(miss.passed).toBe(false)
+    expect(miss.factsUnavailable).toBeUndefined()
+    expect(miss.reasonCode).toBe('ROW_NOT_FOUND')
+    expect(miss.details.lookup?.closest).toContain('楼宇覆盖面积统计表')
+    await flat.close()
+    return
+    await page.close()
+  })
+
+  it('宽表（70 列）：识别返回全部列、默认只勾选前 32 列；勾选更多列后能一次读出', async ({ skip }) => {
+    if (!available) skip()
+    const page = await open('wide-table.html')
+    const result = await detectTable(page, { kind: 'point', ...(await centerOf(page, '#wide tbody td:nth-child(5)')) }, deps)
+    expect(result.outcome).toBe('FOUND')
+    if (result.outcome !== 'FOUND') return
+    const d = result.detected
+    expect(d.columns).toHaveLength(70)
+    expect(d.plan.columns).toHaveLength(32)
+    expect(d.notes.join('；')).toContain('默认只勾选前 32 列')
+    expect(tableDetectedSchema.safeParse(d).success).toBe(true)
+    // 勾选全部 70 列后读取（等同用户在列表里全选）
+    const all = { ...d.plan, columns: d.columns.map((c) => ({ key: c.key, name: c.name, valueType: 'number' as const, numericKind: 'integer' as const })) }
+    const sample = await run(page, all as typeof d.plan)
+    expect(sample.columns).toHaveLength(70)
+    expect(valueOf(sample.rows[1], 'col_70')).toBe(140)
     await page.close()
   })
 })

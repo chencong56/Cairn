@@ -69,6 +69,8 @@ function tableCheckOf(result: { details?: Record<string, unknown> | null } | und
   table: TableCheckDetails | null
   message: string | null
 } {
+  /** 条件行检查：一句人话、命中的行、找不到时最接近的名称 */
+  lookup?: { summary?: string; matched?: { rowIndex: number; cells: { column: string; text: string }[] }[]; closest?: string[] }
   const details = result?.details
   const table = details && typeof details.table === 'object' && details.table ? (details.table as TableCheckDetails) : null
   const message = details && typeof details.safeMessage === 'string' ? details.safeMessage : null
@@ -89,7 +91,40 @@ function TableCheckResult({ result }: { result: { details?: Record<string, unkno
           {rows.map((row, i) => (
             <li key={`${row.rowIndex}-${i}`}>
               {row.reasonSummary ?? `第 ${row.rowIndex + 1} 行不满足`}
+      {table?.lookup?.summary && table.lookup.summary !== message ? <p>{table.lookup.summary}</p> : null}
             </li>
+      {table?.lookup?.matched && table.lookup.matched.length > 0 ? (
+        <table className='w-full border-collapse text-[11px]' aria-label='命中的行'>
+          <thead>
+            <tr>
+              <th className='border border-border-divider/60 px-1.5 py-0.5 text-left font-normal'>#</th>
+              {table.lookup.matched[0]?.cells.map((c) => (
+                <th key={c.column} className='border border-border-divider/60 px-1.5 py-0.5 text-left font-normal'>{c.column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.lookup.matched.map((row) => (
+              <tr key={row.rowIndex} className='bg-primary/5'>
+                <td className='border border-border-divider/60 px-1.5 py-0.5'>{row.rowIndex + 1}</td>
+                {row.cells.map((c) => (
+                  <td key={c.column} className='border border-border-divider/60 px-1.5 py-0.5'>{c.text}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+      {table?.lookup?.closest && table.lookup.closest.length > 0 ? (
+        <div>
+          <p>最接近的名称：</p>
+          <ul className='list-disc pl-4'>
+            {table.lookup.closest.map((name) => (
+              <li key={name}>{name}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
           ))}
           {total > rows.length ? <li>另有 {total - rows.length} 处未列出</li> : null}
         </ul>

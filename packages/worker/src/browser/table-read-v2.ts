@@ -4,6 +4,9 @@ import {
   syncSha256,
   tableReadPlanV2Schema,
   TABLE_READ_PROTOCOL_V2,
+  TABLE_READ_MAX_COLS,
+  TABLE_READ_DEFAULT_SELECTED_COLS,
+  TABLE_DETECT_MAX_COLS,
   type JsonValue,
   type TableReadPlanV2,
   type TableRowField,
@@ -297,7 +300,38 @@ async function elementAtPoint(page: Page, x: number, y: number): Promise<Element
   return null
 }
 
+/** 识别的总时限：页面太大或浏览器太忙时放弃，给出人话说明，不让请求拖到网关超时（30s）。 */
+export const TABLE_DETECT_TIMEOUT_MS = 20_000
+
 export async function detectTable(
+  page: Page,
+  input: DetectInput,
+  deps: DetectDeps,
+  meta?: TableSampleSourceMeta,
+  timeoutMs: number = TABLE_DETECT_TIMEOUT_MS,
+): Promise<DetectOutcome> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<DetectOutcome>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          outcome: 'NOT_FOUND',
+          reason: {
+            code: 'TABLE_DETECT_TIMEOUT',
+            message: `识别用了超过 ${Math.round(timeoutMs / 1000)} 秒，已放弃：页面太大或浏览器正忙。可以点“范围小一点”，或稍后再点一次`,
+          },
+        }),
+      timeoutMs,
+    )
+  })
+  try {
+    return await Promise.race([detectTableInner(page, input, deps, meta), timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+async function detectTableInner(
   page: Page,
   input: DetectInput,
   deps: DetectDeps,
@@ -347,7 +381,7 @@ export async function detectTable(
     scope: 'current_page',
     ...(chosen.shape === 'cards' || chosen.shape === 'keyvalue' ? { kind: chosen.shape } : {}),
     rows: { excludeHeader: true, header: chosen.headerMode },
-    columns: kept.slice(0, 32).map((c) => ({
+    columns: kept.slice(0, TABLE_READ_DEFAULT_SELECTED_COLS).map((c) => ({
       key: c.key,
       name: c.name,
       ...(c.field ? { field: c.field } : {}),
@@ -364,6 +398,9 @@ export async function detectTable(
     else if (c.excludedReason === 'index') notes.push(`已自动排除「${c.name}」列（序号）`)
     else if (c.excludedReason === 'action') notes.push(`已自动排除「${c.name}」列（操作按钮）`)
     else if (c.excludedReason === 'hidden') notes.push(`已自动排除「${c.name}」列（页面上隐藏）`)
+  }
+  if (kept.length > TABLE_READ_DEFAULT_SELECTED_COLS) {
+    notes.push(`这张表有 ${kept.length} 列，默认只勾选前 ${TABLE_READ_DEFAULT_SELECTED_COLS} 列；需要后面的列，在下面的列表里勾选即可（一次最多读 ${TABLE_READ_MAX_COLS} 列）`)
   }
   if (!chosen.hasHeader) notes.push('这张表没有表头，列名是自动起的，按第几列读取')
   if (chosen.shape === 'cards') notes.push('按“名称：值”从每张卡片里取字段，卡片里没有的字段会显示为空')
@@ -397,7 +434,7 @@ export async function detectTable(
       selectorQuality: chosen.selectorQuality,
       rowCount: chosen.rowCount,
       colCount: chosen.colCount,
-      columns: chosen.columns.map((c) => ({
+      columns: chosen.columns.slice(0, TABLE_DETECT_MAX_COLS).map((c) => ({
         key: c.key,
         name: c.name,
         ...(c.groupPath ? { groupPath: c.groupPath } : {}),

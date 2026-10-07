@@ -56,4 +56,17 @@ describe('表格数据检查的业务结果', () => {
     expect(r.verdict).toBe('UNKNOWN')
     expect(r.details?.safeMessage).toBe('没有读到合计行')
   })
+
+  it('条件行检查：命中行与最接近名称随业务结果一起保留', () => {
+    const lookup = { summary: '没有找到…', matched: [], closest: ['需求订单统计报表'] }
+    const r = collect({
+      kind: 'failed',
+      output: { passed: false, actual: null, expected: {}, details: { ...tableDetails, lookup } },
+      error: { code: 'ASSERT_FAILED', category: 'EXECUTOR', retryable: false, safeMessage: '没有找到…' },
+      timedOut: false,
+      aborted: false,
+    } as ExecutorOutcome)
+    expect(r.verdict).toBe('FAIL')
+    expect((r.details?.table as { lookup: typeof lookup }).lookup).toEqual(lookup)
+  })
 })

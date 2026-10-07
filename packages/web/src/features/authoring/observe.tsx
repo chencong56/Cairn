@@ -205,6 +205,17 @@ export function useAuthoringObserve() {
   return useContext(AuthoringObserveContext)
 }
 
+/** 识别失败的人话提示：服务端 5xx / 超时不把“内部服务错误”直接丢给用户 */
+function detectErrorText(error: unknown): string {
+  if (error instanceof ApiRequestError) {
+    if (error.status >= 500 || error.status === 504) {
+      return '识别没有成功：受管浏览器忙或页面太大，请稍等几秒再点一次（也可以先点“范围小一点”）'
+    }
+    return error.message
+  }
+  return '识别表格失败，请再试一次'
+}
+
 export function AuthoringObserveProvider({
   runId,
   sessionId,
@@ -238,6 +249,8 @@ export function AuthoringObserveProvider({
   const [tableMarkers, setTableMarkersState] = useState<TableMarkers | null>(null)
   const viewedPage = useRef<ViewedManagedPage | null>(null)
   const tablePickHandler = useRef<((observation: TableDetectObservation) => void) | null>(null)
+  /** 识别在途时不再接受新的点击，避免重复并发请求 */
+  const detectingRef = useRef(false)
   const setTableMarkers = (markers: TableMarkers | null) => setTableMarkersState(markers)
   const holding = Boolean(
     run && run.status === 'HOLDING' && run.debugMode !== 'runThrough'
@@ -412,6 +425,10 @@ export function AuthoringObserveProvider({
         if (!canIndicate || !livePage) return
         const tableHandler = tablePickHandler.current
         if (tableHandler) {
+          if (detectingRef.current) return
+          detectingRef.current = true
+          // 页面很大 / 嵌套 frame 多时识别要几秒：立刻给反馈，别让人以为没点上
+          const loadingId = toast.loading('正在识别表格…最多等 20 秒')
           void detectOnPage({ op: 'table', subOp: 'detect', x, y })
             .then((observation) => {
               tablePickHandler.current = null
@@ -421,11 +438,17 @@ export function AuthoringObserveProvider({
             .catch((error) => {
               tablePickHandler.current = null
               setPickModeState(false)
-              toast.error(error instanceof ApiRequestError ? error.message : '识别表格失败，请再试一次')
+              toast.error(detectErrorText(error))
+            })
+            .finally(() => {
+              detectingRef.current = false
+              toast.dismiss(loadingId)
             })
           return
         }
+        const pickLoadingId = toast.loading('正在读取点到的元素…')
         void observePage({ op: 'pick', x, y })
+          .finally(() => toast.dismiss(pickLoadingId))
           .then((observation) => {
             setHighlight(observation)
             setEnclosingTable(observation.enclosingTable)
@@ -522,7 +545,7 @@ export function AuthoringObserveProvider({
         try {
           return await detectOnPage({ op: 'table', subOp: 'detect', rootSelector, framePath })
         } catch (error) {
-          toast.error(error instanceof ApiRequestError ? error.message : '识别表格失败')
+          toast.error(detectErrorText(error))
           return undefined
         }
       },

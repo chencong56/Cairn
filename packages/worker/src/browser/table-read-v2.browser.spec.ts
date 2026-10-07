@@ -369,4 +369,31 @@ describe('table.read@2 识别 × 点选', { timeout: 120_000 }, () => {
     expect(again.rowCount).toBe(2)
     await page.close()
   })
+
+  it('iframe 的 id 以数字开头（老系统常见）：frame 路径里的选择器要转义，读取仍能找到表', async ({ skip }) => {
+    if (!available) skip()
+    const page = await browser!.newPage()
+    await page.goto(`${base}/frame-numeric-id.html`)
+    const box = await page.frameLocator('[id="800301000"]').locator('#orders tbody td').first().boundingBox()
+    const result = await detectTable(page, { kind: 'point', x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }, deps)
+    expect(result.outcome).toBe('FOUND')
+    if (result.outcome !== 'FOUND') return
+    const frames = result.detected.plan.target.framePath
+    expect(frames.some((f) => f.selector?.startsWith('#'))).toBe(true)
+    const again = await run(page, result.detected.plan)
+    expect(again.rows.map((r) => valueOf(r, 'col_1'))).toEqual(['A001', 'A002'])
+    await page.close()
+  })
+
+  it('点选 iframe 里的元素不能卡住：清理临时标记不得干等默认超时（曾因此每次点选卡 30 秒）', async ({ skip }) => {
+    if (!available) skip()
+    const page = await browser!.newPage()
+    await page.goto(`${base}/frame-numeric-id.html`)
+    const box = await page.frameLocator('[id="800301000"]').locator('#orders tbody td').first().boundingBox()
+    const started = Date.now()
+    const picked = await pickOnPage(page, box!.x + box!.width / 2, box!.y + box!.height / 2)
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(picked.outcome).not.toBe('NOT_FOUND')
+    await page.close()
+  })
 })

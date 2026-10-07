@@ -285,7 +285,9 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
         }
 
         function cssIdent(value: string): string {
-          return value.replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1')
+          const escaped = value.replace(/([ !"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1')
+          // 以数字（或 -数字）开头的 id 在 CSS 里不是合法标识符，须按十六进制转义首个数字：800301 → \38 00301
+          return escaped.replace(/^(-?)([0-9])/, (_all, dash: string, d: string) => `${dash}\\3${d} `)
         }
 
         function cssAttr(value: string): string {
@@ -333,11 +335,21 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
   } catch {
     reverseCandidate = undefined
   } finally {
-    await page
-      .locator(`[${RESOLVED_ATTRIBUTE}="${token}"]`)
-      .first()
-      .evaluate((el, name) => el.removeAttribute(name), RESOLVED_ATTRIBUTE)
-      .catch(() => undefined)
+    // 标记可能打在任意层 iframe 里的元素上：page.locator 只在主 frame 找，元素在 iframe 里时会干等默认 30 秒，
+    // 所以逐个 frame 直接执行清理，不做任何等待
+    await Promise.all(
+      page.frames().map((frame) =>
+        frame
+          .evaluate(
+            ({ name, value }) => {
+              const doc = (globalThis as unknown as { document: { querySelector: (sel: string) => { removeAttribute: (n: string) => void } | null } }).document
+              doc.querySelector(`[${name}="${value}"]`)?.removeAttribute(name)
+            },
+            { name: RESOLVED_ATTRIBUTE, value: token },
+          )
+          .catch(() => undefined),
+      ),
+    )
   }
 
   if (!picked) {

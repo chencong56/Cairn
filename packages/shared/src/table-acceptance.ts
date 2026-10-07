@@ -46,11 +46,6 @@ export {
 
 export const TABLE_READ_PLAN_PROTOCOL = 'table.read@1' as const
 /**
- * 表格验收执行能力（extract as=table、context expect kind=table、表达式 mul/numericPolicy）。
- * 使用这些特性的 Run 快照必须声明该协议；旧 Worker 不得领取。
- */
-export const TABLE_ACCEPTANCE_PROTOCOL = 'table.acceptance@1' as const
-/**
  * 结构化数据读取 v2：列映射不猜、非数据行排除、frame 感知、仅规则定位、体积预算与敏感列。
  * 含 table.read@2 计划的 Run 快照必须声明该能力；旧 Worker 不得领取。
  */

@@ -250,4 +250,52 @@ describe('OutcomeConditionList 表格数据检查', () => {
     expect(text).not.toMatch(/按业务指令判断/)
     expect(text).not.toMatch(/rowsChecked/)
   })
+
+  it('条件行检查：展示命中行的迷你表；找不到时列出最接近的名称', async () => {
+    const found: OutcomeResultDto = {
+      id: '00000000-0000-4000-8000-000000000051',
+      runId,
+      stepRunId: '00000000-0000-4000-8000-000000000052',
+      attemptId: '00000000-0000-4000-8000-000000000053',
+      contractId,
+      scope: 'step',
+      meaning: '找到「报表名称」等于「需求订单统计表」的行，它的「最新数据」不等于 0',
+      severity: 'MUST',
+      onViolation: 'continue',
+      provenance: 'manual',
+      verdict: 'FAIL',
+      expected: null,
+      actual: { rowsChecked: 3, coverage: 'complete' },
+      details: {
+        safeMessage: '找到 1 行（第 2 行），「最新数据」是 0.00，不满足不等于 0',
+        table: {
+          protocol: 'table.outcome@1',
+          totalRowsChecked: 3,
+          violatingRowsCount: 1,
+          violatingRows: [],
+          lookup: { summary: '找到 1 行（第 2 行），「最新数据」是 0.00，不满足不等于 0', matched: [{ rowIndex: 1, cells: [{ column: '报表名称', text: '需求订单统计表' }, { column: '最新数据', text: '0.00' }] }], closest: [] },
+        },
+      },
+      evaluatedAt: '2026-10-07T00:00:00.000Z',
+    }
+    const screen = await render(<OutcomeConditionList runId={runId} run={{ snapshot: tableSnapshot, outcomeResults: [found] }} />)
+    const hit = screen.container.querySelector('table[aria-label="命中的行"]')
+    expect(hit?.textContent).toContain('需求订单统计表')
+    expect(hit?.textContent).toContain('0.00')
+    await screen.unmount()
+
+    const missing: OutcomeResultDto = {
+      ...found,
+      id: '00000000-0000-4000-8000-000000000054',
+      details: {
+        safeMessage: '没有找到「报表名称」等于「需求订单统计表」的行（共读取 3 行）',
+        table: { protocol: 'table.outcome@1', totalRowsChecked: 3, violatingRowsCount: 0, violatingRows: [], lookup: { summary: '没有找到「报表名称」等于「需求订单统计表」的行（共读取 3 行）', matched: [], closest: ['需求订单统计报表', '需求订单明细表'] } },
+      },
+    }
+    const second = await render(<OutcomeConditionList runId={runId} run={{ snapshot: tableSnapshot, outcomeResults: [missing] }} />)
+    const text = second.container.textContent ?? ''
+    expect(text).toContain('最接近的名称')
+    expect(text).toContain('需求订单统计报表')
+    expect(second.container.querySelector('table[aria-label="命中的行"]')).toBeNull()
+  })
 })

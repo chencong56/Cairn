@@ -5,7 +5,7 @@ import { isSensitiveLocatorHay } from './sensitive-fill.js'
 import { stepSchema } from './step.js'
 import { targetDescriptorSchema } from './target-descriptor.js'
 import { entityIdSchema } from './wire.js'
-import { tableSampleSchema, tableReadPlanSchema, tableReadPlanV2Schema, type TableSample } from './table-acceptance.js'
+import { TABLE_DETECT_MAX_COLS, tableSampleSchema, tableReadPlanSchema, tableReadPlanV2Schema, type TableSample } from './table-acceptance.js'
 
 export const TARGET_OBSERVATION_OUTCOMES = [
   'FOUND',
@@ -217,7 +217,7 @@ export const tableDetectedSchema = z.strictObject({
   selectorQuality: z.enum(['stable', 'positional']),
   rowCount: z.number().int().nonnegative(),
   colCount: z.number().int().nonnegative(),
-  columns: z.array(tableDetectedColumnSchema).max(64),
+  columns: z.array(tableDetectedColumnSchema).max(TABLE_DETECT_MAX_COLS),
   /** 可切换的其它表根（外层 / 内层），供“范围大一点 / 小一点”。 */
   alternatives: z
     .array(

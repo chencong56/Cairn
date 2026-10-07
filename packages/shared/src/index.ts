@@ -1878,8 +1878,6 @@ export {
   runInputKeySchema,
   runInputSchema,
   runSnapshotSchema,
-  snapshotUsesTableAcceptance,
-  snapshotUsesTableReadV2,
   validationSubjectSchema,
   type ValidationSubject,
   CONTROL_FLOW_PROTOCOL,
