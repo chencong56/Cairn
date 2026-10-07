@@ -131,6 +131,12 @@ export const tableReadPlanV1Schema = z.strictObject({
 
 /** v2 单步输出体积预算（字节）的默认值与上限；单步输出硬上限为 256 KiB。 */
 export const TABLE_READ_DEFAULT_MAX_BYTES = 192 * 1024
+/** 一次最多读取的列数（宽报表常有 60+ 列；体积由 maxBytes 预算兜底）。 */
+export const TABLE_READ_MAX_COLS = 100
+/** 点选识别时默认勾选的列数；其余列在列表里按需勾选。 */
+export const TABLE_READ_DEFAULT_SELECTED_COLS = 32
+/** 识别结果最多返回的列数。 */
+export const TABLE_DETECT_MAX_COLS = 128
 export const TABLE_READ_MAX_BYTES_LIMIT = 240 * 1024
 
 export const tableReadPlanV2Schema = z.strictObject({
@@ -158,15 +164,15 @@ export const tableReadPlanV2Schema = z.strictObject({
         .optional(),
     })
     .default({ excludeHeader: true, header: 'auto' }),
-  columns: z.array(tableColumnSpecSchema).min(1).max(32),
+  columns: z.array(tableColumnSpecSchema).min(1).max(TABLE_READ_MAX_COLS),
   readiness: tableReadinessPolicySchema.optional(),
   limits: z
     .strictObject({
       maxRows: z.number().int().min(1).max(200).default(200),
-      maxCols: z.number().int().min(1).max(32).default(32),
+      maxCols: z.number().int().min(1).max(TABLE_READ_MAX_COLS).default(TABLE_READ_MAX_COLS),
       maxBytes: z.number().int().min(8 * 1024).max(TABLE_READ_MAX_BYTES_LIMIT).default(TABLE_READ_DEFAULT_MAX_BYTES),
     })
-    .default({ maxRows: 200, maxCols: 32, maxBytes: TABLE_READ_DEFAULT_MAX_BYTES }),
+    .default({ maxRows: 200, maxCols: TABLE_READ_MAX_COLS, maxBytes: TABLE_READ_DEFAULT_MAX_BYTES }),
 })
 export type TableReadPlanV2 = z.infer<typeof tableReadPlanV2Schema>
 export type TableReadPlanV1 = z.infer<typeof tableReadPlanV1Schema>
@@ -249,6 +255,55 @@ export type TableSample = z.infer<typeof tableSampleSchema>
 // 3. Table Predicates & Rules
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// 日期谓词的日期运算（只到“天”，不带时区的页面日期按字符串比较）
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_TABLE_TIMEZONE = 'Asia/Shanghai'
+
+export function isValidIsoDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!m) return false
+  const y = Number(m[1])
+  const mo = Number(m[2])
+  const d = Number(m[3])
+  if (y < 1900 || y > 2100 || mo < 1 || mo > 12 || d < 1) return false
+  return d <= new Date(Date.UTC(y, mo, 0)).getUTCDate()
+}
+
+export function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 取值的日期部分（YYYY-MM-DD，可带 “ HH:mm:ss” / “T…”）；不是合法日期返回 null。 */
+export function datePartOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const head = /^(\d{4}-\d{2}-\d{2})(?:[ T].*)?$/.exec(value.trim())?.[1]
+  return head && isValidIsoDate(head) ? head : null
+}
+
+/** 某个时刻在指定时区下的日期（YYYY-MM-DD）。 */
+export function dateInTimeZone(instant: string, timezone: string): string | null {
+  const t = new Date(instant)
+  if (Number.isNaN(t.getTime()) || !isValidTimeZone(timezone)) return null
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(t)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value
+  return `${get('year')}-${get('month')}-${get('day')}`
+}
+
+export function addDaysToIsoDate(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number]
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10)
+}
+
+export type TablePredicateContext = { sampledAt?: string }
+
 export const tablePredicateSchema = z.discriminatedUnion('op', [
   z
     .strictObject({
@@ -277,8 +332,28 @@ export const tablePredicateSchema = z.discriminatedUnion('op', [
     ),
   }),
   z.strictObject({ op: z.enum(['is_empty', 'is_not_empty']) }),
+  /** 日期列与固定日期比较（只比日期部分，值为 YYYY-MM-DD）。 */
+  z.strictObject({
+    op: z.enum(['date_on', 'date_before', 'date_after', 'date_on_or_before', 'date_on_or_after']),
+    value: z.string().refine(isValidIsoDate, { message: '日期须为 YYYY-MM-DD' }),
+  }),
+  /** 日期不早于“今天往前 N 天”（N=0 即今天）；今天按采样时刻在 timezone 下取日期。 */
+  z.strictObject({
+    op: z.literal('date_within_days'),
+    days: z.number().int().min(0).max(3650),
+    allowFuture: z.boolean().default(false),
+    timezone: z.string().min(1).max(64).default(DEFAULT_TABLE_TIMEZONE).refine(isValidTimeZone, { message: '不支持的时区' }),
+  }),
 ])
 export type TablePredicate = z.infer<typeof tablePredicateSchema>
+
+/** 条件行检查里的一个条件：某一列满足某个谓词。 */
+export const TABLE_LOOKUP_MAX_CONDITIONS = 3
+export const tableConditionSchema = z.strictObject({
+  column: z.string().min(1).max(64),
+  predicate: tablePredicateSchema,
+})
+export type TableCondition = z.infer<typeof tableConditionSchema>
 
 export const tableExpectRuleSchema = z.discriminatedUnion('rule', [
   z.strictObject({
@@ -319,6 +394,17 @@ export const tableExpectRuleSchema = z.discriminatedUnion('rule', [
   z.strictObject({
     rule: z.literal('column_unique'),
     column: z.string().min(1).max(64),
+  }),
+  /**
+   * 找到某一行，再检查它：先按 where 找行（全部满足才算这一行），再要求找到的行满足 expect。
+   * 找不到这一行、找到多行怎么办由 onMissing / onMultiple 明确声明，不靠 any / all 的隐含语义。
+   */
+  z.strictObject({
+    rule: z.literal('row_lookup'),
+    where: z.array(tableConditionSchema).min(1).max(TABLE_LOOKUP_MAX_CONDITIONS),
+    expect: z.array(tableConditionSchema).min(1).max(TABLE_LOOKUP_MAX_CONDITIONS),
+    onMissing: z.enum(['fail', 'unknown', 'pass']).default('fail'),
+    onMultiple: z.enum(['all', 'any']).default('all'),
   }),
   z
     .strictObject({
@@ -376,6 +462,21 @@ export const tableOutcomeDetailsSchema = z.strictObject({
     reasonCode: z.string().optional(),
     reasonSummary: z.string().max(512).optional(),
   }),
+  /** 条件行检查（row_lookup）的补充：一句人话、命中的行、找不到时最接近的名称。 */
+  lookup: z
+    .strictObject({
+      summary: z.string().max(512),
+      matched: z
+        .array(
+          z.strictObject({
+            rowIndex: z.number().int().nonnegative(),
+            cells: z.array(z.strictObject({ column: z.string().max(64), text: z.string().max(128) })).max(8),
+          }),
+        )
+        .max(5),
+      closest: z.array(z.string().max(128)).max(3),
+    })
+    .optional(),
 })
 export type TableOutcomeDetails = z.infer<typeof tableOutcomeDetailsSchema>
 
@@ -421,6 +522,7 @@ export type TablePredicateOutcome =
 export function checkTablePredicate(
   field: TableRowField | undefined,
   predicate: TablePredicate,
+  context: TablePredicateContext = {},
 ): TablePredicateOutcome {
   if (!field || field.status === 'missing') {
     return { status: 'unknown', reasonCode: 'FIELD_MISSING', reasonSummary: '字段缺失或未读取到' }
@@ -442,6 +544,42 @@ export function checkTablePredicate(
     return empty
       ? { status: 'fail', reasonCode: 'EMPTY', reasonSummary: '字段为空' }
       : { status: 'pass' }
+  }
+  if (
+    predicate.op === 'date_on' || predicate.op === 'date_before' || predicate.op === 'date_after' ||
+    predicate.op === 'date_on_or_before' || predicate.op === 'date_on_or_after' || predicate.op === 'date_within_days'
+  ) {
+    if (val === null || val === undefined || val === '') {
+      return { status: 'unknown', reasonCode: 'DATE_EMPTY', reasonSummary: '日期为空，无法比较' }
+    }
+    const actual = datePartOf(val)
+    if (!actual) {
+      return { status: 'unknown', reasonCode: 'NOT_A_DATE', reasonSummary: `期望日期，实际值「${JSON.stringify(val) ?? val}」不是日期，不做隐式转换` }
+    }
+    if (predicate.op === 'date_within_days') {
+      const today = context.sampledAt ? dateInTimeZone(context.sampledAt, predicate.timezone) : null
+      if (!today) {
+        return { status: 'unknown', reasonCode: 'TODAY_UNAVAILABLE', reasonSummary: '没有可用的采样时刻，无法确定“今天”' }
+      }
+      const earliest = addDaysToIsoDate(today, -predicate.days)
+      if (actual < earliest) {
+        return { status: 'fail', reasonCode: 'DATE_TOO_OLD', reasonSummary: `日期是 ${actual}，早于 ${earliest}（运行当天 ${today} 往前 ${predicate.days} 天，按 ${predicate.timezone}）` }
+      }
+      if (!predicate.allowFuture && actual > today) {
+        return { status: 'fail', reasonCode: 'DATE_IN_FUTURE', reasonSummary: `日期是 ${actual}，晚于运行当天 ${today}（按 ${predicate.timezone}）` }
+      }
+      return { status: 'pass' }
+    }
+    const target = predicate.value
+    const ok =
+      predicate.op === 'date_on' ? actual === target
+      : predicate.op === 'date_before' ? actual < target
+      : predicate.op === 'date_after' ? actual > target
+      : predicate.op === 'date_on_or_before' ? actual <= target
+      : actual >= target
+    return ok
+      ? { status: 'pass' }
+      : { status: 'fail', reasonCode: 'DATE_COMPARE_FAILED', reasonSummary: `日期是 ${actual}，不满足${describeTablePredicate(predicate)}` }
   }
   if (predicate.op === 'eq' || predicate.op === 'neq') {
     if (typeof predicate.value === 'number') {
@@ -808,6 +946,234 @@ function evaluateColumnRule(
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// 条件行检查（row_lookup）
+// ---------------------------------------------------------------------------
+
+type LookupRule = Extract<TableExpectRule, { rule: 'row_lookup' }>
+
+const PREDICATE_OP_TEXT: Record<string, string> = {
+  eq: '等于',
+  neq: '不等于',
+  gt: '大于',
+  gte: '大于等于',
+  date_on: '是',
+  date_before: '早于',
+  date_after: '晚于',
+  date_on_or_before: '不晚于',
+  date_on_or_after: '不早于',
+  lt: '小于',
+  lte: '小于等于',
+  contains: '包含',
+  starts_with: '以…开头',
+  ends_with: '以…结尾',
+  matches: '匹配',
+}
+
+/** 把谓词说成一句人话：等于「X」 / 不等于 0 / 为空。 */
+export function describeTablePredicate(predicate: TablePredicate): string {
+  if (predicate.op === 'is_empty') return '为空'
+  if (predicate.op === 'is_not_empty') return '不为空'
+  if (predicate.op === 'date_within_days') {
+    const base = predicate.days === 0 ? '是今天' : predicate.days === 1 ? '不早于昨天' : `不早于 ${predicate.days} 天前`
+    return `${base}（按${predicate.timezone === DEFAULT_TABLE_TIMEZONE ? '北京时间' : predicate.timezone}的运行当天算${predicate.allowFuture ? '，允许晚于今天' : ''}）`
+  }
+  const v = (predicate as { value: string | number | boolean }).value
+  if (typeof predicate.op === 'string' && predicate.op.startsWith('date_')) return `${PREDICATE_OP_TEXT[predicate.op]} ${v}`
+  const shown = typeof v === 'string' ? `「${v}」` : String(v)
+  if (predicate.op === 'starts_with') return `以${shown}开头`
+  if (predicate.op === 'ends_with') return `以${shown}结尾`
+  return `${PREDICATE_OP_TEXT[predicate.op] ?? predicate.op}${typeof v === 'string' ? '' : ' '}${shown}`
+}
+
+function conditionsText(conds: readonly TableCondition[], nameOf: (key: string) => string): string {
+  return conds.map((c) => `「${nameOf(c.column)}」${describeTablePredicate(c.predicate)}`).join('，并且')
+}
+
+/** 最长公共子串长度，用来给“找不到”时挑最接近的名称。 */
+function commonSubstringLength(a: string, b: string): number {
+  let best = 0
+  const prev = new Array<number>(b.length + 1).fill(0)
+  for (let i = 1; i <= a.length; i++) {
+    let diagonal = 0
+    for (let j = 1; j <= b.length; j++) {
+      const keep = prev[j] ?? 0
+      prev[j] = a[i - 1] === b[j - 1] ? diagonal + 1 : 0
+      if ((prev[j] ?? 0) > best) best = prev[j] ?? 0
+      diagonal = keep
+    }
+  }
+  return best
+}
+
+/** 最接近目标文字的值（仅展示用，不参与判定）：公共片段占比 ≥ 0.4，最多 3 个，去重。 */
+export function closestTexts(target: string, candidates: readonly string[], limit = 3): string[] {
+  const t = target.trim()
+  if (!t) return []
+  const seen = new Set<string>()
+  const scored: Array<{ text: string; score: number }> = []
+  for (const raw of candidates) {
+    const text = raw.trim()
+    if (!text || text === t || seen.has(text)) continue
+    seen.add(text)
+    const score = commonSubstringLength(t, text) / Math.max(t.length, text.length)
+    if (score >= 0.4) scored.push({ text, score })
+  }
+  return scored.sort((x, y) => y.score - x.score).slice(0, limit).map((x) => x.text)
+}
+
+function lookupDetails(
+  sample: TableSample,
+  coverage: TableOutcomeDetails['coverage'],
+  lookup: NonNullable<TableOutcomeDetails['lookup']>,
+  violating: TableViolatingRowPreview[],
+  matchedCount: number,
+): TableOutcomeDetails {
+  return {
+    protocol: TABLE_OUTCOME_PROTOCOL,
+    totalRowsChecked: sample.rows.length,
+    matchedRows: matchedCount,
+    violatingRowsCount: violating.length,
+    violatingRows: violating.slice(0, 5),
+    presentation: { truncated: violating.length > 5, omittedViolatingRows: Math.max(0, violating.length - 5), truncatedFields: false },
+    coverage,
+    lookup,
+  }
+}
+
+function evaluateRowLookup(
+  sample: TableSample,
+  rule: LookupRule,
+  coverage: TableOutcomeDetails['coverage'],
+): TableEvaluationResult {
+  const nameOf = (key: string): string => sample.columns.find((c) => c.key === key)?.name ?? key
+  const whereText = conditionsText(rule.where, nameOf)
+  const expectText = conditionsText(rule.expect, nameOf)
+  const textOfField = (field: TableRowField | undefined): string => {
+    if (!field || field.status === 'missing') return '（空）'
+    if (field.status === 'masked') return '（已遮蔽）'
+    if (field.status === 'error') return field.rawText ?? '（读不出）'
+    return String(field.rawText ?? field.value ?? '（空）').slice(0, 128)
+  }
+  const usedColumns = Array.from(new Set([...rule.where, ...rule.expect].map((c) => c.column))).slice(0, 8)
+  const previewOf = (i: number) => ({
+    rowIndex: i,
+    cells: usedColumns.map((column) => ({ column: nameOf(column), text: textOf(sample.rows[i]?.[column]) })),
+  })
+  const textOf = textOfField
+
+  const matched: number[] = []
+  const undetermined: number[] = []
+  sample.rows.forEach((row, i) => {
+    const results = rule.where.map((c) => checkTablePredicate(row[c.column], c.predicate, { sampledAt: sample.source.sampledAt }))
+    if (results.some((r) => r.status === 'fail')) return
+    if (results.some((r) => r.status === 'unknown')) undetermined.push(i)
+    else matched.push(i)
+  })
+  const rowsText = (rows: number[]): string => `第 ${rows.slice(0, 5).map((r) => r + 1).join('、')} 行${rows.length > 5 ? `等 ${rows.length} 行` : ''}`
+
+  if (matched.length === 0) {
+    if (undetermined.length > 0) {
+      return unknownResult(
+        sample,
+        'TABLE_LOOKUP_UNDETERMINED',
+        `有 ${undetermined.length} 行（${rowsText(undetermined)}）的值读不出或已遮蔽，无法确认其中有没有${whereText}的行`,
+      )
+    }
+    const first = rule.where[0]
+    const target = first && 'value' in first.predicate && typeof first.predicate.value === 'string' ? first.predicate.value : ''
+    const closest =
+      first && target
+        ? closestTexts(
+            target,
+            sample.rows.map((r) => {
+              const f = r[first.column]
+              return f && f.status === 'ok' && f.value !== null ? String(f.value) : ''
+            }),
+          )
+        : []
+    const missingText = `没有找到${whereText}的行（共读取 ${sample.rows.length} 行）`
+    const lookup = { summary: missingText.slice(0, 512), matched: [], closest }
+    if (rule.onMissing === 'pass') return { passed: true, details: lookupDetails(sample, coverage, lookup, [], 0) }
+    // 表有分页时只读了本页：本页没有不等于没有——不能判“不通过”，只能说无法确认
+    if (sample.coverage.clues?.includes('pagination_present')) {
+      return unknownResult(
+        sample,
+        'ROW_NOT_FOUND_PAGED',
+        `${missingText}。这张表还有分页，只读了本页，不能确认其他页里有没有这一行`,
+      )
+    }
+    if (rule.onMissing === 'unknown') return unknownResult(sample, 'ROW_NOT_FOUND', missingText)
+    return {
+      passed: false,
+      reasonCode: 'ROW_NOT_FOUND',
+      reasonMessage: missingText,
+      details: lookupDetails(sample, coverage, lookup, [], 0),
+    }
+  }
+
+  // 找到了：逐个命中行判断 expect
+  type RowVerdict = { index: number; status: 'pass' | 'fail' | 'unknown'; reason: string }
+  const verdicts: RowVerdict[] = matched.map((i) => {
+    const row = sample.rows[i] as Record<string, TableRowField>
+    const failed: string[] = []
+    const unknowns: string[] = []
+    for (const c of rule.expect) {
+      const r = checkTablePredicate(row[c.column], c.predicate, { sampledAt: sample.source.sampledAt })
+      const label = `「${nameOf(c.column)}」`
+      if (r.status === 'fail') failed.push(`${label}是 ${textOf(row[c.column])}，不满足${describeTablePredicate(c.predicate)}`)
+      else if (r.status === 'unknown') unknowns.push(`${label}${r.reasonSummary ?? '读不出'}`)
+    }
+    if (failed.length > 0) return { index: i, status: 'fail', reason: failed.join('；') }
+    if (unknowns.length > 0) return { index: i, status: 'unknown', reason: unknowns.join('；') }
+    return { index: i, status: 'pass', reason: '' }
+  })
+  const failedRows = verdicts.filter((v) => v.status === 'fail')
+  const unknownRows = verdicts.filter((v) => v.status === 'unknown')
+  const passedRows = verdicts.filter((v) => v.status === 'pass')
+  const foundText = `找到 ${matched.length} 行（${rowsText(matched)}）`
+  const valuesText = (rows: number[]): string =>
+    rows
+      .slice(0, 3)
+      .map((i) => rule.expect.map((c) => `「${nameOf(c.column)}」是 ${textOf(sample.rows[i]?.[c.column])}`).join('，'))
+      .join('；')
+  const lookup = (summary: string) => ({ summary: summary.slice(0, 512), matched: matched.slice(0, 5).map(previewOf), closest: [] as string[] })
+  const violating = (rows: RowVerdict[]): TableViolatingRowPreview[] =>
+    rows.map((v) => rowPreview(v.index, v.reason, undefined, 'LOOKUP_EXPECT_FAILED', `第 ${v.index + 1} 行${v.reason}`))
+
+  const doneFail = (rows: RowVerdict[]): TableEvaluationResult => {
+    const msg = `${foundText}，${rows[0]?.reason ?? '不满足条件'}`
+    return {
+      passed: false,
+      reasonCode: 'LOOKUP_EXPECT_FAILED',
+      reasonMessage: msg,
+      details: lookupDetails(sample, coverage, lookup(msg), violating(rows), matched.length - rows.length),
+    }
+  }
+  const donePass = (): TableEvaluationResult => ({
+    passed: true,
+    details: lookupDetails(sample, coverage, lookup(`${foundText}，${valuesText(passedRows.map((v) => v.index))}`), [], passedRows.length),
+  })
+
+  if (rule.onMultiple === 'any') {
+    if (passedRows.length > 0) return donePass()
+    if (unknownRows.length > 0) return unknownResult(sample, 'TABLE_LOOKUP_UNDETERMINED', `${foundText}，${unknownRows[0]?.reason ?? '读不出'}，无法确认`)
+    return doneFail(failedRows)
+  }
+  // all：任一命中行不满足即不通过（确定的反例优先）；其次有读不出的行 → 无法确认
+  if (failedRows.length > 0) return doneFail(failedRows)
+  if (unknownRows.length > 0) return unknownResult(sample, 'TABLE_LOOKUP_UNDETERMINED', `${foundText}，${unknownRows[0]?.reason ?? '读不出'}，无法确认`)
+  if (undetermined.length > 0) {
+    return unknownResult(
+      sample,
+      'TABLE_LOOKUP_UNDETERMINED',
+      `另有 ${undetermined.length} 行（${rowsText(undetermined)}）的值读不出，无法确认它们是不是也要满足条件`,
+    )
+  }
+  return donePass()
+}
+
 /**
  * 求值前置门：要求范围非 complete 时一律 UNKNOWN，不利用部分样本给全表结论。
  */
@@ -882,7 +1248,7 @@ export function evaluateTableExpectation(
     for (let i = 0; i < sample.rows.length; i++) {
       const row = sample.rows[i]!
       const field = row[rule.column]
-      const predRes = checkTablePredicate(field, rule.predicate)
+      const predRes = checkTablePredicate(field, rule.predicate, { sampledAt: sample.source.sampledAt })
       if (predRes.status === 'unknown') {
         unknownCount++
       } else if (predRes.status === 'fail') {
@@ -966,7 +1332,7 @@ export function evaluateTableExpectation(
     for (let i = 0; i < sample.rows.length; i++) {
       const row = sample.rows[i]!
       const field = row[rule.column]
-      const predRes = checkTablePredicate(field, rule.predicate)
+      const predRes = checkTablePredicate(field, rule.predicate, { sampledAt: sample.source.sampledAt })
       if (predRes.status === 'pass') {
         matchedCount++
       } else if (predRes.status === 'unknown') {
@@ -1029,6 +1395,11 @@ export function evaluateTableExpectation(
   // 3b. 列聚合 / 合计行核对 / 列唯一
   if (rule.rule === 'column_stat' || rule.rule === 'total_row_match' || rule.rule === 'column_unique') {
     return evaluateColumnRule(sample, rule, coverageDetails)
+  }
+
+  // 3c. 找到某一行，再检查它
+  if (rule.rule === 'row_lookup') {
+    return evaluateRowLookup(sample, rule, coverageDetails)
   }
 
   // 4. row_expression rule：每行只建立独立只读 row 绑定，不注入外层 Context
@@ -1367,36 +1738,22 @@ function validateRowExpression(
  * Schema 校验之后、编译之前的规则 × 读取计划列类型交叉检查。
  * 人工入口、AI 提案、保存与正式编译共用。
  */
-export function validateTableExpectRuleAgainstPlan(
-  rule: TableExpectRule,
+
+/** 某一列上的谓词是否与列类型对得上（all_rows / any_row / row_lookup 共用）。 */
+function validatePredicateOnColumn(
+  columnKey: string,
+  predicate: TablePredicate,
   columns: TableColumnSpec[],
 ): { valid: true } | { valid: false; code: string; message: string } {
-  if (rule.rule === 'row_count') return { valid: true }
-
-  if (rule.rule === 'column_stat' || rule.rule === 'total_row_match' || rule.rule === 'column_unique') {
-    const col = columns.find((c) => c.key === rule.column)
-    if (!col) {
-      return { valid: false, code: 'TABLE_COLUMN_NOT_DECLARED', message: `规则引用了读取计划未声明的列 "${rule.column}"` }
-    }
-    if (rule.rule !== 'column_unique' && col.valueType !== 'number') {
-      return { valid: false, code: 'TABLE_NUMBER_COLUMN_REQUIRED', message: `合计、平均、最大最小和合计行核对只接受数字列，列 "${col.key}" 是 ${col.valueType}` }
-    }
-    if (rule.rule === 'column_stat' && rule.numericPolicy && rule.op !== 'eq' && rule.op !== 'neq' && rule.numericPolicy.mode === 'tolerance') {
-      return { valid: false, code: 'TABLE_NUMERIC_POLICY_INVALID', message: '容差只适用于相等比较' }
-    }
-    return { valid: true }
-  }
-
-  if (rule.rule === 'all_rows' || rule.rule === 'any_row') {
-    const col = columns.find((c) => c.key === rule.column)
+    const col = columns.find((c) => c.key === columnKey)
     if (!col) {
       return {
         valid: false,
         code: 'TABLE_COLUMN_NOT_DECLARED',
-        message: `规则引用了读取计划未声明的列 "${rule.column}"`,
+        message: `规则引用了读取计划未声明的列 "${columnKey}"`,
       }
     }
-    const pred = rule.predicate
+    const pred = predicate
     if ('numericPolicy' in pred && pred.numericPolicy && col.valueType !== 'number') {
       return {
         valid: false,
@@ -1404,7 +1761,24 @@ export function validateTableExpectRuleAgainstPlan(
         message: `列 "${col.key}" 不是数字列，不能声明数值精度策略`,
       }
     }
+    if (pred.op.startsWith('date_')) {
+      if (col.valueType !== 'date') {
+        return {
+          valid: false,
+          code: 'TABLE_DATE_COLUMN_REQUIRED',
+          message: `日期比较只接受日期列，列 "${col.key}" 是 ${col.valueType}`,
+        }
+      }
+      return { valid: true }
+    }
     if (pred.op === 'gt' || pred.op === 'gte' || pred.op === 'lt' || pred.op === 'lte') {
+      if (col.valueType === 'date') {
+        return {
+          valid: false,
+          code: 'TABLE_DATE_COLUMN_NUMERIC_COMPARE',
+          message: `列 "${col.key}" 是日期列，不能做数字大小比较，请改用“早于 / 晚于 / 不早于”`,
+        }
+      }
       if (col.valueType !== 'number') {
         return {
           valid: false,
@@ -1446,6 +1820,38 @@ export function validateTableExpectRuleAgainstPlan(
       return { valid: true }
     }
     return { valid: true }
+}
+
+export function validateTableExpectRuleAgainstPlan(
+  rule: TableExpectRule,
+  columns: TableColumnSpec[],
+): { valid: true } | { valid: false; code: string; message: string } {
+  if (rule.rule === 'row_count') return { valid: true }
+
+  if (rule.rule === 'column_stat' || rule.rule === 'total_row_match' || rule.rule === 'column_unique') {
+    const col = columns.find((c) => c.key === rule.column)
+    if (!col) {
+      return { valid: false, code: 'TABLE_COLUMN_NOT_DECLARED', message: `规则引用了读取计划未声明的列 "${rule.column}"` }
+    }
+    if (rule.rule !== 'column_unique' && col.valueType !== 'number') {
+      return { valid: false, code: 'TABLE_NUMBER_COLUMN_REQUIRED', message: `合计、平均、最大最小和合计行核对只接受数字列，列 "${col.key}" 是 ${col.valueType}` }
+    }
+    if (rule.rule === 'column_stat' && rule.numericPolicy && rule.op !== 'eq' && rule.op !== 'neq' && rule.numericPolicy.mode === 'tolerance') {
+      return { valid: false, code: 'TABLE_NUMERIC_POLICY_INVALID', message: '容差只适用于相等比较' }
+    }
+    return { valid: true }
+  }
+
+  if (rule.rule === 'row_lookup') {
+    for (const cond of [...rule.where, ...rule.expect]) {
+      const checked = validatePredicateOnColumn(cond.column, cond.predicate, columns)
+      if (!checked.valid) return checked
+    }
+    return { valid: true }
+  }
+
+  if (rule.rule === 'all_rows' || rule.rule === 'any_row') {
+    return validatePredicateOnColumn(rule.column, rule.predicate, columns)
   }
 
   // row_expression

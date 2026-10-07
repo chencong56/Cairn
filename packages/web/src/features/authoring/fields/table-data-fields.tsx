@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/select'
 import { copyToClipboard } from '@/lib/clipboard'
 import { useAuthoringObserve } from '../observe'
+import { setTableSample } from './table-sample-store'
 import {
   columnLabel,
   coverageSummary,
@@ -80,6 +81,10 @@ export function TableDataFields({
   const [previewing, setPreviewing] = useState(false)
   const [failure, setFailure] = useState<{ message: string; feedback?: string } | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  // 数据检查要用最近一次预览（候选值 / 按预览提示结果）
+  useEffect(() => {
+    setTableSample(step.id, preview)
+  }, [step.id, preview])
   const stepIdRef = useRef(step.id)
 
   // 换了步骤就清掉上一步的识别结果与预览
@@ -438,7 +443,10 @@ function AdvancedSettings({
         <Label>每一列怎么读</Label>
         {plan.columns.map((column) => (
           <div key={column.key} className='grid grid-cols-[1fr_6rem_8rem] items-center gap-2'>
-            <span className='truncate' title={column.name}>{columnLabel(column)}</span>
+            <span className='truncate' title={column.valueType === 'date' ? `${column.name}（这一列被当作日期读取，不对可在右侧改回数字 / 文字）` : column.name}>
+              {columnLabel(column)}
+              {column.valueType === 'date' ? <span className='ml-1 rounded bg-primary/10 px-1 text-[11px] text-primary' data-testid='date-column-badge'>按日期读</span> : null}
+            </span>
             <Select value={column.valueType} disabled={disabled} onValueChange={(v) => onChange(setColumnType(plan, column.key, v as 'text' | 'number' | 'boolean' | 'date'))}>
               <SelectTrigger aria-label={`「${column.name}」列的类型`}>
                 <SelectValue />

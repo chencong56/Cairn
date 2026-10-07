@@ -1,9 +1,20 @@
 import { newUuid } from '@/lib/uuid'
-import type { OutcomeContract, TableExpectRule } from '@cairn/shared'
+import { DEFAULT_TABLE_TIMEZONE, describeTablePredicate, type OutcomeContract, type TableCondition, type TableExpectRule, type TablePredicate } from '@cairn/shared'
 
 export type { TableExpectRule }
 
-export type CheckColumn = { key: string; label: string; numeric: boolean }
+export type ColumnType = 'text' | 'number' | 'date' | 'boolean'
+export type CheckColumn = {
+  key: string
+  label: string
+  numeric: boolean
+  valueType?: ColumnType
+  numericKind?: 'integer' | 'decimal' | 'float'
+  /** 已设为敏感（打码）的列不能用于条件 */
+  sensitive?: boolean
+}
+export const columnTypeOf = (col: Pick<CheckColumn, 'numeric' | 'valueType'> | undefined): ColumnType =>
+  col?.valueType ?? (col?.numeric ? 'number' : 'text')
 export type CheckKind = 'table' | 'cards' | 'keyvalue'
 
 /** 各形态下的叫法：表格是“行”，卡片是“张”，键值信息只有一行、不说“每一行”。 */
@@ -24,22 +35,34 @@ export type CheckTemplate =
   | 'column_stat'
   | 'total_row_match'
   | 'column_unique'
+  | 'row_lookup'
 
-export const TEMPLATE_OPTIONS: { value: CheckTemplate; label: string }[] = [
-  { value: 'row_count', label: '共有多少行' },
-  { value: 'all_rows', label: '每一行都满足' },
-  { value: 'any_row', label: '至少有一行满足' },
-  { value: 'column_stat', label: '某列的合计 / 平均 / 最大 / 最小' },
-  { value: 'total_row_match', label: '各行相加等于合计行' },
-  { value: 'column_unique', label: '某列没有重复值' },
+export type TemplateOption = { value: CheckTemplate; label: string; example: string }
+
+export const TEMPLATE_OPTIONS: TemplateOption[] = [
+  { value: 'row_count', label: '共有多少行', example: '例：表里至少有 1 行' },
+  { value: 'all_rows', label: '每一行都满足', example: '例：每一行的「状态」都不是“失败”' },
+  { value: 'any_row', label: '至少有一行满足', example: '例：至少有一行的「状态」是“成功”' },
+  { value: 'row_lookup', label: '找到某一行，再检查它', example: '例：名称是“需求订单统计表”的行，最新数据不能为 0' },
+  { value: 'column_stat', label: '某列的合计 / 平均 / 最大 / 最小', example: '例：收入合计大于 0' },
+  { value: 'total_row_match', label: '各行相加等于合计行', example: '例：收入各行相加和合计行一致' },
+  { value: 'column_unique', label: '某列没有重复值', example: '例：报表名称不重复' },
 ]
 
 /** 该形态下可选的检查模板。键值信息只有一条记录：只给“某项满足条件”。 */
-export function templatesFor(kind: CheckKind): { value: CheckTemplate; label: string }[] {
-  if (kind === 'keyvalue') return [{ value: 'all_rows', label: '某一项满足条件' }]
+export function templatesFor(kind: CheckKind): TemplateOption[] {
+  if (kind === 'keyvalue') return [{ value: 'all_rows', label: '某一项满足条件', example: '例：「状态」是“运行中”' }]
   if (kind === 'cards') {
     return TEMPLATE_OPTIONS.filter((t) => t.value !== 'total_row_match').map((t) =>
-      t.value === 'row_count' ? { ...t, label: '共有多少张卡片' } : t.value === 'all_rows' ? { ...t, label: '每张卡片都满足' } : t.value === 'any_row' ? { ...t, label: '至少有一张卡片满足' } : t,
+      t.value === 'row_count'
+        ? { ...t, label: '共有多少张卡片', example: '例：至少有 1 张卡片' }
+        : t.value === 'all_rows'
+          ? { ...t, label: '每张卡片都满足', example: '例：每张卡片的「告警数」都是 0' }
+          : t.value === 'any_row'
+            ? { ...t, label: '至少有一张卡片满足', example: '例：至少有一张卡片的「状态」是“正常”' }
+            : t.value === 'row_lookup'
+              ? { ...t, label: '找到某一张卡片，再检查它', example: '例：标题是“服务器A”的卡片，告警数不能大于 0' }
+              : t,
     )
   }
   return TEMPLATE_OPTIONS
@@ -79,11 +102,142 @@ export const ROW_PREDICATE_OPS = [
 ] as const
 
 function predicateText(p: { op: string; value?: unknown }): string {
+  if (p.op.startsWith('date_')) return describeTablePredicate(p as TablePredicate)
   if (p.op === 'is_empty' || p.op === 'is_not_empty') return PREDICATE_TEXT[p.op] ?? p.op
   if (p.op === 'starts_with') return `以「${String(p.value)}」开头`
   if (p.op === 'ends_with') return `以「${String(p.value)}」结尾`
   const v = typeof p.value === 'string' ? `「${p.value}」` : String(p.value)
   return `${PREDICATE_TEXT[p.op] ?? p.op} ${v}`
+}
+
+
+export type DateMode =
+  | 'today'
+  | 'yesterday'
+  | 'days_n'
+  | 'date_before'
+  | 'date_after'
+  | 'date_on_or_before'
+  | 'date_on_or_after'
+  | 'date_on'
+  | 'is_empty'
+  | 'is_not_empty'
+
+export const DATE_MODE_OPTIONS: Array<{ mode: DateMode; label: string }> = [
+  { mode: 'today', label: '是今天' },
+  { mode: 'yesterday', label: '不早于昨天' },
+  { mode: 'days_n', label: '不早于 N 天前' },
+  { mode: 'date_on', label: '等于某个日期' },
+  { mode: 'date_before', label: '早于某个日期' },
+  { mode: 'date_after', label: '晚于某个日期' },
+  { mode: 'date_on_or_before', label: '不晚于某个日期' },
+  { mode: 'date_on_or_after', label: '不早于某个日期' },
+  { mode: 'is_empty', label: '为空' },
+  { mode: 'is_not_empty', label: '不为空' },
+]
+
+export function dateModeOf(pred: TablePredicate): DateMode {
+  if (pred.op === 'date_within_days') return pred.days === 0 ? 'today' : pred.days === 1 ? 'yesterday' : 'days_n'
+  if (pred.op === 'is_empty' || pred.op === 'is_not_empty') return pred.op
+  if (pred.op.startsWith('date_')) return pred.op as DateMode
+  return 'date_on'
+}
+
+export const localIsoDate = (d: Date = new Date()): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+/** 切换日期条件的“模式”，尽量沿用已填的天数 / 日期 / 时区设置。 */
+export function predicateFromDateMode(mode: DateMode, prev: TablePredicate): TablePredicate {
+  if (mode === 'is_empty' || mode === 'is_not_empty') return { op: mode }
+  if (mode === 'today' || mode === 'yesterday' || mode === 'days_n') {
+    const old = prev.op === 'date_within_days' ? prev : null
+    const days = mode === 'today' ? 0 : mode === 'yesterday' ? 1 : old && old.days > 1 ? old.days : 3
+    return { op: 'date_within_days', days, allowFuture: old?.allowFuture ?? false, timezone: old?.timezone ?? DEFAULT_TABLE_TIMEZONE }
+  }
+  const value = 'value' in prev && typeof prev.value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(prev.value) ? prev.value : localIsoDate()
+  return { op: mode, value }
+}
+
+/** 小数 / 浮点列做“等于 / 不等于”时，编译要求显式精度策略：自动补一个精确到 8 位的，用户不用懂。 */
+export const EXACT_NUMBER_POLICY = { mode: 'fixed', scale: 8, rounding: 'half_away_from_zero' } as const
+
+const TEXT_WHERE_OPS = [
+  { op: 'eq', label: '等于' },
+  { op: 'neq', label: '不等于' },
+  { op: 'contains', label: '包含' },
+  { op: 'starts_with', label: '开头是' },
+] as const
+const NUMBER_OPS = [
+  { op: 'eq', label: '等于' },
+  { op: 'neq', label: '不等于' },
+  { op: 'gt', label: '大于' },
+  { op: 'gte', label: '大于等于' },
+  { op: 'lt', label: '小于' },
+  { op: 'lte', label: '小于等于' },
+] as const
+const EMPTY_OPS = [
+  { op: 'is_empty', label: '为空' },
+  { op: 'is_not_empty', label: '不为空' },
+] as const
+
+/** 某类列上可选的条件。找行（where）不提供“为空”，要检查（expect）才提供。 */
+export function predicateOptionsFor(type: ColumnType, side: 'where' | 'expect'): Array<{ op: TablePredicate['op']; label: string }> {
+  const base =
+    type === 'number'
+      ? [...NUMBER_OPS]
+      : type === 'boolean'
+        ? [{ op: 'eq', label: '等于' } as const, { op: 'neq', label: '不等于' } as const]
+        : [...TEXT_WHERE_OPS]
+  return side === 'expect' ? [...base, ...EMPTY_OPS] : base
+}
+
+export function defaultPredicate(col: CheckColumn | undefined, side: 'where' | 'expect'): TablePredicate {
+  const type = columnTypeOf(col)
+  if (type === 'date') return side === 'expect' ? predicateFromDateMode('yesterday', { op: 'is_not_empty' }) : predicateFromDateMode('date_on', { op: 'is_not_empty' })
+  if (type === 'number') return normalizePredicate({ op: side === 'expect' ? 'neq' : 'eq', value: 0 }, col)
+  if (type === 'boolean') return { op: 'eq', value: true }
+  return side === 'expect' ? { op: 'is_not_empty' } : { op: 'eq', value: '' }
+}
+
+/** 按列类型补齐 / 去掉精度策略，保证保存后编译能过。 */
+export function normalizePredicate(pred: TablePredicate, col: CheckColumn | undefined): TablePredicate {
+  if (pred.op !== 'eq' && pred.op !== 'neq') return pred
+  const { numericPolicy: _old, ...rest } = pred
+  if (typeof pred.value === 'number' && columnTypeOf(col) === 'number' && (col?.numericKind ?? 'decimal') !== 'integer') {
+    return { ...rest, numericPolicy: EXACT_NUMBER_POLICY } as TablePredicate
+  }
+  return rest as TablePredicate
+}
+
+export function emptyCondition(col: CheckColumn | undefined, side: 'where' | 'expect'): TableCondition {
+  return { column: col?.key ?? '', predicate: defaultPredicate(col, side) }
+}
+
+/** 编辑器每次改动后统一规整：条件里的精度策略随列类型补齐。 */
+export function normalizeRule(rule: TableExpectRule, columns: readonly CheckColumn[]): TableExpectRule {
+  const colOf = (key: string) => columns.find((c) => c.key === key)
+  if (rule.rule === 'all_rows' || rule.rule === 'any_row') {
+    return { ...rule, predicate: normalizePredicate(rule.predicate, colOf(rule.column)) }
+  }
+  if (rule.rule === 'row_lookup') {
+    const fix = (c: TableCondition): TableCondition => ({ ...c, predicate: normalizePredicate(c.predicate, colOf(c.column)) })
+    return { ...rule, where: rule.where.map(fix), expect: rule.expect.map(fix) }
+  }
+  return rule
+}
+
+/** 还没填完整（找行的值为空等）：编辑器提醒用户，不阻断保存。 */
+export function lookupIncomplete(rule: TableExpectRule): string | null {
+  if (rule.rule !== 'row_lookup') return null
+  const blank = rule.where.some((c) => {
+    const p = c.predicate
+    return 'value' in p && typeof p.value === 'string' && p.value.trim() === ''
+  })
+  return blank ? '请填写要找的内容' : null
+}
+
+function conditionsSentence(conds: readonly TableCondition[], labelOf: (key: string) => string): string {
+  return conds.map((c) => `「${labelOf(c.column)}」${describeTablePredicate(c.predicate)}`).join('，并且')
 }
 
 /** 规则 → 给人读的完整句子（同时作为合约的 meaning）。 */
@@ -101,6 +255,12 @@ export function sentenceOf(rule: TableExpectRule, labelOf: (key: string) => stri
       return `「${labelOf(rule.column)}」各行相加等于合计行${rule.precision === 'exact' ? '（精确比较）' : ''}`
     case 'column_unique':
       return `「${labelOf(rule.column)}」没有重复值`
+    case 'row_lookup': {
+      const unit = kind === 'cards' ? '卡片' : '行'
+      const missing = rule.onMissing === 'fail' ? '记为不通过' : rule.onMissing === 'unknown' ? '记为无法确认' : '当作通过'
+      const multi = rule.onMultiple === 'any' ? `；找到多${kind === 'cards' ? '张' : '行'}时只要有一${kind === 'cards' ? '张' : '行'}满足即可` : ''
+      return `找到${conditionsSentence(rule.where, labelOf)}的${unit}，它的${conditionsSentence(rule.expect, labelOf)}${multi}；找不到这${kind === 'cards' ? '张卡片' : '一行'}${missing}`
+    }
     case 'row_expression':
       return rule.quantifier === 'all' ? `${kind === 'cards' ? '每张卡片' : '每一行'}都满足自定义条件（高级）` : `至少有${kind === 'cards' ? '一张卡片' : '一行'}满足自定义条件（高级）`
   }
@@ -125,6 +285,16 @@ export function defaultRule(template: CheckTemplate, columns: readonly CheckColu
       return firstNumber ? { rule: 'total_row_match', column: firstNumber.key, precision: 'display' } : null
     case 'column_unique':
       return first ? { rule: 'column_unique', column: first.key } : null
+    case 'row_lookup': {
+      if (!first) return null
+      const usable = columns.filter((c) => !c.sensitive)
+      const whereCol = usable[0] ?? first
+      const expectCol = usable.find((c) => c.key !== whereCol.key && columnTypeOf(c) === 'number') ?? usable.find((c) => c.key !== whereCol.key) ?? whereCol
+      return normalizeRule(
+        { rule: 'row_lookup', where: [emptyCondition(whereCol, 'where')], expect: [emptyCondition(expectCol, 'expect')], onMissing: 'fail', onMultiple: 'all' },
+        columns,
+      )
+    }
   }
 }
 

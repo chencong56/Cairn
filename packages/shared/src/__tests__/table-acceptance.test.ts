@@ -8,7 +8,6 @@ import {
   isTableReadPlanV2,
   TABLE_READ_PROTOCOL_V2,
   TABLE_READ_DEFAULT_MAX_BYTES,
-  snapshotUsesTableReadV2,
   stepSchema,
   tableSampleSchema,
   tablePredicateSchema,
@@ -17,6 +16,8 @@ import {
   truncateUtf8Bytes,
   evaluateTableExpectation,
   validateTableExpectRuleAgainstPlan,
+  closestTexts,
+  describeTablePredicate,
 } from '../index.js'
 
 describe('Numeric Policy & Precise Comparison', () => {
@@ -668,25 +669,6 @@ describe('table.read@2 读取计划契约', () => {
       }).success,
     ).toBe(false)
   })
-
-  it('旧 worker 看不懂 v2：快照里含 v2 计划必须声明 table.read@2 能力', () => {
-    const planV2 = {
-      protocol: TABLE_READ_PROTOCOL_V2,
-      target,
-      columns: [{ key: 'a', name: 'A', valueType: 'text' }],
-    }
-    const step = {
-      id: '00000000-0000-4000-8000-0000000000a1',
-      name: '提取表格',
-      type: 'extract' as const,
-      effectType: 'READ_ONLY' as const,
-      outputKey: 'tbl',
-      input: { target, as: 'table' as const, table: planV2 },
-    }
-    const parsed = stepSchema.parse(step)
-    expect(snapshotUsesTableReadV2([parsed])).toBe(true)
-    expect(snapshotUsesTableReadV2([{ ...parsed, input: { ...parsed.input, table: { ...planV2, protocol: 'table.read@1' } } } as never])).toBe(false)
-  })
 })
 
 
@@ -805,5 +787,290 @@ describe('table.read@2 读取形态 kind', () => {
   })
   it('未知形态拒绝', () => {
     expect(tableReadPlanSchema.safeParse({ ...base, kind: 'tree' }).success).toBe(false)
+  })
+})
+
+describe('找到某一行，再检查它（row_lookup）', () => {
+  type Cell = { value: string | number | null; rawText?: string; decimalValue?: string; status: 'ok' | 'missing' | 'error' | 'masked' }
+  const text = (v: string): Cell => ({ value: v, rawText: v, status: 'ok' })
+  const num = (v: string): Cell => ({ value: Number(v), rawText: v, decimalValue: v, status: 'ok' })
+  const rows = (items: Array<[Cell, Cell, Cell?]>) =>
+    items.map(([name, data, cycle]) => ({ name, data, ...(cycle ? { cycle } : {}) }))
+  const sampleOf = (items: Array<[Cell, Cell, Cell?]>, status: 'complete' | 'partial' = 'complete') =>
+    ({
+      protocol: 'table.sample@1',
+      source: { runId: '11111111-1111-4111-8111-111111111111', sampledAt: new Date().toISOString(), planDigest: 'a'.repeat(64) },
+      columns: [
+        { key: 'name', name: '报表名称', valueType: 'text' },
+        { key: 'data', name: '最新数据', valueType: 'number', numericKind: 'decimal' },
+        { key: 'cycle', name: '更新周期', valueType: 'text' },
+      ],
+      rows: rows(items),
+      rowCount: items.length,
+      coverage: { requestedScope: 'current_page', observedScope: 'current_page', status, ...(status === 'partial' ? { reasonCode: 'TABLE_VIRTUAL_SCROLL', reasonMessage: 'x' } : {}) },
+      presentation: { omitted: false, previewCount: items.length },
+    }) as never
+  const fixed = { mode: 'fixed', scale: 8, rounding: 'half_away_from_zero' } as const
+  const nameIs = (v: string) => ({ column: 'name', predicate: { op: 'eq', value: v } }) as const
+  const dataNot0 = { column: 'data', predicate: { op: 'neq', value: 0, numericPolicy: fixed } } as const
+  const parse = (r: unknown) => tableExpectRuleSchema.parse(r)
+  const lookup = (extra: Record<string, unknown> = {}) =>
+    parse({ rule: 'row_lookup', where: [nameIs('需求订单统计表')], expect: [dataNot0], ...extra })
+
+  const base = sampleOf([
+    [text('存量收入和成本统计表'), num('20251122')],
+    [text('需求订单统计表'), num('20251222')],
+    [text('楼宇覆盖面积统计表'), num('0')],
+  ])
+
+  it('契约默认：找不到记为不通过、多行要求每一行都满足；条件最多 3 个', () => {
+    const rule = lookup()
+    expect(rule.rule === 'row_lookup' && rule.onMissing).toBe('fail')
+    expect(rule.rule === 'row_lookup' && rule.onMultiple).toBe('all')
+    expect(tableExpectRuleSchema.safeParse({ rule: 'row_lookup', where: [], expect: [dataNot0] }).success).toBe(false)
+    const four = [nameIs('a'), nameIs('b'), nameIs('c'), nameIs('d')]
+    expect(tableExpectRuleSchema.safeParse({ rule: 'row_lookup', where: four, expect: [dataNot0] }).success).toBe(false)
+  })
+
+  it('找到且满足：通过，并给出命中行与一句人话', () => {
+    const r = evaluateTableExpectation(base, lookup())
+    expect(r.passed).toBe(true)
+    expect(r.details.lookup?.summary).toContain('找到 1 行（第 2 行）')
+    expect(r.details.lookup?.summary).toContain('20251222')
+    expect(r.details.lookup?.matched[0]?.cells.map((c) => c.text)).toEqual(['需求订单统计表', '20251222'])
+  })
+
+  it('找到但不满足：业务不通过，说清是哪一行哪一列', () => {
+    const zero = sampleOf([[text('需求订单统计表'), num('0.00')]])
+    const r = evaluateTableExpectation(zero, lookup())
+    expect(r.passed).toBe(false)
+    expect(r.factsUnavailable).toBeUndefined()
+    expect(r.reasonCode).toBe('LOOKUP_EXPECT_FAILED')
+    expect(r.reasonMessage).toContain('第 1 行')
+    expect(r.reasonMessage).toContain('「最新数据」是 0.00')
+    expect(r.details.violatingRows).toHaveLength(1)
+  })
+
+  it('找不到：默认不通过并给最接近的名称；onMissing 可改为无法确认 / 通过', () => {
+    const s = sampleOf([[text('需求订单统计报表'), num('1')], [text('需求订单明细表'), num('2')], [text('收入汇总'), num('3')]])
+    const miss = evaluateTableExpectation(s, lookup())
+    expect(miss.passed).toBe(false)
+    expect(miss.reasonCode).toBe('ROW_NOT_FOUND')
+    expect(miss.reasonMessage).toContain('共读取 3 行')
+    expect(miss.details.lookup?.closest).toEqual(['需求订单统计报表', '需求订单明细表'])
+    expect(evaluateTableExpectation(s, lookup({ onMissing: 'unknown' })).factsUnavailable).toBe(true)
+    expect(evaluateTableExpectation(s, lookup({ onMissing: 'pass' })).passed).toBe(true)
+  })
+
+  it('找到多行：all 要求每一行都满足，any 只要有一行满足', () => {
+    const dup = sampleOf([[text('需求订单统计表'), num('0')], [text('需求订单统计表'), num('5')]])
+    expect(evaluateTableExpectation(dup, lookup()).passed).toBe(false)
+    expect(evaluateTableExpectation(dup, lookup({ onMultiple: 'any' })).passed).toBe(true)
+  })
+
+  it('多个条件是“并且”：名称相同但更新周期不同的行不算命中', () => {
+    const s = sampleOf([
+      [text('需求订单统计表'), num('0'), text('每月')],
+      [text('需求订单统计表'), num('7'), text('每日')],
+    ])
+    const rule = parse({ rule: 'row_lookup', where: [nameIs('需求订单统计表'), { column: 'cycle', predicate: { op: 'eq', value: '每日' } }], expect: [dataNot0] })
+    const r = evaluateTableExpectation(s, rule)
+    expect(r.passed).toBe(true)
+    expect(r.details.lookup?.summary).toContain('第 2 行')
+  })
+
+  it('找行的列读不出：不能说“找不到”，而是无法确认并说明行号', () => {
+    const s = sampleOf([[{ value: null, status: 'error', rawText: '??' }, num('1')], [text('别的表'), num('2')]])
+    const r = evaluateTableExpectation(s, lookup())
+    expect(r.factsUnavailable).toBe(true)
+    expect(r.reasonMessage).toContain('第 1 行')
+  })
+
+  it('找到的行里要检查的值是空：默认无法确认，不当成 0', () => {
+    const s = sampleOf([[text('需求订单统计表'), { value: null, status: 'missing' }]])
+    expect(evaluateTableExpectation(s, lookup()).factsUnavailable).toBe(true)
+  })
+
+  it('读不全（范围不完整）时一律无法确认', () => {
+    const s = sampleOf([[text('需求订单统计表'), num('1')]], 'partial')
+    expect(evaluateTableExpectation(s, lookup()).factsUnavailable).toBe(true)
+  })
+
+  it('编译校验：列要已声明；大小比较只接受数字列；小数列的相等比较要带精度策略', () => {
+    const cols = [
+      { key: 'name', name: '报表名称', valueType: 'text' as const },
+      { key: 'data', name: '最新数据', valueType: 'number' as const, numericKind: 'decimal' as const },
+    ]
+    const v = (r: unknown) => validateTableExpectRuleAgainstPlan(parse(r), cols)
+    expect(v({ rule: 'row_lookup', where: [nameIs('x')], expect: [dataNot0] }).valid).toBe(true)
+    expect(v({ rule: 'row_lookup', where: [{ column: 'zzz', predicate: { op: 'eq', value: 'x' } }], expect: [dataNot0] }).valid).toBe(false)
+    expect(v({ rule: 'row_lookup', where: [nameIs('x')], expect: [{ column: 'name', predicate: { op: 'gt', value: 1 } }] }).valid).toBe(false)
+    expect(v({ rule: 'row_lookup', where: [nameIs('x')], expect: [{ column: 'data', predicate: { op: 'neq', value: 0 } }] }).valid).toBe(false)
+  })
+
+  it('closestTexts：只展示接近的，去重，最多 3 个', () => {
+    expect(closestTexts('需求订单统计表', ['需求订单统计报表', '需求订单统计报表', '完全无关', '订单明细'])).toEqual(['需求订单统计报表'])
+    expect(closestTexts('', ['a'])).toEqual([])
+  })
+})
+
+describe('条件行检查：分页表上的“找不到”不能判不通过', () => {
+  const sample = (clues?: string[]) =>
+    ({
+      protocol: 'table.sample@1',
+      source: { runId: '11111111-1111-4111-8111-111111111111', sampledAt: new Date().toISOString(), planDigest: 'a'.repeat(64) },
+      columns: [
+        { key: 'name', name: '报表名称', valueType: 'text' },
+        { key: 'n', name: '次数', valueType: 'number', numericKind: 'integer' },
+      ],
+      rows: [{ name: { value: '甲', rawText: '甲', status: 'ok' }, n: { value: 1, rawText: '1', status: 'ok' } }],
+      rowCount: 1,
+      coverage: { requestedScope: 'current_page', observedScope: 'current_page', status: 'complete', ...(clues ? { clues } : {}) },
+      presentation: { omitted: false, previewCount: 1 },
+    }) as never
+  const rule = (onMissing: 'fail' | 'unknown' | 'pass') =>
+    tableExpectRuleSchema.parse({ rule: 'row_lookup', where: [{ column: 'name', predicate: { op: 'eq', value: '乙' } }], expect: [{ column: 'n', predicate: { op: 'gt', value: 0 } }], onMissing })
+
+  it('有分页：本页没找到 → 无法确认（说明只读了本页），不是业务不通过', () => {
+    const r = evaluateTableExpectation(sample(['pagination_present']), rule('fail'))
+    expect(r.factsUnavailable).toBe(true)
+    expect(r.reasonCode).toBe('ROW_NOT_FOUND_PAGED')
+    expect(r.reasonMessage).toContain('只读了本页')
+  })
+  it('没有分页：找不到仍是业务不通过；选“当作通过”不受分页影响', () => {
+    expect(evaluateTableExpectation(sample(), rule('fail')).reasonCode).toBe('ROW_NOT_FOUND')
+    expect(evaluateTableExpectation(sample(['pagination_present']), rule('pass')).passed).toBe(true)
+  })
+  it('有分页但本页找到了：照常判定', () => {
+    const found = tableExpectRuleSchema.parse({ rule: 'row_lookup', where: [{ column: 'name', predicate: { op: 'eq', value: '甲' } }], expect: [{ column: 'n', predicate: { op: 'gt', value: 0 } }] })
+    expect(evaluateTableExpectation(sample(['pagination_present']), found).passed).toBe(true)
+  })
+})
+
+describe('宽表：一次最多读 100 列，识别结果最多返回 128 列', () => {
+  const target = { framePath: [], candidates: [{ by: 'css', value: '#t' }] }
+  const cols = (n: number) => Array.from({ length: n }, (_, i) => ({ key: `col_${i + 1}`, name: `列${i + 1}`, valueType: 'text' }))
+  it('读取计划 100 列合法、101 列不合法；默认上限是 100', () => {
+    expect(tableReadPlanSchema.safeParse({ protocol: TABLE_READ_PROTOCOL_V2, target, columns: cols(100) }).success).toBe(true)
+    expect(tableReadPlanSchema.safeParse({ protocol: TABLE_READ_PROTOCOL_V2, target, columns: cols(101) }).success).toBe(false)
+    const parsed = tableReadPlanSchema.parse({ protocol: TABLE_READ_PROTOCOL_V2, target, columns: cols(3) })
+    expect('limits' in parsed && parsed.limits.maxCols).toBe(100)
+  })
+})
+
+describe('日期列：固定日期与相对今天', () => {
+  type Cell = { value: string | null; rawText?: string; status: 'ok' | 'missing' | 'error' | 'masked' }
+  const date = (v: string, raw?: string): Cell => ({ value: v, ...(raw ? { rawText: raw } : {}), status: 'ok' })
+  const sampleAt = (sampledAt: string, cells: Cell[]) =>
+    ({
+      protocol: 'table.sample@1',
+      source: { runId: '11111111-1111-4111-8111-111111111111', sampledAt, planDigest: 'a'.repeat(64) },
+      columns: [{ key: 'd', name: '最新数据', valueType: 'date' }],
+      rows: cells.map((d) => ({ d })),
+      rowCount: cells.length,
+      coverage: { requestedScope: 'current_page', observedScope: 'current_page', status: 'complete' },
+      presentation: { omitted: false, previewCount: cells.length },
+    }) as never
+  const rule = (predicate: unknown) => tableExpectRuleSchema.parse({ rule: 'all_rows', column: 'd', predicate })
+  const within = (days: number, extra: Record<string, unknown> = {}) => rule({ op: 'date_within_days', days, ...extra })
+  // 2025-12-22 08:00 北京时间 = 2025-12-22T00:00Z
+  const NOON = '2025-12-22T04:00:00.000Z'
+
+  it('契约：日期须合法、timezone 默认 Asia/Shanghai、非法时区被拒绝', () => {
+    const p = tablePredicateSchema.parse({ op: 'date_within_days', days: 1 })
+    expect(p).toMatchObject({ allowFuture: false, timezone: 'Asia/Shanghai' })
+    expect(tablePredicateSchema.safeParse({ op: 'date_before', value: '2025-02-30' }).success).toBe(false)
+    expect(tablePredicateSchema.safeParse({ op: 'date_before', value: '20251222' }).success).toBe(false)
+    expect(tablePredicateSchema.safeParse({ op: 'date_within_days', days: 1, timezone: 'Mars/Base' }).success).toBe(false)
+    expect(tablePredicateSchema.safeParse({ op: 'date_within_days', days: -1 }).success).toBe(false)
+  })
+
+  it('固定日期：早于 / 晚于 / 不早于 / 不晚于 / 是，带时分秒只比日期部分', () => {
+    const s = sampleAt(NOON, [date('2025-12-22 23:59:59', '20251222235959')])
+    const ok = (op: string, value: string) => evaluateTableExpectation(s, rule({ op, value })).passed
+    expect(ok('date_on', '2025-12-22')).toBe(true)
+    expect(ok('date_before', '2025-12-23')).toBe(true)
+    expect(ok('date_before', '2025-12-22')).toBe(false)
+    expect(ok('date_after', '2025-12-21')).toBe(true)
+    expect(ok('date_on_or_before', '2025-12-22')).toBe(true)
+    expect(ok('date_on_or_after', '2025-12-22')).toBe(true)
+    expect(ok('date_on_or_after', '2025-12-23')).toBe(false)
+  })
+
+  it('相对今天：N=0 是今天，N=1 不早于昨天；默认不允许晚于今天，可放开', () => {
+    const at = (d: string, r: ReturnType<typeof within>) => evaluateTableExpectation(sampleAt(NOON, [date(d)]), r)
+    expect(at('2025-12-22', within(0)).passed).toBe(true)
+    expect(at('2025-12-21', within(0)).passed).toBe(false)
+    expect(at('2025-12-21', within(1)).passed).toBe(true)
+    expect(at('2025-12-20', within(1)).passed).toBe(false)
+    expect(at('2025-12-23', within(1)).passed).toBe(false)
+    expect(at('2025-12-23', within(1, { allowFuture: true })).passed).toBe(true)
+  })
+
+  it('不通过时说清所用的“今天”与时区', () => {
+    const r = evaluateTableExpectation(sampleAt(NOON, [date('2025-12-20')]), within(1))
+    expect(r.passed).toBe(false)
+    expect(r.factsUnavailable).toBeUndefined()
+    expect(JSON.stringify(r.details)).toContain('2025-12-20，早于 2025-12-21')
+    expect(JSON.stringify(r.details)).toContain('运行当天 2025-12-22')
+    expect(JSON.stringify(r.details)).toContain('Asia/Shanghai')
+  })
+
+  it('边界：月末、闰年、年底跨年', () => {
+    const at = (now: string, d: string, days: number) => evaluateTableExpectation(sampleAt(now, [date(d)]), within(days)).passed
+    expect(at('2024-03-01T04:00:00.000Z', '2024-02-29', 1)).toBe(true) // 闰年 2/29 是 3/1 的前一天
+    expect(at('2025-03-01T04:00:00.000Z', '2025-02-28', 1)).toBe(true)
+    expect(at('2025-03-01T04:00:00.000Z', '2025-02-27', 1)).toBe(false)
+    expect(at('2026-01-01T04:00:00.000Z', '2025-12-31', 1)).toBe(true)
+    expect(at('2025-03-31T04:00:00.000Z', '2025-03-01', 30)).toBe(true)
+  })
+
+  it('跨零点的时区：同一采样时刻在不同时区“今天”不同，且重算恒定', () => {
+    const now = '2025-12-21T17:00:00.000Z' // 北京已是 12-22 01:00；UTC 仍是 12-21
+    const s = sampleAt(now, [date('2025-12-22')])
+    expect(evaluateTableExpectation(s, within(0)).passed).toBe(true)
+    expect(evaluateTableExpectation(s, within(0, { timezone: 'UTC' })).passed).toBe(false) // UTC 今天是 12-21，12-22 属未来
+    expect(evaluateTableExpectation(s, within(0)).passed).toBe(evaluateTableExpectation(s, within(0)).passed)
+  })
+
+  it('空值 / 读不出 / 不是日期 → 无法确认，不当“很久以前”', () => {
+    const miss: Cell = { value: null, status: 'missing' }
+    const empty: Cell = { value: '', status: 'ok' }
+    const bad: Cell = { value: '待定', rawText: '待定', status: 'ok' }
+    for (const c of [miss, empty, bad]) {
+      const r = evaluateTableExpectation(sampleAt(NOON, [c]), within(1))
+      expect(r.passed).toBe(false)
+      expect(r.factsUnavailable).toBe(true)
+    }
+  })
+
+  it('条件行检查里也能用：找到某一行，其日期不早于 1 天前', () => {
+    const s = sampleAt(NOON, [date('2025-12-21')])
+    const r = tableExpectRuleSchema.parse({
+      rule: 'row_lookup',
+      where: [{ column: 'd', predicate: { op: 'is_not_empty' } }],
+      expect: [{ column: 'd', predicate: { op: 'date_within_days', days: 1 } }],
+    })
+    expect(evaluateTableExpectation(s, r).passed).toBe(true)
+  })
+
+  it('编译期校验：日期谓词只用于日期列，日期列不能做数字大小比较', () => {
+    const columns = [
+      { key: 'd', name: '日期', valueType: 'date' as const },
+      { key: 'n', name: '数量', valueType: 'text' as const },
+    ]
+    const v = (column: string, predicate: unknown) =>
+      validateTableExpectRuleAgainstPlan({ rule: 'all_rows', column, predicate, allowEmpty: false } as never, columns)
+    expect(v('d', { op: 'date_within_days', days: 1, allowFuture: false, timezone: 'Asia/Shanghai' }).valid).toBe(true)
+    expect(v('n', { op: 'date_within_days', days: 1, allowFuture: false, timezone: 'Asia/Shanghai' })).toMatchObject({ valid: false, code: 'TABLE_DATE_COLUMN_REQUIRED' })
+    expect(v('d', { op: 'gt', value: 1 })).toMatchObject({ valid: false, code: 'TABLE_DATE_COLUMN_NUMERIC_COMPARE' })
+  })
+
+  it('一句人话', () => {
+    const d = (p: unknown) => describeTablePredicate(tablePredicateSchema.parse(p))
+    expect(d({ op: 'date_within_days', days: 0 })).toBe('是今天（按北京时间的运行当天算）')
+    expect(d({ op: 'date_within_days', days: 1 })).toContain('不早于昨天')
+    expect(d({ op: 'date_within_days', days: 3 })).toContain('不早于 3 天前')
+    expect(d({ op: 'date_before', value: '2025-12-01' })).toBe('早于 2025-12-01')
   })
 })

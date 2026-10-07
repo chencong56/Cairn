@@ -112,6 +112,38 @@ describe('table.read@2 × 卡片 / 键值靶场', { timeout: 180_000 }, () => {
     await page.close()
   })
 
+  it('紧凑日期：8 位 / 14 位整列合法 → 日期列并规范化；混入非法值的整列保持数字；带时分秒按日期部分比较', async ({ skip }) => {
+    if (!available) skip()
+    const page = await open('compact-dates.html')
+    const result = await detectTable(page, { kind: 'point', ...(await centerOf(page, '#reports tbody tr:nth-child(1) td:nth-child(2)')) }, deps)
+    expect(result.outcome).toBe('FOUND')
+    if (result.outcome !== 'FOUND') return
+    const d = result.detected
+    const typeOf = (name: string) => d.columns.find((c) => c.name === name)?.valueType
+    expect(typeOf('最新数据')).toBe('date')
+    expect(typeOf('更新时间')).toBe('date')
+    expect(typeOf('单号')).toBe('number')
+    const key = (name: string) => d.columns.find((c) => c.name === name)!.key
+    const first = d.sample.rows[0]!
+    expect(valueOf(first, key('最新数据'))).toBe('2025-12-22')
+    expect(first[key('最新数据')]!.rawText).toBe('20251222')
+    expect(valueOf(first, key('更新时间'))).toBe('2025-12-22 08:30:00')
+    // 采样时刻按北京时间是 2025-12-22：更新时间（带时分秒）“是今天”按日期部分通过
+    const verdict = evaluateTableExpectation(
+      { ...d.sample, source: { ...d.sample.source, sampledAt: '2025-12-22T04:00:00.000Z' } },
+      {
+        rule: 'row_lookup',
+        where: [{ column: key('报表名称'), predicate: { op: 'eq', value: '需求订单统计表' } }],
+        expect: [{ column: key('更新时间'), predicate: { op: 'date_within_days', days: 0, allowFuture: false, timezone: 'Asia/Shanghai' } }],
+        onMissing: 'fail',
+        onMultiple: 'all',
+      } as never,
+    )
+    expect(verdict.reasonMessage ?? '').toBe('')
+    expect(verdict.passed).toBe(true)
+    await page.close()
+  })
+
   it('键值（th/td 表单表格）：一行两对 / 两列版都按“名称：值”读，空值为 missing', async ({ skip }) => {
     if (!available) skip()
     const page = await open('keyvalue-table.html')

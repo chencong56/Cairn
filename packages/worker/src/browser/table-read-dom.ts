@@ -136,6 +136,11 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
   const EMPTY_RE = /(暂无数据|没有数据|无数据|暂无记录|没有记录|无记录|no\s*(data|records|results)|empty)/i
   const PAGER_SEL =
     '.pagination,.pager,.pagenav,.datagrid-pager,.ui-jqgrid-pager,.x-paging-toolbar,.layui-table-page,[class*="pagination"],[class*="pager"],[class*="Pager"]'
+  /** 这张表自己的分页条：在表内，或紧挨着它的前 / 后一个兄弟（不能在整个父容器里找，否则同页别的表的分页条会被算到这张表头上）。 */
+  const pagerNear = (node: any): boolean => {
+    const hit = (n: any): boolean => Boolean(n && (n.matches?.(PAGER_SEL) || n.querySelector?.(PAGER_SEL)))
+    return hit(node) || hit(node.nextElementSibling) || hit(node.previousElementSibling)
+  }
   const TOTAL_RE = /^(合计|总计|小计|汇总|合\s*计|总\s*计|total|sum|subtotal)\s*[:：]?$/i
   const GRID_SEL = '.datagrid-wrap,.datagrid-view,.ui-jqgrid,.x-grid,.layui-table-view,.el-table,.frozen-table'
   const CHECKBOX_SEL = 'input[type="checkbox"],input[type="radio"],.layui-form-checkbox,.x-grid-row-checker,.cbox,.datagrid-cell-check'
@@ -606,7 +611,6 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
     const footRows = (Array.from(root.querySelectorAll('.el-table__footer-wrapper tbody tr')) as any[]).map((tr) => ({ el: tr, cells: cellsOf(tr) }))
     const emptyText = root.querySelector('.el-table__empty-text')
     const loading = Array.from(root.querySelectorAll('.el-loading-mask')).some((m: any) => !isHidden(m))
-    const anchor = root.parentElement || root
     return {
       shape: 'elementui',
       cols,
@@ -614,7 +618,7 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
       dataRows,
       summaryRows: footRows,
       excluded: { mergedRows: 0, paginationRows: 0, footerRows: footRows.length },
-      hasPagination: Boolean(anchor.querySelector?.('.el-pagination')),
+      hasPagination: pagerNear(root),
       isBusy: loading,
       emptyNote: dataRows.length === 0 && ((Boolean(emptyText) && !isHidden(emptyText)) || EMPTY_RE.test(textOf(root))),
       renderedRowEls: rowEls,
@@ -841,7 +845,6 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
       }
       return { el: card, cells }
     })
-    const anchor = root.parentElement || root
     return {
       shape: 'cards',
       cols,
@@ -849,7 +852,7 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
       dataRows,
       summaryRows: [],
       excluded: { mergedRows: 0, paginationRows: 0, footerRows: 0 },
-      hasPagination: Boolean(root.querySelector?.(PAGER_SEL) || anchor.querySelector?.(PAGER_SEL)),
+      hasPagination: pagerNear(root),
       isBusy: Array.from(root.querySelectorAll?.('.loading,[aria-busy="true"],.layui-layer-loading') || []).some((m: any) => !isHidden(m)),
       emptyNote: cards.length === 0 && EMPTY_RE.test(textOf(root)),
       renderedRowEls: cards,
@@ -965,11 +968,13 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
   /** 日期规范化为不带时区的 YYYY-MM-DD / YYYY-MM-DD HH:mm:ss。 */
   const parseDate = (raw: string): string | null => {
     const s = toHalf(raw).trim()
-    const m = /^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s)
+    const compact = /^(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})(\d{2}))?$/.exec(s)
+    const m = compact ?? /^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s)
     if (!m) return null
     const y = Number(m[1])
     const mo = Number(m[2])
     const d = Number(m[3])
+    if (compact && (y < 1900 || y > 2100)) return null
     const probe = new Date(Date.UTC(y, mo - 1, d))
     if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d) return null
     const p2 = (n: number): string => String(n).padStart(2, '0')
@@ -1344,7 +1349,7 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
       if (texts.length > 0) {
         const compact = texts.map((tx) => tx.replace(/[,，\s¥￥$€£%元万亿个]/g, ''))
         if (texts.every((tx) => /^(true|false|yes|no|是|否|真|假)$/i.test(tx))) valueType = 'boolean'
-        else if (texts.every((tx) => DATE_LIKE.test(tx))) valueType = 'date'
+        else if (texts.every((tx) => DATE_LIKE.test(tx)) || texts.every((tx) => /^\d{8}(\d{6})?$/.test(toHalf(tx).trim()) && parseDate(tx) !== null)) valueType = 'date'
         else if (compact.every((x) => /^[-(]?\d+(\.\d+)?\)?$/.test(x)) && texts.some((tx) => /\d/.test(tx))) {
           valueType = 'number'
           numericKind = compact.every((x) => /^[-(]?\d+\)?$/.test(x)) ? 'integer' : 'decimal'

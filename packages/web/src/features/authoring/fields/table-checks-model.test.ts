@@ -6,6 +6,13 @@ import {
   sentenceOf,
   splitTableChecks,
   templatesFor,
+  normalizeRule,
+  predicateOptionsFor,
+  lookupIncomplete,
+  EXACT_NUMBER_POLICY,
+  defaultPredicate,
+  dateModeOf,
+  predicateFromDateMode,
   withRule,
   withSeverity,
   type CheckColumn,
@@ -78,5 +85,81 @@ describe('表格数据检查模型', () => {
     const c = buildTableCheck('card', eq, labelOf, 'MUST', undefined, 'keyvalue')
     expect(c.meaning).toBe('「区域」等于 「运行中」')
     expect(outcomeContractSchema.safeParse(c).success).toBe(true)
+  })
+
+  describe('找到某一行，再检查它', () => {
+    const cols: CheckColumn[] = [
+      { key: 'name', label: '报表名称', numeric: false, valueType: 'text' },
+      { key: 'data', label: '最新数据', numeric: true, valueType: 'number', numericKind: 'decimal' },
+      { key: 'phone', label: '电话', numeric: false, valueType: 'text', sensitive: true },
+    ]
+    const lbl = (k: string) => cols.find((c) => c.key === k)?.label ?? k
+
+    it('默认规则合法：找行用第一个可用列，检查用数字列，小数列自动补精确精度策略', () => {
+      const rule = defaultRule('row_lookup', cols)!
+      expect(rule.rule).toBe('row_lookup')
+      if (rule.rule !== 'row_lookup') return
+      expect(rule.where[0]?.column).toBe('name')
+      expect(rule.expect[0]?.column).toBe('data')
+      expect(rule.expect[0]?.predicate).toEqual({ op: 'neq', value: 0, numericPolicy: EXACT_NUMBER_POLICY })
+      expect(rule.onMissing).toBe('fail')
+      const c = buildTableCheck('report', rule, lbl)
+      expect(outcomeContractSchema.safeParse(c).success).toBe(true)
+    })
+
+    it('整句：多个条件用“并且”，找不到怎么办写在句尾；卡片说“卡片”', () => {
+      const rule = normalizeRule(
+        { rule: 'row_lookup', where: [{ column: 'name', predicate: { op: 'eq', value: '需求订单统计表' } }], expect: [{ column: 'data', predicate: { op: 'neq', value: 0 } }], onMissing: 'unknown', onMultiple: 'any' },
+        cols,
+      )
+      expect(sentenceOf(rule, lbl)).toBe('找到「报表名称」等于「需求订单统计表」的行，它的「最新数据」不等于 0；找到多行时只要有一行满足即可；找不到这一行记为无法确认')
+      expect(sentenceOf(rule, lbl, 'cards')).toContain('的卡片')
+    })
+
+    it('精度策略随列类型补齐 / 去掉：整数列和文字列不带', () => {
+      const intCols: CheckColumn[] = [{ key: 'n', label: '数量', numeric: true, valueType: 'number', numericKind: 'integer' }]
+      const r = normalizeRule({ rule: 'all_rows', column: 'n', predicate: { op: 'eq', value: 3, numericPolicy: EXACT_NUMBER_POLICY }, allowEmpty: false }, intCols)
+      expect(r.rule === 'all_rows' && 'numericPolicy' in r.predicate).toBe(false)
+    })
+
+    it('条件选项随列类型变化：找行不给“为空”，检查才给；数字列才有大小比较', () => {
+      expect(predicateOptionsFor('text', 'where').map((o) => o.op)).toEqual(['eq', 'neq', 'contains', 'starts_with'])
+      expect(predicateOptionsFor('text', 'expect').map((o) => o.op)).toContain('is_empty')
+      expect(predicateOptionsFor('number', 'where').map((o) => o.op)).toContain('gt')
+      expect(predicateOptionsFor('boolean', 'where').map((o) => o.op)).toEqual(['eq', 'neq'])
+    })
+
+    it('找行的值还是空时提醒“请填写要找的内容”', () => {
+      const rule = defaultRule('row_lookup', cols)!
+      expect(lookupIncomplete(rule)).toBe('请填写要找的内容')
+    })
+
+    it('菜单：表格、卡片有，键值没有；每项带例子', () => {
+      expect(templatesFor('table').map((t) => t.value)).toContain('row_lookup')
+      expect(templatesFor('cards').find((t) => t.value === 'row_lookup')?.label).toBe('找到某一张卡片，再检查它')
+      expect(templatesFor('keyvalue').map((t) => t.value)).not.toContain('row_lookup')
+      expect(templatesFor('table').every((t) => t.example.startsWith('例：'))).toBe(true)
+    })
+  })
+})
+
+describe('日期列条件模型', () => {
+  const dateCol = { key: 'd', label: '最新数据', numeric: false, valueType: 'date' as const }
+  it('默认条件：检查侧不早于昨天；找行侧等于某个日期', () => {
+    expect(defaultPredicate(dateCol, 'expect')).toMatchObject({ op: 'date_within_days', days: 1, allowFuture: false, timezone: 'Asia/Shanghai' })
+    expect(defaultPredicate(dateCol, 'where')).toMatchObject({ op: 'date_on' })
+  })
+  it('模式与谓词互转：天数 0 / 1 / N、固定日期沿用已填值', () => {
+    expect(dateModeOf({ op: 'date_within_days', days: 0, allowFuture: false, timezone: 'UTC' })).toBe('today')
+    expect(dateModeOf({ op: 'date_within_days', days: 7, allowFuture: false, timezone: 'UTC' })).toBe('days_n')
+    expect(predicateFromDateMode('days_n', { op: 'date_within_days', days: 7, allowFuture: true, timezone: 'UTC' })).toEqual({ op: 'date_within_days', days: 7, allowFuture: true, timezone: 'UTC' })
+    expect(predicateFromDateMode('date_before', { op: 'date_on', value: '2025-12-01' })).toEqual({ op: 'date_before', value: '2025-12-01' })
+    expect(predicateFromDateMode('is_empty', { op: 'date_on', value: '2025-12-01' })).toEqual({ op: 'is_empty' })
+  })
+  it('整句里说清口径', () => {
+    const labelOf = () => '最新数据'
+    expect(sentenceOf({ rule: 'all_rows', column: 'd', predicate: { op: 'date_within_days', days: 1, allowFuture: false, timezone: 'Asia/Shanghai' }, allowEmpty: false }, labelOf)).toBe(
+      '每一行的「最新数据」都不早于昨天（按北京时间的运行当天算）',
+    )
   })
 })

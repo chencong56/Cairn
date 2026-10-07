@@ -1,5 +1,6 @@
 import {
   TABLE_PLACEHOLDER_COLUMN_NAME,
+  TABLE_READ_MAX_COLS,
   TABLE_READ_PROTOCOL_V2,
   isTablePlanUnconfigured,
   isTableReadPlanV2,
@@ -21,7 +22,7 @@ export function createPlaceholderTablePlan(): TableReadPlanV2 {
     scope: 'current_page',
     rows: { excludeHeader: true, header: 'auto' },
     columns: [{ key: 'col_1', name: TABLE_PLACEHOLDER_COLUMN_NAME, valueType: 'text' }],
-    limits: { maxRows: 200, maxCols: 32, maxBytes: 192 * 1024 },
+    limits: { maxRows: 200, maxCols: TABLE_READ_MAX_COLS, maxBytes: 192 * 1024 },
   }
 }
 

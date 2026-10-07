@@ -1,4 +1,7 @@
 import { Trash2 } from 'lucide-react'
+import { DatePredicateFields } from './date-predicate-fields'
+import { RowLookupFields } from './row-lookup-fields'
+import { useTableSample } from './table-sample-store'
 import type { OutcomeContract, Step, TableExpectRule } from '@cairn/shared'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -14,6 +17,8 @@ import {
 import {
   COMPARE_LABEL,
   ROW_PREDICATE_OPS,
+  columnTypeOf,
+  defaultPredicate,
   STAT_LABEL,
   everyPrefix,
   anyPrefix,
@@ -22,6 +27,7 @@ import {
   type CheckKind,
   buildTableCheck,
   defaultRule,
+  normalizeRule,
   sentenceOf,
   withRule,
   withSeverity,
@@ -50,6 +56,9 @@ export function checkColumnsOf(step: ExtractTableStep): CheckColumn[] {
     key: c.key,
     label: ('label' in c && c.label ? c.label : c.name) as string,
     numeric: c.valueType === 'number',
+    valueType: c.valueType,
+    ...(c.numericKind ? { numericKind: c.numericKind } : {}),
+    ...('sensitive' in c && c.sensitive ? { sensitive: true } : {}),
   }))
 }
 
@@ -161,6 +170,7 @@ function RuleFields({
       const p = rule.predicate
       const needsValue = p.op !== 'is_empty' && p.op !== 'is_not_empty'
       const numeric = columns.find((c) => c.key === rule.column)?.numeric === true
+      const isDate = columnTypeOf(columns.find((c) => c.key === rule.column)) === 'date'
       const setOp = (op: (typeof ROW_PREDICATE_OPS)[number]) => {
         if (op === 'is_empty' || op === 'is_not_empty') return onChange({ ...rule, predicate: { op } })
         if (op === 'gt' || op === 'gte' || op === 'lt' || op === 'lte') {
@@ -173,7 +183,15 @@ function RuleFields({
       return (
         <>
           <span>{rule.rule === 'all_rows' ? everyPrefix(kind) : anyPrefix(kind)}</span>
-          <ColumnSelect value={rule.column} columns={columns} disabled={disabled} onChange={(column) => onChange({ ...rule, column })} />
+          <ColumnSelect value={rule.column} columns={columns} disabled={disabled} onChange={(column) => {
+            const next = columns.find((c) => c.key === column)
+            const nextDate = columnTypeOf(next) === 'date'
+            // 日期列与其他列的条件不通用：跨类型切换时换成该列的默认条件
+            onChange({ ...rule, column, ...(nextDate !== isDate ? { predicate: nextDate ? defaultPredicate(next, 'expect') : { op: 'is_not_empty' as const } } : {}) })
+          }} />
+          {isDate ? (
+            <DatePredicateFields predicate={p} column={rule.column} side='expect' sample={null} disabled={disabled} onChange={(predicate) => onChange({ ...rule, predicate })} />
+          ) : (
           <Select value={p.op} disabled={disabled} onValueChange={(v) => setOp(v as (typeof ROW_PREDICATE_OPS)[number])}>
             <SelectTrigger className='h-8 w-auto min-w-24'>
               <SelectValue />
@@ -186,7 +204,8 @@ function RuleFields({
               ))}
             </SelectContent>
           </Select>
-          {needsValue ? (
+          )}
+          {needsValue && !isDate ? (
             <Input
               aria-label='比较的值'
               className='h-8 w-36'
@@ -256,6 +275,8 @@ function RuleFields({
           <span>没有重复值</span>
         </>
       )
+    case 'row_lookup':
+      return null
     case 'row_expression':
       return <span className='text-muted-foreground'>自定义条件（高级），请到高级编辑中修改</span>
   }
@@ -275,6 +296,7 @@ export function TableChecksEditor({
 }) {
   const columns = checkColumnsOf(step)
   const kind = checkKindOf(step)
+  const sample = useTableSample(step.id)
   const labelOf = (key: string) => columns.find((c) => c.key === key)?.label ?? key
   const outputKey = step.outputKey
   const replace = (next: TableCheckContract) => onChange(checks.map((c) => (c.id === next.id ? next : c)))
@@ -283,7 +305,7 @@ export function TableChecksEditor({
     if (!outputKey) return
     const rule = defaultRule(template, columns)
     if (!rule) return
-    onChange([...checks, buildTableCheck(outputKey, rule, labelOf, 'MUST', undefined, kind)])
+    onChange([...checks, buildTableCheck(outputKey, normalizeRule(rule, columns), labelOf, 'MUST', undefined, kind)])
   }
 
   return (
@@ -299,8 +321,11 @@ export function TableChecksEditor({
           </SelectTrigger>
           <SelectContent>
             {templatesFor(kind).map((t) => (
-              <SelectItem key={t.value} value={t.value}>
-                {t.label}
+              <SelectItem key={t.value} value={t.value} textValue={t.label}>
+                <span className='flex flex-col items-start'>
+                  <span>{t.label}</span>
+                  <span className='text-caption text-muted-foreground'>{t.example}</span>
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
@@ -325,13 +350,17 @@ export function TableChecksEditor({
           return (
             <li key={check.id} className='space-y-1.5 rounded-md border border-border-divider p-3' data-testid='table-check'>
               <div className='flex flex-wrap items-center gap-2 text-small'>
-                <RuleFields
-                  rule={rule}
-                  columns={columns}
-                  kind={kind}
-                  disabled={disabled}
-                  onChange={(next) => replace(withRule(check, next, labelOf, kind))}
-                />
+                {rule.rule === 'row_lookup' ? (
+                  <b className='flex-1 text-caption'>{kind === 'cards' ? '找到某一张卡片，再检查它' : '找到某一行，再检查它'}</b>
+                ) : (
+                  <RuleFields
+                    rule={rule}
+                    columns={columns}
+                    kind={kind}
+                    disabled={disabled}
+                    onChange={(next) => replace(withRule(check, normalizeRule(next, columns), labelOf, kind))}
+                  />
+                )}
                 <div className='ml-auto flex items-center gap-2'>
                   <Label className='flex items-center gap-1.5 text-caption font-normal'>
                     <Checkbox
@@ -353,6 +382,16 @@ export function TableChecksEditor({
                   </Button>
                 </div>
               </div>
+              {rule.rule === 'row_lookup' ? (
+                <RowLookupFields
+                  rule={rule}
+                  columns={columns}
+                  kind={kind}
+                  sample={sample}
+                  disabled={disabled}
+                  onChange={(next) => replace(withRule(check, normalizeRule(next, columns), labelOf, kind))}
+                />
+              ) : null}
               <p className='text-caption text-muted-foreground'>检查内容：{sentenceOf(rule, labelOf, kind)}</p>
             </li>
           )
