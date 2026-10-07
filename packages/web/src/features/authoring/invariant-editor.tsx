@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Trash2 } from 'lucide-react'
 import { PageHealthConfigForm } from './page-health-config'
 
 const KIND_LABELS: Record<RuntimeInvariantKind, string> = {
@@ -126,8 +126,16 @@ function InvariantCard({
           <p className='text-label text-muted-foreground'>{KIND_LABELS[invariant.kind]}</p>
           <Label htmlFor={`invariant-meaning-${invariant.id}`}>一句话说明</Label>
         </div>
-        <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
-          删除
+        <Button
+          type='button'
+          size='sm'
+          variant='ghost'
+          disabled={disabled}
+          onClick={onRemove}
+          className='h-7 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
+        >
+          <Trash2 className='size-3.5' />
+          <span>删除</span>
         </Button>
       </div>
       <Input

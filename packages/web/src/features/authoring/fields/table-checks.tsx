@@ -377,8 +377,9 @@ export function TableChecksEditor({
                     aria-label='删除这条检查'
                     disabled={disabled}
                     onClick={() => onChange(checks.filter((c) => c.id !== check.id))}
+                    className='size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
                   >
-                    <Trash2 className='size-4' />
+                    <Trash2 className='size-3.5' />
                   </Button>
                 </div>
               </div>

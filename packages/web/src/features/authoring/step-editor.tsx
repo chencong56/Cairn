@@ -393,7 +393,7 @@ export function InputsEditor({
                 variant='ghost'
                 size='sm'
                 disabled={disabled}
-                className='h-6 px-1.5 text-caption text-muted-foreground hover:text-destructive gap-1'
+                className='h-6 px-1.5 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
                 onClick={() =>
                   onChange(inputs.filter((_, itemIndex) => itemIndex !== index))
                 }

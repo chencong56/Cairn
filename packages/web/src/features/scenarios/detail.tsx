@@ -54,6 +54,7 @@ import {
   Plus,
   Settings,
   Sparkles,
+  Trash2,
   Undo2,
   Zap,
 } from 'lucide-react'
@@ -91,7 +92,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
@@ -1708,7 +1709,9 @@ export function ScenarioDetailPage() {
                   variant='outline'
                   disabled={disabled || draft.nodes.length <= 1}
                   onClick={() => setDeleteId(nodeId(draft.selectedNode!))}
+                  className='text-muted-foreground hover:text-destructive hover:bg-destructive/10 hover:border-destructive/30 transition-colors'
                 >
+                  <Trash2 className='size-3.5 mr-1' />
                   删除
                 </Button>
                 <Button size='sm' variant='outline' disabled={!draft.undo} onClick={draft.undoStructure}>
@@ -1774,7 +1777,9 @@ export function ScenarioDetailPage() {
                   variant='outline'
                   disabled={disabled || draft.nodes.length <= 1}
                   onClick={() => setDeleteId(nodeId(draft.selectedNode!))}
+                  className='text-muted-foreground hover:text-destructive hover:bg-destructive/10 hover:border-destructive/30 transition-colors'
                 >
+                  <Trash2 className='size-3.5 mr-1' />
                   删除
                 </Button>
                 <Button size='sm' variant='outline' disabled={!draft.undo} onClick={draft.undoStructure}>
@@ -1892,7 +1897,9 @@ export function ScenarioDetailPage() {
                   variant='outline'
                   disabled={disabled || nodeCount <= 1}
                   onClick={() => setDeleteId(draft.selected!.id)}
+                  className='text-muted-foreground hover:text-destructive hover:bg-destructive/10 hover:border-destructive/30 transition-colors'
                 >
+                  <Trash2 className='size-3.5 mr-1' />
                   删除
                 </Button>
                 <Button size='sm' variant='outline' disabled={!draft.undo} onClick={draft.undoStructure}>
@@ -2843,6 +2850,7 @@ export function ScenarioDetailPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
               onClick={() => {
                 if (!document || !deleteId) return
                 if (isAuthoringDocumentV2(document) && draft.v2Document) {

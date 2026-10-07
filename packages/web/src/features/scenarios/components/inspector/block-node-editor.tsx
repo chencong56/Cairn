@@ -69,7 +69,7 @@ export function BlockNodeEditor({
                 type='button'
                 size='sm'
                 variant='ghost'
-                className='h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10'
+                className='h-7 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
                 disabled={disabled}
                 onClick={onDelete}
               >
@@ -183,7 +183,7 @@ export function BlockNodeEditor({
                 type='button'
                 size='sm'
                 variant='ghost'
-                className='h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10'
+                className='h-7 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
                 disabled={disabled}
                 onClick={onDelete}
               >
@@ -336,7 +336,7 @@ export function BlockNodeEditor({
               type='button'
               size='sm'
               variant='ghost'
-              className='h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10'
+              className='h-7 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
               disabled={disabled}
               onClick={onDelete}
             >

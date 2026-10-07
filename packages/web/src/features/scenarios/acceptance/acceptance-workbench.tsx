@@ -1651,7 +1651,15 @@ function IntentEditor({
           <p className='text-small font-medium'>{meta.label}</p>
           <p className='text-label text-muted-foreground'>{meta.description}</p>
         </div>
-        <Button type='button' size='icon' variant='ghost' aria-label={`移除${meta.label}`} disabled={disabled} onClick={onRemove}>
+        <Button
+          type='button'
+          size='icon'
+          variant='ghost'
+          aria-label={`移除${meta.label}`}
+          disabled={disabled}
+          onClick={onRemove}
+          className='size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
+        >
           <Trash2 className='size-3.5' />
         </Button>
       </div>

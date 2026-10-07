@@ -16,6 +16,7 @@ import {
   Info,
   Loader2,
   Square,
+  Trash2,
 } from 'lucide-react'
 import type {
   RunDetailDto,
@@ -592,7 +593,8 @@ export function StudioToolbar({
               {canDelete ? (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem className='text-destructive' onClick={onOpenRemove}>
+                  <DropdownMenuItem className='text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer' onClick={onOpenRemove}>
+                    <Trash2 className='size-3.5 mr-2' />
                     <span className='whitespace-nowrap'>删除</span>
                   </DropdownMenuItem>
                 </>

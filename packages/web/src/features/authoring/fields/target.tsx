@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Trash2 } from 'lucide-react'
 import {
   describeLocatorCandidates,
   sanitizeLocatorLabel,
@@ -387,6 +387,7 @@ export function TargetFields({
                     variant='ghost'
                     size='sm'
                     disabled={disabled}
+                    className='h-7 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
                     onClick={() =>
                       onChange({
                         ...target,
@@ -394,7 +395,8 @@ export function TargetFields({
                       })
                     }
                   >
-                    移除
+                    <Trash2 className='size-3.5' />
+                    <span>移除</span>
                   </Button>
                 ) : null}
               </div>
@@ -455,6 +457,7 @@ export function TargetFields({
                   variant='ghost'
                   size='sm'
                   disabled={disabled}
+                  className='h-7 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
                   onClick={() =>
                     onChange({
                       ...target,
@@ -462,7 +465,8 @@ export function TargetFields({
                     })
                   }
                 >
-                  移除
+                  <Trash2 className='size-3.5' />
+                  <span>移除</span>
                 </Button>
               </div>
             ))}

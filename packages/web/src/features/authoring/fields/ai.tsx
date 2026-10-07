@@ -168,8 +168,10 @@ export function ContextBindingsField({
                 size='sm'
                 variant='ghost'
                 disabled={disabled}
-                className='h-8 w-8 p-0 text-muted-foreground hover:text-destructive'
+                className='h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
                 onClick={() => removeBinding(idx)}
+                aria-label='删除变量绑定'
+                title='删除变量绑定'
               >
                 <Trash2 className='h-4 w-4' />
               </Button>
@@ -496,8 +498,10 @@ function OutputSchemaFields({
                     ),
                   })
                 }
+                className='h-8 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
               >
-                移除
+                <Trash2 className='size-3.5' />
+                <span>移除</span>
               </Button>
             </div>
           ))}

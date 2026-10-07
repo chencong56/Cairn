@@ -324,7 +324,8 @@ export function ScenarioOutputsEditor({
                           size='sm'
                           disabled={disabled}
                           onClick={() => removeMetric(idx)}
-                          className='h-6 w-6 p-0 text-muted-foreground hover:text-destructive'
+                          className='h-6 w-6 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
+                          aria-label='删除指标'
                           title='删除指标'
                         >
                           <Trash2 className='size-3.5' />
@@ -430,7 +431,8 @@ export function ScenarioOutputsEditor({
                           size='sm'
                           disabled={disabled}
                           onClick={() => removeDataRowField(idx)}
-                          className='h-6 w-6 p-0 text-muted-foreground hover:text-destructive'
+                          className='h-6 w-6 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
+                          aria-label='删除字段'
                           title='删除字段'
                         >
                           <Trash2 className='size-3.5' />

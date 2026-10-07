@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Trash2 } from 'lucide-react'
 import { FieldHelp } from '@/components/ui/field-help'
 import { defaultTarget } from './step-registry'
 import { TargetFields } from './fields/target'
@@ -199,7 +199,17 @@ function OutcomeCard({
             onChange={(event) => onChange({ ...contract, rule: { kind: 'ai', instruction: event.target.value } })}
           />
           <p className='text-caption text-muted-foreground'>运行时由 AI 核对页面是否满足以上要求；保存条件不代表已经验证通过。</p>
-          <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>移除</Button>
+          <Button
+            type='button'
+            size='sm'
+            variant='ghost'
+            disabled={disabled}
+            onClick={onRemove}
+            className='h-7 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
+          >
+            <Trash2 className='size-3.5' />
+            <span>移除</span>
+          </Button>
         </div>
       ) : contract.rule.kind === 'context' ||
       contract.rule.kind === 'step_duration' ||
@@ -367,8 +377,16 @@ function OutcomeCard({
                 直接填写对象
               </Button>
             ) : null}
-            <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
-              移除
+            <Button
+              type='button'
+              size='sm'
+              variant='ghost'
+              disabled={disabled}
+              onClick={onRemove}
+              className='h-7 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
+            >
+              <Trash2 className='size-3.5' />
+              <span>移除</span>
             </Button>
           </div>
           <p className='text-label text-muted-foreground'>
@@ -519,8 +537,16 @@ function NonPageRuleFields({
         <p className='text-label text-muted-foreground'>
           从首个已执行步骤开始到最后一个业务步骤完成计（不含收尾检查步骤）；取不到耗时时结果为「无法判定」，不会中止运行。
         </p>
-        <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
-          移除
+        <Button
+          type='button'
+          size='sm'
+          variant='ghost'
+          disabled={disabled}
+          onClick={onRemove}
+          className='h-7 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
+        >
+          <Trash2 className='size-3.5' />
+          <span>移除</span>
         </Button>
       </div>
     )
@@ -548,8 +574,16 @@ function NonPageRuleFields({
         <p className='text-label text-muted-foreground'>
           按本步骤最后一次尝试的起止时间计（含页面等待）；取不到耗时时结果为「无法判定」。
         </p>
-        <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
-          移除
+        <Button
+          type='button'
+          size='sm'
+          variant='ghost'
+          disabled={disabled}
+          onClick={onRemove}
+          className='h-7 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
+        >
+          <Trash2 className='size-3.5' />
+          <span>移除</span>
         </Button>
       </div>
     )
@@ -638,8 +672,16 @@ function NonPageRuleFields({
           </div>
         ) : null}
       </div>
-      <Button type='button' size='sm' variant='ghost' disabled={disabled} onClick={onRemove}>
-        移除
+      <Button
+        type='button'
+        size='sm'
+        variant='ghost'
+        disabled={disabled}
+        onClick={onRemove}
+        className='h-7 px-2 text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors gap-1'
+      >
+        <Trash2 className='size-3.5' />
+        <span>移除</span>
       </Button>
     </div>
   )

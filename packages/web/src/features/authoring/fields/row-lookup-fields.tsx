@@ -195,7 +195,7 @@ function ConditionBlock({
           type='button'
           aria-label='删除这个条件'
           disabled={disabled}
-          className='absolute right-1 top-1 rounded p-0.5 text-muted-foreground hover:text-foreground'
+          className='absolute right-1 top-1 rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors'
           onClick={onRemove}
         >
           <X className='size-3.5' />
@@ -208,7 +208,7 @@ function ConditionBlock({
 function StepTitle({ n, children }: { n: number; children: string }) {
   return (
     <div className='mb-1 mt-3 flex items-center gap-1.5 text-caption font-semibold'>
-      <span className='inline-grid size-[18px] place-items-center rounded-full bg-primary text-[11px] text-primary-foreground'>{n}</span>
+      <span className='inline-grid size-[18px] place-items-center rounded-full bg-primary text-2xs text-primary-foreground'>{n}</span>
       {children}
     </div>
   )
@@ -312,9 +312,9 @@ export function RowLookupFields({
         </CollapsibleContent>
       </Collapsible>
 
-      {incomplete ? <p className='mt-2 text-caption text-amber-700'>{incomplete}</p> : null}
+      {incomplete ? <p className='mt-2 text-caption text-status-warning-foreground'>{incomplete}</p> : null}
       {preview ? (
-        <p className={`mt-2 text-caption ${preview.passed ? 'text-emerald-700' : preview.factsUnavailable ? 'text-amber-700' : 'text-amber-700'}`} data-testid='lookup-preview'>
+        <p className={`mt-2 text-caption ${preview.passed ? 'text-status-success-foreground' : 'text-status-warning-foreground'}`} data-testid='lookup-preview'>
           {preview.reasonCode === 'ROW_NOT_FOUND'
             ? `⚠ 当前预览里没有找到符合的${unit}（共 ${sample?.rows.length ?? 0} ${kind === 'cards' ? '张' : '行'}）。运行时以页面实时数据为准。${preview.details.lookup?.closest.length ? `最接近的：${preview.details.lookup.closest.join('、')}` : ''}`
             : preview.passed
