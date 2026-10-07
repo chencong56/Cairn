@@ -88,6 +88,11 @@ export function OutcomeListEditor({
             {scope === 'scenario' ? '怎样才算成功' : '成功条件'}
           </h3>
           <span className='rounded bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground'>选填</span>
+          <FieldHelp label={scope === 'scenario' ? '怎样才算成功' : '成功条件'}>
+            {scope === 'scenario'
+              ? '评估整套业务的最终结果（如订单是否真实创建）。选填项，建议按需添加最终业务断言。'
+              : '检查本动作是否成功执行（如按钮已点击、弹窗已出现）。选填项，若无需在此步骤单独校验页面状态，可直接留空，不影响步骤正常执行。'}
+          </FieldHelp>
         </div>
         <Button
           type='button'
@@ -99,18 +104,7 @@ export function OutcomeListEditor({
           添加条件
         </Button>
       </div>
-      <p className='text-caption text-muted-foreground'>
-        {scope === 'scenario'
-          ? '评估整套业务的最终结果（如订单是否真实创建）。'
-          : '检查本动作是否成功执行（如按钮已点击、弹窗已出现）。'}
-      </p>
-      {outcomes.length === 0 ? (
-        <div className='rounded-md border border-dashed border-border-divider p-3 text-caption text-muted-foreground bg-muted/20'>
-          {scope === 'scenario'
-            ? '业务结果未评估：当前无场景级完成标准。流程执行成功不代表业务最终达标，建议在此添加最终业务断言。'
-            : '还没有成功条件。若无需在此步骤单独校验页面状态，可直接留空，不影响步骤正常执行。'}
-        </div>
-      ) : (
+      {outcomes.length > 0 ? (
         <ul className='space-y-3'>
           {outcomes.map((contract, index) => (
             <li key={contract.id}>
@@ -126,7 +120,7 @@ export function OutcomeListEditor({
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
       {scope === 'step' ? (
         <PageRequestConditions
           outcomes={allOutcomes}
