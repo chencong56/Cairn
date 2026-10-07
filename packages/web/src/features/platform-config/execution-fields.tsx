@@ -1,4 +1,6 @@
 import { FormField } from '@/components/ui/form'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   FieldGrid,
   NumberSetting,
@@ -98,6 +100,19 @@ export function ExecutionFields({ canWrite }: { canWrite: boolean }) {
             )}
           />
           <FormField
+            name='runtimeInvariants.defaultPageHealthGuards'
+            render={({ field }) => (
+              <SwitchRow
+                label='新建场景默认检查页面接口与脚本错误'
+                help='只对新建的场景生效，已有场景不会被改动；每个场景仍可单独删除或调整这两条约束。'
+                warning='违规只记为警告，不会让运行失败，也不会触发消息推送。'
+                checked={field.value ?? true}
+                disabled={!canWrite}
+                onCheckedChange={field.onChange}
+              />
+            )}
+          />
+          <FormField
             name='fixtureStepsEnabled'
             render={({ field }) => (
               <SwitchRow
@@ -111,6 +126,33 @@ export function ExecutionFields({ canWrite }: { canWrite: boolean }) {
             )}
           />
         </SwitchGrid>
+        <FormField
+          name='runtimeInvariants.pageHealthDefaultIgnore'
+          render={({ field }) => (
+            <div className='space-y-1.5'>
+              <Label htmlFor='page-health-default-ignore'>页面接口检查的默认忽略地址（一行一个）</Label>
+              <Textarea
+                id='page-health-default-ignore'
+                rows={3}
+                disabled={!canWrite}
+                placeholder='/favicon.ico'
+                defaultValue={(field.value ?? []).join('\n')}
+                onBlur={(event) =>
+                  field.onChange(
+                    event.target.value
+                      .split('\n')
+                      .map((item) => item.trim())
+                      .filter(Boolean)
+                      .slice(0, 50)
+                  )
+                }
+              />
+              <p className='text-label text-muted-foreground'>
+                新建场景时写进「页面接口不得报错」约束，已有场景不受影响。以 / 开头只匹配路径。
+              </p>
+            </div>
+          )}
+        />
       </SettingSection>
 
       <SettingSection title='步骤默认'>

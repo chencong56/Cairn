@@ -6,6 +6,7 @@ import {
   DEMONSTRATION_PROTOCOL,
   DEMONSTRATION_RULE_VERSION,
   createScenarioHandoffBodySchema,
+  defaultPageHealthInvariants,
   type CreateScenarioHandoffBody,
   type DemonstrationDecision,
   type RecordingImportReceipt,
@@ -26,6 +27,7 @@ import { composeRecordingHandoffDocument } from './imports.js'
 
 export {
   createScenarioHandoffBodySchema,
+  defaultPageHealthInvariants,
   type CreateScenarioHandoffBody,
 }
 
@@ -41,6 +43,7 @@ export async function createScenarioFromRecordingHandoff(
   recordingDraftId: string,
   body: CreateScenarioHandoffBody,
   actor: AuditActor,
+  options: { pageHealthGuards?: boolean; pageHealthIgnore?: readonly string[] } = {},
 ): Promise<{ scenario: ScenarioDetailDto; receipt: RecordingImportReceipt }> {
   createScenarioHandoffBodySchema.parse(body)
 
@@ -158,6 +161,11 @@ export async function createScenarioFromRecordingHandoff(
       sourceMap = composed.sourceMap
       sourceDigest = composed.sourceDigest
       normalizerVersion = composed.normalizerVersion
+    }
+
+    // 新建场景默认带页面接口 / 脚本错误约束（由调用方按平台开关决定）。
+    if (options.pageHealthGuards && !authoringDoc.runtimeInvariants?.length) {
+      authoringDoc = { ...authoringDoc, runtimeInvariants: defaultPageHealthInvariants(newId, { networkIgnore: options.pageHealthIgnore }) }
     }
 
     const expanded = await expandWithLoader(txDb, draftRow.targetId, authoringDoc, 'preview', true)

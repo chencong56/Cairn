@@ -2,6 +2,7 @@ import { appendRunEvents, conflict, recordInlineLogEvidence, setSessionProbe } f
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  isPageHealthKind,
   isSideEffectBrowserCommand,
   requiredScreenshotRole,
   resolveEvidencePolicy,
@@ -27,6 +28,7 @@ import {
 } from './runtime'
 import { executeOnPage } from './surface'
 import { handoffMessage } from './managed-helpers'
+import { PageHealthCollector } from './page-health-collector.js'
 import { createManagedPage, pageRefFor, pickPopupHandoff, type ManagedPageEntry } from './page-identity'
 import { type LiveHandle, type SessionManagerContext } from './session-live.js'
 import {
@@ -454,7 +456,23 @@ export async function invalidate(this: SessionManagerContext, grant: SessionGran
     await this.close(sessionId, reason).catch(() => undefined)
   }
 
+/** 运行占用期间挂页面健康采集器（只监听）；没有页面健康约束时什么都不做。 */
+export function startPageHealthForLease(this: SessionManagerContext, leaseId: string, sessionId: string, run: RunSnapshot): void {
+    this.pageHealthByLease.get(leaseId)?.dispose()
+    this.pageHealthByLease.delete(leaseId)
+    const invariants = (run.runtimeInvariantManifest?.entries ?? []).filter((item) => isPageHealthKind(item.kind))
+    if (invariants.length === 0) return
+    const live = this.lives.get(sessionId)
+    const context = live?.handle.context
+    if (!context || typeof context.on !== 'function') return
+    const knownOrigins = [...(run.allowedOrigins ?? []), ...(run.loginOrigin ? [run.loginOrigin] : [])]
+    const collector = new PageHealthCollector(context as never, { invariants, knownOrigins })
+    collector.attach()
+    this.pageHealthByLease.set(leaseId, collector)
+  }
+
 export async function startTracingForLease(this: SessionManagerContext, leaseId: string, sessionId: string, run: RunSnapshot): Promise<void> {
+    startPageHealthForLease.call(this, leaseId, sessionId, run)
     const policy = resolveEvidencePolicy(run.evidencePolicy)
     if (policy.trace === 'off') {
       this.tracingByLease.set(leaseId, false)
@@ -475,6 +493,8 @@ export async function startTracingForLease(this: SessionManagerContext, leaseId:
   }
 
 export async function stopTracingForLease(this: SessionManagerContext, leaseId: string, sessionId: string | undefined): Promise<void> {
+    this.pageHealthByLease.get(leaseId)?.dispose()
+    this.pageHealthByLease.delete(leaseId)
     const enabled = this.tracingByLease.get(leaseId)
     this.tracingByLease.delete(leaseId)
     if (!enabled || !sessionId) return

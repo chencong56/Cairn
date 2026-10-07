@@ -1,6 +1,8 @@
+import { useAuthStore } from '@/stores/auth-store'
 import { TableSampleOutput } from './table-sample-view'
 import { useState } from 'react'
 import {
+  hasPermission,
   isAiStepType,
   type EvidenceMetadata,
   type RunDetailDto,
@@ -17,7 +19,7 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -29,6 +31,7 @@ import { buildStepQuote } from '@/features/assistant/quote-helper'
 import { translateStepError } from './error-translator'
 import { healerHypothesisOf, isAttemptHealed, isStepHealed } from './healed-helper'
 import { OutcomeConditionList } from './outcome-axis'
+import { hasVisibleConditions } from './outcome-labels'
 import { ContextLists } from './context-lists'
 import { AiAttemptSummary } from './ai-evidence'
 import { RunMapClues } from '@/features/map/run-clues'
@@ -63,6 +66,9 @@ export function StepInspector({
   focusEvidenceId,
   onFocusEvidence,
 }: Props) {
+  const navigate = useNavigate()
+  const authUser = useAuthStore((state) => state.auth.user)
+  const canEditScenario = Boolean(authUser && hasPermission(authUser.permissions, 'workflow:write'))
   const [activeTab, setActiveTab] = useState<'evidence' | 'outcome' | 'data' | 'debug'>('evidence')
   const setQuote = useAssistantStore((s) => s.setQuote)
   const openAssistant = useAssistantStore((s) => s.openPanel)
@@ -357,12 +363,12 @@ export function StepInspector({
 
         {/* Tab 2: 成功条件与业务判定 */}
         <div className={activeTab === 'outcome' ? 'flex-1 overflow-y-auto p-4 space-y-3 m-0' : 'hidden'}>
-          {run.snapshot.outcomeManifest?.entries.length ||
-          run.snapshot.runtimeInvariantManifest?.entries.length ? (
+          {hasVisibleConditions(run) ? (
             <OutcomeConditionList
               runId={run.id}
               run={run}
               evidenceItems={evidenceItems}
+              onOpenScenarioConfig={canEditScenario ? () => void navigate({ to: '/scenarios/$scenarioId', params: { scenarioId: run.scenarioId } }) : undefined}
               onFocusEvidence={(evidenceId) => {
                 setActiveTab('evidence')
                 onFocusEvidence?.(evidenceId)

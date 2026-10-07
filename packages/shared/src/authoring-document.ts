@@ -7,6 +7,7 @@ import {
   type ModuleExecutionMode,
 } from './action-module-vocabulary.js'
 import { outcomeContractSchema, type OutcomeContract } from './outcome.js'
+import { isPageHealthKind } from './page-health.js'
 import { runtimeInvariantSchema } from './runtime-invariant.js'
 import { outputFieldNameSchema } from './output-schema.js'
 import { scenarioOutputDeclSchema } from './run-output.js'
@@ -974,7 +975,8 @@ export function authoringHasModuleInvocations(document: ScenarioAuthoringDocumen
 
 export function authoringHasOutcomes(document: ScenarioAuthoringDocumentV2): boolean {
   if ((document.scenarioOutcomes?.length ?? 0) > 0) return true
-  if ((document.runtimeInvariants?.length ?? 0) > 0) return true
+  // 页面健康约束是新建场景自动带上的默认项，V1 客户端保存时允许丢弃，不算「有成功条件或运行期约束」。
+  if ((document.runtimeInvariants ?? []).some((item) => !isPageHealthKind(item.kind))) return true
   return walkAuthoringNodes(document).some(
     (item) => item.node.kind === 'step' && (item.node.outcomes?.length ?? 0) > 0,
   )

@@ -17,7 +17,7 @@ import type { Db } from '../client.js'
 import { atomic, clockNow, insertIgnoreRows, locked, schemaFor } from '../native.js'
 import { newId } from '../id.js'
 import { getOrCreatePlatformConfig, getPlatformConfig } from '../platform-config/store.js'
-import { recalculateRunOutcomeTx } from '../runs/outcome-results.js'
+import { outcomeStatusForOutboundTx, recalculateRunOutcomeTx } from '../runs/outcome-results.js'
 
 export async function lockOutboundDispatch(tx: Db) {
   const { outboundControls: c } = schemaFor(tx)
@@ -296,7 +296,9 @@ export async function prepareOutboundEvents(
       }
       const outcomeStatus = await recalculateRunOutcomeTx(tx, run.id, run.snapshot, now)
       const policy = event.policy!
-      const reasons = outboundReasons(policy.policy, { ...run, outcomeStatus })
+      // 只由页面健康导致的警告不推送：推送原因按排除非 MUST 页面健康约束后的结论计算。
+      const reasonOutcomeStatus = await outcomeStatusForOutboundTx(tx, run.id, run.snapshot)
+      const reasons = outboundReasons(policy.policy, { ...run, outcomeStatus: reasonOutcomeStatus })
       if (!reasons.length) {
         await tx
           .update(e)

@@ -1,5 +1,5 @@
 import { TableSampleOutput } from './table-sample-view'
-import { useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import {
   candidateGroupsOf,
   isAiStepType,
@@ -26,6 +26,7 @@ import { StatusBadge } from '@/components/status-badge'
 import { MODULE_EXECUTION_MODE_LABELS } from '@/features/action-modules/labels'
 import { AiAttemptSummary } from './ai-evidence'
 import { AttemptEvidenceList } from './evidence-viewer'
+import { pageHealthCountsByStep } from './outcome-labels'
 import { StepFaceScreenshot, stepFaceScreenshot } from './run-video'
 import { LoopIterationsPanel } from './loop-iterations'
 import { isStepHealed } from './healed-helper'
@@ -74,6 +75,9 @@ const SKIP_REASON_LABELS = {
   not_needed: '不再需要',
 } as const
 
+/** 页面健康违规按发起步骤的计数；没有违规时为空，步骤行不显示任何标记。 */
+const PageHealthByStepContext = createContext<Map<string, { net: number; script: number }>>(new Map())
+
 export function StepTimeline({
   run,
   evidenceItems,
@@ -86,6 +90,7 @@ export function StepTimeline({
 }: StepTimelineProps) {
   const manifest = run.snapshot?.moduleManifest
   const entries = manifest?.entries ?? []
+  const healthByStep = useMemo(() => pageHealthCountsByStep(run.outcomeResults), [run.outcomeResults])
 
   const ifBlocks = useMemo(() => topLevelIfBlocks(run), [run.snapshot])
 
@@ -200,6 +205,7 @@ export function StepTimeline({
   const hasModuleGroups = groups.some((g) => g.kind === 'module')
 
   return (
+    <PageHealthByStepContext.Provider value={healthByStep}>
     <div className='space-y-3'>
       {hasModuleGroups && (
         <div className='flex items-center justify-between gap-2 text-label text-muted-foreground'>
@@ -329,6 +335,7 @@ export function StepTimeline({
         })}
       </ol>
     </div>
+    </PageHealthByStepContext.Provider>
   )
 }
 
@@ -433,6 +440,7 @@ export function StepRunItem({
   onSelectStep?: (stepRunId: string, attemptId?: string) => void
 }) {
   const isCurrent = currentStepRunId === step.id
+  const health = useContext(PageHealthByStepContext).get(step.stepId)
   const setQuote = useAssistantStore((s) => s.setQuote)
   return (
     <li
@@ -454,6 +462,11 @@ export function StepRunItem({
           <StatusBadge tone={stepRunStatusTone(step.status)}>
             {STEP_RUN_STATUS_LABELS[step.status]}
           </StatusBadge>
+          {health ? (
+            <StatusBadge tone='warning' data-testid='step-page-health'>
+              {[health.net ? `接口 ${health.net}` : '', health.script ? `脚本 ${health.script}` : ''].filter(Boolean).join(' · ')}
+            </StatusBadge>
+          ) : null}
           {step.skipReason === 'optional_absent' ? (
             <Badge variant='outline' className='border-transparent bg-status-info-background text-status-info-foreground'>
               未出现，已跳过

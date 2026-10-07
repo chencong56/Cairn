@@ -74,6 +74,8 @@ import { attachMaintenanceOperation, attachValidationOperation, completeOccupied
 import { settleOccupiedLanding, type SettleOccupiedLandingInput } from './landing-settle.js'
 import { acquireRunAuthControl, applyRecoveryRule, executeAuthInput, expiredAuthObservation, failInRunAuthRecovery, heartbeatRunAuthControl, inputRunAuthControl, observeInRunAuth, observeInRunAuthHeld, releaseRunAuthControl, restoreAuthGateFromCheckpoint, resumeRunAuth, verifyInRunAuth } from './session-auth-control.js'
 import { adoptPage, assertCommand, closeManagedPage, closeRunPage, ensureRunPage, execute, invalidate, pageForGrant, runManagedPage, runSurfaceCommand, startTracingForLease, stopTracingForLease, withManagedPage } from './session-command.js'
+import { type PageHealthCollector } from './page-health-collector.js'
+import { type PageHealthDrain, type PageHealthStepInfo } from '@cairn/shared'
 import {
   discardSealedVideo,
   finalizeSealedVideo,
@@ -122,6 +124,7 @@ export class BrowserSessionManager {
   readonly leaseToRun = new Map<string, string>()
   readonly leaseTtls = new Map<string, number>()
   readonly tracingByLease = new Map<string, boolean>()
+  readonly pageHealthByLease = new Map<string, PageHealthCollector>()
   readonly videoRecorders = new Map<string, RunVideoRecorder>()
   readonly observeGrants = new Map<string, ObserveGrantEntry>()
   readonly authGateClosed = new Set<string>()
@@ -377,6 +380,22 @@ export class BrowserSessionManager {
     _signal?: AbortSignal,
   ): Promise<{ locale?: string; viewport?: MapViewport; pageFrameObserved: boolean }> {
     return sampleMapConditions.call(this, grant, _signal)
+  }
+
+  /** 标记页面健康归属的步骤；info 为 null 表示该步骤结束。没有页面健康约束时无操作。 */
+  markPageHealthStep(grant: SessionGrant, info: PageHealthStepInfo | null): void {
+    const collector = this.pageHealthByLease.get(grant.leaseId)
+    if (!collector) return
+    // 会话中途重建后浏览器上下文已换，采集器要跟过去。
+    const sessionId = this.leaseToSession.get(grant.leaseId)
+    const context = sessionId ? this.lives.get(sessionId)?.handle.context : undefined
+    if (context && typeof context.on === 'function' && !collector.isBoundTo(context)) collector.rebind(context as never)
+    if (info) collector.beginStep(info)
+    else collector.endStep()
+  }
+
+  drainPageHealth(grant: SessionGrant): PageHealthDrain | undefined {
+    return this.pageHealthByLease.get(grant.leaseId)?.drain()
   }
 
   async probeErrorSurface(grant: SessionGrant, _signal?: AbortSignal): Promise<{ role: string; text: string }[]> {

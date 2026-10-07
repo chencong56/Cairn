@@ -226,6 +226,7 @@ export async function projectModuleInvocationResults(
     outcomeResults: outcomeResultRows.map((r) => ({
       stepId: stepIdByRun.get(r.stepRunId) ?? null,
       verdict: r.verdict,
+      expected: r.expected,
     })),
     manualRequirementCounts,
   })

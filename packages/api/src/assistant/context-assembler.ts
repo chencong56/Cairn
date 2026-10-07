@@ -16,6 +16,9 @@ import {
   stepRunsOf,
   SENSITIVE_FILL_HINT,
   canonicalJson,
+  isPageHealthResult,
+  pageHealthCountsText,
+  pageHealthFactFromResult,
 } from '@cairn/shared'
 import { DomainError, loadRunObservation, type DbHandle } from '@cairn/db'
 
@@ -118,7 +121,10 @@ export async function assembleDiagnoseContext(
     [citationKey('run', run.id)],
     run.outcomeStatus === 'FAIL',
   )
-  const outcomeResults = run.outcomeResults ?? []
+  const allOutcomeResults = run.outcomeResults ?? []
+  // 页面健康结果合并成一条事实，排在业务检查之后，不占业务检查的名额。
+  const pageHealthResults = allOutcomeResults.filter((item) => item.verdict !== 'PASS' && isPageHealthResult(item))
+  const outcomeResults = allOutcomeResults.filter((item) => !isPageHealthResult(item))
   const notableOutcomes = outcomeResults.filter((item) => item.verdict !== 'PASS')
   const displayedOutcomes = (notableOutcomes.length > 0 ? notableOutcomes : outcomeResults).slice(0, 6)
   for (const result of displayedOutcomes) {
@@ -132,6 +138,14 @@ export async function assembleDiagnoseContext(
   if (notableOutcomes.length > displayedOutcomes.length) {
     missingInformation.push(`业务检查异常共 ${notableOutcomes.length} 项，事实包只列出前 ${displayedOutcomes.length} 项`)
     missingReasons.push({ reason: 'truncated', detail: '业务检查异常条目超过当前事实包展示上限' })
+  }
+  if (pageHealthResults.length > 0) {
+    const facts = pageHealthResults.map((item) => pageHealthFactFromResult(item)).filter((fact): fact is NonNullable<typeof fact> => Boolean(fact))
+    add(
+      'page-health',
+      `页面健康检查发现问题（只记警告，不是业务检查失败）：${pageHealthCountsText(facts) || '见运行结果'}。`,
+      [citationKey('run', run.id), ...pageHealthResults.slice(0, 3).map((item) => citationKey('stepRun', item.stepRunId))],
+    )
   }
   const placementDescription = assistantWaitingPlacementDescription(run.placement.state)
   if (placementDescription) add('placement', placementDescription, [citationKey('run', run.id)])

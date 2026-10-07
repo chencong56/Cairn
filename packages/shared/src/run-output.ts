@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { entityIdSchema, jsonValueSchema, type JsonValue } from './wire.js'
 import { contextKeySchema, type Step } from './step.js'
 import { outputFieldNameSchema } from './output-schema.js'
+import { isPageHealthResult, pageHealthFactFromResult, pageHealthSummaryText, type PageHealthFact } from './page-health.js'
 
 export const scenarioMetricDeclSchema = z
   .strictObject({
@@ -121,6 +122,8 @@ export type AssembleOutcomeResultItem = {
   severity?: string
   verdict?: string
   evidenceId?: string | null
+  expected?: JsonValue | null
+  actual?: JsonValue | null
   details?: Record<string, JsonValue> | null
   stepId?: string
   evaluatedAt?: Date | string
@@ -283,7 +286,20 @@ export function assembleRunOutput(input: AssembleRunOutputInput): RunOutput {
     }
   }
 
+  // 页面健康约束每次运行合并成一条发现项（按约束），避免每个违规尝试各刷一条。
+  const pageHealth = new Map<string, { res: AssembleOutcomeResultItem; facts: PageHealthFact[]; evidenceId?: string }>()
+  const stepIndexById = new Map(steps.map((s, idx) => [s.id, idx + 1]))
+
   for (const res of outcomeResults) {
+    if ((res.verdict === 'FAIL' || res.verdict === 'WARN') && isPageHealthResult(res)) {
+      const key = res.contractId || res.id || 'page-health'
+      const entry = pageHealth.get(key) ?? { res, facts: [] }
+      const fact = pageHealthFactFromResult(res)
+      if (fact) entry.facts.push(fact)
+      if (!entry.evidenceId && res.evidenceId && entityIdSchema.safeParse(res.evidenceId).success) entry.evidenceId = res.evidenceId
+      pageHealth.set(key, entry)
+      continue
+    }
     if (res.verdict === 'FAIL' || res.verdict === 'WARN') {
       // 与结果轴聚合同口径：只有必须成立（MUST）的条件不通过才是异常；应当成立 / 仅记录的不通过记警告。
       const severity: FindingSeverity =
@@ -307,8 +323,28 @@ export function assembleRunOutput(input: AssembleRunOutputInput): RunOutput {
     }
   }
 
-  // 若无 Outcome 违规但 Run 或步骤 FAILED，则自动注入执行异常 Finding
-  if (findings.length === 0 && input.status === 'FAILED') {
+  for (const [key, entry] of pageHealth) {
+    if (findings.length >= 50) break
+    const severity: FindingSeverity =
+      entry.res.verdict === 'FAIL' && (entry.res.severity === undefined || entry.res.severity === 'MUST') ? 'HIGH' : 'WARN'
+    const firstSample = entry.facts.flatMap((f) => f.samples).find((sample) => sample.stepId)
+    const stepOrdinal = firstSample?.stepId ? stepOrdinalByStepId.get(firstSample.stepId) : undefined
+    const detail = pageHealthSummaryText(entry.facts, (sample) => {
+      if (sample.afterStep && sample.stepId) return `第 ${stepIndexById.get(sample.stepId) ?? '?'} 步之后`
+      return sample.stepId && stepIndexById.has(sample.stepId) ? `第 ${stepIndexById.get(sample.stepId)} 步` : ''
+    })
+    findings.push({
+      id: key.slice(0, 64),
+      severity,
+      title: (entry.res.meaning || '页面健康').slice(0, 128),
+      detail: truncateString(detail, 2000),
+      ...(entry.evidenceId ? { evidenceId: entry.evidenceId } : {}),
+      ...(stepOrdinal !== undefined ? { stepOrdinal } : {}),
+    })
+  }
+
+  // 若运行 FAILED 且没有 HIGH 级业务发现项，自动注入执行异常 Finding（警告类发现项不能压掉执行失败）
+  if (!findings.some((finding) => finding.severity === 'HIGH') && input.status === 'FAILED') {
     let failedOrdinal: number | undefined = undefined
     let errorMsg = input.error?.safeMessage || input.error?.message || input.error?.code
     for (const sr of stepRuns) {

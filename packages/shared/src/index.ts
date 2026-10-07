@@ -3764,6 +3764,7 @@ export {
   FACTORY_RUNTIME_INVARIANT_DEFAULTS,
   platformRuntimeInvariantDefaultsSchema,
   type RuntimeInvariantKind,
+  defaultPageHealthInvariants,
   type RuntimeInvariantEvaluateAt,
   type RuntimeInvariant,
   type RuntimeInvariantManifest,
@@ -3784,6 +3785,7 @@ export {
   proposeOutcomeCandidate,
   outcomeContractFromCandidate,
   expectKindLabel,
+export * from './page-health.js'
   outcomeCandidateMeaning,
   type OutcomeCandidateProvenance,
   type OutcomeTextStability,

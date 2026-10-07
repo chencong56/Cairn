@@ -318,7 +318,8 @@ export function buildReportAiPrompt(sanitized: SanitizedReportData): { system: s
 4. 对每一个关键发现，citationIds 必须来自输入数据中真实存在的 ID（如步骤 ID、证据 ID、成员 ID）。若证据不足请留空数组，严禁凭空编造 ID。
 5. 若现有事实或证据不足以判断问题原因，请将 status 设为 "inconclusive"，并在 observation 中明确说明材料不足。
 6. 推测分析必须放在 hypotheses 中并标注可信度，不得将推测写为既成事实。
-7. 对场景集，status 和 counts 是执行事实；verdict 是依据封存成员事实的只读展示投影，sealedVerdict 是封存时旧结论。业务判定必须以 suiteBusiness 和 members.businessStatus 为准。healthScore 为 null、businessStatus 为 UNDETERMINED 或 UNVERIFIED 时，不得描述为业务正常、全部通过或满分。`
+7. 对场景集，status 和 counts 是执行事实；verdict 是依据封存成员事实的只读展示投影，sealedVerdict 是封存时旧结论。业务判定必须以 suiteBusiness 和 members.businessStatus 为准。healthScore 为 null、businessStatus 为 UNDETERMINED 或 UNVERIFIED 时，不得描述为业务正常、全部通过或满分。
+8. businessOutput.findings 里标题为「页面接口不得报错」「页面脚本不得出现未捕获异常」的发现项来自页面健康监听（接口 4xx / 5xx、请求失败、接口耗时超阈、脚本未捕获异常），默认只记警告，不是业务检查失败。解读时单独说明页面后台有错误或偏慢，不得据此断言业务失败，也不得编造未在 detail 中出现的接口或错误。`
 
   const user = JSON.stringify(sanitized)
   return { system, user }

@@ -52,6 +52,12 @@ export function createBrowserPort(manager: BrowserSessionManager, objects?: Obje
     async probeErrorSurface(grant, signal) {
       return manager.probeErrorSurface(grant, signal)
     },
+    markPageHealthStep(grant, info) {
+      manager.markPageHealthStep(grant, info)
+    },
+    drainPageHealth(grant) {
+      return manager.drainPageHealth(grant)
+    },
     async captureStructureSnapshot(grant, signal) {
       return manager.captureStructureSnapshot(grant, signal)
     },

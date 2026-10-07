@@ -26,6 +26,7 @@ import {
   type SessionGrant,
   type Step,
   isBrowserStepType,
+  stepUsesBrowser,
 } from '@cairn/shared'
 import { isAbortError, type EngineClock } from './clock.js'
 import { recordStepHardTimeout } from '../runtime/step-timeout-stats.js'
@@ -35,6 +36,7 @@ import { planBranchSuccess } from './engine-branch-plan.js'
 import { chargedAttemptCount, contextValue, evidencePayloadForStep, sessionLeaseFor } from './engine-step-plan.js'
 import { shouldNeedsReview, shouldRetry } from './engine-decisions.js'
 import { collectAttemptOutcomeResults } from './outcome-collector.js'
+import { collectPageHealthResults, type PageHealthCollected } from './page-health.js'
 import {
   collectErrorSurfaceResults,
   ERROR_SURFACE_VIOLATED,
@@ -209,6 +211,17 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
 
       if (!skipExecutor) {
         const stepStarted = input.clock.now()
+        const trackPageHealth = Boolean(
+          input.sessionGrant && this.browser?.markPageHealthStep && stepUsesBrowser(input.step.type),
+        )
+        if (trackPageHealth) {
+          this.browser!.markPageHealthStep!(input.sessionGrant!, {
+            stepId: input.step.id,
+            stepRunId: input.stepRunId,
+            attemptId,
+          })
+        }
+        try {
         outcome = await this.runExecutor({
           step: currentStep,
           input: currentInput,
@@ -226,6 +239,9 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
           snapshot: input.snapshot,
           scopePath: input.scopePath,
         })
+        } finally {
+          if (trackPageHealth) this.browser!.markPageHealthStep!(input.sessionGrant!, null)
+        }
         if (outcome.timedOut) recordStepHardTimeout()
         const remainingAfter = Math.max(0, input.policy.timeoutMs - (input.clock.now() - stepStarted))
         mapFacts = await this.collectAfterFacts({
@@ -299,6 +315,17 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
       }
     }
 
+    // 页面健康：每个浏览器步骤尝试结束时取数；没有违规不写任何行。
+    const pageHealthCollected: PageHealthCollected =
+      !skipDispatch && input.sessionGrant && this.browser?.drainPageHealth && stepUsesBrowser(input.step.type)
+        ? collectPageHealthResults({
+            runId: input.runId,
+            snapshot: input.snapshot,
+            drain: this.browser.drainPageHealth(input.sessionGrant),
+            now: new Date(input.clock.now()),
+          })
+        : { results: [], halt: false }
+
     const { outcomeResults: stepOutcomeResults, continueMode } = collectAttemptOutcomeResults({
       snapshot: input.snapshot,
       step: input.step,
@@ -306,9 +333,10 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
       attemptId,
       now: new Date(input.clock.now()),
     })
-    const outcomeResults = [...stepOutcomeResults, ...(surfaceCollected?.results ?? [])]
+    const outcomeResults = [...stepOutcomeResults, ...(surfaceCollected?.results ?? []), ...pageHealthCollected.results]
     const haltAfterSurface =
-      Boolean(surfaceCollected?.halt && surfaceCollected.violated && outcome.kind === 'success')
+      Boolean(surfaceCollected?.halt && surfaceCollected.violated && outcome.kind === 'success') ||
+      Boolean(pageHealthCollected.halt && outcome.kind === 'success')
 
     // 成功也要看写入结果：取消请求抢先到达时 finishAttempt 会把它改写成取消，此时必须停手。
     // 在 continue 模式下，即便断言失败也视为业务巡检步骤完成，按成功继续下一逻辑步，OutcomeResult 记 FAIL。
@@ -424,6 +452,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         secrets: input.secrets,
         mapFacts,
         outcomeResults,
+        pageHealth: pageHealthCollected.evidence,
       })
       if (!closed) return input.stop.aborted && !input.yielding() ? 'cancelled' : input.yielding() ? 'yielded' : 'stopped'
       if (hold) return 'await_hold'
@@ -482,6 +511,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         secrets: input.secrets,
         mapFacts,
         outcomeResults,
+        pageHealth: pageHealthCollected.evidence,
       })
       return 'stopped'
     }
@@ -509,6 +539,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         secrets: input.secrets,
         mapFacts,
         outcomeResults,
+        pageHealth: pageHealthCollected.evidence,
       })
       return 'cancelled'
     }
@@ -581,6 +612,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         secrets: input.secrets,
         mapFacts,
         outcomeResults,
+        pageHealth: pageHealthCollected.evidence,
       })
       if (!closed) return input.stop.aborted && !input.yielding() ? 'cancelled' : input.yielding() ? 'yielded' : 'stopped'
       if (hold) return 'await_hold'
@@ -637,6 +669,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
       secrets: input.secrets,
       mapFacts,
       outcomeResults,
+      pageHealth: pageHealthCollected.evidence,
     })
     if (!closed) return input.stop.aborted && !input.yielding() ? 'cancelled' : input.yielding() ? 'yielded' : 'stopped'
     if (hold) return 'await_hold'

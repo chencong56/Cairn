@@ -9,6 +9,7 @@ import {
   type OutcomeStatus,
   type OutcomeVerdict,
 } from './outcome.js'
+import { networkHealthConfigSchema, scriptErrorsConfigSchema } from './page-health.js'
 import { effectTypeSchema, type EffectType } from './step.js'
 import { entityIdSchema, type JsonValue } from './wire.js'
 
@@ -20,6 +21,8 @@ export const RUNTIME_INVARIANT_KINDS = [
   'effect_ceiling',
   'readonly_guarantee',
   'error_surface',
+  'network_health',
+  'script_errors',
 ] as const
 export type RuntimeInvariantKind = (typeof RUNTIME_INVARIANT_KINDS)[number]
 export const runtimeInvariantKindSchema = z.enum(RUNTIME_INVARIANT_KINDS)
@@ -48,7 +51,7 @@ export function effectTypeExceedsCeiling(actual: EffectType, ceiling: EffectType
 }
 
 export function defaultEvaluateAt(kind: RuntimeInvariantKind): RuntimeInvariantEvaluateAt {
-  if (kind === 'error_surface') return 'each_step'
+  if (kind === 'error_surface' || kind === 'network_health' || kind === 'script_errors') return 'each_step'
   if (kind === 'effect_ceiling' || kind === 'readonly_guarantee') {
     return 'before_side_effect'
   }
@@ -56,7 +59,7 @@ export function defaultEvaluateAt(kind: RuntimeInvariantKind): RuntimeInvariantE
 }
 
 export function defaultInvariantSeverity(kind: RuntimeInvariantKind): OutcomeSeverity {
-  return kind === 'auth_validity' ? 'SHOULD' : 'MUST'
+  return kind === 'auth_validity' || kind === 'network_health' || kind === 'script_errors' ? 'SHOULD' : 'MUST'
 }
 
 export function defaultInvariantOnViolation(kind: RuntimeInvariantKind): OutcomeOnViolation {
@@ -76,6 +79,10 @@ export function defaultInvariantMeaning(kind: RuntimeInvariantKind): string {
       return '本次巡检不得改写业务数据'
     case 'error_surface':
       return '不得出现系统错误弹窗'
+    case 'network_health':
+      return '页面接口不得报错'
+    case 'script_errors':
+      return '页面脚本不得出现未捕获异常'
   }
 }
 
@@ -87,8 +94,23 @@ export const runtimeInvariantSchema = z
     severity: outcomeSeveritySchema,
     onViolation: outcomeOnViolationSchema,
     evaluateAt: runtimeInvariantEvaluateAtSchema,
+    network: networkHealthConfigSchema.optional(),
+    script: scriptErrorsConfigSchema.optional(),
   })
   .superRefine((invariant, ctx) => {
+    if (invariant.network && invariant.kind !== 'network_health') {
+      ctx.addIssue({ code: 'custom', path: ['network'], message: '接口配置只能出现在页面接口约束上' })
+    }
+    if (invariant.script && invariant.kind !== 'script_errors') {
+      ctx.addIssue({ code: 'custom', path: ['script'], message: '脚本配置只能出现在页面脚本约束上' })
+    }
+    if ((invariant.kind === 'network_health' || invariant.kind === 'script_errors') && invariant.evaluateAt !== 'each_step') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['evaluateAt'],
+        message: '页面健康约束只能在每一步后取数',
+      })
+    }
     if ((invariant.severity === 'SHOULD' || invariant.severity === 'INFO') && invariant.onViolation === 'halt') {
       ctx.addIssue({
         code: 'custom',
@@ -120,6 +142,16 @@ export function createRuntimeInvariant(kind: RuntimeInvariantKind, id: string): 
     onViolation: defaultInvariantOnViolation(kind),
     evaluateAt: defaultEvaluateAt(kind),
   })
+}
+
+/** 新建场景默认带上的页面接口 / 脚本错误约束（默认 SHOULD + continue，只记警告）。 */
+export function defaultPageHealthInvariants(
+  newId: () => string,
+  options: { networkIgnore?: readonly string[] } = {},
+): RuntimeInvariant[] {
+  const network = createRuntimeInvariant('network_health', newId())
+  const ignore = (options.networkIgnore ?? []).slice(0, 50)
+  return [ignore.length > 0 ? { ...network, network: { ignore } } : network, createRuntimeInvariant('script_errors', newId())]
 }
 
 export type RuntimeInvariantWindow = {
@@ -411,6 +443,9 @@ export function deriveRuntimeInvariantResults(input: {
       continue
     }
 
+    // 页面健康约束只有违规才有结果行，运行结束不补判（没有违规什么都不记）。
+    if (invariant.kind !== 'error_surface') continue
+
     const probes = (input.errorSurfaces ?? []).filter((item) => item.probed)
     const hits = probes.filter((item) => classifyErrorSurface(item.matches).violated)
     if (hits.length > 0) {
@@ -485,9 +520,15 @@ export function joinRuntimeInvariantEvaluations(
 
 export const FACTORY_RUNTIME_INVARIANT_DEFAULTS = {
   allowEachStepProbe: false,
+  defaultPageHealthGuards: true,
+  /** 新建场景时写进「页面接口」约束的默认忽略清单（匹配规则同约束里的忽略地址）。 */
+  pageHealthDefaultIgnore: ['/favicon.ico'] as string[],
 } as const
 
 export const platformRuntimeInvariantDefaultsSchema = z.strictObject({
   allowEachStepProbe: z.boolean(),
+  /** 新建场景时默认带上页面接口 / 脚本错误两条约束（存量场景不回填）。 */
+  defaultPageHealthGuards: z.boolean().default(true),
+  pageHealthDefaultIgnore: z.array(z.string().trim().min(1).max(256)).max(50).default(['/favicon.ico']),
 })
 export type PlatformRuntimeInvariantDefaults = z.infer<typeof platformRuntimeInvariantDefaultsSchema>

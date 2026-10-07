@@ -36,6 +36,7 @@ import { findRunVideo, RunVideoSection, StepFaceScreenshot, stepFaceScreenshot }
 import { PlacementHint } from '@/features/runs/placement-hint'
 import { StepTimeline } from '@/features/runs/step-timeline'
 import { OutcomeAxisSummary, OutcomeConditionList, RUN_EXECUTION_AXIS_LABELS } from '@/features/runs/outcome-axis'
+import { hasVisibleConditions, type PageHealthIgnoreRule } from '@/features/runs/outcome-labels'
 
 function formatTrialValue(value: unknown): string {
   if (value === undefined) return '无'
@@ -56,6 +57,8 @@ export type TrialResultDialogProps = {
   selectedDraftStepId: string | null
   onSelectDraftStep: (stepId: string | null) => void
   onFocusFailedStep?: (stepId: string) => void
+  /** 把违规地址 / 消息写进草稿约束的忽略清单，下次试跑生效。 */
+  onIgnorePageHealth?: (invariantId: string, rules: PageHealthIgnoreRule[]) => void
 }
 
 export function TrialResultDialog({
@@ -66,6 +69,7 @@ export function TrialResultDialog({
   selectedDraftStepId,
   onSelectDraftStep,
   onFocusFailedStep,
+  onIgnorePageHealth,
 }: TrialResultDialogProps) {
   const user = useAuthStore((state) => state.auth.user)
   const canRead = Boolean(user && hasPermission(user.permissions, 'run:read'))
@@ -360,12 +364,13 @@ export function TrialResultDialog({
                   <OutcomeAxisSummary
                     executionLabel={RUN_EXECUTION_AXIS_LABELS[run.status]}
                     outcomeStatus={run.outcomeStatus}
-                    hasContracts={Boolean(run.snapshot.outcomeManifest?.entries.length)}
+                    hasContracts={hasVisibleConditions(run)}
                   />
                   <OutcomeConditionList
                     runId={run.id}
                     run={run}
                     evidenceItems={evidence?.items ?? []}
+                    onIgnorePageHealth={onIgnorePageHealth}
                     onEdit={(row) => {
                       if (row.entry.scope === 'scenario') {
                         onSelectDraftStep(null)

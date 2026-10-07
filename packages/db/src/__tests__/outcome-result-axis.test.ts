@@ -41,6 +41,7 @@ import {
   type NativeHandle as DbHandle,
 } from '../test-entry.js'
 import { newId } from '../id.js'
+import { outcomeStatusForOutboundTx } from '../runs/outcome-results.js'
 import { consoleAccounts as pg_consoleAccounts } from '../schema/console.js'
 import { runs as pg_runs, stepRuns as pg_stepRuns, outcomeResults as pg_outcomeResults } from '../schema/execution.js'
 import { targets as pg_targets } from '../schema/targets.js'
@@ -512,6 +513,81 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
     expect(detail?.outcomeStatus).toBe('WARN')
     expect(detail?.stepRuns[0]!.outcomeStatus).toBe('WARN')
     expect(detail?.outcomeResults[0]!.verdict).toBe('FAIL')
+  })
+
+  it('页面健康约束：只有违规才有结果行，SHOULD 违规为 WARN；无违规保持未评价；推送口径排除非 MUST 页面健康', async () => {
+    const net = createRuntimeInvariant('network_health', newId())
+    const script = createRuntimeInvariant('script_errors', newId())
+    const scenario = await createScenarioWithNodes({
+      name: '页面健康约束',
+      nodes: [{ kind: 'step', step: echoStep }],
+      runtimeInvariants: [net, script],
+    })
+    const run = await createRunWithSnapshot(handle.db, { scenarioId: scenario.id, actor: { id: actorId } })
+    const runId = run.detail.id
+    const grant = await forceGrantForRun(handle, runId, 'tester-ph')
+    const start = await startAttempt(handle.db, { runId, stepRunId: run.detail.stepRuns[0]!.id, grant, inputPayload: {} })
+    const evidenceId = newId()
+    await finishAttempt(handle.db, {
+      runId,
+      attemptId: start!.attemptId,
+      attemptStatus: 'SUCCEEDED',
+      output: { ok: true },
+      stepRunStatus: 'SUCCEEDED',
+      runStatus: 'SUCCEEDED',
+      grant,
+      pageHealth: {
+        evidenceId,
+        payload: { role: 'page_health', facts: [{ kind: 'network_health', total: 2, byClass: { '5xx': 2 }, samples: [] }] },
+      },
+      outcomeResults: [
+        {
+          contractId: net.id,
+          scope: 'scenario',
+          meaning: net.meaning,
+          severity: 'SHOULD',
+          onViolation: 'continue',
+          provenance: 'runtime_invariant',
+          verdict: 'FAIL',
+          expected: { kind: 'network_health', violations: 0 },
+          actual: { kind: 'network_health', total: 2, byClass: { '5xx': 2 }, samples: [] },
+          evidenceId,
+          evaluatedAt: new Date(),
+        },
+      ],
+    })
+    await settleRunOutcome(handle.db, runId)
+    const detail = await loadRunDetail(handle.db, runId)
+    expect(detail?.status).toBe('SUCCEEDED')
+    expect(detail?.outcomeStatus).toBe('WARN')
+    // 只有违规行：脚本约束没有违规，不补 PASS / UNKNOWN
+    expect(detail?.outcomeResults.map((row) => row.contractId)).toEqual([net.id])
+    expect(detail?.outcomeResults[0]!.evidenceId).toBe(evidenceId)
+    const evidence = await handle.pool!.query('SELECT type, payload FROM cairn.evidences WHERE id = $1', [evidenceId])
+    expect(evidence.rows[0]).toMatchObject({ type: 'log', payload: { role: 'page_health' } })
+    // 推送口径：非 MUST 页面健康被排除，只剩没有条件 → 未评价（不触发 outcome_warn）
+    const forOutbound = await handle.db.transaction((tx) =>
+      outcomeStatusForOutboundTx(tx as never, runId, detail!.snapshot as RunSnapshot),
+    )
+    expect(forOutbound).toBe('NOT_EVALUATED')
+
+    // 没有违规的运行：不写任何行，结论保持未评价
+    const clean = await createRunWithSnapshot(handle.db, { scenarioId: scenario.id, actor: { id: actorId } })
+    const cleanGrant = await forceGrantForRun(handle, clean.detail.id, 'tester-ph2')
+    const cleanStart = await startAttempt(handle.db, { runId: clean.detail.id, stepRunId: clean.detail.stepRuns[0]!.id, grant: cleanGrant, inputPayload: {} })
+    await finishAttempt(handle.db, {
+      runId: clean.detail.id,
+      attemptId: cleanStart!.attemptId,
+      attemptStatus: 'SUCCEEDED',
+      output: { ok: true },
+      stepRunStatus: 'SUCCEEDED',
+      runStatus: 'SUCCEEDED',
+      grant: cleanGrant,
+    })
+    await settleRunOutcome(handle.db, clean.detail.id)
+    const cleanDetail = await loadRunDetail(handle.db, clean.detail.id)
+    expect(cleanDetail?.outcomeResults).toEqual([])
+    expect(cleanDetail?.outcomeStatus).toBe('NOT_EVALUATED')
   })
 
   it('终态路径 2: finishRunIfDrained 补算并更新 runs.outcomeStatus', async () => {

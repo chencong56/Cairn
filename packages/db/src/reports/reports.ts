@@ -2,6 +2,9 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL }
 import {
   DEFAULT_REPORT_CONFIG,
   EXPORT_ARTIFACTS_PROTOCOL,
+  MAX_PAGE_HEALTH_SAMPLES,
+  isPageHealthResult,
+  pageHealthFactFromResult,
   REPORT_RENDER_VERSION,
   REPORT_TEMPLATE_VERSION,
   REPORT_LIMITS,
@@ -353,6 +356,21 @@ export async function listReports(db: Db, query: Partial<ReportListQuery> = {}, 
   })
 }
 
+/** 报告来源里的页面健康块：只含有违规的约束，样本总数有界；没有违规返回空对象，不写这个块。 */
+function pageHealthSourceBlock(results: readonly { contractId: string; meaning: string; verdict: string; severity: string; evidenceId?: string | null; actual?: unknown; expected?: unknown }[]): Record<string, JsonValue> {
+  const items: JsonValue[] = []
+  let budget = MAX_PAGE_HEALTH_SAMPLES
+  for (const result of results) {
+    if (!isPageHealthResult(result) || (result.verdict !== 'FAIL' && result.verdict !== 'WARN')) continue
+    const fact = pageHealthFactFromResult(result)
+    if (!fact) continue
+    const samples = fact.samples.slice(0, Math.max(0, budget))
+    budget -= samples.length
+    items.push({ contractId: result.contractId, meaning: result.meaning, kind: fact.kind, severity: result.severity, verdict: result.verdict, total: fact.total, byClass: fact.byClass, evidenceId: result.evidenceId ?? null, samples: JSON.parse(JSON.stringify(samples)) as JsonValue })
+  }
+  return items.length > 0 ? { pageHealth: { items } as JsonValue } : {}
+}
+
 type CapturedSource = { targetId: string; defaults: ReportConfig; payload: Record<string, JsonValue>; terminal: boolean; evidencePending: boolean; titleVars: Partial<Record<ReportTitleVariable, string>> }
 export async function captureSource(db: Db, subject: ReportSubject, actorId?: string): Promise<CapturedSource> {
   await assertReportSourceReadable(db, subject, actorId)
@@ -388,7 +406,9 @@ export async function captureSource(db: Db, subject: ReportSubject, actorId?: st
         finishedAt: run.finishedAt,
         targetAccountName: run.targetAccountName,
         accountNameSource: 'generation_time',
-        outcomeResults: run.outcomeResults.map((result) => ({ stepRunId: result.stepRunId, attemptId: result.attemptId, meaning: result.meaning, verdict: result.verdict, severity: result.severity, evidenceId: result.evidenceId ?? null })),
+        // 页面健康结果不进通用断言列表，单独成块（有违规才有）。
+        outcomeResults: run.outcomeResults.filter((result) => !isPageHealthResult(result)).map((result) => ({ stepRunId: result.stepRunId, attemptId: result.attemptId, meaning: result.meaning, verdict: result.verdict, severity: result.severity, evidenceId: result.evidenceId ?? null })),
+        ...pageHealthSourceBlock(run.outcomeResults),
         evidence: evidence.map((item) => {
           const shot = readScreenshotPayload(item.payload)
           return { evidenceId: item.id, type: item.type, status: item.status,

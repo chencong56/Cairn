@@ -3023,6 +3023,19 @@ export function ScenarioDetailPage() {
           runId={runId}
           scenarioId={scenarioId}
           selectedDraftStepId={draft.selectedId}
+          onIgnorePageHealth={(invariantId, rules) => {
+            const list = draft.v2Document?.runtimeInvariants ?? []
+            const add = (current: string[] | undefined) =>
+              Array.from(new Set([...(current ?? []), ...rules.map((rule) => rule.value)])).slice(0, 50)
+            draft.updateRuntimeInvariants(
+              list.map((item) => {
+                if (item.id !== invariantId) return item
+                return rules[0]?.kind === 'network_health'
+                  ? { ...item, network: { ...item.network, ignore: add(item.network?.ignore) } }
+                  : { ...item, script: { ...item.script, ignore: add(item.script?.ignore) } }
+              }),
+            )
+          }}
           onSelectDraftStep={(stepId) => {
             if (stepId) {
               locateStep(stepId)

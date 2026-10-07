@@ -14,6 +14,7 @@ import {
   type StepRunStatus,
 } from './run.js'
 import { stepRunMapByStep } from './run-api.js'
+import { isPageHealthResult } from './page-health.js'
 import { entityIdSchema, utcInstantSchema } from './wire.js'
 import { type ModuleHealthSignal, type ModuleHealthSummary, moduleHealthSummarySchema } from './action-module-health.js'
 
@@ -227,6 +228,7 @@ export type ModuleQualityDeriveEvidence = {
 export type ModuleQualityDeriveOutcomeResult = {
   stepId?: string | null
   verdict: 'PASS' | 'WARN' | 'FAIL' | 'UNKNOWN'
+  expected?: unknown
 }
 
 export type DeriveInvocationResultsInput = {
@@ -384,7 +386,7 @@ function deriveOne(
     if (step?.status === 'FAILED' || step?.outcomeStatus === 'FAIL') return true
     return Boolean(
       input.outcomeResults?.some(
-        (r) => r.stepId === stepId && r.verdict === 'FAIL',
+        (r) => r.stepId === stepId && r.verdict === 'FAIL' && !isPageHealthResult(r),
       ),
     )
   })

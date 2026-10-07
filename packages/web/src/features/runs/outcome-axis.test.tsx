@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import {
   createRuntimeInvariant,
@@ -7,6 +7,7 @@ import {
   type RunSnapshot,
 } from '@cairn/shared'
 import { OutcomeAxisSummary, OutcomeConditionList } from './outcome-axis'
+import { hasVisibleConditions, pageHealthCountsByStep, pageHealthSummaryOf } from './outcome-labels'
 
 const invariant = createRuntimeInvariant('auth_validity', '00000000-0000-4000-8000-000000000001')
 
@@ -297,5 +298,119 @@ describe('OutcomeConditionList 表格数据检查', () => {
     expect(text).toContain('最接近的名称')
     expect(text).toContain('需求订单统计报表')
     expect(second.container.querySelector('table[aria-label="命中的行"]')).toBeNull()
+  })
+})
+
+describe('OutcomeConditionList 页面健康', () => {
+  const stepId = '00000000-0000-4000-8000-000000000031'
+  const net = createRuntimeInvariant('network_health', '00000000-0000-4000-8000-000000000030')
+  const healthSnapshot = {
+    steps: [{ id: stepId, name: '提交订单' }],
+    runtimeInvariantManifest: { entries: [net] },
+  } as unknown as RunSnapshot
+  const violation: OutcomeResultDto = {
+    ...failRow,
+    id: '00000000-0000-4000-8000-000000000032',
+    contractId: net.id,
+    meaning: net.meaning,
+    severity: 'SHOULD',
+    expected: { kind: 'network_health', violations: 0 },
+    evidenceId: '00000000-0000-4000-8000-000000000033',
+    actual: {
+      kind: 'network_health',
+      total: 2,
+      byClass: { '5xx': 2 },
+      samples: [{ type: 'http', method: 'POST', url: 'https://a.corp/api/order', status: 503, count: 2, stepId }],
+    },
+  }
+
+  it('没有违规时什么都不显示，也不算有条件', async () => {
+    const run = { snapshot: healthSnapshot, outcomeResults: [] }
+    const screen = await render(<OutcomeConditionList runId={violation.runId} run={run} />)
+    expect(screen.container.textContent).not.toMatch(/页面接口不得报错|未求值|通过/)
+    expect(hasVisibleConditions(run)).toBe(false)
+    expect(pageHealthSummaryOf(run)).toBe('')
+  })
+
+  it('有违规：显示警告徽标与按步骤的违规表，不显示红色业务异常', async () => {
+    const run = { snapshot: healthSnapshot, outcomeResults: [violation] }
+    const screen = await render(<OutcomeConditionList runId={violation.runId} run={run} />)
+    const text = screen.container.textContent ?? ''
+    expect(text).toMatch(/警告/)
+    expect(text).not.toMatch(/业务异常/)
+    expect(text).toMatch(/第 1 步 · 提交订单/)
+    expect(text).toMatch(/POST https:\/\/a\.corp\/api\/order → 503 ×2/)
+    expect(hasVisibleConditions(run)).toBe(true)
+    expect(pageHealthSummaryOf(run)).toBe('2 处接口错误')
+  })
+
+  it('按发起步骤统计接口 / 脚本违规，没有违规为空', () => {
+    expect(pageHealthCountsByStep([]).size).toBe(0)
+    const withScript: OutcomeResultDto = {
+      ...violation,
+      actual: {
+        kind: 'network_health',
+        total: 3,
+        byClass: {},
+        samples: [
+          { type: 'http', method: 'GET', url: 'https://a/x', status: 500, count: 2, stepId },
+          { type: 'script_error', text: 'boom', count: 1, stepId },
+        ],
+      },
+    }
+    expect(pageHealthCountsByStep([withScript]).get(stepId)).toEqual({ net: 2, script: 1 })
+  })
+
+  it('多个违规地址可一次全部忽略，慢请求显示耗时与阈值', async () => {
+    const onIgnore = vi.fn()
+    const many: OutcomeResultDto = {
+      ...violation,
+      actual: {
+        kind: 'network_health',
+        total: 2,
+        byClass: { '5xx': 1, slow: 1 },
+        samples: [
+          { type: 'http', method: 'GET', url: 'https://a.corp/api/a', status: 500, count: 1, stepId },
+          { type: 'slow', method: 'POST', url: 'https://a.corp/api/checkout', durationMs: 1200, maxMs: 800, count: 1, stepId },
+        ],
+      },
+    }
+    const screen = await render(
+      <OutcomeConditionList runId={violation.runId} run={{ snapshot: healthSnapshot, outcomeResults: [many] }} onIgnorePageHealth={onIgnore} />,
+    )
+    expect(screen.container.textContent).toMatch(/POST https:\/\/a\.corp\/api\/checkout 耗时 1200ms（阈值 800ms）/)
+    await screen.getByRole('button', { name: /忽略以上全部/ }).click()
+    expect(onIgnore).toHaveBeenCalledWith(net.id, [
+      { kind: 'network_health', value: 'https://a.corp/api/a' },
+      { kind: 'network_health', value: 'https://a.corp/api/checkout' },
+    ])
+    expect(pageHealthSummaryOf({ outcomeResults: [many] })).toBe('1 处接口错误 · 1 处接口耗时超阈')
+  })
+
+  it('调成 MUST 后按失败显示', async () => {
+    const must = { ...net, severity: 'MUST' as const }
+    const screen = await render(
+      <OutcomeConditionList
+        runId={violation.runId}
+        run={{
+          snapshot: { ...healthSnapshot, runtimeInvariantManifest: { entries: [must] } } as unknown as RunSnapshot,
+          outcomeResults: [{ ...violation, severity: 'MUST' }],
+        }}
+      />,
+    )
+    expect(screen.container.textContent).toMatch(/业务异常/)
+  })
+
+  it('试跑里可以就地忽略此地址', async () => {
+    const onIgnore = vi.fn()
+    const screen = await render(
+      <OutcomeConditionList
+        runId={violation.runId}
+        run={{ snapshot: healthSnapshot, outcomeResults: [violation] }}
+        onIgnorePageHealth={onIgnore}
+      />,
+    )
+    await screen.getByRole('button', { name: '忽略此地址' }).click()
+    expect(onIgnore).toHaveBeenCalledWith(net.id, [{ kind: 'network_health', value: 'https://a.corp/api/order' }])
   })
 })

@@ -10,16 +10,22 @@ import {
   type OutcomeStatus,
   type RunDetailDto,
   type EvidenceMetadata,
+  isPageHealthKind,
+  pageHealthFactFromResult,
+  pageHealthSampleText,
+  type PageHealthSample,
 } from '@cairn/shared'
 import { RUNTIME_INVARIANT_KIND_LABELS } from '@/features/authoring/invariant-editor'
 import { StatusBadge, type StatusTone } from '@/components/status-badge'
 import { cn } from '@/lib/utils'
 import {
+  type PageHealthIgnoreRule,
   RUN_OUTCOME_STATUS_HINTS,
   RUN_OUTCOME_STATUS_LABELS,
   runOutcomeStatusTone,
 } from './outcome-labels'
 
+export type { PageHealthIgnoreRule } from './outcome-labels'
 export {
   RUN_EXECUTION_AXIS_LABELS,
   RUN_OUTCOME_STATUS_HINTS,
@@ -133,6 +139,94 @@ function TableCheckResult({ result }: { result: { details?: Record<string, unkno
   )
 }
 
+
+/** 页面健康违规表：接口 / 脚本错误按发起步骤列出，可跳证据、可就地忽略（试跑里）。 */
+function PageHealthResult({
+  invariantId,
+  kind,
+  run,
+  onFocusEvidence,
+  onIgnorePageHealth,
+  onOpenScenarioConfig,
+}: {
+  invariantId: string
+  kind: 'network_health' | 'script_errors'
+  run: Pick<RunDetailDto, 'snapshot' | 'outcomeResults'>
+  onFocusEvidence?: (evidenceId: string) => void
+  onIgnorePageHealth?: (invariantId: string, rules: PageHealthIgnoreRule[]) => void
+  onOpenScenarioConfig?: () => void
+}) {
+  const results = (run.outcomeResults ?? []).filter(
+    (item) => item.contractId === invariantId && (item.verdict === 'FAIL' || item.verdict === 'WARN'),
+  )
+  const stepIndex = new Map((run.snapshot.steps ?? []).map((step, index) => [step.id, { index: index + 1, name: step.name }]))
+  const rows: { sample: PageHealthSample; evidenceId?: string | null }[] = []
+  for (const result of results) {
+    const fact = pageHealthFactFromResult(result)
+    for (const sample of fact?.samples ?? []) rows.push({ sample, evidenceId: result.evidenceId })
+  }
+  if (rows.length === 0) return null
+  const total = results.reduce((sum, item) => sum + (pageHealthFactFromResult(item)?.total ?? 0), 0)
+  const shown = rows.slice(0, 30)
+  const stepText = (sample: PageHealthSample) => {
+    const step = sample.stepId ? stepIndex.get(sample.stepId) : undefined
+    if (!step) return '-'
+    return `第 ${step.index} 步${sample.afterStep ? '之后' : ''} · ${step.name}`
+  }
+  const ignoreValue = (sample: PageHealthSample) => sample.type === 'script_error' ? sample.text : sample.url
+  const distinctIgnoreValues = Array.from(new Set(shown.map(({ sample }) => ignoreValue(sample)).filter((v): v is string => Boolean(v))))
+  return (
+    <div className='space-y-1 text-label' data-testid='page-health-result'>
+      <p className='text-muted-foreground'>
+        共 {total} 处{kind === 'network_health' ? '接口错误' : '脚本异常'}
+        {rows.length < total ? `，下表列出 ${shown.length} 类` : ''}
+      </p>
+      {onIgnorePageHealth && distinctIgnoreValues.length > 1 ? (
+        <button
+          type='button'
+          className='text-primary hover:underline'
+          onClick={() => onIgnorePageHealth(invariantId, distinctIgnoreValues.map((value) => ({ kind, value })))}
+        >
+          忽略以上全部（{distinctIgnoreValues.length} 项）
+        </button>
+      ) : null}
+      {!onIgnorePageHealth && onOpenScenarioConfig ? (
+        <button type='button' className='text-primary hover:underline' onClick={onOpenScenarioConfig}>
+          去场景配置里忽略
+        </button>
+      ) : null}
+      <ul className='space-y-1'>
+        {shown.map(({ sample, evidenceId }, index) => {
+          const value = ignoreValue(sample)
+          return (
+            <li key={`${index}-${sample.stepRunId ?? sample.stepId ?? ''}`} className='flex flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+              <span className='text-muted-foreground'>{stepText(sample)}</span>
+              <span className='font-mono break-all'>
+                {pageHealthSampleText(sample)}
+                {sample.count > 1 ? ` ×${sample.count}` : ''}
+              </span>
+              {evidenceId ? (
+                <button type='button' className='text-primary hover:underline' onClick={() => onFocusEvidence?.(evidenceId)}>
+                  查看证据
+                </button>
+              ) : null}
+              {onIgnorePageHealth && value ? (
+                <button
+                  type='button'
+                  className='text-primary hover:underline'
+                  onClick={() => onIgnorePageHealth(invariantId, [{ kind, value }])}
+                >
+                  {sample.type === 'script_error' ? '忽略此消息' : '忽略此地址'}
+                </button>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 function outcomeStatusHint(status: OutcomeStatus, hasContracts?: boolean): string {
   if (status !== 'NOT_EVALUATED') return RUN_OUTCOME_STATUS_HINTS[status]
   return hasContracts
@@ -211,6 +305,8 @@ export function OutcomeConditionList({
   evidenceItems,
   onEdit,
   onFocusEvidence,
+  onIgnorePageHealth,
+  onOpenScenarioConfig,
 }: {
   runId: string
   run: Pick<RunDetailDto, 'snapshot' | 'outcomeResults'> & {
@@ -219,6 +315,10 @@ export function OutcomeConditionList({
   evidenceItems?: EvidenceMetadata[]
   onEdit?: (item: JoinedOutcomeEvaluation) => void
   onFocusEvidence?: (evidenceId: string) => void
+  /** 试跑里就地把违规地址 / 消息加入约束的忽略清单。 */
+  onIgnorePageHealth?: (invariantId: string, rules: PageHealthIgnoreRule[]) => void
+  /** 运行详情里不就地改草稿，提供去场景配置里忽略的入口（调用方负责权限判断）。 */
+  onOpenScenarioConfig?: () => void
 }) {
   const rows = joinOutcomeEvaluations(
     run.snapshot.outcomeManifest,
@@ -227,12 +327,13 @@ export function OutcomeConditionList({
     candidateGroupsOf(run.snapshot),
     loopBodyHeadersOf(run.snapshot.controlFlow),
   )
+  // 页面健康约束只在有违规时出现：没有违规不显示「未求值」「通过」之类占位。
   const invariantRows = joinRuntimeInvariantEvaluations(
     run.snapshot.runtimeInvariantManifest,
     run.outcomeResults,
-  )
+  ).filter((row) => !isPageHealthKind(row.entry.kind) || Boolean(row.result))
   if (rows.length === 0 && invariantRows.length === 0) {
-    return <p className='text-small text-muted-foreground'>这次运行没有成功条件或运行期约束。</p>
+    return <p className='text-small text-muted-foreground'>这次运行没有可显示的成功条件或运行期约束结果。</p>
   }
   return (
     <div className='space-y-4'>
@@ -324,12 +425,17 @@ export function OutcomeConditionList({
       <ul className='space-y-3' aria-label='运行期约束判定'>
         {invariantRows.map((row) => {
           const evidence = evidenceForOutcomeResult(row.result, evidenceItems)
+          const pageHealthKind = row.entry.kind === 'network_health' || row.entry.kind === 'script_errors' ? row.entry.kind : null
+          // 应当 / 提示级的页面健康违规一律显示「警告」，不显示红色「业务异常」。
+          const softViolation = pageHealthKind !== null && row.displayVerdict === 'FAIL' && row.entry.severity !== 'MUST'
           return (
             <li key={row.entry.id} className='space-y-2 rounded-md border border-border-card p-3'>
               <div className='flex flex-wrap items-start justify-between gap-2'>
                 <p className='text-body font-medium'>{row.entry.meaning}</p>
-                <StatusBadge tone={runOutcomeStatusTone(row.displayVerdict)}>
-                  {row.displayVerdict === 'NOT_EVALUATED'
+                <StatusBadge tone={softViolation ? 'warning' : runOutcomeStatusTone(row.displayVerdict)}>
+                  {softViolation
+                    ? '警告'
+                    : row.displayVerdict === 'NOT_EVALUATED'
                     ? '未求值'
                     : row.displayVerdict === 'UNKNOWN'
                       ? '无法判断'
@@ -338,20 +444,31 @@ export function OutcomeConditionList({
                         : RUN_OUTCOME_STATUS_LABELS[row.displayVerdict]}
                 </StatusBadge>
               </div>
-              <p className='text-label text-muted-foreground'>
-                {RUNTIME_INVARIANT_KIND_LABELS[row.entry.kind]}
-                {' · '}
-                期望 {formatExpected(row.result?.expected, RUNTIME_INVARIANT_KIND_LABELS[row.entry.kind])}
-                {' · '}
-                实际 {formatValue(row.result?.actual)}
-              </p>
+              {pageHealthKind ? (
+                <PageHealthResult
+                  invariantId={row.entry.id}
+                  kind={pageHealthKind}
+                  run={run}
+                  onFocusEvidence={onFocusEvidence}
+                  onIgnorePageHealth={onIgnorePageHealth}
+                  onOpenScenarioConfig={onOpenScenarioConfig}
+                />
+              ) : (
+                <p className='text-label text-muted-foreground'>
+                  {RUNTIME_INVARIANT_KIND_LABELS[row.entry.kind]}
+                  {' · '}
+                  期望 {formatExpected(row.result?.expected, RUNTIME_INVARIANT_KIND_LABELS[row.entry.kind])}
+                  {' · '}
+                  实际 {formatValue(row.result?.actual)}
+                </p>
+              )}
               {row.displayVerdict === 'NOT_EVALUATED' ? (
                 <p className='text-label text-muted-foreground'>这次运行还没有观察到这条约束。</p>
               ) : null}
               {row.displayVerdict === 'NOT_APPLICABLE' ? (
                 <p className='text-label text-muted-foreground'>所在步骤已被跳过或停用，此约束不适用。</p>
               ) : null}
-              {evidence && evidence.length > 0 ? (
+              {!pageHealthKind && evidence && evidence.length > 0 ? (
                 <button
                   type='button'
                   className='text-label text-primary hover:underline'

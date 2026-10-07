@@ -13,6 +13,7 @@ import {
   renameRecordingDraft,
   updateRecordingDraftExclusions,
   createScenarioFromRecordingHandoff,
+  getPlatformConfig,
   listRecordingAdoptionReceipts,
   getRecordingAdoptionReceipt,
   revertAssistantRecordingAdoption,
@@ -159,7 +160,12 @@ export class RecordingsService {
     actor: RequestAccount,
   ) {
     try {
-      const result = await createScenarioFromRecordingHandoff(this.db, recordingDraftId, body, actor)
+      const platform = await getPlatformConfig(this.db)
+      const result = await createScenarioFromRecordingHandoff(this.db, recordingDraftId, body, actor, {
+        // 新建场景默认带页面接口 / 脚本错误约束（平台开关，默认开）。
+        pageHealthGuards: platform?.document.runtimeInvariants?.defaultPageHealthGuards !== false,
+        pageHealthIgnore: platform?.document.runtimeInvariants?.pageHealthDefaultIgnore ?? [],
+      })
       await this.publishHint(recordingDraftId)
       return result
     } catch (error) {

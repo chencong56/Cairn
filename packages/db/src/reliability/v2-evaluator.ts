@@ -16,6 +16,7 @@ import {
   type ResolutionRungRecord,
   type RunSnapshot,
   DEFAULT_RELIABILITY_POLICY,
+  isPageHealthResult,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { newId } from '../id.js'
@@ -402,7 +403,8 @@ export async function evaluateReliabilityBatch(
         let hasBusinessRejection = false
         for (const att of attList) {
           const ots = outcomesByAttempt.get(att.id) ?? []
-          if (ots.some((o) => o.verdict === 'FAIL')) {
+          // 页面健康警告不是业务拒绝，不能压掉执行失败事件。
+          if (ots.some((o) => o.verdict === 'FAIL' && !isPageHealthResult(o))) {
             hasBusinessRejection = true
             break
           }

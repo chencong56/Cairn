@@ -481,10 +481,14 @@ describe('平台配置契约', () => {
     expect('moduleQuality' in legacy).toBe(false)
   })
 
-  it('旧修订没有 runtimeInvariants 时补出厂关闭逐步探测', () => {
+  it('旧修订没有 runtimeInvariants 时补出厂关闭逐步探测、默认开启页面健康约束', () => {
     const { runtimeInvariants: _ignored, ...legacy } = FACTORY_PLATFORM_CONFIG
     const parsed = platformConfigDocumentSchema.parse(legacy)
-    expect(parsed.runtimeInvariants).toEqual({ allowEachStepProbe: false })
+    expect(parsed.runtimeInvariants).toEqual({ allowEachStepProbe: false, defaultPageHealthGuards: true, pageHealthDefaultIgnore: ['/favicon.ico'] })
+    // 旧修订只有 allowEachStepProbe 时，新开关也按默认开启补齐
+    expect(
+      platformConfigDocumentSchema.parse({ ...legacy, runtimeInvariants: { allowEachStepProbe: true } }).runtimeInvariants,
+    ).toEqual({ allowEachStepProbe: true, defaultPageHealthGuards: true, pageHealthDefaultIgnore: ['/favicon.ico'] })
     expect('runtimeInvariants' in legacy).toBe(false)
   })
 

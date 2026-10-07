@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { assertExpectSchema } from './browser-command.js'
 import { aiInstructionSchema, contextExpectSchema, contextKeySchema } from './step.js'
 import { outputFieldNameSchema } from './output-schema.js'
+import { isPageHealthKind } from './page-health.js'
 import { targetDescriptorSchema } from './target-descriptor.js'
 import { entityIdSchema, jsonValueSchema, utcInstantSchema, type JsonValue } from './wire.js'
 import type { StepSkipReason, StepRunStatus } from './run.js'
@@ -288,7 +289,7 @@ export function effectiveOutcomeEvaluations(input: {
   results?: readonly OutcomeResultEvaluation[] | null
   stepRuns?: readonly StepRunEvaluationInfo[] | null
   candidateGroups?: readonly CandidateGroup[] | null
-  invariantManifest?: { entries: readonly { id: string; severity: OutcomeSeverity; meaning?: string; onViolation?: OutcomeOnViolation }[] } | null
+  invariantManifest?: { entries: readonly { id: string; kind?: string; severity: OutcomeSeverity; meaning?: string; onViolation?: OutcomeOnViolation }[] } | null
   loopBodyHeaders?: ReadonlyMap<string, string> | null
 }): EffectiveOutcomeEvaluation[] {
   const stepRunsByStepId = new Map<string, StepRunEvaluationInfo[]>()
@@ -532,6 +533,8 @@ export function effectiveOutcomeEvaluations(input: {
     const evaluationCount = rawResults.length
     const lastResult = rawResults[rawResults.length - 1]
     const effectiveVerdict = foldOutcomeVerdicts(rawResults.map((r) => r.verdict))
+    // 页面健康约束只降不升：没有违规就视为不存在，既不算未求值，也不算无法判断。
+    if (isPageHealthKind(inv.kind) && effectiveVerdict !== 'FAIL' && effectiveVerdict !== 'WARN') continue
 
     evaluations.push({
       contractId: inv.id,
@@ -565,7 +568,7 @@ export function effectiveOutcomeEvaluations(input: {
 export function aggregateRunOutcomeStatus(
   manifest?: OutcomeManifest | null,
   results?: readonly OutcomeResultEvaluation[] | null,
-  invariantManifest?: { entries: readonly { id: string; severity: OutcomeSeverity }[] } | null,
+  invariantManifest?: { entries: readonly { id: string; kind?: string; severity: OutcomeSeverity }[] } | null,
   stepRuns?: readonly StepRunEvaluationInfo[] | null,
   candidateGroups?: readonly CandidateGroup[] | null,
   loopBodyHeaders?: ReadonlyMap<string, string> | null,

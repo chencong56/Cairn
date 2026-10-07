@@ -859,6 +859,48 @@ export function renderAiInterpretationCard(ai: ReportAiInterpretation | undefine
 // ---------------------------------------------------------------------------
 // Template A: Single Scenario Execution Template (RUN)
 // ---------------------------------------------------------------------------
+type PageHealthRow = {
+  kind: string
+  severity: string
+  text: string
+  count: number
+  stepId: string
+  stepRunId: string
+  afterStep: boolean
+  slow: boolean
+}
+
+/** 报告来源里的页面健康块 → 扁平行；没有违规返回空数组（此时报告里不渲染任何页面健康内容）。 */
+function pageHealthRows(source: Record<string, JsonValue>): PageHealthRow[] {
+  const rows: PageHealthRow[] = []
+  for (const item of records(record(source.pageHealth as JsonValue | undefined).items)) {
+    for (const sample of records(item.samples)) {
+      const type = String(sample.type ?? '')
+      const method = String(sample.method ?? 'GET')
+      const url = String(sample.url ?? '-')
+      const text =
+        type === 'http'
+          ? `${method} ${url} → ${String(sample.status ?? '-')}`
+          : type === 'slow'
+            ? `${method} ${url} 耗时 ${String(sample.durationMs ?? '-')}ms（阈值 ${String(sample.maxMs ?? '-')}ms）`
+            : type === 'request_failed'
+            ? `${method} ${url} 请求失败${sample.text ? `（${String(sample.text)}）` : ''}`
+            : `脚本异常：${String(sample.text ?? '-')}${sample.url ? `（${String(sample.url)}）` : ''}`
+      rows.push({
+        kind: String(item.kind ?? ''),
+        severity: String(item.severity ?? 'SHOULD'),
+        text,
+        count: Number(sample.count ?? 1),
+        stepId: String(sample.stepId ?? ''),
+        stepRunId: String(sample.stepRunId ?? ''),
+        afterStep: sample.afterStep === true,
+        slow: type === 'slow',
+      })
+    }
+  }
+  return rows
+}
+
 export function renderSingleScenarioHtml(document: ReportDocument, images: ReportImage[] = []): string {
   const source = record(document.source)
   const timeZone = document.timeZone || 'Asia/Shanghai'
@@ -875,6 +917,17 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
   const loops = records(source.loops)
   const outcomeResults = records(source.outcomeResults)
   const evidenceList = records(source.evidence)
+  const healthRows = pageHealthRows(source)
+  const healthSlow = healthRows.filter((row) => row.slow).reduce((sum, row) => sum + row.count, 0)
+  const healthNet = healthRows.filter((row) => row.kind === 'network_health' && !row.slow).reduce((sum, row) => sum + row.count, 0)
+  const healthScript = healthRows.filter((row) => row.kind === 'script_errors').reduce((sum, row) => sum + row.count, 0)
+  const healthBadge = healthRows.some((row) => row.severity === 'MUST') ? 'badge-danger' : 'badge-warning'
+  const healthStepLabel = (row: PageHealthRow): string => {
+    const index = stepRuns.findIndex((step) => (row.stepRunId ? step.id === row.stepRunId : step.stepId === row.stepId))
+    if (index < 0) return '-'
+    const name = String(stepRuns[index]!.name ?? '')
+    return `第 ${index + 1} 步${row.afterStep ? '之后' : ''}${name ? ` · ${name}` : ''}`
+  }
 
   const verdict = String(source.verdict ?? source.outcomeStatus ?? 'UNKNOWN')
   const runStatus = String(source.status ?? 'UNKNOWN')
@@ -964,6 +1017,12 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
           </div>
           <div class="stat-subtext">截图: ${screenshots.length} 张 · 证据项: ${evidenceList.length}</div>
         </div>
+        ${healthRows.length ? `
+        <div class="stat-card">
+          <div class="stat-label">页面健康</div>
+          <div class="stat-value"><span class="badge ${healthBadge}" style="font-size:16px;padding:6px 12px;">${healthNet + healthSlow + healthScript} 处</span></div>
+          <div class="stat-subtext">${[healthNet ? `接口错误 ${healthNet}` : '', healthSlow ? `耗时超阈 ${healthSlow}` : '', healthScript ? `脚本异常 ${healthScript}` : ''].filter(Boolean).join(' · ')}</div>
+        </div>` : ''}
       </div>
     </div>
 
@@ -1024,6 +1083,34 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
       </div>
     </div>
 
+    ${healthRows.length ? `
+    <!-- 页面健康：接口与脚本错误（只在有违规时出现） -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">接口与脚本错误</div>
+        <div class="filter-pills no-print">
+          <button class="pill active" onclick="filterItems('.health-row', 'data-kind', 'ALL', this)">全部 (${healthRows.length})</button>
+          <button class="pill" onclick="filterItems('.health-row', 'data-kind', 'network_health', this)">仅接口 (${healthRows.filter((row) => row.kind === 'network_health').length})</button>
+          <button class="pill" onclick="filterItems('.health-row', 'data-kind', 'script_errors', this)">仅脚本 (${healthRows.filter((row) => row.kind === 'script_errors').length})</button>
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="table-responsive">
+          <table>
+            <thead><tr><th style="width:220px;">发起步骤</th><th>请求 / 异常</th><th style="width:70px;">次数</th></tr></thead>
+            <tbody>
+              ${healthRows.map((row) => `
+              <tr class="health-row" data-kind="${escapeHtml(row.kind)}">
+                <td>${escapeHtml(healthStepLabel(row))}</td>
+                <td style="font-family:var(--font-mono);font-size:12px;word-break:break-all;">${escapeHtml(row.text)}</td>
+                <td class="table-num">${row.count}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>` : ''}
+
     <!-- L3 步骤深度排查与证据回溯 -->
     <div class="section">
       <div class="section-header">
@@ -1068,6 +1155,20 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
                 `).join('')}
               </div>
             ` : ''}
+
+            ${(() => {
+              const mine = healthRows.filter((row) => (row.stepRunId ? row.stepRunId === step.id : row.stepId !== '' && row.stepId === step.stepId))
+              if (!mine.length) return ''
+              return `
+              <div style="margin-bottom:12px;">
+                <div style="font-weight:600;margin-bottom:4px;color:var(--text-secondary);font-size:12px;">接口与脚本错误：</div>
+                ${mine.map((row) => `
+                  <div style="margin-bottom:4px;">
+                    <span class="badge ${row.severity === 'MUST' ? 'badge-danger' : 'badge-warning'}">${row.severity === 'MUST' ? '失败' : '警告'}</span>
+                    <span style="margin-left:6px;font-family:var(--font-mono);font-size:12px;word-break:break-all;">${escapeHtml(row.text)}${row.count > 1 ? ` ×${row.count}` : ''}${row.afterStep ? '（步骤之后）' : ''}</span>
+                  </div>`).join('')}
+              </div>`
+            })()}
 
             <!-- Loop Details if any -->
             ${stepLoop ? `

@@ -7,6 +7,7 @@ import {
   deriveRuntimeInvariantResults,
   effectTypeSchema,
   isHaltedRunStatus,
+  isPageHealthKind,
   type EffectType,
   type JsonValue,
   type OutcomeOnViolation,
@@ -348,6 +349,43 @@ export async function recalculateRunOutcomeTx(
   )
   await tx.update(runs).set({ outcomeStatus, updatedAt: now }).where(eq(runs.id, runId))
   return outcomeStatus
+}
+
+/**
+ * 推送口径：只读重算结论，不计入非 MUST 的页面健康约束（它们只能产生「警告」，已定不触发推送）。
+ * 不写库；约束调成 MUST 后照常计入。
+ */
+export async function outcomeStatusForOutboundTx(tx: Db, runId: string, snapshot: RunSnapshot): Promise<OutcomeStatus> {
+  const { outcomeResults, stepRuns } = schemaFor(tx)
+  const invariants = snapshot.runtimeInvariantManifest?.entries ?? []
+  const silenced = new Set(
+    invariants.filter((item) => isPageHealthKind(item.kind) && item.severity !== 'MUST').map((item) => item.id),
+  )
+  const rows = await tx
+    .select({
+      id: outcomeResults.id,
+      contractId: outcomeResults.contractId,
+      stepRunId: outcomeResults.stepRunId,
+      attemptId: outcomeResults.attemptId,
+      verdict: outcomeResults.verdict,
+      provenance: outcomeResults.provenance,
+      evaluatedAt: outcomeResults.evaluatedAt,
+    })
+    .from(outcomeResults)
+    .where(eq(outcomeResults.runId, runId))
+    .orderBy(asc(outcomeResults.evaluatedAt))
+  const stepRows = await tx
+    .select({ id: stepRuns.id, stepId: stepRuns.stepId, status: stepRuns.status, skipReason: stepRuns.skipReason })
+    .from(stepRuns)
+    .where(eq(stepRuns.runId, runId))
+  return aggregateRunOutcomeStatus(
+    snapshot.outcomeManifest,
+    rows.filter((row) => !silenced.has(row.contractId)),
+    { entries: invariants.filter((item) => !silenced.has(item.id)) },
+    stepRows,
+    candidateGroupsOf(snapshot),
+    loopBodyHeadersOf(snapshot.controlFlow),
+  )
 }
 
 /**

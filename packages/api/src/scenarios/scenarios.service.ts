@@ -108,6 +108,15 @@ export class ScenariosService {
     )
   }
 
+  /** 新建场景默认带页面接口 / 脚本错误约束（平台开关，默认开）及平台默认忽略清单。 */
+  private async pageHealthDefaults() {
+    const invariants = (await this.currentConfig()).document.runtimeInvariants
+    return {
+      pageHealthGuards: invariants?.defaultPageHealthGuards !== false,
+      pageHealthIgnore: invariants?.pageHealthDefaultIgnore ?? [],
+    }
+  }
+
   list(query?: ScenarioListQuery, actorId?: string) {
     return listScenarios(this.db, query, actorId).catch(rethrowDomain)
   }
@@ -152,6 +161,8 @@ export class ScenariosService {
         status: body.status,
         actor: { id: actor.id },
         executableTypes: await this.runtimeTypes(),
+        // 新建场景默认带页面接口 / 脚本错误约束（平台开关，默认开；存量场景不回填）。
+        ...(await this.pageHealthDefaults()),
       })
     } catch (error) {
       rethrowDomain(error)

@@ -1696,6 +1696,8 @@ export type FinishAttemptInput = {
   /** 本次 Attempt 产生的结果轴评价项（若有），与 Attempt 同事务持久化 */
   outcomeResults?: OutcomeResultInsertItem[]
   /** 调试运行自动采集的页面结构快照，作为 log/structure 证据落库 */
+  /** 页面健康违规清单（接口 / 脚本错误），作为 Attempt 级 log 证据落库；结果行的 evidenceId 指向它 */
+  pageHealth?: { evidenceId: string; payload: JsonValue }
   structureSnapshot?: {
     snapshot: string
     truncated: boolean
@@ -1860,6 +1862,22 @@ export async function finishAttemptTx(
   }
 
   if (!cancelled && input.structureSnapshot) {
+  // 结果行外键指向这条证据，结果行取消时也会写，所以这里不受 cancelled 影响。
+  if (input.pageHealth) {
+    await tx.insert(evidences).values({
+      id: input.pageHealth.evidenceId,
+      runId: input.runId,
+      stepRunId: attempt.stepRunId,
+      attemptId: input.attemptId,
+      type: 'log',
+      status: 'available',
+      schemaVersion: 1,
+      payload: redactJson(input.pageHealth.payload, secrets),
+      createdAt: now,
+    })
+    recorded.push({ evidenceId: input.pageHealth.evidenceId, type: 'log', status: 'available' })
+  }
+
     const evidenceId = newId()
     await tx.insert(evidences).values({
       id: evidenceId,

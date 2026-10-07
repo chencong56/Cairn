@@ -9,9 +9,9 @@ import { REPORT_TITLE_CATALOG, reportTitleSources, type ReportTitleSource } from
 export { REPORT_TITLE_CATALOG, parseReportTitle, reportTitleSources, renderReportTitleV2, type ReportTitleSource, type ReportTitleSegment } from './report-title-template.js'
 
 export const EXPORT_ARTIFACTS_PROTOCOL = 'export-artifacts@2' as const
-export const REPORT_RENDER_VERSION = 'report-render@10' as const
+export const REPORT_RENDER_VERSION = 'report-render@11' as const
 export const REPORT_TEMPLATE_VERSION = 'report-template@1' as const
-export const REPORT_AI_PROMPT_VERSION = 'v1' as const
+export const REPORT_AI_PROMPT_VERSION = 'v2' as const
 
 export const REPORT_LIMITS = Object.freeze({
   screenshots: 200,

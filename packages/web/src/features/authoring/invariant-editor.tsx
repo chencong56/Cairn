@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ChevronDown } from 'lucide-react'
+import { PageHealthConfigForm } from './page-health-config'
 
 const KIND_LABELS: Record<RuntimeInvariantKind, string> = {
   navigation_boundary: '不得离开允许范围',
@@ -28,6 +29,8 @@ const KIND_LABELS: Record<RuntimeInvariantKind, string> = {
   effect_ceiling: '副作用不超过声明',
   readonly_guarantee: '不得改写业务数据',
   error_surface: '不得出现系统错误弹窗',
+  network_health: '页面接口不得报错',
+  script_errors: '页面脚本不得出现未捕获异常',
 }
 
 const EVALUATE_LABELS: Record<RuntimeInvariantEvaluateAt, string> = {
@@ -110,6 +113,7 @@ function InvariantCard({
 }) {
   const [advanced, setAdvanced] = useState(false)
   const haltBlocked = invariant.severity === 'SHOULD' || invariant.severity === 'INFO'
+  const pageHealth = invariant.kind === 'network_health' || invariant.kind === 'script_errors'
   const evaluateOptions: RuntimeInvariantEvaluateAt[] =
     invariant.kind === 'error_surface'
       ? ['before_side_effect', 'each_step']
@@ -142,6 +146,7 @@ function InvariantCard({
           对照已执行步骤的副作用类型，不会额外拦截写入。
         </p>
       ) : null}
+      {pageHealth ? <PageHealthConfigForm invariant={invariant} disabled={disabled} onChange={onChange} /> : null}
       {invariant.kind === 'error_surface' ? (
         <p className='text-label text-muted-foreground'>
           默认在每一步后检查当前页；只想在改数据前看一眼时，到高级里改成副作用前。
@@ -155,7 +160,7 @@ function InvariantCard({
           高级
           <ChevronDown className='size-3' />
         </CollapsibleTrigger>
-        <CollapsibleContent className='mt-3 grid gap-3 sm:grid-cols-3'>
+        <CollapsibleContent className={`mt-3 grid gap-3 ${pageHealth ? 'sm:grid-cols-2' : 'sm:grid-cols-3'}`}>
           <div className='space-y-1'>
             <Label>严重度</Label>
             <Select
@@ -199,6 +204,7 @@ function InvariantCard({
               </SelectContent>
             </Select>
           </div>
+          {pageHealth ? null : (
           <div className='space-y-1'>
             <Label>求值时机</Label>
             <Select
@@ -220,6 +226,12 @@ function InvariantCard({
               </SelectContent>
             </Select>
           </div>
+          )}
+          {pageHealth && invariant.onViolation === 'halt' ? (
+            <p className='text-label text-muted-foreground sm:col-span-2'>
+              停止是尽力而为：请求可能在触发步骤之后才返回，所以可能多执行一步才停下。
+            </p>
+          ) : null}
         </CollapsibleContent>
       </Collapsible>
     </div>

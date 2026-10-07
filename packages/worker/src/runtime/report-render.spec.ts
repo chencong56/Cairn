@@ -55,6 +55,57 @@ describe('报告渲染与交付（自包含 HTML 双模板）', () => {
     expect(html).not.toMatch(/href=["']https?:\/\//)
   })
 
+  it('页面健康：有违规才出现卡片、章节与步骤内清单；无违规时 HTML 里没有任何页面健康内容', () => {
+    const base = {
+      ...document,
+      source: {
+        ...(document.source as Record<string, JsonValue>),
+        outcomeStatus: 'WARN',
+        stepRuns: [
+          { id: 'sr-1', stepId: 'step-1', name: '提交订单', status: 'SUCCEEDED', outcomeStatus: 'NOT_EVALUATED', attempts: [{ id: 'a-1', status: 'SUCCEEDED' }] },
+          { id: 'sr-2', stepId: 'step-2', name: '等待', status: 'SUCCEEDED', outcomeStatus: 'NOT_EVALUATED', attempts: [{ id: 'a-2', status: 'SUCCEEDED' }] },
+        ],
+      },
+    } as unknown as ReportDocument
+    const clean = renderReportHtml(base)
+    expect(clean).not.toContain('页面健康')
+    expect(clean).not.toContain('接口与脚本错误')
+
+    const withHealth = {
+      ...base,
+      source: {
+        ...(base.source as Record<string, JsonValue>),
+        pageHealth: {
+          items: [
+            {
+              contractId: 'c-1', meaning: '页面接口不得报错', kind: 'network_health', severity: 'SHOULD', verdict: 'FAIL', total: 3, byClass: { '5xx': 3 }, evidenceId: null,
+              samples: [
+                { type: 'http', method: 'POST', url: 'https://shop.example/api/order/*', status: 503, count: 2, stepId: 'step-1', stepRunId: 'sr-1' },
+                { type: 'slow', method: 'POST', url: 'https://shop.example/api/v1/checkout', durationMs: 1200, maxMs: 800, count: 1, stepId: 'step-1', stepRunId: 'sr-1' },
+              ],
+            },
+            {
+              contractId: 'c-2', meaning: '页面脚本不得出现未捕获异常', kind: 'script_errors', severity: 'SHOULD', verdict: 'FAIL', total: 1, byClass: { script: 1 },
+              evidenceId: null,
+              samples: [{ type: 'script_error', text: 'TypeError: x', count: 1, stepId: 'step-1', stepRunId: 'sr-1', afterStep: true }],
+            },
+          ],
+        },
+      },
+    } as unknown as ReportDocument
+    const html = renderReportHtml(withHealth)
+    expect(html).toContain('页面健康')
+    expect(html).toContain('接口与脚本错误')
+    expect(html).toContain('POST https://shop.example/api/order/* → 503')
+    expect(html).toContain('第 1 步 · 提交订单')
+    expect(html).toContain('第 1 步之后')
+    expect(html).toContain('仅接口 (2)')
+    expect(html).toContain('badge-warning')
+    expect(html).toContain('接口错误 2')
+    expect(html).toContain('耗时超阈 1')
+    expect(html).toContain('POST https://shop.example/api/v1/checkout 耗时 1200ms（阈值 800ms）')
+  })
+
   it('场景集巡检模板：正确呈现 0-100 健康分大卡、并发节约率、跨模块对照大表与聚合异常', async () => {
     const suiteDocument: ReportDocument = {
       ...document,

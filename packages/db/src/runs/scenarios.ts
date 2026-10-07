@@ -27,6 +27,7 @@ import {
   authoringSteps,
   insertNodeAfter,
   locateNode,
+  defaultPageHealthInvariants,
   normalizeAuthoringDocument,
   parseScenarioDocument,
   removeNode,
@@ -797,6 +798,10 @@ export async function createScenarioWithVersion(
     actor: AuditActor
     compileMode?: 'save' | 'release'
     executableTypes?: readonly string[]
+    /** 新建场景默认带页面接口 / 脚本错误约束。由 API 按平台开关传入；缺省不带（存量与直接调用方不受影响）。 */
+    pageHealthGuards?: boolean
+    /** 写进默认「页面接口」约束的忽略清单（平台默认忽略清单）。 */
+    pageHealthIgnore?: readonly string[]
   },
 ): Promise<ScenarioDetailDto & { latestVersionId: string; latestVersionNo: number }> {
   const { scenarioDrafts, scenarioVersions, scenarios } = schemaFor(db)
@@ -805,11 +810,16 @@ export async function createScenarioWithVersion(
   if (!target.exists) throw notFound('TARGET_NOT_FOUND', '目标系统不存在')
   if (target.status === 'disabled')
     throw conflict('TARGET_DISABLED', '目标系统已停用，不能新建场景')
+  const resolution = await compileResolutionFromPlatform(db, input.targetId)
   const compiled = compileDocument(document, target, input.compileMode ?? 'release', {
     executableTypes: input.executableTypes,
-    resolution: await compileResolutionFromPlatform(db, input.targetId),
+    resolution,
   })
   if ((input.compileMode ?? 'release') === 'release') throwIfBlocked(compiled)
+  // 新建场景默认带页面接口 / 脚本错误约束（由调用方按平台开关决定；存量场景不回填）。
+  const seededAuthoring: ScenarioAuthoringDocumentV2 | undefined = input.pageHealthGuards
+    ? { ...normalizeAuthoringDocument(compiled.definition), runtimeInvariants: defaultPageHealthInvariants(newId, { networkIgnore: input.pageHealthIgnore }) }
+    : undefined
 
   const id = newId()
   const versionId = newId()
@@ -834,17 +844,18 @@ export async function createScenarioWithVersion(
         definition: compiled.definition,
         compilerVersion: COMPILER_VERSION,
         sourceDigest: digest,
+        ...(seededAuthoring ? { authoringDocument: seededAuthoring } : {}),
         createdByConsoleAccountId: input.actor.id,
         createdAt: now,
       })
       await tx.insert(scenarioDrafts).values({
         scenarioId: id,
         revision: 1,
-        document: compiled.definition,
+        document: seededAuthoring ?? compiled.definition,
         updatedByConsoleAccountId: input.actor.id,
         updatedAt: now,
       })
-      const authoring = normalizeAuthoringDocument(compiled.definition)
+      const authoring = seededAuthoring ?? normalizeAuthoringDocument(compiled.definition)
       const expansion = await expandWithLoader(tx as unknown as Db, input.targetId, authoring, 'preview', true)
       if (expansion.ok) await saveValidationSubjectTx(tx as unknown as Db, versionId, await draftValidationSubject(tx as unknown as Db, input.targetId, id, authoring, expansion))
       await recordAudit(

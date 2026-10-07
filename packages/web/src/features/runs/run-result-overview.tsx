@@ -1,5 +1,8 @@
+import { useNavigate } from '@tanstack/react-router'
+import { useAuthStore } from '@/stores/auth-store'
 import { useMemo } from 'react'
 import {
+  hasPermission,
   type RunDetailDto,
   type EvidenceMetadata,
   type StepRunDto,
@@ -23,6 +26,7 @@ import { useAssistantStore } from '@/stores/assistant-store'
 import { buildStepQuote } from '@/features/assistant/quote-helper'
 import { RunOutputCard } from './run-output-card'
 import { OutcomeAxisSummary, OutcomeConditionList, RUN_EXECUTION_AXIS_LABELS } from './outcome-axis'
+import { hasVisibleConditions, pageHealthSummaryOf } from './outcome-labels'
 import { translateStepError } from './error-translator'
 import { formatDuration } from './labels'
 
@@ -59,6 +63,9 @@ export function RunResultOverview({
   onSelectStep,
   onFocusEvidence,
 }: RunResultOverviewProps) {
+  const navigate = useNavigate()
+  const authUser = useAuthStore((state) => state.auth.user)
+  const canEditScenario = Boolean(authUser && hasPermission(authUser.permissions, 'workflow:write'))
   const openAssistant = useAssistantStore((state) => state.openPanel)
   const setQuote = useAssistantStore((state) => state.setQuote)
 
@@ -119,10 +126,9 @@ export function RunResultOverview({
     return Object.entries(run.context).filter(([k]) => !k.startsWith('_') && !k.startsWith('$'))
   }, [run.context])
 
-  const hasAssertions = Boolean(
-    run.snapshot.outcomeManifest?.entries.length ||
-    run.snapshot.runtimeInvariantManifest?.entries.length
-  )
+  // 没有违规的页面健康约束不算「已配置断言」，也不显示任何占位。
+  const hasAssertions = hasVisibleConditions(run)
+  const pageHealthSummary = pageHealthSummaryOf(run)
 
   return (
     <div className='flex flex-1 flex-col overflow-y-auto p-4 space-y-4'>
@@ -204,8 +210,13 @@ export function RunResultOverview({
         <OutcomeAxisSummary
           executionLabel={RUN_EXECUTION_AXIS_LABELS[run.status]}
           outcomeStatus={run.outcomeStatus}
-          hasContracts={Boolean(run.snapshot.outcomeManifest?.entries.length)}
+          hasContracts={hasAssertions}
         />
+        {pageHealthSummary ? (
+          <p className='text-label text-status-warning-foreground' data-testid='page-health-summary'>
+            页面健康：{pageHealthSummary}
+          </p>
+        ) : null}
 
         {/* 详细断言列表 */}
         {hasAssertions ? (
@@ -215,6 +226,7 @@ export function RunResultOverview({
               run={run}
               evidenceItems={evidenceItems}
               onFocusEvidence={onFocusEvidence}
+              onOpenScenarioConfig={canEditScenario ? () => void navigate({ to: '/scenarios/$scenarioId', params: { scenarioId: run.scenarioId } }) : undefined}
             />
           </div>
         ) : (
