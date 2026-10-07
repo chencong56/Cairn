@@ -1,5 +1,5 @@
 # Cairn Worker 镜像：四角色共用（executor/scheduler/analyst/maintenance），含 Chromium 与中文字体
-# 构建：podman build --platform linux/amd64 -f deploy/cluster/Dockerfile.worker -t cairn-worker:<tag> .
+# 构建：docker build -f deploy/cluster/Dockerfile.worker -t cairn-worker:<tag> .
 FROM node:24-bookworm-slim AS builder
 # ONNXRUNTIME_NODE_INSTALL=skip：跳过 CUDA/TensorRT providers 下载（仅 NVIDIA GPU 加速需要，
 # CPU 部署用包内自带核心运行时；且 nuget.org 在部分内网返回 302 导致 postinstall 失败）。

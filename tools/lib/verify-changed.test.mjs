@@ -6,6 +6,7 @@ import {
   evaluateRemoteFreshness,
   getDownstreamPackages,
   mapPathToPackage,
+  planRelatedRun,
 } from './verify-changed.mjs'
 
 describe('分层验证路径映射与决策逻辑 (Phase 3 验收)', () => {
@@ -184,5 +185,70 @@ describe('分层验证路径映射与决策逻辑 (Phase 3 验收)', () => {
     // 无效输入兜底
     assert.equal(evaluateRemoteFreshness(null, nowMs).isStale, false)
     assert.equal(evaluateRemoteFreshness(NaN, nowMs).isStale, false)
+  })
+})
+
+describe('迭代档 --related 计划生成', () => {
+  const kinds = (plan) => plan.steps.map((s) => `${s.kind}:${s.pkg}`)
+
+  it('worker 源码：typecheck + 纯逻辑相关 + db 项目；默认不含真浏览器', () => {
+    const plan = planRelatedRun(['packages/worker/src/browser/totp.ts'])
+    assert.deepEqual(kinds(plan), ['typecheck:@cairn/worker', 'related:@cairn/worker', 'related:@cairn/worker'])
+    const cmds = plan.steps.map((s) => s.command)
+    assert.ok(cmds[1].includes('vitest related src/browser/totp.ts --run --passWithNoTests --config vitest.config.mts'))
+    assert.ok(cmds[2].includes('--config vitest.integration.config.mts --project integration-db'))
+    assert.ok(!cmds.some((c) => c.includes('browser-serial')))
+    assert.ok(plan.notes.some((n) => n.includes('--browser')))
+  })
+
+  it('worker + --browser：纳入 browser-serial / browser-parallel', () => {
+    const plan = planRelatedRun(['packages/worker/src/browser/totp.ts'], () => true, { browser: true })
+    assert.equal(plan.steps.length, 4)
+    assert.ok(plan.steps[3].command.includes('--project browser-serial --project browser-parallel'))
+    assert.ok(!plan.notes.some((n) => n.includes('默认不跑')))
+  })
+
+  it('web：带 --browser.headless，文件路径相对包目录', () => {
+    const plan = planRelatedRun(['packages/web/src/lib/utils.ts'])
+    assert.equal(plan.steps[1].command, 'pnpm --filter @cairn/web exec vitest related src/lib/utils.ts --run --passWithNoTests --browser.headless')
+  })
+
+  it('迁移 / 配置 / 非代码文件：该包退回全量 test，并说明原因', () => {
+    for (const file of ['packages/db/migrations/0150_x.sql', 'packages/db/vitest.config.mts', 'packages/db/package.json']) {
+      const plan = planRelatedRun([file, 'packages/db/src/testing.ts'])
+      assert.deepEqual(kinds(plan), ['typecheck:@cairn/db', 'full:@cairn/db'], file)
+      assert.equal(plan.steps[1].command, 'pnpm --filter @cairn/db test')
+      assert.deepEqual(plan.steps[1].because, [file])
+    }
+  })
+
+  it('已删除文件：该包退回全量，不把不存在的路径交给 vitest', () => {
+    const plan = planRelatedRun(['packages/api/src/gone.ts'], () => false)
+    assert.deepEqual(kinds(plan), ['typecheck:@cairn/api', 'full:@cairn/api'])
+    assert.ok(plan.steps[1].because[0].includes('已删除'))
+  })
+
+  it('下游包未覆盖要明说；改下游自身不报它', () => {
+    const plan = planRelatedRun(['packages/db/src/testing.ts'])
+    assert.deepEqual(plan.uncoveredDownstream, ['@cairn/api', '@cairn/worker'])
+    assert.ok(plan.notes.some((n) => n.includes('下游包未覆盖')))
+    assert.deepEqual(planRelatedRun(['packages/web/src/lib/utils.ts']).uncoveredDownstream, [])
+  })
+
+  it('多包按依赖顺序执行：上游先于下游', () => {
+    const plan = planRelatedRun(['packages/worker/src/a.ts', 'packages/web/src/b.ts', 'packages/shared/src/c.ts', 'packages/db/src/d.ts'])
+    const order = [...new Set(plan.steps.map((s) => s.pkg))]
+    assert.deepEqual(order, ['@cairn/shared', '@cairn/db', '@cairn/worker', '@cairn/web'])
+  })
+
+  it('文档与不属于带测试包的改动：不产生步骤，未处理的改动要列出', () => {
+    const plan = planRelatedRun(['docs/spec/a.md', 'packages/web/README.md', 'tools/x.mjs'])
+    assert.deepEqual(plan.steps, [])
+    assert.ok(plan.notes.some((n) => n.includes('tools/x.mjs')))
+  })
+
+  it('永远提示：迭代档不含 lint、不等于交付门', () => {
+    const plan = planRelatedRun(['packages/web/src/lib/utils.ts'])
+    assert.ok(plan.notes.some((n) => n.includes('不含 lint')))
   })
 })

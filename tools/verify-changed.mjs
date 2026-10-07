@@ -6,16 +6,21 @@
  * 用法:
  *   pnpm verify:changed
  *   pnpm verify:changed --dry-run
+ *   pnpm verify:changed --related      迭代档：只跑与改动文件相关的用例 + 受影响包 typecheck（不替代交付门）
+ *   pnpm verify:changed --related --browser   同上，并纳入 worker 的真 Chromium 用例（约 5 分钟）
  *   pnpm verify:changed --files packages/web/src/App.tsx,packages/web/package.json
  */
 
 import { execSync, spawnSync } from 'node:child_process'
-import { analyzeVerificationScope, evaluateRemoteFreshness } from './lib/verify-changed.mjs'
+import { existsSync } from 'node:fs'
+import { analyzeVerificationScope, evaluateRemoteFreshness, planRelatedRun } from './lib/verify-changed.mjs'
 
 function parseArgs() {
   const args = process.argv.slice(2)
   let dryRun = false
   let forceFull = false
+  let related = false
+  let withBrowser = false
   let files = null
 
   for (let i = 0; i < args.length; i++) {
@@ -24,6 +29,10 @@ function parseArgs() {
       dryRun = true
     } else if (arg === '--full') {
       forceFull = true
+    } else if (arg === '--related') {
+      related = true
+    } else if (arg === '--browser') {
+      withBrowser = true
     } else if (arg === '--files' && i + 1 < args.length) {
       files = args[++i].split(/[,\s]+/).map((s) => s.trim()).filter(Boolean)
     } else if (arg.startsWith('--files=')) {
@@ -31,7 +40,7 @@ function parseArgs() {
     }
   }
 
-  return { dryRun, forceFull, files }
+  return { dryRun, forceFull, related, withBrowser, files }
 }
 
 function getChangedFilesFromGit() {
@@ -86,8 +95,54 @@ function checkOriginMainFreshness() {
   }
 }
 
+function runRelated(files, analysis, dryRun, withBrowser) {
+  if (analysis.isDocsOnly) {
+    console.log('✅ 判定结论: 仅涉及文档或辅助元数据改动，迭代档无需执行。')
+    process.exit(0)
+  }
+  const plan = planRelatedRun(files, existsSync, { browser: withBrowser })
+  console.log('⚡ 迭代档 (--related)：只跑相关用例，不替代交付门')
+  if (analysis.isFull) {
+    console.log('🚨 本次改动命中交付门的全量升级条件，交付前仍须跑全量：')
+    for (const r of analysis.reasons) console.log(`  • ${r}`)
+  }
+  if (plan.steps.length === 0) {
+    console.log('没有可执行的相关用例步骤。')
+    for (const n of plan.notes) console.log(`  ℹ️  ${n}`)
+    process.exit(0)
+  }
+  console.log('执行计划:')
+  plan.steps.forEach((step, i) => {
+    const tag = step.kind === 'typecheck' ? '类型检查' : step.kind === 'full' ? '包全量' : '相关用例'
+    console.log(`  ${i + 1}. [${tag}] ${step.pkg}${step.files ? `（${step.files.length} 个文件）` : ''}`)
+    for (const reason of step.because ?? []) console.log(`       退回全量: ${reason}`)
+  })
+  for (const n of plan.notes) console.log(`  ℹ️  ${n}`)
+  console.log('─────────────────────────────────────────────────────────────────')
+  if (dryRun) {
+    for (const step of plan.steps) console.log(`  $ ${step.command}`)
+    console.log('\n[DRY-RUN] 仅试跑决策，不实际执行命令。')
+    process.exit(0)
+  }
+  const started = Date.now()
+  for (const [i, step] of plan.steps.entries()) {
+    const t0 = Date.now()
+    console.log(`\n▶ (${i + 1}/${plan.steps.length}) ${step.command}`)
+    const result = spawnSync(step.command, { stdio: 'inherit', shell: true })
+    const secs = ((Date.now() - t0) / 1000).toFixed(1)
+    if ((result.status ?? 1) !== 0) {
+      console.log(`\n❌ 失败于第 ${i + 1} 步（${secs}s）：${step.pkg} ${step.kind}。已停止，后续步骤未执行。`)
+      process.exit(result.status ?? 1)
+    }
+    console.log(`✔ 第 ${i + 1} 步通过（${secs}s）`)
+  }
+  console.log(`\n✅ 迭代档通过，共 ${plan.steps.length} 步，用时 ${((Date.now() - started) / 1000).toFixed(1)}s。`)
+  console.log('⚠️  这不等于交付门通过：交付前请不带 --related 再跑一次 pnpm verify:changed。')
+  process.exit(0)
+}
+
 function main() {
-  const { dryRun, forceFull, files: explicitFiles } = parseArgs()
+  const { dryRun, forceFull, related, withBrowser, files: explicitFiles } = parseArgs()
   const freshness = checkOriginMainFreshness()
   const files = explicitFiles ?? getChangedFilesFromGit()
 
@@ -108,6 +163,7 @@ function main() {
   console.log('─────────────────────────────────────────────────────────────────')
 
   const analysis = analyzeVerificationScope(files)
+  if (related) runRelated(files, analysis, dryRun, withBrowser)
   if (forceFull) {
     analysis.isFull = true
     analysis.reasons.push('用户显式指定了 --full 强制全量')

@@ -81,10 +81,13 @@ resolve_services() {
   local target="${1:-all}"
   case "$target" in
     all)
-      echo "postgres rustfs redis"
+      echo "postgres postgres-test rustfs redis"
       ;;
     postgres|pg|db|database)
       echo "postgres"
+      ;;
+    postgres-test|pgtest|testdb)
+      echo "postgres-test"
       ;;
     rustfs|minio|s3|storage)
       echo "rustfs"
@@ -93,7 +96,7 @@ resolve_services() {
       echo "redis"
       ;;
     *)
-      echo "未知服务组件: $target (可选: all, postgres, redis, rustfs)" >&2
+      echo "未知服务组件: $target (可选: all, postgres, postgres-test, redis, rustfs)" >&2
       exit 1
       ;;
   esac
@@ -103,10 +106,13 @@ compose_up_services() {
   local target="${1:-all}"
   case "$target" in
     all)
-      echo "postgres rustfs rustfs-init redis"
+      echo "postgres postgres-test rustfs rustfs-init redis"
       ;;
     postgres|pg|db|database)
       echo "postgres"
+      ;;
+    postgres-test|pgtest|testdb)
+      echo "postgres-test"
       ;;
     rustfs|minio|s3|storage)
       echo "rustfs rustfs-init"
@@ -124,6 +130,7 @@ compose_up_services() {
 port_of() {
   case "$1" in
     postgres) echo "$(get_env_val "CAIRN_DB_PORT" "5432")" ;;
+    postgres-test) echo "$(get_env_val "CAIRN_TEST_DB_PORT" "5442")" ;;
     redis)    echo "$(get_env_val "CAIRN_REDIS_PORT" "6379")" ;;
     rustfs)   echo "$(get_env_val "CAIRN_S3_API_PORT" "9021")" ;;
     *)        echo "" ;;
@@ -228,6 +235,9 @@ status_one() {
   case "$svc" in
     postgres)
       port_desc="127.0.0.1:${port}"
+      ;;
+    postgres-test)
+      port_desc="127.0.0.1:${port} (测试专用，内存盘)"
       ;;
     redis)
       port_desc="127.0.0.1:${port}"
@@ -347,7 +357,7 @@ logs_cmd() {
         lines="$1"
         shift
         ;;
-      all|postgres|pg|db|database|redis|cache|rustfs|minio|s3|storage)
+      all|postgres|pg|db|database|postgres-test|pgtest|testdb|redis|cache|rustfs|minio|s3|storage)
         target="$1"
         shift
         ;;
@@ -372,16 +382,12 @@ logs_cmd() {
   fi
 }
 
-clean_test_dbs_cmd() {
-  echo "正在检查并清理所有孤儿测试数据库..."
-  local engine; engine="$(detect_engine)"
-  if [[ -z "$engine" ]]; then
-    echo "  ✗ 未找到容器引擎" >&2
-    exit 1
-  fi
+clean_test_dbs_in() {
+  local container="$1" engine="$2"
+  echo "[$container] 正在检查并清理孤儿测试数据库..."
 
   local dbs
-  dbs="$($engine exec -i cairn-postgres psql -U cairn -d postgres -t -A -c "
+  dbs="$($engine exec -i "$container" psql -U cairn -d postgres -t -A -c "
     SELECT datname FROM pg_database 
     WHERE (
       datname LIKE 'cairn_test_%' OR 
@@ -397,6 +403,11 @@ clean_test_dbs_cmd() {
     AND datname NOT IN (
       SELECT DISTINCT datname FROM pg_stat_activity 
       WHERE datname IS NOT NULL AND pid <> pg_backend_pid()
+    )
+    AND datname NOT IN (
+      -- 模板库的持有者连接（见 packages/db/src/testing.ts templateOwnerAppName）：application_name 只存 32 位 id，仍有进程在用
+      SELECT 'cairn_test_template_' || substr(application_name, 18) FROM pg_stat_activity
+      WHERE application_name LIKE 'cairn-test-owner:%'
     );
   " 2>/dev/null || true)"
 
@@ -405,15 +416,45 @@ clean_test_dbs_cmd() {
     return 0
   fi
 
-  local count=0
+  local count=0 failed=0
   for db in $dbs; do
     [[ -n "$db" ]] || continue
     echo "  - 清理 $db..."
-    $engine exec -i cairn-postgres psql -U cairn -d postgres -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE);" >/dev/null 2>&1 || true
-    count=$((count + 1))
+    # 已标 is_template 的库 PG 拒绝直接删除，须先取消标记；库已被主人自己删掉时 ALTER 会报错，容忍，以 DROP 结果为准
+    $engine exec -i "$container" psql -U cairn -d postgres \
+      -c "ALTER DATABASE \"$db\" WITH is_template = false;" >/dev/null 2>&1 || true
+    if $engine exec -i "$container" psql -U cairn -d postgres -v ON_ERROR_STOP=1 \
+      -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE);" >/dev/null 2>&1; then
+      count=$((count + 1))
+    else
+      failed=$((failed + 1))
+      echo "    ✗ 清理失败：$db" >&2
+    fi
   done
 
   echo "  ✅ 成功清理 $count 个残留孤儿测试库"
+  if [[ $failed -gt 0 ]]; then
+    echo "  ✗ $failed 个清理失败（见上方）" >&2
+    return 1
+  fi
+}
+
+clean_test_dbs_cmd() {
+  local engine; engine="$(detect_engine)"
+  if [[ -z "$engine" ]]; then
+    echo "  ✗ 未找到容器引擎" >&2
+    exit 1
+  fi
+  local rc=0 c
+  # 开发库与测试库都要扫：测试现在只连测试库，开发库里的历史遗留仍需一次性清掉
+  for c in cairn-postgres cairn-postgres-test; do
+    if [[ "$($engine inspect -f '{{.State.Running}}' "$c" 2>/dev/null)" == "true" ]]; then
+      clean_test_dbs_in "$c" "$engine" || rc=1
+    else
+      echo "[$c] 未运行，跳过"
+    fi
+  done
+  return $rc
 }
 
 cmd="${1:-}"
@@ -448,7 +489,8 @@ case "$cmd" in
 
 服务组件 (可选):
   all        所有基础设施组件 (postgres, rustfs, redis) [默认]
-  postgres   仅 PostgreSQL 数据库 (别名: pg, db, database)
+  postgres   仅 PostgreSQL 开发库 (别名: pg, db, database)
+  postgres-test  测试专用 PostgreSQL，内存盘 (别名: pgtest, testdb)
   redis      仅 Redis 缓存与变化提示 (别名: cache)
   rustfs     仅 RustFS 对象存储 (别名: minio, s3, storage)
 

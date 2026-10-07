@@ -25,19 +25,23 @@ const base = {
   testTimeout: 60_000,
   hookTimeout: 60_000,
   retry: process.env.CI || process.env.CAIRN_TEST_RETRY ? 1 : 0,
-  globalSetup: './vitest.global-setup.mts',
 } as const
+
+/** 只能在根配置声明一次：写进 base 展开到每个 project 会一次运行建多个模板，清理只认最后一个。 */
+const globalSetup = './vitest.global-setup.mts'
 
 export default defineConfig({
   test:
     process.env.CAIRN_BROWSER_PARALLEL === '0'
       ? {
           ...base,
+          globalSetup,
           include: [...BROWSER_SERIAL_SPEC_FILES, ...BROWSER_PARALLEL_SPEC_FILES],
           fileParallelism: false,
         }
       : {
           ...base,
+          globalSetup,
           projects: [
             {
               test: {

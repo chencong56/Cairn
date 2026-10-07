@@ -183,4 +183,16 @@ describe('Worker 测试套件分组完整性检查', () => {
       `BROWSER_PARALLEL_SPEC_FILES 中存在连库或固定端口的文件，违背可并行设计:\n${JSON.stringify(violations, null, 2)}`,
     ).toEqual([])
   })
+
+  it('多 project 配置的 globalSetup 只在根声明一次（否则一次运行建多个模板且必漏）', () => {
+    const root = join(__dirname, '..', '..')
+    for (const file of ['vitest.integration.config.mts', 'vitest.browser.config.mts']) {
+      const text = readFileSync(join(root, file), 'utf8')
+      const base = text.slice(text.indexOf('const base'), text.indexOf('} as const'))
+      expect(base, `${file} 的 base 会展开进每个 project，不得含 globalSetup`).not.toContain('globalSetup')
+      // projects 数组内部（从 projects: [ 起）不得出现 globalSetup
+      const projects = text.slice(text.indexOf('projects: ['))
+      expect(projects, `${file} 的 project 内不得声明 globalSetup`).not.toMatch(/globalSetup/)
+    }
+  })
 })

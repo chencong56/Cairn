@@ -38,7 +38,7 @@
 | `executor.compose.yml` | ah2/ah4 执行栈 |
 | `.env.example` | 环境变量模板（密钥 openssl 随机生成） |
 | `push-src.sh`（Mac） | 源码增量推送（git stash create 快照 diff + tar 管道；Mac openrsync 与 CentOS 7 rsync 协议不兼容，勿用 rsync） |
-| `build.sh`（Mac） | 运行时底座镜像交叉构建（podman buildx linux/amd64，仅首次/换底座时用） |
+| `build-base.sh`（ah3） | 在服务器上原生构建运行时底座镜像（仅首次/换底座时用；Mac 不构建、不传输镜像） |
 | `build-apps.sh`（ah3） | 容器内构建应用产物到 `apps/`（含 `.old` 回滚目录） |
 | `sync-apps.sh`（ah3） | 产物内网分发 ah2/ah4 并滚动重启 executor |
 | `cairn-ctl.sh`（各机） | 宿主运维：up/down/restart/ps/status/logs/migrate |
@@ -60,8 +60,10 @@ ssh root@shsnc-ah3
 
 ## 首次部署（底座镜像，仅记录用）
 
-Mac `./build.sh` 交叉构建 amd64 三镜像 → 传 ah3 `docker load`；或直接在 ah3 用源码 `docker build`（npm/CDN 可达，
-注意 `ONNXRUNTIME_NODE_INSTALL=skip` 已内置，避免 nuget 302）。基础设施镜像三台走 daocloud mirror 自拉。
+**原则：Mac 不构建、不拉取、不传输任何镜像，只传源码和配置；镜像架构由各服务器自己决定。**
+`push-src.sh` 推源码到 ah3 → ah3 构建目录执行 `./build-base.sh <tag> --to ah2,ah4`（原生 `docker build`，
+同架构执行节点经内网 `docker save | docker load`；注意 `ONNXRUNTIME_NODE_INSTALL=skip` 已内置，避免 nuget 302）→ Mac `./ship.sh` 分发配置。
+基础设施镜像（PG / Redis / RustFS / mc / Nginx）三台 `compose up` 时走 daocloud mirror 自拉，不经过 Mac。
 
 ## 运维要点（踩过的坑）
 

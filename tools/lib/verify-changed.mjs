@@ -263,6 +263,126 @@ export function analyzeVerificationScope(files) {
 }
 
 /**
+ * 迭代档（--related）：每个包只跑与改动文件有依赖关系的用例，并跑该包 typecheck。
+ *
+ * 只作 AI / 人的内循环，不替代交付门：
+ * - vitest 的依赖图只在包内有效，改 @cairn/db 源码不会带出 api / worker 的用例，
+ *   所以计划里列出「未覆盖的下游包」，交付前仍须跑 analyzeVerificationScope 给出的命令；
+ * - 配置、构建、迁移、数据文件等无法判断影响面的改动，该包退回全量 test；
+ * - 不含 lint（lint 只覆盖有该脚本的包，交付前统一跑）。
+ */
+const RELATED_RUNNERS = {
+  '@cairn/shared': [{ args: '' }],
+  '@cairn/authoring': [{ args: '' }],
+  '@cairn/storage': [{ args: '' }],
+  '@cairn/secret': [{ args: '' }],
+  '@cairn/map': [{ args: '' }],
+  '@cairn/db': [{ args: '' }],
+  '@cairn/api': [{ args: '' }],
+  // worker：纯逻辑（fast）+ 集成配置里的 db 项目（真 PG、假浏览器，约 20s）。
+  // 真 Chromium 的 browser-serial / browser-parallel 项目约 5 分钟，不属于内循环：
+  // 间接被大量引用的模块（如 totp.ts）会把 30 余个浏览器用例都带出来，迭代档退化成全量。需要时加 --browser。
+  '@cairn/worker': [
+    { args: '--config vitest.config.mts' },
+    { args: '--config vitest.integration.config.mts --project integration-db' },
+    { args: '--config vitest.integration.config.mts --project browser-serial --project browser-parallel', browserOnly: true },
+  ],
+  '@cairn/web': [{ args: '--browser.headless' }],
+}
+
+/** 依赖顺序：上游先跑，失败尽早暴露 */
+const RELATED_ORDER = Object.keys(RELATED_RUNNERS)
+
+const CODE_FILE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/
+const CONFIG_FILE = /(?:^|\/)(?:package\.json|tsconfig[^/]*\.json|vitest[^/]*\.m?[jt]s|vite\.config\.[mc]?[jt]s|eslint\.config\.[mc]?[jt]s|knip\.config\.[mc]?[jt]s)$/
+
+function shellQuote(value) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * @param {string[]} files 变更文件（仓库相对路径）
+ * @param {(file: string) => boolean} exists 文件当前是否存在（已删除的文件不能交给 vitest related）
+ */
+export function planRelatedRun(files, exists = () => true, options = {}) {
+  const withBrowser = options.browser === true
+  const byPackage = new Map()
+  const notes = []
+  const skipped = []
+
+  for (const raw of files) {
+    const file = raw.replace(/\\/g, '/')
+    if (!file) continue
+    const pkg = mapPathToPackage(file)
+    if (!pkg || !RELATED_RUNNERS[pkg]) {
+      if (!isDocumentationOrMeta(file)) skipped.push(file)
+      continue
+    }
+    if (file.endsWith('.md') || file.includes('/dist/') || file.includes('/node_modules/')) continue
+    const entry = byPackage.get(pkg) ?? { related: [], fullBecause: [] }
+    byPackage.set(pkg, entry)
+
+    const rel = file.slice(file.indexOf('/', file.indexOf('/') + 1) + 1) // packages/<name>/<rel>
+    if (CONFIG_FILE.test(file) || !CODE_FILE.test(file) || file.endsWith('.d.ts')) {
+      entry.fullBecause.push(file)
+    } else if (!exists(file)) {
+      // 已删除：改动面无法由文件本身推出，退回包全量
+      entry.fullBecause.push(`${file}（已删除）`)
+    } else {
+      entry.related.push(rel)
+    }
+  }
+
+  const steps = []
+  for (const pkg of RELATED_ORDER) {
+    const entry = byPackage.get(pkg)
+    if (!entry) continue
+    steps.push({ kind: 'typecheck', pkg, command: `pnpm --filter ${pkg} typecheck` })
+    if (entry.fullBecause.length > 0) {
+      steps.push({
+        kind: 'full',
+        pkg,
+        because: entry.fullBecause,
+        command: `pnpm --filter ${pkg} test`,
+      })
+      continue
+    }
+    if (entry.related.length === 0) continue
+    const fileArgs = entry.related.map(shellQuote).join(' ')
+    for (const runner of RELATED_RUNNERS[pkg]) {
+      if (runner.browserOnly && !withBrowser) continue
+      steps.push({
+        kind: 'related',
+        pkg,
+        files: entry.related,
+        command:
+          `pnpm --filter ${pkg} exec vitest related ${fileArgs} --run --passWithNoTests ${runner.args}`.trimEnd(),
+      })
+    }
+  }
+
+  const changedPackages = [...byPackage.keys()].sort()
+  const uncovered = getDownstreamPackages(changedPackages).filter((pkg) => RELATED_RUNNERS[pkg])
+  if (uncovered.length > 0) {
+    notes.push(
+      `下游包未覆盖（vitest 依赖图只在包内）：${uncovered.join('、')}。改动若影响其对外行为，交付前须按交付门跑到这些包。`,
+    )
+  }
+  if (steps.some((step) => step.kind === 'full')) {
+    notes.push('含配置、迁移、已删除文件或非代码文件的包已退回该包全量 test（无法判断影响面）。')
+  }
+  if (skipped.length > 0) {
+    notes.push(`以下改动不属于任何带测试的包，迭代档不处理：${skipped.join('、')}`)
+  }
+  if (!withBrowser && changedPackages.includes('@cairn/worker')) {
+    notes.push('worker 的真 Chromium 用例（browser-serial / browser-parallel，约 5 分钟）迭代档默认不跑：加 --browser 纳入，或交付前跑 pnpm test:worker:browser。')
+  }
+  notes.push('迭代档不含 lint；交付前仍须按 pnpm verify:changed（不带 --related）给出的命令跑完整的受影响包。')
+
+  return { steps, notes, changedPackages, uncoveredDownstream: uncovered }
+}
+
+/**
  * 评估本地 origin/main 或对比分支的时效性
  * @param {number} commitTimestampSeconds - git commit timestamp (秒)
  * @param {number} nowMs - 当前毫秒时间戳

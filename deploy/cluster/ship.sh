@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Mac 侧分发：生成/复用 .env（密钥 openssl 随机），把镜像 tar、compose、配置送到三台，
-# 远端 docker load 并布置目录。只加不改：不触碰任何存量容器与目录。
+# Mac 侧分发：生成/复用 .env（密钥 openssl 随机），把 compose、配置送到三台并布置目录。
+# 不传输镜像：底座镜像由服务器原生构建（build-base.sh），基础设施镜像由服务器 compose up 时自行拉取。
+# 只加不改：不触碰任何存量容器与目录。
 # 用法：./ship.sh          # 全新分发（首次；本地已生成 .env 则复用）
 #       ./ship.sh <tag>    # 指定与 dist/TAG 不同的镜像 tag
 set -euo pipefail
@@ -43,13 +44,14 @@ fi
 # ── 2. 逐台布置 ──
 ship() {
   local host="$1" short="$2" ip="$3"
-  echo "▶ [$short] 传输镜像与配置"
-  ssh "$host" "mkdir -p /data/wp/cairn/cluster/{deploy/nginx,images,pg,rustfs2,browser-profiles,logs}"
-  scp -q "$DIST/cairn-$TAG.tar" "$DIST/infra.tar" "$host:/data/wp/cairn/cluster/images/"
+  echo "▶ [$short] 传输配置"
+  ssh "$host" "mkdir -p /data/wp/cairn/cluster/{deploy/nginx,pg,rustfs2,browser-profiles,logs}"
   scp -q nginx/entry.conf nginx/worker-gateway.conf.template "$host:/data/wp/cairn/cluster/deploy/nginx/"
   scp -q cairn-ctl.sh "$host:/data/wp/cairn/cluster/deploy/"
-  echo "▶ [$short] docker load"
-  ssh "$host" "docker load -i /data/wp/cairn/cluster/images/cairn-$TAG.tar && docker load -i /data/wp/cairn/cluster/images/infra.tar"
+  echo "▶ [$short] 检查底座镜像（须已由服务器原生构建）"
+  if ! ssh "$host" "docker image inspect cairn-worker:$TAG >/dev/null 2>&1"; then
+    echo "  ! [$short] 缺少 cairn-worker:$TAG：先 push-src.sh，再在 ah3 构建目录执行 ./build-base.sh $TAG --to ah2,ah4" >&2
+  fi
   echo "▶ [$short] 写入 .env 与 compose"
   sed -e "s|^HOST_IP=.*|HOST_IP=$ip|" -e "s|^HOST_SHORT=.*|HOST_SHORT=$short|" "$SECRET_FILE" \
     | ssh "$host" "cat > /data/wp/cairn/cluster/deploy/.env && chmod 640 /data/wp/cairn/cluster/deploy/.env"

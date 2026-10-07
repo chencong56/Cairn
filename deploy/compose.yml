@@ -22,6 +22,41 @@ services:
       retries: 20
       start_period: 10s
 
+  # 测试专用 PostgreSQL：与开发库分开，数据放内存盘并关闭持久化保证（重启即清空，泄漏无法跨重启累积）。
+  # 仅供 vitest 集成测试使用（packages/db/src/testing.ts 把 CAIRN_DB_PORT 锁定到 CAIRN_TEST_DB_PORT）。
+  # 不指定 platform：跟随宿主架构，不得再在本机拉取其它架构镜像（见 docs/spec/2026-10-07-ai-dev-test-loop-and-isolation.md）。
+  postgres-test:
+    image: postgres:16
+    container_name: cairn-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CAIRN_DB_USER}
+      POSTGRES_PASSWORD: ${CAIRN_DB_PASSWORD}
+      POSTGRES_DB: ${CAIRN_DB_NAME}
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - max_connections=300
+    shm_size: 256mb
+    tmpfs:
+      - /var/lib/postgresql/data:rw,size=4g
+    ports:
+      - "127.0.0.1:${CAIRN_TEST_DB_PORT:-5442}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CAIRN_DB_USER} -d ${CAIRN_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
   rustfs:
     image: rustfs/rustfs:1.0.0
     container_name: cairn-rustfs

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { drizzle } from 'drizzle-orm/node-postgres'
-import { Pool } from 'pg'
+import { Client, Pool } from 'pg'
 import { dbEnvSchema, formatEnvIssues, type PostgresDbEnv } from '@cairn/shared'
 import { bindTransactions, type DbHandle } from './client.js'
 import { eq } from 'drizzle-orm'
@@ -21,6 +21,36 @@ const ENV_FILE = resolve(import.meta.dirname, '../../../.env')
 const CONNECT_TIMEOUT_MS = 10_000
 
 /**
+ * 集成测试只连测试专用 PG（容器 cairn-postgres-test，内存盘），不碰开发库。
+ *
+ * 此前测试与开发库共用一个实例：多个会话并发跑测试时互相干扰，测试还会往开发库里建删库与 schema。
+ * 做法：把进程里的 CAIRN_DB_PORT 锁定为 CAIRN_TEST_DB_PORT。必须在 globalSetup 里（主进程、fork worker 之前）
+ * 调用，worker 继承环境变量，之后无论 `process.loadEnvFile` 还是各测试自读 env，看到的都是测试端口。
+ *
+ * - 本地未配 CAIRN_TEST_DB_PORT：明确失败，不回退到开发库；
+ * - 测试端口与开发库端口相同：明确失败；
+ * - CI（`CI` 环境变量）未配：沿用 CAIRN_DB_PORT，CI 的库本来就是一次性、隔离的。
+ */
+function pinTestDbPort(): void {
+  if (process.env.CAIRN_TEST_DB_PINNED === '1') return
+  const testPort = process.env.CAIRN_TEST_DB_PORT?.trim()
+  if (!testPort) {
+    if (process.env.CI) return
+    throw new Error(
+      '集成测试必须连测试专用 PostgreSQL，但未配置 CAIRN_TEST_DB_PORT（见 .env.example）。\n' +
+        '启动：pnpm infra:up（会同时启动 cairn-postgres-test）。不会回退到开发库。',
+    )
+  }
+  if (testPort === String(process.env.CAIRN_DB_PORT ?? '')) {
+    throw new Error(
+      `CAIRN_TEST_DB_PORT（${testPort}）与开发库端口 CAIRN_DB_PORT 相同，测试会写进开发库，已拒绝。`,
+    )
+  }
+  process.env.CAIRN_DB_PORT = testPort
+  process.env.CAIRN_TEST_DB_PINNED = '1'
+}
+
+/**
  * 集成测试的库前置条件：**连不上就失败，不跳过**。
  *
  * 判据必须是「库能不能连上」，而不是「配置看起来有没有」。原先各集成测试用
@@ -33,6 +63,7 @@ const CONNECT_TIMEOUT_MS = 10_000
  */
 export async function requireReachableDb(): Promise<PostgresDbEnv> {
   if (existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE)
+  pinTestDbPort()
 
   const parsed = dbEnvSchema.safeParse(process.env)
   if (!parsed.success) {
@@ -64,7 +95,7 @@ export async function requireReachableDb(): Promise<PostgresDbEnv> {
     throw new Error(
       `集成测试需要可用的 PostgreSQL，但连接 ` +
         `${env.CAIRN_DB_HOST}:${env.CAIRN_DB_PORT}/${env.CAIRN_DB_NAME} 失败：${reason}\n` +
-        '库不可用时集成测试失败，不跳过。',
+        '库不可用时集成测试失败，不跳过。本地请先 pnpm infra:up 启动测试专用库 cairn-postgres-test。',
     )
   } finally {
     await pool.end()
@@ -79,8 +110,27 @@ function templateDatabase(): string | undefined {
 }
 
 /**
+ * 模板库持有者连接的 application_name 前缀。建模板的进程在整个运行期间保持一条这样的连接，
+ * 回收程序据此判断模板是否仍有人在用：模板库本身不能挂连接（会让 CREATE DATABASE ... TEMPLATE 失败），
+ * 两次克隆之间它是「无连接」的，只看 pg_stat_activity 会把并发运行中的模板当孤儿删掉。
+ */
+export const TEMPLATE_OWNER_APP_PREFIX = 'cairn-test-owner:'
+
+const TEMPLATE_DB_PREFIX = 'cairn_test_template_'
+
+/**
+ * 持有者连接的 application_name。PG 把它截断在 63 字符，完整库名（52）加前缀（17）会超长，
+ * 被截断后回收程序认不出持有者而误删，所以只放库名里的 32 位 id，回收时再补回 TEMPLATE_DB_PREFIX。
+ */
+export function templateOwnerAppName(templateDb: string): string {
+  return `${TEMPLATE_OWNER_APP_PREFIX}${templateDb.slice(TEMPLATE_DB_PREFIX.length)}`
+}
+
+/**
  * 清理上次被异常中断（如 Ctrl+C、崩溃或进程强杀）遗留的孤儿测试数据库。
  * 保护活跃连接，防止并发套件误删；只清理无连接且符合测试命名前缀的孤儿库。
+ * 模板库另有持有者连接保护（见 TEMPLATE_OWNER_APP_PREFIX）；已标 is_template 的库 PG 拒绝直接删除，
+ * 须先取消标记。删除失败不静默：汇总数量与首个原因告警。
  */
 export async function cleanupOrphanTestDatabases(env?: PostgresDbEnv): Promise<number> {
   const dbEnv = env ?? (await requireReachableDb())
@@ -94,8 +144,9 @@ export async function cleanupOrphanTestDatabases(env?: PostgresDbEnv): Promise<n
   })
 
   try {
-    const res = await admin.query<{ datname: string }>(`
-      SELECT datname FROM pg_database 
+    const res = await admin.query<{ datname: string; datistemplate: boolean }>(
+      `
+      SELECT datname, datistemplate FROM pg_database 
       WHERE (
         datname LIKE 'cairn_test_%' OR 
         datname LIKE 'cairn_port_%' OR 
@@ -111,19 +162,32 @@ export async function cleanupOrphanTestDatabases(env?: PostgresDbEnv): Promise<n
         SELECT DISTINCT datname FROM pg_stat_activity 
         WHERE datname IS NOT NULL AND pid <> pg_backend_pid()
       )
-    `)
+      AND datname NOT IN (
+        SELECT CAST($3 AS text) || substr(application_name, $1) FROM pg_stat_activity
+        WHERE application_name LIKE $2
+      )
+    `,
+      [TEMPLATE_OWNER_APP_PREFIX.length + 1, `${TEMPLATE_OWNER_APP_PREFIX}%`, TEMPLATE_DB_PREFIX],
+    )
 
     let cleaned = 0
+    const failures: string[] = []
     for (const row of res.rows) {
       try {
+        if (row.datistemplate) {
+          await admin.query(`ALTER DATABASE "${row.datname}" WITH is_template = false`)
+        }
         await admin.query(`DROP DATABASE IF EXISTS "${row.datname}" WITH (FORCE)`)
         cleaned++
-      } catch {
-        // 忽略单库删除竞争失败
+      } catch (error) {
+        failures.push(`${row.datname}: ${(error as Error).message}`)
       }
     }
     if (cleaned > 0) {
       console.log(`[testing] 自动垃圾回收：已清理 ${cleaned} 个历史残留孤儿测试库`)
+    }
+    if (failures.length > 0) {
+      console.warn(`[testing] 自动垃圾回收：${failures.length} 个孤儿测试库清理失败，首个：${failures[0]}`)
     }
     return cleaned
   } catch (error) {
@@ -137,86 +201,104 @@ export async function cleanupOrphanTestDatabases(env?: PostgresDbEnv): Promise<n
 /**
  * 在运行测试套件前，一次性初始化基准模板库并执行全部迁移。
  * 后续所有 openIsolatedDb 均基于此模板克隆，省去逐用例执行 migration 的高昂耗时。
+ *
+ * 返回**这一份模板自己的**清理函数：谁建谁删，不读共享环境变量。多 project 配置若每个 project
+ * 都声明 globalSetup，会各建一个模板，而共享的 CAIRN_TEST_TEMPLATE_DB 只记得最后一个，其余必漏。
+ * 因此 globalSetup 只应在根配置声明一次。
+ *
+ * 先于建库开持有者连接：模板从创建到标记完成之间，别的进程的回收不能把它当孤儿删掉。
  */
-export async function setupTestTemplateDatabase(): Promise<void> {
+export async function setupTestTemplateDatabase(): Promise<() => Promise<void>> {
   const env = await requireReachableDb()
   await cleanupOrphanTestDatabases(env)
-  const name = `cairn_test_template_${randomUUID().replaceAll('-', '')}`
-  const admin = new Pool({
+  const name = `${TEMPLATE_DB_PREFIX}${randomUUID().replaceAll('-', '')}`
+
+  const owner = new Client({
     host: env.CAIRN_DB_HOST,
     port: env.CAIRN_DB_PORT,
     database: env.CAIRN_DB_NAME,
     user: env.CAIRN_DB_USER,
     password: env.CAIRN_DB_PASSWORD,
     connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    application_name: templateOwnerAppName(name),
   })
-  try {
-    await admin.query(`CREATE DATABASE "${name}"`)
-  } finally {
-    await admin.end()
+  // 持有者连接被服务端掐断（如开发库重启）时不能变成未处理错误把整个套件打红。
+  owner.on('error', () => {})
+  await owner.connect()
+
+  const release = async (): Promise<void> => {
+    await owner.end().catch(() => {})
+    const admin = new Pool({
+      host: env.CAIRN_DB_HOST,
+      port: env.CAIRN_DB_PORT,
+      database: env.CAIRN_DB_NAME,
+      user: env.CAIRN_DB_USER,
+      password: env.CAIRN_DB_PASSWORD,
+      connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    })
+    try {
+      await admin.query(`ALTER DATABASE "${name}" WITH is_template = false`).catch(() => {
+        // 库不存在或缺少特权：下面的 DROP 会给出真实结果
+      })
+    } finally {
+      await admin.end()
+    }
+    await dropIsolatedDatabase(env, name)
+    if (process.env.CAIRN_TEST_TEMPLATE_DB === name) delete process.env.CAIRN_TEST_TEMPLATE_DB
   }
 
-  const pool = new Pool({
-    host: env.CAIRN_DB_HOST,
-    port: env.CAIRN_DB_PORT,
-    database: name,
-    user: env.CAIRN_DB_USER,
-    password: env.CAIRN_DB_PASSWORD,
-    options: `-c search_path=cairn,public`,
-  })
   try {
-    await migrate(pool, 'cairn')
+    const admin = new Pool({
+      host: env.CAIRN_DB_HOST,
+      port: env.CAIRN_DB_PORT,
+      database: env.CAIRN_DB_NAME,
+      user: env.CAIRN_DB_USER,
+      password: env.CAIRN_DB_PASSWORD,
+      connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    })
+    try {
+      await admin.query(`CREATE DATABASE "${name}"`)
+    } finally {
+      await admin.end()
+    }
+
+    const pool = new Pool({
+      host: env.CAIRN_DB_HOST,
+      port: env.CAIRN_DB_PORT,
+      database: name,
+      user: env.CAIRN_DB_USER,
+      password: env.CAIRN_DB_PASSWORD,
+      options: `-c search_path=cairn,public`,
+    })
+    try {
+      await migrate(pool, 'cairn')
+    } finally {
+      await pool.end()
+    }
+
+    const adminPost = new Pool({
+      host: env.CAIRN_DB_HOST,
+      port: env.CAIRN_DB_PORT,
+      database: env.CAIRN_DB_NAME,
+      user: env.CAIRN_DB_USER,
+      password: env.CAIRN_DB_PASSWORD,
+      connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    })
+    try {
+      await adminPost.query(`ALTER DATABASE "${name}" WITH is_template = true`)
+    } catch {
+      // 忽略缺少特权等特定环境告警
+    } finally {
+      await adminPost.end()
+    }
   } catch (error) {
-    await pool.end()
-    await dropIsolatedDatabase(env, name)
+    await release()
     throw error
   }
-  await pool.end()
 
-  const adminPost = new Pool({
-    host: env.CAIRN_DB_HOST,
-    port: env.CAIRN_DB_PORT,
-    database: env.CAIRN_DB_NAME,
-    user: env.CAIRN_DB_USER,
-    password: env.CAIRN_DB_PASSWORD,
-    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
-  })
-  try {
-    await adminPost.query(`ALTER DATABASE "${name}" WITH is_template = true`)
-  } catch {
-    // 忽略缺少特权等特定环境告警
-  } finally {
-    await adminPost.end()
-  }
-
-  // 每次测试调用独占模板，子进程继承名称；并行套件不得删除彼此的库。
+  // 子进程继承名称；并行套件各有各的模板，不得删除彼此的库。
   process.env.CAIRN_TEST_TEMPLATE_DB = name
-}
-
-/**
- * 测试套件全部结束后的模板库清理。
- */
-export async function teardownTestTemplateDatabase(): Promise<void> {
-  const name = templateDatabase()
-  if (!name) return
-  const env = await requireReachableDb()
-  const admin = new Pool({
-    host: env.CAIRN_DB_HOST,
-    port: env.CAIRN_DB_PORT,
-    database: env.CAIRN_DB_NAME,
-    user: env.CAIRN_DB_USER,
-    password: env.CAIRN_DB_PASSWORD,
-    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
-  })
-  try {
-    await admin.query(`ALTER DATABASE "${name}" WITH is_template = false`)
-  } catch {
-    // 忽略
-  } finally {
-    await admin.end()
-  }
-  await dropIsolatedDatabase(env, name)
-  delete process.env.CAIRN_TEST_TEMPLATE_DB
+  return release
 }
 
 /**

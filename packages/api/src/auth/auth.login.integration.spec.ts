@@ -1,21 +1,15 @@
-import { postgresEnvSchema as dbEnvSchema } from '@cairn/db/testing'
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createDb, type DbHandle } from '@cairn/db/testing'
+import { newId, openIsolatedDb, type DbHandle } from '@cairn/db/testing'
 import { loginAuditQuerySchema } from '@cairn/shared'
 import { RbacStore } from '@cairn/db'
 import { AuthService } from './auth.service'
 import { RbacService } from '../rbac/rbac.service'
 import { hashSecret, verifySecret } from './password'
 
-const envFile = resolve(__dirname, '../../../../.env')
-if (existsSync(envFile)) process.loadEnvFile(envFile)
-const parsed = dbEnvSchema.safeParse(process.env)
 const prefix = `login-${Date.now().toString(36)}`
 
-describe.skipIf(!parsed.success)('AuthService 登录审计（集成）', () => {
+describe('AuthService 登录审计（集成）', () => {
   let handle: DbHandle
   let auth: AuthService
   let rbac: RbacService
@@ -25,7 +19,8 @@ describe.skipIf(!parsed.success)('AuthService 登录审计（集成）', () => {
   const password = 'secret-password'
 
   beforeAll(async () => {
-    handle = createDb(parsed.data!)
+    // 隔离库：原先直连主库并依赖它「已迁移」，测试因此只能跑在开发库上、还会往里写账号与审计行
+    handle = await openIsolatedDb(`cairn_test_authlogin_${newId().replaceAll('-', '')}`)
     store = new RbacStore(handle, { hash: hashSecret, verify: verifySecret })
     rbac = new RbacService(handle)
     auth = new AuthService(handle, { signAsync: async () => 'jwt-token' } as never, rbac)
@@ -37,21 +32,8 @@ describe.skipIf(!parsed.success)('AuthService 登录审计（集成）', () => {
   })
 
   afterAll(async () => {
-    if (handle) {
-      const schema = parsed.data!.CAIRN_DB_SCHEMA
-      await handle.pool.query(`DELETE FROM ${schema}.console_audit_events WHERE login_identifier = $1`, [
-        login,
-      ])
-      await handle.pool.query(`DELETE FROM ${schema}.console_audit_events WHERE login_identifier = $1`, [
-        `${prefix}-ghost`,
-      ])
-      try {
-        await store.deleteAccount(accountId, null)
-      } catch {
-        // 清理失败不挡测试收尾
-      }
-      await handle.close()
-    }
+    // close 会整库删除，不再需要逐行清理
+    await handle?.close()
   })
 
   it('成功登录写 login/success，响应不含口令', async () => {

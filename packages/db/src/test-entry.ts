@@ -9,7 +9,7 @@ export {
   grantScopedPermissions,
   adjustPlatformConfig,
   setupTestTemplateDatabase,
-  teardownTestTemplateDatabase,
+  cleanupOrphanTestDatabases,
   type PgTestHandle as DbHandle,
 } from './testing.js'
 export { migrate, loadMigrations, latestLogicalVersion, latestLogicalVersionForDriver } from './migrate.js'
