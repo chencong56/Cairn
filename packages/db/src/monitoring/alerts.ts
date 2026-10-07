@@ -46,6 +46,7 @@ import { failure, notFound } from '../runs/errors.js'
 import { summarizeAi } from './ai.js'
 import { summarizeAnomalies } from './anomalies.js'
 import { summarizeFleet } from './fleet.js'
+import { pageHealthRunRate, summarizeTargetPageHealth } from './page-health.js'
 import { summarizeQueues } from './queues.js'
 
 const PLATFORM_SCOPE_ID = 'platform'
@@ -307,6 +308,14 @@ export async function collectAlertReadings(
     PLATFORM_SCOPE_ID,
     apis.length === 0 ? unknownMetric('not_collected') : knownMetric(staleApis > 0 ? 1 : 0),
   )
+
+  // 页面健康（目标范围）：每个有数据的目标是一个独立的告警实例；没有数据的目标没有读数
+  for (const [targetId, entry] of await summarizeTargetPageHealth(db, asOf)) {
+    putMetric(readings, 'target.apiSlowCount', 'target', targetId, knownMetric(entry.slowCount))
+    putMetric(readings, 'target.apiErrorCount', 'target', targetId, knownMetric(entry.errorCount))
+    const rate = pageHealthRunRate(entry)
+    if (rate !== null) putMetric(readings, 'target.pageHealthRunRate', 'target', targetId, knownMetric(rate))
+  }
 
   return readings
 }
@@ -669,6 +678,16 @@ function toAlertItem(
   })
 }
 
+/** 目标范围的告警补上目标名称（只用于控制台列表展示）。 */
+async function withScopeNames(db: Db, items: MonitorAlertItem[]): Promise<MonitorAlertItem[]> {
+  const ids = [...new Set(items.filter((item) => item.scope === 'target').map((item) => item.scopeId))]
+  if (ids.length === 0) return items
+  const { targets } = schemaFor(db)
+  const rows = await db.select({ id: targets.id, name: targets.name }).from(targets).where(inArray(targets.id, ids))
+  const names = new Map(rows.map((row) => [row.id, row.name]))
+  return items.map((item) => (item.scope === 'target' ? { ...item, scopeName: names.get(item.scopeId) ?? null } : item))
+}
+
 export async function listMonitorAlerts(db: Db, query: MonitorAlertListQuery): Promise<MonitorAlertListResponse> {
   const asOf = await clockNow(db)
   const { monitoringAlerts } = schemaFor(db)
@@ -708,13 +727,16 @@ export async function listMonitorAlerts(db: Db, query: MonitorAlertListQuery): P
     const last = page.at(-1)
     return monitorAlertListResponseSchema.parse({
       asOf: asOf.toISOString(),
-      items: page.map((row) =>
-        toAlertItem(
-          {
-            ...row,
-            state: row.state as 'firing' | 'interrupted',
-          },
-          asOf,
+      items: await withScopeNames(
+        db,
+        page.map((row) =>
+          toAlertItem(
+            {
+              ...row,
+              state: row.state as 'firing' | 'interrupted',
+            },
+            asOf,
+          ),
         ),
       ),
       nextCursor:
@@ -749,7 +771,10 @@ export async function listMonitorAlerts(db: Db, query: MonitorAlertListQuery): P
   const last = page.at(-1)
   return monitorAlertListResponseSchema.parse({
     asOf: asOf.toISOString(),
-    items: page.map((row) => toAlertItem({ ...row, state: 'resolved' }, asOf)),
+    items: await withScopeNames(
+      db,
+      page.map((row) => toAlertItem({ ...row, state: 'resolved' }, asOf)),
+    ),
     nextCursor:
       rows.length > limit && last?.resolvedAt
         ? encodeCursor(last.resolvedAt, last.id)

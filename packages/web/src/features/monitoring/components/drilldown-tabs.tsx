@@ -127,12 +127,14 @@ function TargetSlaTab() {
       <Table>
         <TableHeader className="bg-muted/30">
           <TableRow className="hover:bg-transparent">
-            <TableHead className="w-[28%] text-label font-medium">目标系统</TableHead>
-            <TableHead className="w-[14%] text-label font-medium">24h 运行量</TableHead>
-            <TableHead className="w-[22%] text-label font-medium">执行通过率</TableHead>
-            <TableHead className="w-[12%] text-label font-medium">失败数</TableHead>
-            <TableHead className="w-[12%] text-label font-medium">P95 耗时</TableHead>
-            <TableHead className="w-[12%] text-right text-label font-medium">账号池健康度</TableHead>
+            <TableHead className="w-[22%] text-label font-medium">目标系统</TableHead>
+            <TableHead className="w-[10%] text-label font-medium">24h 运行量</TableHead>
+            <TableHead className="w-[17%] text-label font-medium">执行通过率</TableHead>
+            <TableHead className="w-[9%] text-label font-medium">失败数</TableHead>
+            <TableHead className="w-[9%] text-label font-medium">P95 耗时</TableHead>
+            <TableHead className="w-[12%] text-label font-medium">接口超阈 / 错误（1h）</TableHead>
+            <TableHead className="w-[11%] text-label font-medium">页面健康违规运行</TableHead>
+            <TableHead className="w-[10%] text-right text-label font-medium">账号池健康度</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -190,6 +192,31 @@ function TargetSlaTab() {
                 </TableCell>
                 <TableCell className="font-mono tabular-nums text-foreground">
                   {item.p95DurationMs != null ? `${(item.p95DurationMs / 1000).toFixed(1)}s` : '—'}
+                </TableCell>
+                <TableCell className="font-mono tabular-nums" data-testid="sla-page-health-api">
+                  {item.pageHealth ? (
+                    <span
+                      className={
+                        item.pageHealth.slowCount + item.pageHealth.errorCount > 0
+                          ? 'text-status-warning-foreground'
+                          : 'text-muted-foreground'
+                      }
+                    >
+                      {item.pageHealth.slowCount} / {item.pageHealth.errorCount}
+                      {item.pageHealth.truncated ? '+' : ''}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground/50">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="font-mono tabular-nums" data-testid="sla-page-health-runs">
+                  {item.pageHealth && item.pageHealth.runsWithGuards > 0 ? (
+                    <span className={item.pageHealth.violatingRuns > 0 ? 'text-status-warning-foreground' : 'text-muted-foreground'}>
+                      {item.pageHealth.violatingRuns} / {item.pageHealth.runsWithGuards}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground/50">—</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1.5 font-mono tabular-nums text-foreground">

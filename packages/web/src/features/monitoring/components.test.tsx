@@ -13,6 +13,7 @@ import type { MockLinkProps } from '@/test-utils/router-mocks'
 const fetchMonitorAlerts = vi.fn()
 const fetchMonitorSeries = vi.fn()
 const fetchWorkers = vi.fn()
+const fetchTargetSla = vi.fn().mockResolvedValue({ asOf: '2026-09-22T00:00:00Z', items: [] })
 const useCan = vi.fn((_permission?: string) => true)
 
 vi.mock('@tanstack/react-router', async (importOriginal) => ({
@@ -25,7 +26,7 @@ vi.mock('@/lib/monitoring-api', () => ({
   fetchMonitorAlerts: (...args: unknown[]) => fetchMonitorAlerts(...args),
   fetchMonitorSeries: (...args: unknown[]) => fetchMonitorSeries(...args),
   fetchAiModels: vi.fn().mockResolvedValue({ asOf: '2026-09-22T00:00:00Z', items: [] }),
-  fetchTargetSla: vi.fn().mockResolvedValue({ asOf: '2026-09-22T00:00:00Z', items: [] }),
+  fetchTargetSla: (...args: unknown[]) => fetchTargetSla(...args),
   silenceMonitorAlert: vi.fn(),
 }))
 
@@ -309,3 +310,41 @@ describe('监控增强组件 (Visualization & Layout Components)', () => {
   })
 })
 
+describe('目标 SLA 页面健康列（P2-B）', () => {
+  const item = (over: Record<string, unknown>) => ({
+    targetId: 't', targetName: '系统', totalRuns: 10, successRate: 100, failedRuns: 0, p95DurationMs: 1200,
+    activeAccounts: 1, totalAccounts: 1, captchaIntercepts: 0, ...over,
+  })
+
+  it('有数据显示「超阈 / 错误」与「违规运行 / 带约束运行」，没有数据显示「—」，截断加「+」', async () => {
+    fetchTargetSla.mockResolvedValueOnce({
+      asOf: '2026-09-22T00:00:00Z',
+      windowHours: 24,
+      items: [
+        item({ targetId: 'a', targetName: '有违规系统', pageHealth: { slowCount: 3, errorCount: 5, violatingRuns: 2, runsWithGuards: 40, truncated: false } }),
+        item({ targetId: 'b', targetName: '被截断系统', pageHealth: { slowCount: 1, errorCount: 2, violatingRuns: 9, runsWithGuards: 9, truncated: true } }),
+        item({ targetId: 'c', targetName: '没数据系统' }),
+      ],
+    })
+    const screen = await render(
+      wrap(
+        <DrilldownTabs
+          capacity={{} as MonitorCapacityCard}
+          queues={{} as MonitoringOverviewResponse['partitions']['queues']}
+          anomalies={{} as MonitoringOverviewResponse['partitions']['anomalies']}
+          canReadWorkers={false}
+        />,
+      ),
+    )
+    await expect.element(screen.getByText('有违规系统')).toBeInTheDocument()
+    const rows = Array.from(screen.container.querySelectorAll('tbody tr'))
+    const cells = (name: string) => {
+      const row = rows.find((r) => r.textContent?.includes(name))!
+      return [row.querySelector('[data-testid="sla-page-health-api"]')?.textContent?.trim(), row.querySelector('[data-testid="sla-page-health-runs"]')?.textContent?.trim()]
+    }
+    expect(cells('有违规系统')).toEqual(['3 / 5', '2 / 40'])
+    expect(cells('被截断系统')).toEqual(['1 / 2+', '9 / 9'])
+    expect(cells('没数据系统')).toEqual(['—', '—'])
+    expect(screen.container.textContent).toContain('接口超阈 / 错误（1h）')
+  })
+})

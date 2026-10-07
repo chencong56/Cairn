@@ -80,6 +80,7 @@ export const ALERTABLE_METRIC_KEYS = (Object.keys(MONITOR_METRIC_CATALOG) as Mon
 )
 
 export function requiredAlertMetricScope(key: MonitorMetricKey): MonitorSampleScope {
+  if (key.startsWith('target.')) return 'target'
   if (
     key.startsWith('api.process.') ||
     key === 'api.sse.connections' ||
@@ -482,6 +483,32 @@ export const FACTORY_ALERT_RULES: AlertRule[] = alertRuleSchema.array().parse([
   },
   {
     kind: 'threshold',
+    id: 'factory.target.api_slow',
+    name: '接口耗时频繁超阈',
+    metricKey: 'target.apiSlowCount',
+    scope: 'target',
+    comparator: 'gte',
+    threshold: 10,
+    forSeconds: 300,
+    severity: 'warning',
+    channelIds: [],
+    enabled: false,
+  },
+  {
+    kind: 'threshold',
+    id: 'factory.target.page_health_rate',
+    name: '页面健康违规运行占比过高',
+    metricKey: 'target.pageHealthRunRate',
+    scope: 'target',
+    comparator: 'gte',
+    threshold: 50,
+    forSeconds: 600,
+    severity: 'warning',
+    channelIds: [],
+    enabled: false,
+  },
+  {
+    kind: 'threshold',
     id: 'factory.worker.profile_disk',
     name: 'Profile 磁盘可用空间不足',
     metricKey: 'worker.profileDiskFreeBytes',
@@ -527,6 +554,8 @@ export const monitorAlertItemSchema = z.object({
   staleSource: z.enum(ALERT_STALE_SOURCES).nullable(),
   scope: z.enum(MONITOR_SAMPLE_SCOPES),
   scopeId: z.string().min(1).max(256),
+  /** 目标范围告警的目标名称（控制台列表展示用；通知正文仍只带 ID）。 */
+  scopeName: z.string().nullable().optional(),
   state: z.enum(ALERT_VISIBLE_STATES),
   severity: z.enum(ALERT_SEVERITIES),
   comparator: z.enum(ALERT_COMPARATORS).nullable(),

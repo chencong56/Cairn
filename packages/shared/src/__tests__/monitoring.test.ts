@@ -33,7 +33,7 @@ describe('监控契约', () => {
     expect(new Set(MONITOR_SAMPLE_KEYS).size).toBe(MONITOR_SAMPLE_KEYS.length)
     for (const key of MONITOR_SAMPLE_KEYS) {
       expect(MONITOR_METRIC_KEYS).toContain(key)
-      expect(MONITOR_SAMPLE_KEY_SCOPES[key]).toMatch(/^(platform|api|worker)$/)
+      expect(MONITOR_SAMPLE_KEY_SCOPES[key]).toMatch(/^(platform|api|worker|target)$/)
     }
   })
 
@@ -180,5 +180,25 @@ describe('监控契约', () => {
     expect(() => monitorStreamQuerySchema.parse({ intervalMs: 60_001 })).toThrow()
     const ready = monitorStreamControlSchema.parse({ kind: 'ready', intervalMs: 5_000, minIntervalMs: 5_000 })
     expect(ready).toEqual({ kind: 'ready', intervalMs: 5_000, minIntervalMs: 5_000 })
+  })
+})
+
+describe('页面健康目标指标（P2-B）', () => {
+  it('三个键范围为 target、层为 L3，可告警且告警范围固定为 target；出厂规则默认关闭', async () => {
+    const { MONITOR_SAMPLE_KEY_SCOPES, MONITOR_METRIC_CATALOG } = await import('../monitoring.js')
+    const { isAlertableMetricKey, requiredAlertMetricScope, alertRuleSchema, FACTORY_ALERT_RULES } = await import('../alerting.js')
+    for (const key of ['target.apiSlowCount', 'target.apiErrorCount', 'target.pageHealthRunRate'] as const) {
+      expect(MONITOR_SAMPLE_KEY_SCOPES[key]).toBe('target')
+      expect(MONITOR_METRIC_CATALOG[key].layer).toBe('L3')
+      expect(isAlertableMetricKey(key)).toBe(true)
+      expect(requiredAlertMetricScope(key)).toBe('target')
+    }
+    expect(MONITOR_METRIC_CATALOG['target.pageHealthRunRate'].unit).toBe('percent')
+    const rule = { kind: 'threshold', id: 'x.test', name: 't', metricKey: 'target.apiErrorCount', scope: 'target', comparator: 'gte', threshold: 3, forSeconds: 60, severity: 'warning', channelIds: [], enabled: true }
+    expect(alertRuleSchema.safeParse(rule).success).toBe(true)
+    expect(alertRuleSchema.safeParse({ ...rule, scope: 'platform' }).success).toBe(false)
+    const factory = FACTORY_ALERT_RULES.filter((item) => item.id.startsWith('factory.target.'))
+    expect(factory.map((item) => item.id).sort()).toEqual(['factory.target.api_slow', 'factory.target.page_health_rate'])
+    expect(factory.every((item) => item.enabled === false && item.channelIds.length === 0)).toBe(true)
   })
 })

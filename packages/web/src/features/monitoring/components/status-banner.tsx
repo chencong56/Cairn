@@ -234,7 +234,7 @@ export function StatusBanner() {
                         </span>
                       </div>
                       <p className="text-label text-muted-foreground">
-                        {item.metricKey ?? item.staleSource} · {item.scope}/{item.scopeId}
+                        {item.metricKey ?? item.staleSource} · {item.scope}/{item.scopeName ?? item.scopeId}
                       </p>
                     </TableCell>
                     <TableCell>

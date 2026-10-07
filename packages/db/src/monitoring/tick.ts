@@ -9,6 +9,7 @@ import type { Db } from '../client.js'
 import { clockNow, schemaFor } from '../native.js'
 import { summarizeAnomalies } from './anomalies.js'
 import { summarizeFleet } from './fleet.js'
+import { pageHealthRunRate, summarizeTargetPageHealth } from './page-health.js'
 import { takeLastClaimDiagnostics } from '../leases/index.js'
 import { summarizeQueues } from './queues.js'
 import { countScenarioAiInBucket, type MonitorSampleWrite } from './samples.js'
@@ -82,6 +83,21 @@ export async function collectPlatformSamples(
     )
   }
   writes.push(...(await collectApiInstanceSamples(db)))
+  writes.push(...(await collectTargetPageHealthSamples(db, asOf)))
+  return writes
+}
+
+/** 目标范围的页面健康样本；窗口内没有带约束的运行、也没有违规的目标不写（没有数据不等于 0）。 */
+async function collectTargetPageHealthSamples(db: Db, asOf: Date): Promise<MonitorSampleWrite[]> {
+  const writes: MonitorSampleWrite[] = []
+  for (const [targetId, entry] of await summarizeTargetPageHealth(db, asOf)) {
+    writes.push(
+      { key: 'target.apiSlowCount', scope: 'target', scopeId: targetId, value: entry.slowCount },
+      { key: 'target.apiErrorCount', scope: 'target', scopeId: targetId, value: entry.errorCount },
+    )
+    const rate = pageHealthRunRate(entry)
+    if (rate !== null) writes.push({ key: 'target.pageHealthRunRate', scope: 'target', scopeId: targetId, value: rate })
+  }
   return writes
 }
 

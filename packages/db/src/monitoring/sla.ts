@@ -6,6 +6,7 @@ import {
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { jsonHasKey, schemaFor } from '../native.js'
+import { summarizeTargetPageHealth } from './page-health.js'
 
 export const DEFAULT_SLA_WINDOW_HOURS = 24
 const TARGET_SLA_DURATION_SAMPLE_LIMIT = 2000
@@ -161,6 +162,8 @@ export async function summarizeTargetSla(
     captchaByTarget.set(c.targetId, Number(c.intercepts ?? 0))
   }
 
+  const pageHealthByTarget = await summarizeTargetPageHealth(db, asOf)
+
   return allTargets.map((t) => {
     const s = statsByTarget.get(t.id)
     const a = accountsByTarget.get(t.id)
@@ -183,6 +186,7 @@ export async function summarizeTargetSla(
       activeAccounts: Number(a?.activeAccounts ?? 0),
       totalAccounts: Number(a?.totalAccounts ?? 0),
       captchaIntercepts: captchaByTarget.get(t.id) ?? 0,
+      ...(pageHealthByTarget.has(t.id) ? { pageHealth: pageHealthByTarget.get(t.id)! } : {}),
     }
   })
 }

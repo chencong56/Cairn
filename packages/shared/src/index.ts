@@ -98,6 +98,7 @@ export {
   monitorProbeBodySchema,
   monitorProbeResponseSchema,
 } from './monitoring.js'
+export { MONITOR_PAGE_HEALTH_ROW_LIMIT, MONITOR_PAGE_HEALTH_WINDOW_MINUTES } from './monitoring.js'
 export {
   ALERT_SEVERITIES,
   ALERT_COMPARATORS,

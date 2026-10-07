@@ -14,6 +14,11 @@ export type MonitorLayer = (typeof MONITOR_LAYERS)[number]
 export const MONITOR_UNITS = ['count', 'milliseconds', 'seconds', 'bytes', 'percent'] as const
 export type MonitorUnit = (typeof MONITOR_UNITS)[number]
 
+/** 页面健康指标的滚动窗口（分钟）。 */
+export const MONITOR_PAGE_HEALTH_WINDOW_MINUTES = 60
+/** 聚合页面健康违规行的上限；达到上限时数字按下限处理。 */
+export const MONITOR_PAGE_HEALTH_ROW_LIMIT = 5000
+
 export const MONITOR_SAMPLE_SCOPES = ['platform', 'api', 'worker', 'target'] as const
 export type MonitorSampleScope = (typeof MONITOR_SAMPLE_SCOPES)[number]
 
@@ -144,6 +149,9 @@ export const MONITOR_METRIC_KEYS = [
   'ai.errors',
   'ai.inputTokens',
   'ai.outputTokens',
+  'target.apiSlowCount',
+  'target.apiErrorCount',
+  'target.pageHealthRunRate',
 ] as const
 export type MonitorMetricKey = (typeof MONITOR_METRIC_KEYS)[number]
 export const monitorMetricKeySchema = z.enum(MONITOR_METRIC_KEYS)
@@ -196,6 +204,9 @@ export const MONITOR_SAMPLE_KEYS = [
   'ai.errors',
   'ai.inputTokens',
   'ai.outputTokens',
+  'target.apiSlowCount',
+  'target.apiErrorCount',
+  'target.pageHealthRunRate',
 ] as const satisfies readonly MonitorMetricKey[]
 export type MonitorSampleKey = (typeof MONITOR_SAMPLE_KEYS)[number]
 export const monitorSampleKeySchema = z.enum(MONITOR_SAMPLE_KEYS)
@@ -253,6 +264,9 @@ export const MONITOR_SAMPLE_KEY_SCOPES = {
   'ai.errors': 'platform',
   'ai.inputTokens': 'platform',
   'ai.outputTokens': 'platform',
+  'target.apiSlowCount': 'target',
+  'target.apiErrorCount': 'target',
+  'target.pageHealthRunRate': 'target',
 } as const satisfies Record<MonitorSampleKey, MonitorSampleScope>
 
 export type MonitorMetricDef = {
@@ -360,6 +374,10 @@ export const MONITOR_METRIC_CATALOG: { readonly [K in MonitorMetricKey]: Monitor
   'ai.errors': { layer: 'L3', unit: 'count', unknownWhen: L3_AGGREGATE },
   'ai.inputTokens': { layer: 'L3', unit: 'count', unknownWhen: L3_AGGREGATE },
   'ai.outputTokens': { layer: 'L3', unit: 'count', unknownWhen: L3_AGGREGATE },
+  // 页面健康（近 60 分钟，按目标）：从运行结果里的页面健康违规行聚合，没有带约束的运行时不产生数据
+  'target.apiSlowCount': { layer: 'L3', unit: 'count', unknownWhen: L3_AGGREGATE },
+  'target.apiErrorCount': { layer: 'L3', unit: 'count', unknownWhen: L3_AGGREGATE },
+  'target.pageHealthRunRate': { layer: 'L3', unit: 'percent', unknownWhen: L3_AGGREGATE },
 }
 
 export const monitorUnknownReasonSchema = z.enum(MONITOR_UNKNOWN_REASONS)
@@ -665,6 +683,17 @@ export const monitorTargetSlaItemSchema = z.object({
   activeAccounts: z.number().int().nonnegative(),
   totalAccounts: z.number().int().nonnegative(),
   captchaIntercepts: z.number().int().nonnegative().default(0),
+  /** 页面健康（近 60 分钟）；缺省视为没有带约束的运行，界面显示「—」。 */
+  pageHealth: z
+    .object({
+      slowCount: z.number().int().nonnegative(),
+      errorCount: z.number().int().nonnegative(),
+      violatingRuns: z.number().int().nonnegative(),
+      runsWithGuards: z.number().int().nonnegative(),
+      /** 违规行达到聚合上限，数字是下限。 */
+      truncated: z.boolean().default(false),
+    })
+    .optional(),
 })
 export type MonitorTargetSlaItem = z.infer<typeof monitorTargetSlaItemSchema>
 

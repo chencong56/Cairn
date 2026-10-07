@@ -31,6 +31,7 @@ export {
 export { summarizeAi, summarizeAiModels } from './ai.js'
 export { summarizeSla, summarizeTargetSla } from './sla.js'
 export { collectPlatformSamples, collectWorkerSamples } from './tick.js'
+export { summarizeTargetPageHealth, pageHealthRunRate, type TargetPageHealth } from './page-health.js'
 export {
   collectAlertReadings,
   evaluateAlerts,

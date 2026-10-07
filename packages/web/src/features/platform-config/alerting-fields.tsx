@@ -45,6 +45,13 @@ const SEVERITY_LABELS: Record<(typeof ALERT_SEVERITIES)[number], string> = {
   critical: '严重',
 }
 
+/** 部分指标带中文说明（其余仍显示键名）。 */
+const ALERT_METRIC_LABELS: Partial<Record<string, string>> = {
+  'target.apiSlowCount': '目标接口耗时超阈次数，近 1 小时',
+  'target.apiErrorCount': '目标接口错误次数，近 1 小时',
+  'target.pageHealthRunRate': '目标页面健康违规运行占比，近 1 小时',
+}
+
 export function AlertingFields({
   canWrite,
   revision,
@@ -205,7 +212,7 @@ export function AlertingFields({
                             <SelectContent>
                               {ALERTABLE_METRIC_KEYS.map((key) => (
                                 <SelectItem key={key} value={key}>
-                                  {key}
+                                  {ALERT_METRIC_LABELS[key] ? `${key}（${ALERT_METRIC_LABELS[key]}）` : key}
                                 </SelectItem>
                               ))}
                             </SelectContent>
