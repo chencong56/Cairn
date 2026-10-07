@@ -367,7 +367,7 @@ describe('运行监控页', () => {
     const pageText = screen.container.textContent ?? ''
     expect(pageText).toContain('此刻的事实')
     expect(pageText).toContain('当前没有未恢复告警')
-    expect(pageText).toContain('配置规则')
+    expect(pageText).toContain('设置告警通知')
 
     // 切换到“队列与租约守卫” Tab 检查分区失败降级
     await screen.getByRole('tab', { name: '队列与租约守卫' }).click()

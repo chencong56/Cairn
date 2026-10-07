@@ -118,6 +118,7 @@ export {
   MIN_ALERT_SILENCE_SECONDS,
   MAX_ALERT_SILENCE_SECONDS,
   FACTORY_ALERT_RULES,
+  mergeFactoryAlertRules,
   FACTORY_ALERTING,
   credentialMaintenanceAlertingSchema,
   alertRuleIdSchema,

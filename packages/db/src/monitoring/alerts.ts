@@ -5,6 +5,7 @@ import {
   DEFAULT_ALERT_DELIVERY_MAX_ATTEMPTS,
   DEFAULT_MONITOR_OBJECT_STORE_PROBE_MS,
   FACTORY_ALERTING,
+  mergeFactoryAlertRules,
   alertNoticeSchema,
   alertOpenKey,
   alertRetryDelayMs,
@@ -962,7 +963,8 @@ export async function listMonitorAlertRules(db: Db): Promise<MonitorAlertRulesRe
   const alerting = resolveAlerting(current.document)
   return monitorAlertRulesResponseSchema.parse({
     revision: current.revision,
-    rules: alerting.rules,
+    // 存量平台升级后补上新增的出厂建议规则（默认关闭）；用户保存时一并落库
+    rules: mergeFactoryAlertRules(alerting.rules),
     channels: alerting.channels,
   })
 }

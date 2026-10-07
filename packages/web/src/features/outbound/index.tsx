@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  FileText,
   Radio,
   RefreshCw,
   Search,
@@ -159,7 +160,7 @@ export function OutboundPage() {
         <TabsList className='border-b-0'>
           {canRead && <TabsTrigger value='records'>推送记录</TabsTrigger>}
           {canWorkflow && <TabsTrigger value='results'>结果推送</TabsTrigger>}
-          {canMonitor && <TabsTrigger value='alerts'>告警推送</TabsTrigger>}
+          {canMonitor && <TabsTrigger value='alerts'>告警通知</TabsTrigger>}
           {canConfig && <TabsTrigger value='channels'>推送渠道</TabsTrigger>}
         </TabsList>
         <TabsContent value='records'>
@@ -357,6 +358,7 @@ function OutboundRecords({
                 <SelectItem value='all'>全部类型</SelectItem>
                 <SelectItem value='run'>运行结果</SelectItem>
                 <SelectItem value='alert'>告警推送</SelectItem>
+                <SelectItem value='report'>周期报告</SelectItem>
                 <SelectItem value='test'>渠道测试</SelectItem>
               </SelectContent>
             </Select>
@@ -471,6 +473,8 @@ function OutboundRecords({
                       >
                         {event.type === 'run.finished' ? (
                           <Workflow className='size-4' />
+                        ) : event.type === 'report.duration_period' ? (
+                          <FileText className='size-4' />
                         ) : event.type.startsWith('alert') ? (
                           <AlertTriangle className='size-4 text-status-warning-foreground' />
                         ) : event.type === 'channel.test' ? (

@@ -522,6 +522,16 @@ export const FACTORY_ALERT_RULES: AlertRule[] = alertRuleSchema.array().parse([
   },
 ])
 
+/**
+ * 把配置里缺少的出厂建议规则补上（默认关闭、不带渠道）。
+ * 存量平台的配置文档是按修订保存的，升级后新增的出厂规则不会自动出现；展示（和用户保存）时按规则 id 补齐。
+ * 出厂规则不能被用户删除，所以补齐不会让已删除的规则「复活」。
+ */
+export function mergeFactoryAlertRules(rules: readonly AlertRule[]): AlertRule[] {
+  const present = new Set(rules.map((rule) => rule.id))
+  return [...rules, ...FACTORY_ALERT_RULES.filter((rule) => !present.has(rule.id)).map((rule) => ({ ...rule, channelIds: [] as string[] }))]
+}
+
 export const FACTORY_ALERTING: PlatformAlerting = platformAlertingSchema.parse({
   rules: FACTORY_ALERT_RULES,
   channels: [],

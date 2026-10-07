@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { FormProvider, useForm } from 'react-hook-form'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import {
   DEFAULT_OUTBOUND_POLICY,
   outboundPolicyResponseSchema,
@@ -509,6 +509,7 @@ function AlertRulesForm({
   revision: number
   canWrite: boolean
 }) {
+  const navigate = useNavigate()
   const form = useForm<PlatformConfigDocument>({
     defaultValues: { alerting: { rules }, outbound: { channels } },
   })
@@ -547,16 +548,17 @@ function AlertRulesForm({
           <AlertTriangle className='size-4 text-status-warning-foreground' />
           <div>
             <h2 className='font-semibold text-text-primary text-section'>
-              监控告警规则推送
+              什么情况下通知我
             </h2>
             <p className='text-label text-muted-foreground'>
-              复用监控的告警规则；触发、依据中断和恢复各自留下推送记录。
+              系统出问题时（如执行节点失联、接口变慢），按这里的规则把通知发到你选的渠道；触发、依据中断和恢复各自留下推送记录。
             </p>
           </div>
         </div>
 
         <AlertingFields
           hideChannels
+          onGoChannels={() => void navigate({ to: '/outbound', search: { tab: 'channels' } })}
           canWrite={canWrite}
           revision={revision}
           reason={reason}

@@ -32,7 +32,7 @@ import { summarizeTargetPageHealth, pageHealthRunRate } from '../monitoring/page
 import { summarizeTargetSla } from '../monitoring/sla.js'
 import { collectPlatformSamples } from '../monitoring/tick.js'
 import { insertMonitorSamples, readMonitorSeries } from '../monitoring/samples.js'
-import { collectAlertReadings, evaluateAlerts, listMonitorAlerts } from '../monitoring/alerts.js'
+import { collectAlertReadings, evaluateAlerts, listMonitorAlertRules, listMonitorAlerts } from '../monitoring/alerts.js'
 import { getOrCreatePlatformConfig, updatePlatformConfig } from '../platform-config/store.js'
 
 void LOCATOR_RESOLUTION_PROTOCOL
@@ -194,5 +194,25 @@ describe('目标页面健康聚合、采样、SLA 与告警读数（P2-B，集�
     expect(listed.items.find((item) => item.ruleId === 'factory.target.api_slow')).toMatchObject({ scope: 'target', scopeId: targetId, scopeName: '监控页面健康目标' })
     await setRules(rulesWith(1000))
     expect((await evaluateAlerts(handle.db)).resolved).toBe(1)
+  })
+
+  it('存量配置缺少新增的出厂规则时，列表按 id 补上（默认关闭、不带渠道），已有规则原样保留', async () => {
+    const current = await getOrCreatePlatformConfig(handle.db)
+    const legacy = FACTORY_ALERT_RULES.filter((rule) => !rule.id.startsWith('factory.target.')).map((rule) =>
+      rule.id === 'factory.worker.ready_zero' ? ({ ...rule, enabled: true, channelIds: [] } as AlertRule) : rule,
+    )
+    await updatePlatformConfig(handle.db, {
+      expectedRevision: current.revision,
+      reason: '模拟存量配置',
+      document: { ...current.document, alerting: { ...current.document.alerting, rules: legacy } } satisfies PlatformConfigDocument,
+      actor: { id: actorId },
+    })
+    const listed = await listMonitorAlertRules(handle.db)
+    const ids = listed.rules.map((rule) => rule.id)
+    expect(ids).toEqual(expect.arrayContaining(['factory.target.api_slow', 'factory.target.page_health_rate']))
+    expect(new Set(ids).size).toBe(ids.length)
+    const added = listed.rules.filter((rule) => rule.id.startsWith('factory.target.'))
+    expect(added.every((rule) => rule.enabled === false && rule.channelIds.length === 0)).toBe(true)
+    expect(listed.rules.find((rule) => rule.id === 'factory.worker.ready_zero')?.enabled).toBe(true)
   })
 })

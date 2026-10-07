@@ -35,6 +35,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { CursorPagination } from '@/components/data-table'
+import { metricLabel } from '../metric-labels'
 import {
   alertStateTone,
   formatDuration,
@@ -141,7 +142,7 @@ export function StatusBanner() {
           {canReadConfig && (
             <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-label" asChild>
               <Link to="/outbound" search={{ tab: 'alerts' }}>
-                配置规则
+                设置告警通知
                 <ArrowUpRight className="size-3.5" />
               </Link>
             </Button>
@@ -234,7 +235,7 @@ export function StatusBanner() {
                         </span>
                       </div>
                       <p className="text-label text-muted-foreground">
-                        {item.metricKey ?? item.staleSource} · {item.scope}/{item.scopeName ?? item.scopeId}
+                        {item.metricKey ? metricLabel(item.metricKey) : item.staleSource} · {item.scope === 'target' ? (item.scopeName ?? item.scopeId) : `${item.scope}/${item.scopeId}`}
                       </p>
                     </TableCell>
                     <TableCell>
