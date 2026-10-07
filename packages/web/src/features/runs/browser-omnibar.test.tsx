@@ -135,4 +135,19 @@ describe('BrowserOmnibar', () => {
     expect(onNavigate).toHaveBeenCalled()
     await expect.element(input).toHaveValue('https://bad.example.com/x')
   })
+
+  it('他人持有手动操作权时显示占用方并禁止进入编辑态', async () => {
+    const screen = await render(
+      <BrowserOmnibar
+        url="https://app.example.com/orders"
+        caption="app.example.com/orders"
+        canNavigate={false}
+        lockedReason='李四 正在手动操作'
+      />,
+    )
+
+    await expect.element(screen.getByText('李四 正在手动操作')).toBeInTheDocument()
+    await screen.getByText('app.example.com/orders').click()
+    expect(screen.getByRole('textbox').elements()).toHaveLength(0)
+  })
 })

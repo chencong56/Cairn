@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Copy, CornerDownLeft, Globe, Loader2, X } from 'lucide-react'
+import { Check, Copy, CornerDownLeft, Globe, Loader2, Lock, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -9,6 +9,8 @@ export interface BrowserOmnibarProps {
   url?: string | null
   caption?: string | null
   canNavigate?: boolean
+  /** 他人持有手动操作权时的说明；设置后地址栏只读并展示占用方 */
+  lockedReason?: string
   onNavigate?: (url: string) => Promise<void> | void
   navigating?: boolean
   className?: string
@@ -18,6 +20,7 @@ export function BrowserOmnibar({
   url,
   caption,
   canNavigate = false,
+  lockedReason,
   onNavigate,
   navigating = false,
   className,
@@ -44,6 +47,14 @@ export function BrowserOmnibar({
       }
     }
   }, [])
+
+  // 编辑中途被他人接管手动操作权：退出编辑态，避免提交必败
+  useEffect(() => {
+    if (lockedReason && editing) {
+      setEditing(false)
+      setInputValue('')
+    }
+  }, [lockedReason, editing])
 
   // 进入编辑模式时自动全选聚焦
   useEffect(() => {
@@ -103,10 +114,7 @@ export function BrowserOmnibar({
 
     try {
       if (onNavigate) {
-        const res = await onNavigate(normalized)
-        if (res === false) {
-          return
-        }
+        await onNavigate(normalized)
       }
       setEditing(false)
     } catch {
@@ -194,7 +202,9 @@ export function BrowserOmnibar({
             )}
             title={
               fullUrl
-                ? `${fullUrl}${canNavigate ? ' (点击可编辑直接跳转)' : ''}`
+                ? `${fullUrl}${
+                    canNavigate ? ' (点击可编辑直接跳转)' : lockedReason ? `（${lockedReason}，结束后才能跳转）` : ''
+                  }`
                 : caption ?? undefined
             }
             onClick={handleStartEditing}
@@ -203,6 +213,15 @@ export function BrowserOmnibar({
           </span>
 
           <div className='flex items-center gap-1 shrink-0'>
+            {lockedReason ? (
+              <span
+                className='flex items-center gap-1 text-caption text-muted-foreground'
+                title={`${lockedReason}，结束后才能修改地址`}
+              >
+                <Lock className='size-3' />
+                {lockedReason}
+              </span>
+            ) : null}
             {fullUrl ? (
               <button
                 type='button'

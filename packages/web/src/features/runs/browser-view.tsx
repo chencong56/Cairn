@@ -669,6 +669,13 @@ export function BrowserView({
     })
   }
 
+  const markActivity = () => {
+    // 仅在事件处理（导航提交）中调用；作为 prop 下传时 React Compiler 会误判为渲染期调用
+    // eslint-disable-next-line react-hooks/purity
+    lastActivityRef.current = Date.now()
+    idleWarnedRef.current = false
+  }
+
   const handleNavigate = async (url: string) => {
     if (!canControl || readOnly) {
       toast.error('当前无操作权限')
@@ -700,8 +707,7 @@ export function BrowserView({
         frameId: frame?.frameId ?? 'f-nav',
         viewport: frame ? { width: frame.width, height: frame.height } : { width: 1920, height: 1080 },
       }
-      lastActivityRef.current = Date.now()
-      idleWarnedRef.current = false
+      markActivity()
       await inputAuthControl(runId, { token: activeToken, command })
       toast.success('已跳转至目标页面')
       const nextMeta = await fetchManagedBrowser(runId, viewPageId)
@@ -722,7 +728,7 @@ export function BrowserView({
     }
   }
 
-  const canNavigate = Boolean(canControl && !readOnly && (sessionMode || waiting))
+  const canNavigate = Boolean(canControl && !readOnly && !heldByOther && (sessionMode || waiting))
 
   const handleAcquire = () => {
     setAuthError(null)
@@ -908,6 +914,7 @@ export function BrowserView({
               url={activePage?.url}
               caption={activeCaption}
               canNavigate={canNavigate}
+              lockedReason={heldByOther ? holderLabel : undefined}
               onNavigate={handleNavigate}
               navigating={navigating}
               className='max-w-xl'
@@ -1229,6 +1236,7 @@ export function BrowserView({
                   url={activePage?.url}
                   caption={activeCaption}
                   canNavigate={canNavigate}
+                  lockedReason={heldByOther ? holderLabel : undefined}
                   onNavigate={handleNavigate}
                   navigating={navigating}
                 />
