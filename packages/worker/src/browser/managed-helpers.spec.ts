@@ -18,6 +18,36 @@ describe('managed helpers', () => {
     expect(handoffMessage('PAGE_HANDOFF_OUT_OF_SCOPE')).toBe('页面交接失败')
   })
 
+  describe('navigate 指令', () => {
+    it('合法 HTTP 地址导航成功，并触发主 Frame 导航事件', async () => {
+      const browser = await chromium.launch({ headless: true })
+      try {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })
+        await page.route('http://nav.test/**', (route) =>
+          route.fulfill({ status: 200, contentType: 'text/html', body: '<title>ok</title>' }),
+        )
+        let navigated = 0
+        page.on('framenavigated', (frame) => {
+          if (frame === page.mainFrame()) navigated += 1
+        })
+        const command: BrowserAuthInputCommand = {
+          type: 'navigate',
+          url: 'http://nav.test/a/b?x=1',
+          commandId: 'cmd-nav-ok',
+          seq: 1,
+          pageRef: { sessionId: 's1', sessionGeneration: 1, pageId: 'p1', documentEpoch: 0 },
+          frameId: 'f1',
+          viewport: { width: 1280, height: 720 },
+        }
+        await applyAuthInput(page, command)
+        expect(page.url()).toBe('http://nav.test/a/b?x=1')
+        expect(navigated).toBeGreaterThan(0)
+      } finally {
+        await browser.close()
+      }
+    })
+  })
+
   describe('真实 Chromium 滚轮与键盘导航端到端验证', () => {
     it('精准落点 mouse_wheel 只滚动光标下的局部容器，不影响其他容器', async () => {
       const browser = await chromium.launch({ headless: true })
