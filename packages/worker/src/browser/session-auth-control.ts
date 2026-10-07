@@ -172,18 +172,21 @@ export async function executeAuthInput(this: SessionManagerContext, params: {
     if (!latest.authControlTokenHash || latest.authControlTokenHash !== hashAuthControlToken(input.token)) {
       throw conflict('AUTH_CONTROL_INVALID', '认证输入权已更换')
     }
-    const entry = live.pages.get(input.command.pageRef.pageId)
+    let entry = live.pages.get(input.command.pageRef.pageId)
+    if ((!entry || entry.page.isClosed()) && input.command.type === 'navigate') {
+      entry = this.ensureRunPage(live, input.runId)
+    }
     if (!entry || entry.page.isClosed()) throw conflict('PAGE_STALE', '页面已关闭或已失效')
     if (entry.runId !== input.runId) throw conflict('PAGE_STALE', '页面不属于当前操作对象，请刷新画面')
     if (
       input.command.pageRef.sessionId !== latest.id ||
       input.command.pageRef.sessionGeneration !== boundGeneration ||
       input.command.pageRef.sessionGeneration !== latest.generation ||
-      input.command.pageRef.documentEpoch !== entry.documentEpoch
+      (input.command.type !== 'navigate' && input.command.pageRef.documentEpoch !== entry.documentEpoch)
     ) {
       throw conflict('PAGE_STALE', '页面代次已变化，请刷新画面')
     }
-    if (!viewportMatches(entry.page.viewportSize(), input.command.viewport)) {
+    if (input.command.type !== 'navigate' && !viewportMatches(entry.page.viewportSize(), input.command.viewport)) {
       throw conflict('PAGE_STALE', '视口已变化，请刷新画面')
     }
     if (input.command.type === 'mouse_click' || input.command.type === 'mouse_wheel') {
@@ -209,6 +212,9 @@ export async function executeAuthInput(this: SessionManagerContext, params: {
     await this.assertOwnLiveRegistration()
     const urlBefore = redactAuthUrl(pageUrl)
     await applyAuthInput(entry.page, input.command)
+    if (input.command.type === 'navigate') {
+      live.pagesRevision += 1
+    }
     // 排查「点了没反应」：只记命令类型、坐标、视口与页面变化，不记输入文本；地址已去掉查询串。
     this.logger?.log(
       {

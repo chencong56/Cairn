@@ -26,10 +26,12 @@ import {
   resumeRunAuth as runResumeRunAuth,
   subscribeBrowserFrames as runSubscribeBrowserFrames,
 } from '@/lib/runs-api'
-import { Globe, Loader2, X } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/status-badge'
 import { useAuthoringObserve } from '@/features/authoring'
+import { BrowserOmnibar } from './browser-omnibar'
 import { cn } from '@/lib/utils'
 
 import { useResetOnChange } from '@/hooks/use-reset-on-change'
@@ -187,6 +189,7 @@ export function BrowserView({
     )
   )
   const [open, setOpen] = useState(defaultOpen)
+  const [navigating, setNavigating] = useState(false)
   const [meta, setMeta] = useState<ManagedBrowserMeta | null>(null)
   const [frame, setFrame] = useState<ManagedBrowserFrame | null>(null)
   const [busy, setBusy] = useState(false)
@@ -666,6 +669,61 @@ export function BrowserView({
     })
   }
 
+  const handleNavigate = async (url: string) => {
+    if (!canControl || readOnly) {
+      toast.error('当前无操作权限')
+      return
+    }
+    setNavigating(true)
+    try {
+      let activeToken = token
+      if (!activeToken) {
+        const granted = await acquireAuthControl(runId)
+        setToken(granted.token)
+        setPageRef(granted.pageRef)
+        setExpiresAt(granted.expiresAt)
+        acceptMeta(granted.meta)
+        activeToken = granted.token
+        toast.success(sessionMode ? '已取得手动操作权' : '已取得输入权')
+      }
+      const targetPageRef = frame?.pageRef ?? activePage?.pageRef ?? pageRef
+      if (!targetPageRef) {
+        throw new Error('未找到有效的受管页面')
+      }
+      seq.current += 1
+      const command: BrowserAuthInputCommand = {
+        type: 'navigate',
+        url,
+        pageRef: targetPageRef,
+        commandId: newUuid(),
+        seq: seq.current,
+        frameId: frame?.frameId ?? 'f-nav',
+        viewport: frame ? { width: frame.width, height: frame.height } : { width: 1920, height: 1080 },
+      }
+      lastActivityRef.current = Date.now()
+      idleWarnedRef.current = false
+      await inputAuthControl(runId, { token: activeToken, command })
+      toast.success('已跳转至目标页面')
+      const nextMeta = await fetchManagedBrowser(runId, viewPageId)
+      if (nextMeta) acceptMeta(nextMeta)
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        (error.status === 401 ||
+          error.status === 403 ||
+          error.payload.code.startsWith('AUTH_'))
+      ) {
+        setToken(null)
+      }
+      toast.error(error instanceof ApiRequestError ? error.message : (error instanceof Error ? error.message : '跳转失败'))
+      throw error
+    } finally {
+      setNavigating(false)
+    }
+  }
+
+  const canNavigate = Boolean(canControl && !readOnly && (sessionMode || waiting))
+
   const handleAcquire = () => {
     setAuthError(null)
     setAcquireError(null)
@@ -846,21 +904,24 @@ export function BrowserView({
         <div className='flex flex-col bg-card'>
           {open ? renderTabStrip() : null}
           <div className='flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border-divider/60 bg-surface-header/40 text-label text-muted-foreground'>
-            <div className='flex items-center gap-2 min-w-0 flex-1 max-w-xl rounded-md border border-border-default/60 bg-muted/30 hover:bg-muted/50 px-2.5 py-1 transition-[background-color,border-color]'>
-              <Globe className='size-3.5 shrink-0 text-muted-foreground' />
-              <span
-                className='truncate font-mono text-foreground select-all text-small'
-                title={activePage?.url ?? activeCaption ?? undefined}
-              >
-                {activeCaption ? `当前页 ${activeCaption}` : '受管浏览器画面'}
-              </span>
-              {frame ? (
-                <span className='shrink-0 pl-1.5 font-mono text-caption text-muted-foreground border-l border-border-divider/50'>
-                  {frame.width}×{frame.height}
-                </span>
-              ) : null}
-            </div>
+            <BrowserOmnibar
+              url={activePage?.url}
+              caption={activeCaption}
+              canNavigate={canNavigate}
+              onNavigate={handleNavigate}
+              navigating={navigating}
+              className='max-w-xl'
+            />
             <div className='flex items-center gap-2 shrink-0'>
+              {frame ? (
+                <Badge
+                  variant='outline'
+                  className='font-mono text-caption font-normal text-muted-foreground'
+                  title={`视口分辨率：${frame.width}×${frame.height}`}
+                >
+                  {frame.width}×{frame.height}
+                </Badge>
+              ) : null}
               {meta?.degradedReason ? (
                 <StatusBadge tone='warning'>画面不可用</StatusBadge>
               ) : null}
@@ -946,7 +1007,18 @@ export function BrowserView({
       ) : (
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <div>
-            <h2 className='text-section font-semibold'>受管浏览器</h2>
+            <div className='flex items-center gap-2'>
+              <h2 className='text-section font-semibold'>受管浏览器</h2>
+              {frame ? (
+                <Badge
+                  variant='outline'
+                  className='font-mono text-caption font-normal text-muted-foreground'
+                  title={`视口分辨率：${frame.width}×${frame.height}`}
+                >
+                  {frame.width}×{frame.height}
+                </Badge>
+              ) : null}
+            </div>
             <p className='mt-1 text-label text-muted-foreground'>
               {waiting
                 ? describeManagedAuthWait(meta?.lastAuthError ?? waitReason)
@@ -1152,21 +1224,14 @@ export function BrowserView({
           {!embedded ? renderTabStrip() : null}
           {!embedded &&
             (activeCaption ? (
-              <div className='flex items-center justify-between gap-2 px-3 py-1.5 rounded-md border border-border-default/60 bg-muted/30 text-label text-muted-foreground'>
-                <div className='flex items-center gap-2 min-w-0 flex-1 truncate'>
-                  <Globe className='size-3.5 shrink-0 text-muted-foreground' />
-                  <span
-                    className='truncate font-mono text-foreground select-all text-small'
-                    title={activePage?.url ?? activeCaption ?? undefined}
-                  >
-                    当前页 {activeCaption}
-                  </span>
-                  {frame ? (
-                    <span className='shrink-0 pl-1.5 font-mono text-caption text-muted-foreground border-l border-border-divider/50'>
-                      {frame.width}×{frame.height}
-                    </span>
-                  ) : null}
-                </div>
+              <div className='flex items-center justify-between gap-2 text-label text-muted-foreground'>
+                <BrowserOmnibar
+                  url={activePage?.url}
+                  caption={activeCaption}
+                  canNavigate={canNavigate}
+                  onNavigate={handleNavigate}
+                  navigating={navigating}
+                />
               </div>
             ) : (
               <p className='text-small text-muted-foreground'>

@@ -42,6 +42,22 @@ export async function applyAuthInput(page: Page, command: BrowserAuthInputComman
     await page.keyboard.press(command.key)
     return
   }
+  if (command.type === 'navigate') {
+    let targetUrl: URL
+    try {
+      targetUrl = new URL(command.url)
+    } catch {
+      throw new Error('无效的 URL 地址')
+    }
+    if (targetUrl.protocol !== 'http:' && targetUrl.protocol !== 'https:') {
+      throw new Error('仅支持导航至 HTTP 或 HTTPS 地址')
+    }
+    await page.goto(targetUrl.toString(), {
+      waitUntil: 'domcontentloaded',
+      timeout: 30_000,
+    })
+    return
+  }
   const focused = page.locator(':focus')
   if (await focused.count()) {
     // Vue / Element 密码框不吃裸 insertText；fill 会触发 input/change。

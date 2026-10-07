@@ -431,7 +431,7 @@ export const INVARIANT_RULES = [
           while (enclosing && !ts.isMethodDeclaration(enclosing)) enclosing = enclosing.parent
           const sessionOwnerLookup = rel === 'packages/api/src/browser-sessions/browser-sessions.service.ts'
             && name === 'getRunSessionOwner'
-            && enclosing?.name?.getText(source) === 'resolveRunOwner'
+            && (enclosing?.name?.getText(source) === 'resolveRunOwner' || enclosing?.name?.getText(source) === 'resolveOwner')
           const actor = node.arguments[2]
           if (!sessionOwnerLookup && (name === 'getRunSessionOwner' || !actor || actor.getText(source) === 'undefined' || actor.getText(source) === 'null')) {
             const line = lineOf(source, node)

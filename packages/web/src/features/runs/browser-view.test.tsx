@@ -146,7 +146,7 @@ describe('BrowserView', () => {
     signIn(['run:read', 'session:view', 'session:control', 'run:execute'])
     const screen = await renderView()
     await expect.element(screen.getByText('目标登录页打不开。画面只对有操作权限的人开放。')).toBeInTheDocument()
-    await expect.element(screen.getByText(/当前页 空白页/)).toBeInTheDocument()
+    await expect.element(screen.getByText('空白页')).toBeInTheDocument()
   })
 
   it('等待认证时折叠态主操作就是处理登录', async () => {
@@ -273,6 +273,7 @@ describe('BrowserView', () => {
     await expect.element(screen.getByRole('button', { name: '收起画面' })).toBeInTheDocument()
     await expect.element(screen.getByRole('img', { name: '受管浏览器当前画面' })).toBeInTheDocument()
     await expect.element(screen.getByText('画面已连接')).toBeInTheDocument()
+    await expect.element(screen.getByText('1280×720')).toBeInTheDocument()
     expect(mocks.subscribeBrowserFrames).toHaveBeenCalled()
   })
 
@@ -539,6 +540,179 @@ describe('BrowserView', () => {
     await screen.getByRole('button', { name: '退出操作' }).click()
     expect(mocks.releaseAuthControl).toHaveBeenCalledWith(meta.runId, { token: 't'.repeat(32) })
     await expect.element(screen.getByRole('button', { name: '手动操作' })).toBeInTheDocument()
+  })
+
+  it('受管画面地址栏提供一键复制完整地址功能', async () => {
+    const live: ManagedBrowserMeta = {
+      ...meta,
+      runStatus: 'RUNNING',
+      framesAvailable: true,
+      currentPage: {
+        pageRef: {
+          sessionId: meta.sessionId!,
+          sessionGeneration: 1,
+          pageId: '66666666-6666-4666-8666-666666666666',
+          documentEpoch: 0,
+        },
+        kind: 'run',
+        viewing: true,
+        currentExecution: true,
+        url: 'https://shop.example.com/items?page=2',
+      },
+      pages: [],
+      authHold: null,
+    }
+    mocks.fetchManagedBrowser.mockResolvedValue(live)
+    const writeTextMock = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: writeTextMock },
+      configurable: true,
+    })
+    signIn(['session:read', 'session:view', 'session:control'])
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const screen = await render(
+      <QueryClientProvider client={client}>
+        <BrowserView runId={meta.runId} runStatus="RUNNING" sessionMode defaultOpen />
+      </QueryClientProvider>,
+    )
+    await expect.element(screen.getByText('shop.example.com/items?page=2')).toBeInTheDocument()
+    const copyBtn = screen.getByRole('button', { name: '复制完整地址' })
+    await expect.element(copyBtn).toBeInTheDocument()
+    await copyBtn.click()
+    expect(writeTextMock).toHaveBeenCalledWith('https://shop.example.com/items?page=2')
+    await expect.element(screen.getByRole('button', { name: '已复制完整地址' })).toBeInTheDocument()
+  })
+
+  it('手动操作模式下地址栏可点击编辑，输入 URL 回车后下发 navigate 指令', async () => {
+    const live: ManagedBrowserMeta = {
+      ...meta,
+      runStatus: 'RUNNING',
+      framesAvailable: true,
+      currentPage: {
+        pageRef: {
+          sessionId: meta.sessionId!,
+          sessionGeneration: 1,
+          pageId: '66666666-6666-4666-8666-666666666666',
+          documentEpoch: 0,
+        },
+        kind: 'run',
+        viewing: true,
+        currentExecution: true,
+        url: 'https://shop.example.com/items',
+      },
+      pages: [],
+      authHold: null,
+    }
+    mocks.fetchManagedBrowser.mockResolvedValue(live)
+    mocks.subscribeBrowserFrames.mockImplementation(async (_id, input) => {
+      input.onFrame({
+        pageRef: live.currentPage!.pageRef,
+        frameId: 'f-manual',
+        width: 1280,
+        height: 720,
+        capturedAt: '2026-09-18T00:00:01.000Z',
+        image: 'data:image/jpeg;base64,ZmFrZQ==',
+      })
+      await new Promise<void>((resolve) =>
+        input.signal.addEventListener('abort', () => resolve(), { once: true }),
+      )
+    })
+    signIn(['session:read', 'session:view', 'session:control'])
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const screen = await render(
+      <QueryClientProvider client={client}>
+        <BrowserView runId={meta.runId} runStatus="RUNNING" sessionMode defaultOpen />
+      </QueryClientProvider>,
+    )
+    await screen.getByRole('button', { name: '手动操作' }).click()
+    await expect.element(screen.getByText('正在手动操作', { exact: true })).toBeInTheDocument()
+
+    // 点击地址栏文本进入编辑态
+    await screen.getByText('shop.example.com/items').click()
+    const input = screen.getByRole('textbox', { name: '目标网址输入框' })
+    await expect.element(input).toBeInTheDocument()
+
+    // 输入目标网址并前往
+    await input.fill('https://shop.example.com/dashboard')
+    await screen.getByRole('button', { name: '前往目标网址' }).click()
+
+    expect(mocks.inputAuthControl).toHaveBeenCalledWith(
+      meta.runId,
+      expect.objectContaining({
+        command: expect.objectContaining({
+          type: 'navigate',
+          url: 'https://shop.example.com/dashboard',
+        }),
+      }),
+    )
+  })
+
+  it('未预先获取操作权时直接在地址栏编辑输入，能自动获取操作权并跳转，且显示分辨率徽标', async () => {
+    const live: ManagedBrowserMeta = {
+      ...meta,
+      runStatus: 'RUNNING',
+      framesAvailable: true,
+      currentPage: {
+        pageRef: {
+          sessionId: meta.sessionId!,
+          sessionGeneration: 1,
+          pageId: '66666666-6666-4666-8666-666666666666',
+          documentEpoch: 0,
+        },
+        kind: 'run',
+        viewing: true,
+        currentExecution: true,
+        url: 'https://shop.example.com/items',
+      },
+      pages: [],
+      authHold: null,
+    }
+    mocks.fetchManagedBrowser.mockResolvedValue(live)
+    mocks.subscribeBrowserFrames.mockImplementation(async (_id, input) => {
+      input.onFrame({
+        pageRef: live.currentPage!.pageRef,
+        frameId: 'f-manual',
+        width: 1920,
+        height: 1080,
+        capturedAt: '2026-09-18T00:00:01.000Z',
+        image: 'data:image/jpeg;base64,ZmFrZQ==',
+      })
+      await new Promise<void>((resolve) =>
+        input.signal.addEventListener('abort', () => resolve(), { once: true }),
+      )
+    })
+    signIn(['session:read', 'session:view', 'session:control'])
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const screen = await render(
+      <QueryClientProvider client={client}>
+        <BrowserView runId={meta.runId} runStatus="RUNNING" sessionMode defaultOpen />
+      </QueryClientProvider>,
+    )
+
+    // 验证标题旁的分辨率 Badge
+    await expect.element(screen.getByText('1920×1080')).toBeInTheDocument()
+
+    // 此时用户尚未点击“手动操作”按钮，直接点击地址栏文本编辑
+    await screen.getByText('shop.example.com/items').click()
+    const input = screen.getByRole('textbox', { name: '目标网址输入框' })
+    await expect.element(input).toBeInTheDocument()
+
+    // 输入目标网址并前往
+    await input.fill('https://shop.example.com/settings')
+    await screen.getByRole('button', { name: '前往目标网址' }).click()
+
+    // 验证自动调用 acquireAuthControl
+    expect(mocks.acquireAuthControl).toHaveBeenCalledWith(meta.runId)
+    // 验证随后派发 navigate 指令
+    expect(mocks.inputAuthControl).toHaveBeenCalledWith(
+      meta.runId,
+      expect.objectContaining({
+        command: expect.objectContaining({
+          type: 'navigate',
+          url: 'https://shop.example.com/settings',
+        }),
+      }),
+    )
   })
 
   it('遇到 PAGE_STALE 时不丢弃控制权，并自动刷新浏览器元数据', async () => {
@@ -1122,8 +1296,8 @@ describe('BrowserView', () => {
         liveMeta([{ ...basePage, viewing: false, currentExecution: false }, { ...popupPage, viewing: true, currentExecution: true }]),
       )
       emit(2)
-      await expect.element(screen.getByText('[弹出页]')).toBeInTheDocument()
-      await expect.element(screen.getByText(/当前页 sub\.example\/gwmanage/)).toBeInTheDocument()
+      await expect.element(screen.getByRole('tablist').getByText('sub.example/gwmanage/')).toBeInTheDocument()
+      await expect.element(screen.getByTitle(/点击可编辑直接跳转/)).toBeInTheDocument()
       expect(latest().pageId).toBeUndefined()
     })
 

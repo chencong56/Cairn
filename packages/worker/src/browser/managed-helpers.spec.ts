@@ -123,9 +123,33 @@ describe('managed helpers', () => {
         await page.waitForFunction((prev) => (globalThis as any).document.getElementById('main')!.scrollTop > prev, afterMainWheel.main, { timeout: 2000 })
         const afterPageDown = await page.evaluate(() => (globalThis as any).document.getElementById('main')!.scrollTop)
         expect(afterPageDown).toBeGreaterThan(afterMainWheel.main)
+        // 4. 验证 navigate 导航指令拦截非法协议
+        const invalidNavCommand: BrowserAuthInputCommand = {
+          type: 'navigate',
+          url: 'javascript:alert(1)',
+          commandId: 'cmd-nav-invalid',
+          seq: 4,
+          pageRef: { sessionId: 's1', sessionGeneration: 1, pageId: 'p1', documentEpoch: 0 },
+          frameId: 'f1',
+          viewport: { width: 1280, height: 720 },
+        }
+        await expect(applyAuthInput(page, invalidNavCommand)).rejects.toThrow('仅支持导航至 HTTP 或 HTTPS 地址')
+
+        // 5. 验证 navigate 格式错误
+        const malformedNavCommand: BrowserAuthInputCommand = {
+          type: 'navigate',
+          url: ':::invalid',
+          commandId: 'cmd-nav-malformed',
+          seq: 5,
+          pageRef: { sessionId: 's1', sessionGeneration: 1, pageId: 'p1', documentEpoch: 0 },
+          frameId: 'f1',
+          viewport: { width: 1280, height: 720 },
+        }
+        await expect(applyAuthInput(page, malformedNavCommand)).rejects.toThrow('无效的 URL 地址')
       } finally {
         await browser.close()
       }
     })
   })
 })
+

@@ -38,18 +38,25 @@ describe('popup handoff selection', () => {
         listeners.delete(event)
       },
     } as unknown as import('playwright').Page
+    let navigatedCount = 0
     const entry = createManagedPage({
       page,
       runId: '00000000-0000-4000-8000-000000000099',
       kind: 'run',
+      onNavigate: () => {
+        navigatedCount += 1
+      },
     })
     expect(entry.documentEpoch).toBe(0)
     listeners.get('framenavigated')?.(main)
     expect(entry.documentEpoch).toBe(1)
+    expect(navigatedCount).toBe(1)
     listeners.get('framenavigated')?.(child)
     expect(entry.documentEpoch).toBe(1)
+    expect(navigatedCount).toBe(1)
     listeners.get('framenavigated')?.(main)
     expect(entry.documentEpoch).toBe(2)
+    expect(navigatedCount).toBe(2)
     expect(entry.pageId).toBe(entry.pageId)
   })
 

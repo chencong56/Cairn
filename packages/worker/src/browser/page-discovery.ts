@@ -58,7 +58,14 @@ export async function discoverPage(manager: SessionManagerContext, live: LiveHan
   const fromPageId = opener
     ? [...live.pages.values()].find((entry) => entry.page === opener && entry.runId === owner.ownerId)?.pageId ?? null
     : null
-  const entry = createManagedPage({ page, runId: owner.ownerId, kind: 'popup' })
+  const entry = createManagedPage({
+    page,
+    runId: owner.ownerId,
+    kind: 'popup',
+    onNavigate: () => {
+      live.pagesRevision += 1
+    },
+  })
   entry.discovered = true
   live.pages.set(entry.pageId, entry)
   // 编排会话没有执行：手动操作打开的新页即接下来要看、要指认的页。

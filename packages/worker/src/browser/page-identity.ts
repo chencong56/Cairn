@@ -14,6 +14,7 @@ export type ManagedPageEntry = {
   discovered?: boolean
   lastNavigationMethod?: string
   retarget?: Promise<void>
+  onNavigate?: () => void
   dispose?: () => void
 }
 
@@ -22,6 +23,7 @@ export function createManagedPage(input: {
   runId: string
   kind: ManagedPageKind
   lastNavigationMethod?: string
+  onNavigate?: () => void
   dispose?: () => void
 }): ManagedPageEntry {
   const entry: ManagedPageEntry = {
@@ -30,6 +32,7 @@ export function createManagedPage(input: {
     page: input.page,
     runId: input.runId,
     kind: input.kind,
+    onNavigate: input.onNavigate,
   }
   if (typeof input.page.on === 'function') {
     const onRequest = (request: Request) => {
@@ -41,7 +44,10 @@ export function createManagedPage(input: {
       }
     }
     const onNavigation = (frame: Frame) => {
-      if (typeof input.page.mainFrame === 'function' && frame === input.page.mainFrame()) entry.documentEpoch += 1
+      if (typeof input.page.mainFrame === 'function' && frame === input.page.mainFrame()) {
+        entry.documentEpoch += 1
+        entry.onNavigate?.()
+      }
     }
     const onDialog = (dialog: Dialog) => {
       dialog.accept().catch(() => {})

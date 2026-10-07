@@ -2976,6 +2976,7 @@ export {
   authControlInputReceiptSchema,
   MANAGED_BROWSER_ERROR_CODES,
   canObserveManagedFrames,
+  normalizeNavigationUrl,
   type PageRef,
   type BrowserCapabilityState,
   type ManagedBrowserCapabilities,

@@ -99,8 +99,22 @@ export const browserAuthInputCommandSchema = z.discriminatedUnion('type', [
     type: z.literal('insert_text'),
     text: z.string().min(1).max(2000),
   }),
+  z.strictObject({
+    ...inputCommon,
+    type: z.literal('navigate'),
+    url: z.string().min(1).max(2048),
+  }),
 ])
 export type BrowserAuthInputCommand = z.infer<typeof browserAuthInputCommandSchema>
+
+export function normalizeNavigationUrl(input: string): string {
+  const trimmed = input.trim()
+  if (!trimmed) return ''
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+  return `http://${trimmed}`
+}
 
 export const managedPageSummarySchema = z.strictObject({
   pageRef: pageRefSchema,

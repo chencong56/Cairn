@@ -608,10 +608,22 @@ export function adoptPage(this: SessionManagerContext,
     const existing = [...live.pages.values()].find(
       (item) => item.page === page && item.runId === runId && !item.page.isClosed(),
     )
-    const entry = existing ?? createManagedPage({ page, runId, kind })
+    const entry =
+      existing ??
+      createManagedPage({
+        page,
+        runId,
+        kind,
+        onNavigate: () => {
+          live.pagesRevision += 1
+        },
+      })
     if (existing) {
       existing.kind = kind
       existing.discovered = false
+      existing.onNavigate = () => {
+        live.pagesRevision += 1
+      }
     } else {
       live.pages.set(entry.pageId, entry)
     }
