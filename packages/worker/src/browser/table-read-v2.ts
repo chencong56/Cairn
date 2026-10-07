@@ -403,6 +403,7 @@ async function detectTableInner(
     notes.push(`这张表有 ${kept.length} 列，默认只勾选前 ${TABLE_READ_DEFAULT_SELECTED_COLS} 列；需要后面的列，在下面的列表里勾选即可（一次最多读 ${TABLE_READ_MAX_COLS} 列）`)
   }
   if (!chosen.hasHeader) notes.push('这张表没有表头，列名是自动起的，按第几列读取')
+  if (chosen.shape === 'listgrid') notes.push('这是用列表（ul/li）搭出来的表格：第一行列表作表头，后面每个 li 是一行，每个子元素是一格')
   if (chosen.shape === 'cards') notes.push('按“名称：值”从每张卡片里取字段，卡片里没有的字段会显示为空')
   if (chosen.selectorQuality === 'positional') {
     notes.push('这张表没有稳定的标识，页面结构变化后可能需要重新点选')

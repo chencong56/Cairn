@@ -232,7 +232,7 @@ export const tableDetectedSchema = z.strictObject({
     )
     .max(6),
   /** 识别出的控件形态：原生表格 / ARIA 网格 / easyui / jqGrid / ExtJS / layui。 */
-  shape: z.enum(['native', 'aria', 'easyui', 'jqgrid', 'extjs', 'layui', 'elementui', 'finereport', 'cards', 'keyvalue']).optional(),
+  shape: z.enum(['native', 'aria', 'easyui', 'jqgrid', 'extjs', 'layui', 'elementui', 'finereport', 'cards', 'keyvalue', 'listgrid']).optional(),
   /** 给用户看的识别说明（自动排除了哪些列、表没有表头等）。 */
   notes: z.array(z.string()).max(16),
 })

@@ -352,6 +352,20 @@ describe('table.read@2 识别 × 点选', { timeout: 120_000 }, () => {
     await page.close()
   })
 
+  it('ul/li + div 模拟的表格（表头在另一个 ul）：识别并按表头读取', async ({ skip }) => {
+    if (!available) skip()
+    const page = await browser!.newPage()
+    await page.goto(`${base}/list-grid.html`)
+    const result = await detectTable(page, { kind: 'point', ...(await centerOf(page, '.topP')) }, deps)
+    expect(result.outcome).toBe('FOUND')
+    if (result.outcome !== 'FOUND') return
+    expect(result.detected.sample.rows.map((r) => valueOf(r, 'col_2'))).toEqual(['DG_Priamy_Oracle11g_100.2', 'Oracle19c', 'Oracle11g-100.52', 'Windows_oracle11'])
+    expect(result.detected.sample.rows.map((r) => valueOf(r, 'col_3'))).toEqual([16.8, 0.7, 0.1, 0.1])
+    const again = await run(page, result.detected.plan)
+    expect(again.rowCount).toBe(4)
+    await page.close()
+  })
+
   it('表在 iframe 里：识别并读取，表根带上 frame 路径', async ({ skip }) => {
     if (!available) skip()
     const page = await browser!.newPage()

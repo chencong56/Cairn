@@ -10,7 +10,7 @@
  * ExtJS 4–6、layui、Element UI el-table、FineReport 冻结表）；版本差异靠手工指定与页面结构反馈迭代。
  */
 
-export type TableShape = 'native' | 'aria' | 'easyui' | 'jqgrid' | 'extjs' | 'layui' | 'elementui' | 'finereport' | 'cards' | 'keyvalue'
+export type TableShape = 'native' | 'aria' | 'easyui' | 'jqgrid' | 'extjs' | 'layui' | 'elementui' | 'finereport' | 'cards' | 'keyvalue' | 'listgrid'
 export type ReadKind = 'table' | 'cards' | 'keyvalue'
 
 export type DomColumnSpec = {
@@ -884,10 +884,83 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
     return null
   }
 
+  // ---------------------------------------------------------------- 列表式表格适配器
+  // 老系统用 ul/li + div 模拟表格：表头是单独的一个 ul（一个 li），数据行是另一个 ul 里的多个 li，
+  // 每个 li 的直接子元素是一格。没有“名称：值”可配对，靠“表头 li 与数据 li 格数一致”识别。
+  const listgridModel = (root: any, rowSelector?: string): Model | ModelError => {
+    const fail: ModelError = { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '这个区域里没有找到用列表（ul/li）搭成的表格' } }
+    const cellsOf = (li: any): any[] =>
+      (Array.from(li.children || []) as any[]).filter((c) => !/^(script|style|link|template)$/i.test(String(c.tagName)) && !isHidden(c))
+    let candidates: any[]
+    try {
+      candidates = Array.from(root.querySelectorAll(rowSelector || 'li')) as any[]
+    } catch {
+      return fail
+    }
+    const rowEls = candidates.filter((li) => !isHidden(li) && !(rowSelector ? false : li.querySelector('li')) && cellsOf(li).length >= 2)
+    const groups = new Map<any, any[]>()
+    for (const li of rowEls) {
+      const g = groups.get(li.parentElement)
+      if (g) g.push(li)
+      else groups.set(li.parentElement, [li])
+    }
+    let dataParent: any = null
+    let dataRowsAll: any[] = []
+    for (const [parent, rows] of groups) if (rows.length >= dataRowsAll.length) { dataParent = parent; dataRowsAll = rows }
+    if (!dataParent || dataRowsAll.length < 2) return fail
+    const counts: Record<number, number> = {}
+    for (const r of dataRowsAll) counts[cellsOf(r).length] = (counts[cellsOf(r).length] || 0) + 1
+    let width = 0
+    for (const [k, v] of Object.entries(counts)) if (v > (counts[width] || 0)) width = Number(k)
+    const rows = dataRowsAll.filter((r) => cellsOf(r).length === width)
+    if (rows.length < 2 || rows.length / dataRowsAll.length < 0.7) return fail
+    // 表头：数据行之前、只有一行、格数相同的另一个列表（取离数据最近的一个）
+    let headerLi: any = null
+    for (const [parent, hrows] of groups) {
+      if (parent === dataParent || hrows.length !== 1 || cellsOf(hrows[0]).length !== width) continue
+      if (!(parent.compareDocumentPosition(dataParent) & 4)) continue
+      if (cellsOf(hrows[0]).every((c) => !textOf(c))) continue
+      headerLi = hrows[0]
+    }
+    const heads = headerLi ? cellsOf(headerLi).map((c) => textOf(c)) : null
+    const cols: ModelCol[] = Array.from({ length: width }, (_, i) => {
+      const h = heads ? (heads[i] as string) : ''
+      return { leaf: h, path: h }
+    })
+    return {
+      shape: 'listgrid',
+      cols,
+      hasHeader: Boolean(heads),
+      dataRows: rows.map((r) => ({ el: r, cells: cellsOf(r) })),
+      summaryRows: [],
+      excluded: { mergedRows: 0, paginationRows: 0, footerRows: 0 },
+      hasPagination: pagerNear(root),
+      isBusy: Array.from(root.querySelectorAll?.('.loading,[aria-busy="true"],.layui-layer-loading') || []).some((m: any) => !isHidden(m)),
+      emptyNote: false,
+      renderedRowEls: rows,
+    }
+  }
+  /** 从点到的元素向上找：优先停在带表头的那一层，找不到表头就用第一个能读出行的层。 */
+  const findListgrid = (start: any): any => {
+    let first: any = null
+    let n = start
+    for (let hop = 0; hop < 8 && n && n.nodeType === 1 && n !== doc.body && n !== doc.documentElement; hop++, n = n.parentElement) {
+      const m = listgridModel(n)
+      if ('error' in m) continue
+      if (m.hasHeader) return n
+      if (!first) first = n
+    }
+    return first
+  }
+
   const buildModel = (root: any, hint: { header: 'auto' | 'first_row' | 'none'; rowSelector?: string; kind?: ReadKind }): Model | ModelError => {
     if (hint.kind === 'keyvalue') return keyvalueModel(root)
     if (hint.kind === 'cards') return cardsModel(root, hint.rowSelector)
     const shape = shapeOf(root)
+    if (!shape) {
+      const asList = listgridModel(root, hint.rowSelector)
+      if (!('error' in asList)) return asList
+    }
     if (!shape) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '这个区域不是表格或常见的表格控件' } }
     if (shape === 'easyui') return easyuiModel(root)
     if (shape === 'jqgrid') return jqgridModel(root)
@@ -1307,11 +1380,18 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
         } else {
           structured = findStructured(el)
         }
+        let listRoot: any = null
         if (!structured) {
+          if (args.forceRoot) listRoot = 'error' in listgridModel(el) ? null : el
+          else listRoot = findListgrid(el)
+        }
+        if (listRoot) {
+          root = listRoot
+        } else if (!structured) {
           if (chain.length === 0) return { ok: false, code: 'TABLE_SHAPE_UNSUPPORTED', message: '点到的位置不在表格、卡片或“名称：值”信息里' }
           return { ok: false, code: 'TABLE_SHAPE_UNSUPPORTED', message: '点到的位置所在的表格看起来不是数据表（可能是页面排版用的表格）' }
         }
-        root = structured.root
+        else root = structured.root
       }
     }
 
@@ -1383,7 +1463,7 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
     }
 
     const sel = selectorFor(root)
-    const baseScore = gridRoot ? 10 : structured ? 6 : (best as NonNullable<typeof best>).score
+    const baseScore = gridRoot ? 10 : structured ? 6 : best && root === best.t ? best.score : 6
     const mk = (t: any, level: 'inner' | 'outer' | 'chosen', sc: number, rowCount: number, colCount: number): DetectCandidate => {
       const s = t === root ? sel : selectorFor(t)
       return {
@@ -1406,7 +1486,7 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
             const s = selectorFor(structured.inner)
             return [{ selector: s.selector, selectorQuality: s.quality, title: titleOf(structured.inner), rowCount: 1, colCount: pairCount, score: 5, tagName: String(structured.inner.tagName).toLowerCase(), isNative: false, level: 'inner' as const }]
           })()
-        : gridRoot || args.forceRoot || structured
+        : gridRoot || args.forceRoot || structured || !best || root !== best.t
         ? []
         : candidates
             .filter((c) => c !== best && c.score >= 3)
