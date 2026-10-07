@@ -216,6 +216,8 @@ export const repairCandidateSchema = z.strictObject({
   adoption: adoptionReceiptSchema.optional(),
   rejection: candidateRejectionReceiptSchema.optional(),
   reopenHistory: z.array(candidateReopenReceiptSchema).optional(),
+  /** 列表读取时派生：草稿中目标步骤的定位已偏离候选来源摘要，采纳/验证会被拒绝 */
+  stale: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

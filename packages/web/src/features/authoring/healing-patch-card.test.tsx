@@ -391,4 +391,38 @@ describe('SH-3: HealingPatchCard Component', () => {
     await reopenBtn.click()
     expect(onReopen).toHaveBeenCalledWith('rep-rej-2')
   })
+
+  it('SH08-STALE: 候选已过期时不展示采纳/验证按钮并说明原因', async () => {
+    const staleCandidate = {
+      id: 'rep-stale-1',
+      candidateId: 'rep_stale',
+      status: 'proposed',
+      stale: true,
+      hypothesis: '过期候选',
+      patch: { kind: 'ADD_CANDIDATE', suggestedCandidate: { by: 'role', value: 'menuitem', name: '数据库' } },
+      guardResults: {
+        overallPassed: true,
+        allowedFields: { status: 'passed' },
+        unchangedBusinessGoal: { status: 'passed' },
+        sideEffectSafety: { status: 'passed' },
+        contextIntegrity: { status: 'passed' },
+      },
+      validationScope: { locatorValid: false, stepPassed: false, outcomePassed: false, crossSampleStable: false },
+      observationCount: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    const screen = await render(
+      <HealingPatchCard
+        candidate={staleCandidate as unknown as RepairCandidate}
+        onAdopt={vi.fn()}
+        onValidate={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    )
+    await expect.element(screen.getByText(/候选已过期/)).toBeVisible()
+    expect(screen.getByRole('button', { name: /采纳为草稿/ }).query()).toBeNull()
+    expect(screen.getByRole('button', { name: '发起隔离验证' }).query()).toBeNull()
+    await expect.element(screen.getByRole('button', { name: '拒绝' })).toBeVisible()
+  })
 })

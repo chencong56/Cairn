@@ -72,7 +72,9 @@ export function HealingPatchCard({
     ? CAUSE_LABELS[diagnosis.cause] ?? { label: diagnosis.cause, variant: 'outline' }
     : undefined
   const statusInfo = activeCandidate
-    ? STATUS_LABELS[activeCandidate.status] ?? { label: activeCandidate.status, variant: 'outline' }
+    ? activeCandidate.stale && activeCandidate.status !== 'blocked'
+      ? { label: '草稿已变更', variant: 'secondary' as const }
+      : STATUS_LABELS[activeCandidate.status] ?? { label: activeCandidate.status, variant: 'outline' as const }
     : undefined
 
   return (
@@ -318,7 +320,13 @@ export function HealingPatchCard({
             {/* Candidate-specific actions */}
             {activeCandidate && (
               <>
-                {(activeCandidate.status === 'proposed' || activeCandidate.status === 'validating') && onValidate && (
+                {activeCandidate.stale && activeCandidate.status !== 'blocked' && (
+                  <span className='text-label text-status-warning font-medium'>
+                    草稿中这一步的定位已被修改，候选已过期，无法验证或采纳，请拒绝
+                  </span>
+                )}
+
+                {!activeCandidate.stale && (activeCandidate.status === 'proposed' || activeCandidate.status === 'validating') && onValidate && (
                   <Button
                     size='sm'
                     variant='outline'
@@ -330,7 +338,7 @@ export function HealingPatchCard({
                   </Button>
                 )}
 
-                {(activeCandidate.status === 'proposed' || activeCandidate.status === 'validating' || activeCandidate.status === 'validated') && onAdopt && (
+                {!activeCandidate.stale && (activeCandidate.status === 'proposed' || activeCandidate.status === 'validating' || activeCandidate.status === 'validated') && onAdopt && (
                   <Button
                     size='sm'
                     variant='default'

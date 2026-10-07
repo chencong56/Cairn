@@ -330,6 +330,27 @@ export async function getRepairCandidate(
   return row ? rowToRepairCandidate(row) : null
 }
 
+const STALE_CHECK_STATUSES = new Set(['proposed', 'validating', 'validated', 'blocked'])
+
+/** 为活跃候选派生 stale：草稿步骤缺失或 target 摘要与候选来源摘要不一致（与采纳/验证的拦截条件一致） */
+async function markStaleCandidates(db: Db, rows: any[]): Promise<RepairCandidate[]> {
+  const { scenarioDrafts } = schemaFor(db)
+  const candidates = rows.map(rowToRepairCandidate)
+  const scenarioIds = [...new Set(candidates.filter((c) => STALE_CHECK_STATUSES.has(c.status)).map((c) => c.scenarioId))]
+  if (!scenarioIds.length) return candidates
+  const drafts = await db.select().from(scenarioDrafts).where(inArray(scenarioDrafts.scenarioId, scenarioIds))
+  const docs = new Map<string, any>(drafts.map((d: any) => [d.scenarioId, d.document]))
+  for (const c of candidates) {
+    if (!STALE_CHECK_STATUSES.has(c.status) || !docs.has(c.scenarioId)) continue
+    if (!c.sourceTargetDigest || c.sourceTargetDigest === 'unknown') continue
+    const ref = c.patchTargetRef as PatchTargetRef
+    const step = findStepInDocument(docs.get(c.scenarioId), ref.stepId)
+    const target = step?.input && 'target' in step.input ? step.input.target : undefined
+    if (!step || (target ? computeTargetDigest(target) : undefined) !== c.sourceTargetDigest) c.stale = true
+  }
+  return candidates
+}
+
 export async function listRepairCandidatesByRun(
   handle: DbHandle,
   runId: string,
@@ -343,7 +364,7 @@ export async function listRepairCandidatesByRun(
     .where(eq(repairCandidates.runId, runId))
     .orderBy(desc(repairCandidates.createdAt))
 
-  return rows.map(rowToRepairCandidate)
+  return await markStaleCandidates(db, rows)
 }
 
 export async function listRepairCandidatesByScenario(
@@ -370,7 +391,7 @@ export async function listRepairCandidatesByScenario(
     .where(and(...conditions))
     .orderBy(desc(repairCandidates.createdAt))
 
-  return rows.map(rowToRepairCandidate)
+  return await markStaleCandidates(db, rows)
 }
 
 export async function updateRepairCandidateValidation(

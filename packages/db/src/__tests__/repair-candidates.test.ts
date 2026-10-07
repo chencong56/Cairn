@@ -431,6 +431,10 @@ describe.each(DRIVERS)('%s Repair Candidates Repository (Integration)', (driver)
         document: modifiedDoc,
       })
 
+    // 列表读取时应派生 stale，供前端提前禁用采纳/验证
+    const listed = await listRepairCandidatesByScenario(handle.db, scenarioId)
+    expect(listed.find((c) => c.id === created.id)?.stale).toBe(true)
+
     // Attempting to adopt should throw REPAIR_CANDIDATE_STALE
     await expect(
       adoptRepairCandidate(handle.db, {
