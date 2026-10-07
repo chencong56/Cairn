@@ -364,4 +364,18 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
     })
     expect(missing.outcome).toBe('NOT_FOUND')
   })
+
+  it('点击打开新页：未声明 pageAfter 时输出 popupOpened，显式 same 时不标记', async ({ skip }) => {
+    if (!hasBrowser) skip()
+    const page = await open('/popup.html')
+    const undeclared = await executeOnPage(page, { type: 'click', target: button('打开子窗') })
+    expect(undeclared.ok).toBe(true)
+    expect(undeclared.ok && undeclared.output).toMatchObject({ popupOpened: true })
+    await page.context().pages().at(-1)!.close()
+
+    const declared = await executeOnPage(page, { type: 'click', target: button('打开子窗'), pageAfter: 'same' })
+    expect(declared.ok).toBe(true)
+    expect(declared.ok && declared.output).toEqual({})
+    await page.context().pages().at(-1)!.close()
+  })
 })

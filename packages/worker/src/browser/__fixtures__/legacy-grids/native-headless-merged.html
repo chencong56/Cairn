@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>原生表格：无 thead、合并单元格、多级表头</title></head>
+<body>
+<h2>无 thead，首行是表头，区域列 rowspan</h2>
+<table id="no-thead">
+  <tr><th>区域</th><th>站点</th><th>数量</th></tr>
+  <tr><td rowspan="2">华东</td><td>上海站</td><td>12</td></tr>
+  <tr><td>杭州站</td><td>7</td></tr>
+  <tr><td>华南</td><td>广州站</td><td>9</td></tr>
+</table>
+
+<h2>多级表头</h2>
+<table id="grouped">
+  <thead>
+    <tr><th rowspan="2">区域</th><th colspan="2">收入</th><th colspan="2">支出</th></tr>
+    <tr><th>本月</th><th>累计</th><th>本月</th><th>累计</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>辽宁</td><td>10</td><td>100</td><td>4</td><td>40</td></tr>
+    <tr><td>上海</td><td>20</td><td>200</td><td>6</td><td>60</td></tr>
+  </tbody>
+</table>
+
+<h2>完全没有表头</h2>
+<table id="bare">
+  <tr><td>甲</td><td>1</td></tr>
+  <tr><td>乙</td><td>2</td></tr>
+</table>
+</body>
+</html>

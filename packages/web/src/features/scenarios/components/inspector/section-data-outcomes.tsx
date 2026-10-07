@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { fieldElementId } from '@/features/authoring/document'
 import { OutcomeListEditor } from '@/features/authoring/outcome-editor'
+import { TableChecksEditor } from '@/features/authoring/fields/table-checks'
+import { splitTableChecks } from '@/features/authoring/fields/table-checks-model'
 
 export interface SectionDataOutcomesProps {
   step: Step
@@ -28,6 +30,9 @@ export function SectionDataOutcomes({
     step.type === 'ai_extract' ||
     step.type === 'ai_assert' ||
     step.type === 'download'
+
+  const tableStep = step.type === 'extract' && step.input.as === 'table' ? step : null
+  const tableSplit = splitTableChecks(outcomes)
 
   return (
     <div data-testid='section-data-outcomes' className='space-y-4'>
@@ -64,13 +69,23 @@ export function SectionDataOutcomes({
       ) : null}
 
       {/* 步骤级成功条件与断言清单 */}
+      {onOutcomesChange && tableStep && (
+        <div className='pt-1'>
+          <TableChecksEditor
+            step={tableStep}
+            checks={tableSplit.checks}
+            disabled={disabled}
+            onChange={(next) => onOutcomesChange([...next, ...tableSplit.others])}
+          />
+        </div>
+      )}
       {onOutcomesChange && (
         <div className='pt-1'>
           <OutcomeListEditor
-            outcomes={outcomes}
+            outcomes={tableStep ? tableSplit.others : outcomes}
             scope='step'
             disabled={disabled}
-            onChange={onOutcomesChange}
+            onChange={(next) => onOutcomesChange(tableStep ? [...tableSplit.checks, ...next] : next)}
           />
         </div>
       )}

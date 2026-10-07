@@ -1,0 +1,472 @@
+import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, Copy, Lock, LockOpen, MousePointerClick } from 'lucide-react'
+import { toast } from 'sonner'
+import {
+  type ExtractInput,
+  type Step,
+  type TableDetectObservation,
+  type TableDetected,
+  type TableReadPlanV2,
+  type TableSample,
+} from '@cairn/shared'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { copyToClipboard } from '@/lib/clipboard'
+import { useAuthoringObserve } from '../observe'
+import {
+  columnLabel,
+  coverageSummary,
+  excludedReasonText,
+  foundSummary,
+  kindNoun,
+  planKind,
+  rootSelectorOf,
+  renameColumn,
+  scopeAlternatives,
+  setColumnSensitive,
+  setColumnSource,
+  setColumnType,
+  setEmptyMeansNone,
+  setHeaderMode,
+  setTotalRow,
+  totalRowsSummary,
+  setMaxRows,
+  setRootSelector,
+  tableInputFromDetected,
+  tablePlanState,
+  toggleColumn,
+} from './table-plan-edit'
+
+type ExtractTableStep = Extract<Step, { type: 'extract' }>
+type TableInput = Extract<ExtractInput, { as: 'table' }>
+
+const PREVIEW_ROWS = 5
+
+function cellText(sample: TableSample | null, rowIndex: number, key: string): string {
+  const field = sample?.rows[rowIndex]?.[key]
+  if (!field) return ''
+  if (field.status === 'masked') return '••••'
+  if (field.status === 'missing') return '—'
+  if (field.status === 'error') return `${field.rawText ?? ''}（读不出）`
+  return String(field.rawText ?? field.value ?? '')
+}
+
+/** 「表格 / 列表数据」提取：点一下、看预览、确认。高级设置折叠在最下面。 */
+export function TableDataFields({
+  step,
+  disabled,
+  onChange,
+}: {
+  step: ExtractTableStep
+  disabled?: boolean
+  onChange: (step: Step) => void
+}) {
+  const observe = useAuthoringObserve()
+  const input = step.input as TableInput
+  const state = tablePlanState(input.table)
+  const plan: TableReadPlanV2 | null = input.table.protocol === 'table.read@2' ? input.table : null
+
+  const [detected, setDetected] = useState<TableDetected | null>(null)
+  const [preview, setPreview] = useState<TableSample | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [failure, setFailure] = useState<{ message: string; feedback?: string } | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const stepIdRef = useRef(step.id)
+
+  // 换了步骤就清掉上一步的识别结果与预览
+  useEffect(() => {
+    if (stepIdRef.current !== step.id) {
+      stepIdRef.current = step.id
+      setDetected(null)
+      setPreview(null)
+      setFailure(null)
+    }
+  }, [step.id])
+
+  const commit = (next: TableReadPlanV2) => {
+    onChange({ ...step, input: { target: next.target, as: 'table', table: next } } as Step)
+  }
+
+  const refreshPreview = async (nextPlan: TableReadPlanV2) => {
+    setPreviewing(true)
+    try {
+      const result = await observe.previewTable(nextPlan)
+      if (result) setPreview(result.sample)
+    } catch {
+      // 预览失败不挡路：保存与试跑仍可继续
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
+  // 列勾选 / 类型等改动后，防抖刷新预览
+  const planKey = plan ? JSON.stringify([plan.columns, plan.rows, plan.readiness, plan.limits]) : ''
+  const lastPreviewKey = useRef(planKey)
+  useEffect(() => {
+    if (!plan || state !== 'ready' || !observe.livePage) return
+    if (lastPreviewKey.current === planKey) return
+    lastPreviewKey.current = planKey
+    const timer = setTimeout(() => void refreshPreview(plan), 600)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planKey])
+
+  const apply = (observation: TableDetectObservation | undefined) => {
+    if (!observation) return
+    if (observation.outcome === 'FOUND' && observation.detected) {
+      const d = observation.detected
+      setDetected(d)
+      setPreview(d.sample)
+      setFailure(null)
+      lastPreviewKey.current = JSON.stringify([d.plan.columns, d.plan.rows, d.plan.readiness, d.plan.limits])
+      onChange({ ...step, input: tableInputFromDetected(d) } as Step)
+      if (observe.canHighlight) void observe.highlightTarget(d.plan.target, { silent: true })
+      return
+    }
+    setFailure({
+      message: observation.reason?.message ?? '没有认出这个表格，请点表格里的另一处。',
+      feedback: observation.reason?.feedback,
+    })
+  }
+
+  const startPick = () => {
+    setFailure(null)
+    observe.beginTablePick((observation) => apply(observation))
+  }
+
+  const switchScope = async (selector: string) => {
+    if (!plan) return
+    apply(await observe.detectTableRoot(selector, plan.target.framePath))
+  }
+
+  const copyFeedback = async () => {
+    if (!failure?.feedback) return
+    const ok = await copyToClipboard(`页面结构反馈（含页面文本，发送前请自行确认）\n${failure.feedback}`)
+    if (ok) toast.success('已复制页面结构反馈')
+    else toast.error('复制失败，请手动选择文字')
+  }
+
+  const popupNotice = observe.viewingPopup()
+    ? '你现在看的是弹出页。执行时这一步在“当前页”运行：请先把上一步点击的“点击后页面”设为“切换到弹出窗口”，或用“运行到此步前置”。'
+    : null
+
+  const summary = coverageSummary(preview)
+  const alternatives = detected ? scopeAlternatives(detected) : {}
+  const sampleColumns = preview?.columns ?? plan?.columns ?? []
+  // 列清单：识别过就列出全部列（含被自动排除的），否则只列计划里的列
+  const columnRows = detected
+    ? detected.columns.map((c) => ({
+        key: c.key,
+        name: c.name,
+        info: c,
+        checked: Boolean(plan?.columns.some((p) => p.key === c.key)),
+      }))
+    : (plan?.columns ?? []).map((c) => ({ key: c.key, name: c.name, info: null, checked: true }))
+
+  return (
+    <div className='space-y-3'>
+      <div className='space-y-1.5'>
+        <Label>{state === 'ready' ? `要读取的${kindNoun(planKind(plan))}` : '要读取的表格'}</Label>
+        {state === 'unconfigured' ? (
+          <p className='text-xs text-muted-foreground'>
+            请在受管画面上点一下表格、卡片或详情信息里的任意位置，系统会自己找出整块数据。
+          </p>
+        ) : state === 'legacy' ? (
+          <p className='rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-900'>
+            这一步用的是旧版读取计划。重新点选一次表格即可升级，升级后可勾选列、看预览。
+          </p>
+        ) : (
+          <p className='text-xs text-muted-foreground'>
+            {detected?.title ? `已选：「${detected.title}」· ` : `已选${kindNoun(planKind(plan))} · `}
+            {plan?.columns.length ?? 0} {planKind(plan) === 'table' ? '列' : '项'}
+          </p>
+        )}
+        {popupNotice ? <p className='text-xs text-amber-700'>{popupNotice}</p> : null}
+        <div className='flex flex-wrap gap-2'>
+          <Button type='button' size='sm' disabled={disabled} onClick={startPick}>
+            <MousePointerClick className='mr-1 size-4' />
+            {state === 'ready' ? '重新点选' : '在页面上点选'}
+          </Button>
+          {state === 'ready' && alternatives.outer ? (
+            <Button type='button' size='sm' variant='outline' disabled={disabled} onClick={() => void switchScope(alternatives.outer!.selector)}>
+              范围大一点
+            </Button>
+          ) : null}
+          {state === 'ready' && alternatives.inner ? (
+            <Button type='button' size='sm' variant='outline' disabled={disabled} onClick={() => void switchScope(alternatives.inner!.selector)}>
+              范围小一点
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {failure ? (
+        <div className='space-y-2 rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs'>
+          <p className='text-destructive'>{failure.message}</p>
+          <p className='text-muted-foreground'>可以点表格里的另一处再试；也可以展开下面的“一般不用动”手动指定。</p>
+          <div className='flex flex-wrap gap-2'>
+            <Button type='button' size='sm' variant='outline' onClick={() => setAdvancedOpen(true)}>
+              手动指定
+            </Button>
+            {failure.feedback ? (
+              <Button type='button' size='sm' variant='outline' onClick={() => void copyFeedback()}>
+                <Copy className='mr-1 size-3.5' />
+                复制页面结构反馈
+              </Button>
+            ) : null}
+          </div>
+          {failure.feedback ? <p className='text-muted-foreground'>反馈内容包含页面文本，发送前请自行确认。</p> : null}
+        </div>
+      ) : null}
+
+      {state === 'ready' && plan ? (
+        <div className='space-y-2'>
+          <p className='text-sm font-medium'>
+            {detected
+              ? foundSummary(detected)
+              : preview
+                ? `预览（${preview.rowCount} 行）`
+                : '预览'}
+            {previewing ? <span className='ml-2 text-xs font-normal text-muted-foreground'>刷新中…</span> : null}
+          </p>
+          {detected?.notes.length ? (
+            <ul className='space-y-0.5 text-xs text-muted-foreground'>
+              {detected.notes.map((note) => (
+                <li key={note}>· {note}</li>
+              ))}
+            </ul>
+          ) : null}
+          {summary ? (
+            <p
+              className={
+                summary.tone === 'ok'
+                  ? 'text-xs text-emerald-700'
+                  : summary.tone === 'warn'
+                    ? 'text-xs text-amber-700'
+                    : 'text-xs text-destructive'
+              }
+            >
+              {summary.text}
+            </p>
+          ) : (
+            <p className='text-xs text-muted-foreground'>
+              {observe.livePage ? '点“重新点选”可刷新预览。' : '连接受管画面后可看到预览。'}
+            </p>
+          )}
+
+          {totalRowsSummary(preview) ? <p className='text-xs text-muted-foreground'>{totalRowsSummary(preview)}</p> : null}
+          <div className='overflow-x-auto rounded-md border'>
+            <table className='w-full text-xs'>
+              <thead className='bg-muted/50'>
+                <tr>
+                  {columnRows.map((c) => {
+                    const planColumn = plan.columns.find((p) => p.key === c.key)
+                    return (
+                      <th key={c.key} className='min-w-28 border-b px-2 py-1.5 text-left align-top font-medium'>
+                        <div className='flex items-center gap-1'>
+                          <Checkbox
+                            aria-label={`读取「${c.name}」${planKind(plan) === 'table' ? '列' : '项'}`}
+                            checked={c.checked}
+                            disabled={disabled || (c.checked && plan.columns.length <= 1)}
+                            onCheckedChange={(checked) => commit(toggleColumn(plan, detected?.columns ?? [], c.key, checked === true))}
+                          />
+                          {planColumn ? (
+                            <Input
+                              key={`${c.key}:${c.name}:${columnLabel(planColumn)}`}
+                              aria-label={`「${c.name}」${planKind(plan) === 'table' ? '列' : '项'}的显示名`}
+                              className='h-6 px-1 text-xs'
+                              defaultValue={columnLabel(planColumn)}
+                              disabled={disabled}
+                              onBlur={(event) => commit(renameColumn(plan, c.key, event.target.value))}
+                            />
+                          ) : (
+                            <span className='text-muted-foreground'>{c.name}</span>
+                          )}
+                          {planColumn ? (
+                            <button
+                              type='button'
+                              className='text-muted-foreground hover:text-foreground'
+                              title={planColumn.sensitive ? '已标为敏感：输出与报告里会打码' : '标为敏感（打码）'}
+                              aria-label={`${planColumn.sensitive ? '取消' : '标为'}「${c.name}」列敏感`}
+                              disabled={disabled}
+                              onClick={() => commit(setColumnSensitive(plan, c.key, !planColumn.sensitive))}
+                            >
+                              {planColumn.sensitive ? <Lock className='size-3.5 text-amber-600' /> : <LockOpen className='size-3.5' />}
+                            </button>
+                          ) : null}
+                        </div>
+                        {c.info?.excludedReason ? (
+                          <span className='mt-0.5 block font-normal text-muted-foreground'>
+                            已排除：{excludedReasonText(c.info.excludedReason)}
+                          </span>
+                        ) : null}
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: Math.min(PREVIEW_ROWS, preview?.rows.length ?? 0) }).map((_, rowIndex) => (
+                  <tr key={rowIndex} className='border-t'>
+                    {columnRows.map((c) => (
+                      <td key={c.key} className='px-2 py-1 text-muted-foreground'>
+                        {c.checked && sampleColumns.some((s) => s.key === c.key) ? cellText(preview, rowIndex, c.key) : ''}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {preview && preview.rowCount > PREVIEW_ROWS ? (
+            <p className='text-xs text-muted-foreground'>只显示前 {PREVIEW_ROWS} 行，共 {preview.rowCount} 行。</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {plan ? (
+        <div className='space-y-2'>
+          <button
+            type='button'
+            className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground'
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            {advancedOpen ? <ChevronDown className='size-3.5' /> : <ChevronRight className='size-3.5' />}
+            一般不用动
+          </button>
+          {advancedOpen ? <AdvancedSettings plan={plan} disabled={disabled} onChange={commit} /> : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function AdvancedSettings({
+  plan,
+  disabled,
+  onChange,
+}: {
+  plan: TableReadPlanV2
+  disabled?: boolean
+  onChange: (plan: TableReadPlanV2) => void
+}) {
+  return (
+    <div className='space-y-3 rounded-md border bg-muted/20 p-2.5 text-xs'>
+      <div className='space-y-1'>
+        <Label htmlFor='table-root-selector'>表格在页面上的位置（选择器）</Label>
+        <Input
+          id='table-root-selector'
+          defaultValue={rootSelectorOf(plan)}
+          disabled={disabled}
+          onBlur={(event) => onChange(setRootSelector(plan, event.target.value))}
+        />
+      </div>
+      <div className='grid grid-cols-2 gap-2'>
+        <div className='space-y-1'>
+          <Label>表头在哪</Label>
+          <Select value={plan.rows.header} disabled={disabled} onValueChange={(v) => onChange(setHeaderMode(plan, v as 'auto' | 'first_row' | 'none'))}>
+            <SelectTrigger aria-label='表头在哪'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='auto'>自动判断</SelectItem>
+              <SelectItem value='first_row'>第一行是表头</SelectItem>
+              <SelectItem value='none'>没有表头</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className='space-y-1'>
+          <Label htmlFor='table-max-rows'>最多读取行数</Label>
+          <Input
+            id='table-max-rows'
+            type='number'
+            min={1}
+            max={200}
+            defaultValue={plan.limits.maxRows}
+            disabled={disabled}
+            onBlur={(event) => onChange(setMaxRows(plan, Number(event.target.value)))}
+          />
+        </div>
+      </div>
+      <label className='flex items-center gap-2'>
+        <Checkbox
+          checked={Boolean(plan.readiness?.emptyMeansNone)}
+          disabled={disabled}
+          onCheckedChange={(checked) => onChange(setEmptyMeansNone(plan, checked === true))}
+        />
+        <span>这张表空着就代表没有数据（页面没有“暂无数据”提示时勾上）</span>
+      </label>
+      <div className='space-y-1'>
+        <Label>合计行（可选）</Label>
+        <p className='text-muted-foreground'>首列写着“合计 / 总计 / 小计”的行会自动识别。别的写法可以在这里指定：某一列等于某个文字的行就是合计行。</p>
+        <div className='grid grid-cols-2 gap-2'>
+          <Select
+            value={plan.rows.totalRow?.columnKey ?? 'none'}
+            disabled={disabled}
+            onValueChange={(v) => onChange(setTotalRow(plan, v === 'none' ? null : v, plan.rows.totalRow?.equals ?? ''))}
+          >
+            <SelectTrigger aria-label='合计行所在的列'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='none'>不手工指定</SelectItem>
+              {plan.columns.map((c) => (
+                <SelectItem key={c.key} value={c.key}>{columnLabel(c)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            aria-label='合计行的文字'
+            placeholder='例如：本页统计'
+            defaultValue={plan.rows.totalRow?.equals ?? ''}
+            disabled={disabled || !plan.rows.totalRow}
+            onBlur={(event) => onChange(setTotalRow(plan, plan.rows.totalRow?.columnKey ?? null, event.target.value))}
+          />
+        </div>
+      </div>
+      <div className='space-y-1.5'>
+        <Label>每一列怎么读</Label>
+        {plan.columns.map((column) => (
+          <div key={column.key} className='grid grid-cols-[1fr_6rem_8rem] items-center gap-2'>
+            <span className='truncate' title={column.name}>{columnLabel(column)}</span>
+            <Select value={column.valueType} disabled={disabled} onValueChange={(v) => onChange(setColumnType(plan, column.key, v as 'text' | 'number' | 'boolean' | 'date'))}>
+              <SelectTrigger aria-label={`「${column.name}」列的类型`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='text'>文字</SelectItem>
+                <SelectItem value='number'>数字</SelectItem>
+                <SelectItem value='boolean'>是 / 否</SelectItem>
+                <SelectItem value='date'>日期</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={column.source === 'index' ? 'index' : 'header'}
+              disabled={disabled}
+              onValueChange={(v) => onChange(setColumnSource(plan, column.key, v as 'header' | 'index', column.index ?? Number(column.key.replace(/\D/g, '')) - 1))}
+            >
+              <SelectTrigger aria-label={`「${column.name}」列的取列方式`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='header'>按表头列名</SelectItem>
+                <SelectItem value='index'>按第几列</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+

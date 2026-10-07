@@ -18,6 +18,7 @@ import {
   CONTROL_FLOW_PROTOCOL,
   CONTROL_FLOW_PROTOCOL_V2,
   TABLE_ACCEPTANCE_PROTOCOL,
+  TABLE_READ_PROTOCOL_V2,
   SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   registrationRequiresOccupancy,
@@ -825,6 +826,9 @@ function claimEligiblePredicate(
     worker.protocolCapabilities?.includes(TABLE_ACCEPTANCE_PROTOCOL)
       ? undefined
       : not(jsonHasKey(tx, runs.snapshot, 'tableAcceptanceProtocol')),
+    worker.protocolCapabilities?.includes(TABLE_READ_PROTOCOL_V2)
+      ? undefined
+      : not(jsonHasKey(tx, runs.snapshot, 'tableReadProtocol')),
     worker.protocolCapabilities?.includes(CONTROL_FLOW_PROTOCOL_V2)
       ? undefined
       : worker.protocolCapabilities?.includes(CONTROL_FLOW_PROTOCOL)

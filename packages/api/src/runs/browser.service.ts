@@ -36,6 +36,7 @@ import {
   parseWorkerEndpoints,
   structureObservationSchema,
   tableDiscoveryObservationSchema,
+  tableDetectObservationSchema,
   tableObservationSchema,
   targetObservationSchema,
   workerInternalPath,
@@ -194,7 +195,9 @@ export class BrowserService {
         : parsed.op === 'table'
           ? parsed.subOp === 'discover'
             ? tableDiscoveryObservationSchema
-            : tableObservationSchema
+            : parsed.subOp === 'detect'
+              ? tableDetectObservationSchema
+              : tableObservationSchema
           : targetObservationSchema
     return this.mutate(
       runId,

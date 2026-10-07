@@ -45,6 +45,8 @@ import {
   observeOperationSchema,
   parseWorkerEndpoints,
   targetObservationSchema,
+  tableDetectObservationSchema,
+  tableObservationSchema,
   platformConfigDocumentSchema,
   sessionEventListResponseSchema,
   sessionObserveQuerySchema,
@@ -250,12 +252,16 @@ export class BrowserSessionsService {
   }
 
   async observe(sessionId: string, body: unknown, actor: RequestAccount) {
+    const operation = observeOperationSchema.parse(body)
     const raw = await this.forwardJson(
       sessionId,
       actor,
       workerInternalPath('/observe'),
-      JSON.stringify(observeOperationSchema.parse(body)),
+      JSON.stringify(operation),
     )
+    // 会话态（未试跑）开放目标观察、点选识别与读取预览；表格发现仍走运行观察。
+    if (operation.op === 'table' && operation.subOp === 'detect') return tableDetectObservationSchema.parse(raw)
+    if (operation.op === 'table' && operation.subOp === 'sample') return tableObservationSchema.parse(raw)
     return targetObservationSchema.parse(raw)
   }
 

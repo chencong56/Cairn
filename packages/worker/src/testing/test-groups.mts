@@ -62,6 +62,10 @@ export const BROWSER_PARALLEL_SPEC_FILES: readonly string[] = [
   'src/browser/surface.business-flows.lab.spec.ts',
   'src/browser/surface.dynamic-lab.spec.ts',
   'src/browser/surface.lab.spec.ts',
+  'src/browser/table-read-grids.browser.spec.ts',
+  'src/browser/table-read-v2.browser.spec.ts',
+    'src/browser/table-read-structured.browser.spec.ts',
+    'src/browser/table-read-real.browser.spec.ts',
 ]
 
 export const BROWSER_SPEC_FILES: readonly string[] = [
@@ -166,6 +170,7 @@ export const PURE_SPEC_FILES: readonly string[] = [
   'src/engine/resolution-ladder.spec.ts',
   'src/engine/step-executor-registry.spec.ts',
   'src/engine/fixture-executor.checks.spec.ts',
+    'src/engine/outcome-collector.table.spec.ts',
   'src/internal/http-server.spec.ts',
   'src/map/consumption.service.spec.ts',
   'src/map/projection.service.spec.ts',

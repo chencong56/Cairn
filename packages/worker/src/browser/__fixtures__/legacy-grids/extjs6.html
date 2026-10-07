@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>ExtJS 6.x grid（锁定列 + 分组表头 + 汇总行，按官方默认 DOM 约定自建）</title></head>
+<body>
+<div id="gridpanel-1030" class="x-panel x-grid x-panel-default x-grid-locked">
+  <div class="x-panel-header"><div class="x-title-text">设备清单</div></div>
+  <div class="x-grid-header-ct x-grid-header-ct-locked"><div class="x-grid-header-ct-inner">
+    <div id="gridcolumn-1031" class="x-column-header" data-columnid="gridcolumn-1031"><div class="x-column-header-inner"><div class="x-column-header-text-container"><div class="x-column-header-text-wrapper"><div class="x-column-header-text x-column-header-text-inner">名称</div></div></div></div></div>
+  </div></div>
+  <div class="x-grid-header-ct"><div class="x-grid-header-ct-inner">
+    <div id="gridcolumn-1032" class="x-column-header" data-columnid="gridcolumn-1032">
+      <div class="x-column-header-inner"><div class="x-column-header-text x-column-header-text-inner">统计</div></div>
+      <div class="x-group-sub-header">
+        <div id="gridcolumn-1033" class="x-column-header" data-columnid="gridcolumn-1033"><div class="x-column-header-inner"><div class="x-column-header-text x-column-header-text-inner">数量</div></div></div>
+        <div id="gridcolumn-1034" class="x-column-header" data-columnid="gridcolumn-1034"><div class="x-column-header-inner"><div class="x-column-header-text x-column-header-text-inner">金额</div></div></div>
+      </div>
+    </div>
+  </div></div>
+  <div class="x-grid-inner-locked">
+    <div id="gridview-1035" class="x-grid-view">
+      <div class="x-grid-item-container">
+        <table class="x-grid-item"><tbody><tr class="x-grid-row"><td class="x-grid-cell"><div class="x-grid-cell-inner">服务器A</div></td></tr></tbody></table>
+        <table class="x-grid-item"><tbody><tr class="x-grid-row"><td class="x-grid-cell"><div class="x-grid-cell-inner">服务器B</div></td></tr></tbody></table>
+        <table class="x-grid-item"><tbody><tr class="x-grid-row"><td class="x-grid-cell"><div class="x-grid-cell-inner">服务器C</div></td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
+  <div class="x-grid-inner-normal">
+    <div id="gridview-1036" class="x-grid-view">
+      <div class="x-grid-item-container">
+        <table class="x-grid-item"><tbody><tr class="x-grid-row"><td class="x-grid-cell"><div class="x-grid-cell-inner">12</div></td><td class="x-grid-cell"><div class="x-grid-cell-inner">1,234.50</div></td></tr></tbody></table>
+        <table class="x-grid-item"><tbody><tr class="x-grid-row"><td class="x-grid-cell"><div class="x-grid-cell-inner">7</div></td><td class="x-grid-cell"><div class="x-grid-cell-inner">2,000.00</div></td></tr></tbody></table>
+        <table class="x-grid-item"><tbody><tr class="x-grid-row"><td class="x-grid-cell"><div class="x-grid-cell-inner">11</div></td><td class="x-grid-cell"><div class="x-grid-cell-inner">2,000.00</div></td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
+  <div class="x-docked-summary"><table class="x-grid-item"><tbody><tr class="x-grid-row-summary"><td class="x-grid-cell"><div class="x-grid-cell-inner">合计</div></td><td class="x-grid-cell"><div class="x-grid-cell-inner">30</div></td><td class="x-grid-cell"><div class="x-grid-cell-inner">5,234.50</div></td></tr></tbody></table></div>
+</div>
+</body>
+</html>

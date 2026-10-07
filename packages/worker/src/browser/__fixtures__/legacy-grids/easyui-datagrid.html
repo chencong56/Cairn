@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>easyui datagrid（按官方默认 DOM 约定自建）</title></head>
+<body>
+<div class="panel-header"><div class="panel-title">设备清单</div></div>
+<div class="datagrid-wrap panel-body" id="dg-wrap">
+  <div class="datagrid-view">
+    <div class="datagrid-view1">
+      <div class="datagrid-header"><div class="datagrid-header-inner">
+        <table class="datagrid-htable" cellspacing="0"><tbody>
+          <tr class="datagrid-header-row">
+            <td field="ck"><div class="datagrid-header-check"><input type="checkbox"></div></td>
+            <td field="code"><div class="datagrid-cell"><span>编号</span></div></td>
+          </tr>
+        </tbody></table>
+      </div></div>
+      <div class="datagrid-body"><table class="datagrid-btable" cellspacing="0"><tbody>
+        <tr id="datagrid-row-r1-1-0" datagrid-row-index="0" class="datagrid-row"><td field="ck"><div class="datagrid-cell-check"><input type="checkbox"></div></td><td field="code"><div class="datagrid-cell">A001</div></td></tr>
+        <tr id="datagrid-row-r1-1-1" datagrid-row-index="1" class="datagrid-row"><td field="ck"><div class="datagrid-cell-check"><input type="checkbox"></div></td><td field="code"><div class="datagrid-cell">A002</div></td></tr>
+        <tr id="datagrid-row-r1-1-2" datagrid-row-index="2" class="datagrid-row"><td field="ck"><div class="datagrid-cell-check"><input type="checkbox"></div></td><td field="code"><div class="datagrid-cell">A003</div></td></tr>
+      </tbody></table></div>
+    </div>
+    <div class="datagrid-view2">
+      <div class="datagrid-header"><div class="datagrid-header-inner">
+        <table class="datagrid-htable" cellspacing="0"><tbody>
+          <tr class="datagrid-header-row">
+            <td rowspan="2" field="name"><div class="datagrid-cell"><span>名称</span></div></td>
+            <td colspan="2"><div class="datagrid-cell"><span>统计</span></div></td>
+            <td rowspan="2" field="expire"><div class="datagrid-cell"><span>到期日</span></div></td>
+            <td rowspan="2" field="secret" style="display:none"><div class="datagrid-cell"><span>内部码</span></div></td>
+          </tr>
+          <tr class="datagrid-header-row">
+            <td field="qty"><div class="datagrid-cell"><span>数量</span></div></td>
+            <td field="amount"><div class="datagrid-cell"><span>金额</span></div></td>
+          </tr>
+        </tbody></table>
+      </div></div>
+      <div class="datagrid-body"><table class="datagrid-btable" cellspacing="0"><tbody>
+        <tr id="datagrid-row-r1-2-0" datagrid-row-index="0" class="datagrid-row"><td field="name"><div class="datagrid-cell">服务器A</div></td><td field="qty"><div class="datagrid-cell">12</div></td><td field="amount"><div class="datagrid-cell">1,234.50</div></td><td field="expire"><div class="datagrid-cell">2026-12-31</div></td><td field="secret" style="display:none"><div class="datagrid-cell">x1</div></td></tr>
+        <tr id="datagrid-row-r1-2-1" datagrid-row-index="1" class="datagrid-row"><td field="name"><div class="datagrid-cell">服务器B</div></td><td field="qty"><div class="datagrid-cell">7</div></td><td field="amount"><div class="datagrid-cell">2,000.00</div></td><td field="expire"><div class="datagrid-cell">2027/01/15</div></td><td field="secret" style="display:none"><div class="datagrid-cell">x2</div></td></tr>
+        <tr id="datagrid-row-r1-2-2" datagrid-row-index="2" class="datagrid-row"><td field="name"><div class="datagrid-cell">服务器C</div></td><td field="qty"><div class="datagrid-cell">11</div></td><td field="amount"><div class="datagrid-cell">2,000.00</div></td><td field="expire"><div class="datagrid-cell">2026年11月05日</div></td><td field="secret" style="display:none"><div class="datagrid-cell">x3</div></td></tr>
+      </tbody></table></div>
+      <div class="datagrid-footer"><div class="datagrid-footer-inner"><table class="datagrid-ftable" cellspacing="0"><tbody>
+        <tr class="datagrid-row"><td field="name"><div class="datagrid-cell">合计</div></td><td field="qty"><div class="datagrid-cell">30</div></td><td field="amount"><div class="datagrid-cell">5,234.50</div></td><td field="expire"><div class="datagrid-cell"></div></td><td field="secret" style="display:none"><div class="datagrid-cell"></div></td></tr>
+      </tbody></table></div></div>
+    </div>
+  </div>
+  <div class="datagrid-pager pagination"><table><tbody><tr><td><div class="pagination-info">显示 1 到 3，共 3 条</div></td></tr></tbody></table></div>
+</div>
+</body>
+</html>

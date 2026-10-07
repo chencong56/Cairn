@@ -1450,6 +1450,8 @@ function TableAcceptanceEditor({
                         }}
                       />
                     </div>
+                  ) : rule.rule !== 'row_expression' ? (
+                    <span className='flex-1 text-xs text-muted-foreground'>该条件在步骤的“数据检查”里编辑</span>
                   ) : (
                     <div className='flex items-center gap-1.5 flex-1'>
                       <Input

@@ -15,6 +15,8 @@ vi.mock('@/lib/sessions-api', () => ({
     diagnostics: { outcome: 'NOT_FOUND', candidatesTried: [] },
     source: 'managed',
   })),
+  detectTableOnSession: vi.fn(),
+  sampleTableOnSession: vi.fn(),
 }))
 
 vi.mock('@/lib/scenarios-api', () => ({

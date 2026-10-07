@@ -244,6 +244,99 @@ describe('compileScenarioDocument', () => {
     ])
   })
 
+  it('表格 / 列表数据提取：占位计划发布时报错、草稿给提醒；真实计划不触发 CSS 弱定位提示', () => {
+    const table = (plan: unknown) => ({
+      id: ids.b,
+      name: '读表',
+      type: 'extract' as const,
+      effectType: 'READ_ONLY' as const,
+      outputKey: 'tbl',
+      input: { target: (plan as { target: unknown }).target, as: 'table' as const, table: plan },
+    })
+    const rootTarget = { framePath: [], candidates: [{ by: 'css', value: '#report' }] }
+    const placeholder = {
+      protocol: 'table.read@2',
+      target: rootTarget,
+      columns: [{ key: 'col_1', name: '数据列', valueType: 'text' }],
+    }
+    const ready = {
+      protocol: 'table.read@2',
+      target: rootTarget,
+      columns: [{ key: 'col_2', name: '区域', valueType: 'text' }],
+    }
+    const base = [navigate(ids.a)]
+
+    const release = compileScenarioDocument(document([...base, table(placeholder) as never]), {
+      mode: 'release',
+      target: { exists: true, status: 'active' },
+    })
+    expect(release.ok).toBe(false)
+    expect(release.diagnostics.some((item) => item.code === 'SCENARIO_TABLE_UNCONFIGURED' && item.severity === 'error')).toBe(true)
+
+    const draft = compileScenarioDocument(document([...base, table(placeholder) as never]), { mode: 'save' })
+    expect(draft.diagnostics.some((item) => item.code === 'SCENARIO_TABLE_UNCONFIGURED' && item.severity === 'warning')).toBe(true)
+
+    const ok = compileScenarioDocument(document([...base, table(ready) as never]), {
+      mode: 'release',
+      target: { exists: true, status: 'active' },
+    })
+    const codes = ok.diagnostics.map((item) => item.code)
+    expect(codes).not.toContain('SCENARIO_TABLE_UNCONFIGURED')
+    expect(codes).not.toContain('SCENARIO_WEAK_LOCATOR')
+  })
+
+  it('数据检查与读取计划对不上时：发布报错、草稿提醒；对得上不报', () => {
+    const rootTarget = { framePath: [], candidates: [{ by: 'css', value: '#board' }] }
+    const planOf = (kind?: 'cards') => ({
+      protocol: 'table.read@2',
+      target: rootTarget,
+      ...(kind ? { kind } : {}),
+      columns: [
+        { key: 'col_1', name: '标题', valueType: 'text' },
+        { key: 'col_2', name: 'CPU', valueType: 'number', numericKind: 'decimal' },
+      ],
+    })
+    const extract = (plan: unknown) => ({
+      id: ids.b,
+      name: '读看板',
+      type: 'extract' as const,
+      effectType: 'READ_ONLY' as const,
+      outputKey: 'board',
+      input: { target: rootTarget, as: 'table' as const, table: plan },
+    })
+    const check = (rule: unknown) => ({
+      contractId: ids.c,
+      scope: 'step' as const,
+      meaning: '检查',
+      severity: 'MUST' as const,
+      onViolation: 'continue' as const,
+      provenance: 'manual' as const,
+      stepId: ids.b,
+      rule: { kind: 'context' as const, key: 'board', expect: { kind: 'table' as const, rule } },
+    })
+    const compile = (plan: unknown, rule: unknown, mode: 'save' | 'release') =>
+      compileScenarioDocument(document([navigate(ids.a), extract(plan) as never]), {
+        mode,
+        target: { exists: true, status: 'active' },
+        outcomeManifest: { entries: [check(rule) as never] },
+      })
+    const codes = (r: ReturnType<typeof compile>) => r.diagnostics.filter((d) => d.code === 'SCENARIO_TABLE_CHECK_INVALID')
+
+    // 引用了已不存在的列
+    const missing = compile(planOf(), { rule: 'column_unique', column: 'col_9' }, 'release')
+    expect(codes(missing)[0]?.severity).toBe('error')
+    expect(codes(missing)[0]?.stepId).toBe(ids.b)
+    expect(missing.ok).toBe(false)
+    expect(codes(compile(planOf(), { rule: 'column_unique', column: 'col_9' }, 'save'))[0]?.severity).toBe('warning')
+    // 聚合只接受数字列
+    expect(codes(compile(planOf(), { rule: 'column_stat', column: 'col_1', stat: 'sum', op: 'gt', value: 0, ignoreEmpty: false }, 'release'))).toHaveLength(1)
+    // 卡片没有合计行
+    expect(codes(compile(planOf('cards'), { rule: 'total_row_match', column: 'col_2', precision: 'display' }, 'release'))).toHaveLength(1)
+    // 对得上
+    expect(codes(compile(planOf('cards'), { rule: 'column_stat', column: 'col_2', stat: 'sum', op: 'gt', value: 0, ignoreEmpty: false }, 'release'))).toHaveLength(0)
+    expect(codes(compile(planOf(), { rule: 'total_row_match', column: 'col_2', precision: 'display' }, 'release'))).toHaveLength(0)
+  })
+
   it('只有 INFO 条件时给出业务语义提示且不阻断发布', () => {
     const source = document([navigate(ids.a), echo(ids.b, '回显', { value: 'ok' })])
     const result = compileScenarioDocument(source, {

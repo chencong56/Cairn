@@ -13,7 +13,7 @@ import { platformRunAuthRecoverySchema } from './session-auth-recovery.js'
 import { candidateGroupsSchema, moduleManifestSchema, type ModuleManifest } from './authoring-document.js'
 import { IMPORTED_OUTCOME_PROTOCOL, outcomeManifestSchema, type OutcomeManifest } from './outcome.js'
 import { runtimeInvariantManifestSchema, type RuntimeInvariantManifest } from './runtime-invariant.js'
-import { TABLE_ACCEPTANCE_PROTOCOL } from './table-acceptance.js'
+import { TABLE_ACCEPTANCE_PROTOCOL, TABLE_READ_PROTOCOL_V2 } from './table-acceptance.js'
 import { frozenCredentialBindingSchema } from './credentials.js'
 import { secretRefSchema } from './secret-ref.js'
 import { sessionPolicySchema } from './session.js'
@@ -339,6 +339,16 @@ export type ControlFlowManifest = z.infer<typeof controlFlowManifestSchema>
  * 或表达式扩展（mul / numericPolicy）。旧 Worker 不得领取这类 Run。
  * JSON 子串匹配只会命中结构化 AST 字段（字符串字面量中的引号会被转义），不会误报。
  */
+/** 步骤里是否含 table.read@2 读取计划（需声明 table.read@2 执行协议能力）。 */
+export function snapshotUsesTableReadV2(steps: readonly Step[]): boolean {
+  return steps.some(
+    (step) =>
+      step.type === 'extract' &&
+      step.input.as === 'table' &&
+      step.input.table.protocol === TABLE_READ_PROTOCOL_V2,
+  )
+}
+
 export function snapshotUsesTableAcceptance(
   steps: readonly Step[],
   outcomeManifest?: OutcomeManifest | null,
@@ -414,6 +424,8 @@ export const runSnapshotSchema = z
     importedOutcomeProtocol: z.literal(IMPORTED_OUTCOME_PROTOCOL).optional(),
     /** 表格验收执行能力标记：使用 extract as=table / table 条件 / 表达式 mul・numericPolicy 时必须声明。 */
     tableAcceptanceProtocol: z.literal(TABLE_ACCEPTANCE_PROTOCOL).optional(),
+    /** 结构化数据读取 v2 能力标记：含 table.read@2 计划时必须声明。 */
+    tableReadProtocol: z.literal(TABLE_READ_PROTOCOL_V2).optional(),
     /** 创建时读取的平台配置修订。旧快照可缺省。 */
     platformConfigRevision: z.number().int().positive().optional(),
     outboundPolicy: frozenOutboundPolicySchema.optional(),
@@ -520,6 +532,9 @@ export const runSnapshotSchema = z
     }
     if (snapshotUsesTableAcceptance(snapshot.steps, snapshot.outcomeManifest) && !snapshot.tableAcceptanceProtocol) {
       ctx.addIssue({ code: 'custom', path: ['tableAcceptanceProtocol'], message: '使用表格验收特性必须声明 table.acceptance 执行协议能力' })
+    }
+    if (snapshotUsesTableReadV2(snapshot.steps) && !snapshot.tableReadProtocol) {
+      ctx.addIssue({ code: 'custom', path: ['tableReadProtocol'], message: '使用 table.read@2 读取计划必须声明执行协议能力' })
     }
     const hasControlFlowFeatures = snapshot.steps.some(
       (s) => s.type === 'decide' || s.type === 'probe' || s.type === 'compute' || s.type === 'loop' || Boolean(s.optional),

@@ -3,6 +3,7 @@ import {
   crossCheckMatches,
   describeLocatorCandidates,
   isCrossCheckContainerTag,
+  isTableReadPlanV2,
   resolvedSelector,
   syncSha256,
   type BrowserCommand,
@@ -69,6 +70,8 @@ function hungError(message?: string): ExecutionError {
 }
 
 export function commandHasResolvableTarget(command: BrowserCommand): command is BrowserCommand & { target: TargetDescriptor } {
+  // 结构化数据读取（table.read@2）只用规则：表根由读取计划自己解析，不进入定位阶梯的 AI 档位。
+  if (command.type === 'extract' && command.as === 'table' && command.table && isTableReadPlanV2(command.table)) return false
   return 'target' in command && Boolean(command.target)
 }
 

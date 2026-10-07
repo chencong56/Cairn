@@ -54,6 +54,8 @@ vi.mock('@/lib/sessions-api', () => ({
   fetchAccountSessionEvents: (...args: unknown[]) => sessionMocks.fetchAccountSessionEvents(...args),
   cancelSessionOperation: (...args: unknown[]) => sessionMocks.cancelSessionOperation(...args),
   observeSession: vi.fn(),
+  detectTableOnSession: vi.fn(),
+  sampleTableOnSession: vi.fn(),
   sessionBrowserTransport: () => ({}),
   newSessionIdempotencyKey: (kind: string) => `session-${kind}-key`,
 }))

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>layui table（按官方默认 DOM 约定自建）</title></head>
+<body>
+<div class="layui-card"><div class="layui-card-header">设备清单</div>
+<div class="layui-table-view layui-form" lay-id="devices" id="layui-table-view-1">
+  <div class="layui-table-box">
+    <div class="layui-table-header"><table class="layui-table"><thead><tr>
+      <th data-field="0" data-key="1-0-0" class="layui-table-col-special"><div class="layui-table-cell laytable-cell-checkbox"><input type="checkbox" lay-skin="primary"><div class="layui-unselect layui-form-checkbox"></div></div></th>
+      <th data-field="name" data-key="1-0-1"><div class="layui-table-cell"><span>名称</span></div></th>
+      <th data-field="qty" data-key="1-0-2"><div class="layui-table-cell"><span>数量</span></div></th>
+      <th data-field="amount" data-key="1-0-3"><div class="layui-table-cell"><span>金额</span></div></th>
+      <th data-field="secret" data-key="1-0-4" class="layui-hide"><div class="layui-table-cell"><span>内部码</span></div></th>
+    </tr></thead></table></div>
+    <div class="layui-table-body layui-table-main"><table class="layui-table"><tbody>
+      <tr data-index="0"><td data-field="0" class="layui-table-col-special"><div class="layui-table-cell"><input type="checkbox"></div></td><td data-field="name"><div class="layui-table-cell">服务器A</div></td><td data-field="qty"><div class="layui-table-cell">12</div></td><td data-field="amount" class="layui-hide"><div class="layui-table-cell"></div></td><td data-field="secret" class="layui-hide"><div class="layui-table-cell">x1</div></td></tr>
+      <tr data-index="1"><td data-field="0" class="layui-table-col-special"><div class="layui-table-cell"><input type="checkbox"></div></td><td data-field="name"><div class="layui-table-cell">服务器B</div></td><td data-field="qty"><div class="layui-table-cell">7</div></td><td data-field="amount" class="layui-hide"><div class="layui-table-cell"></div></td><td data-field="secret" class="layui-hide"><div class="layui-table-cell">x2</div></td></tr>
+      <tr data-index="2"><td data-field="0" class="layui-table-col-special"><div class="layui-table-cell"><input type="checkbox"></div></td><td data-field="name"><div class="layui-table-cell">服务器C</div></td><td data-field="qty"><div class="layui-table-cell">11</div></td><td data-field="amount" class="layui-hide"><div class="layui-table-cell"></div></td><td data-field="secret" class="layui-hide"><div class="layui-table-cell">x3</div></td></tr>
+    </tbody></table></div>
+    <div class="layui-table-total"><table class="layui-table"><tbody><tr>
+      <td data-field="0" class="layui-table-col-special"><div class="layui-table-cell"></div></td><td data-field="name"><div class="layui-table-cell">合计</div></td><td data-field="qty"><div class="layui-table-cell">30</div></td><td data-field="amount"><div class="layui-table-cell">5,234.50</div></td>
+    </tr></tbody></table></div>
+  </div>
+  <!-- 固定列（右）：金额列在固定区里，主表里对应单元格隐藏 -->
+  <div class="layui-table-fixed layui-table-fixed-r"><div class="layui-table-body"><table class="layui-table"><tbody>
+    <tr data-index="0"><td data-field="amount"><div class="layui-table-cell">1,234.50</div></td></tr>
+    <tr data-index="1"><td data-field="amount"><div class="layui-table-cell">2,000.00</div></td></tr>
+    <tr data-index="2"><td data-field="amount"><div class="layui-table-cell">2,000.00</div></td></tr>
+  </tbody></table></div></div>
+  <div class="layui-table-page"><div id="layui-laypage-1" class="layui-box layui-laypage">共 3 条</div></div>
+</div>
+</div>
+</body>
+</html>

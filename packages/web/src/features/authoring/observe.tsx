@@ -12,14 +12,17 @@ import {
   type AuthoringCapabilities,
   type ObserveOperation,
   type TableDiscoveredItem,
+  type TableDetectObservation,
+  type TableObservation,
+  type TableReadPlan,
   type RunDetailDto,
   type TargetDescriptor,
   type TargetObservation,
 } from '@cairn/shared'
 import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
-import { observeRun } from '@/lib/runs-api'
-import { observeSession } from '@/lib/sessions-api'
+import { detectTableOnRun, observeRun } from '@/lib/runs-api'
+import { detectTableOnSession, observeSession, sampleTableOnSession } from '@/lib/sessions-api'
 import { useRunObservation } from '@/features/runs/use-run-observation'
 import {
   type ApplyPickedExtras,
@@ -133,6 +136,14 @@ type AuthoringObserveValue = {
   /** 受管画面上报正在查看的页：指认、高亮作用于此页；pageId 省略表示跟随当前页。 */
   setViewedPage: (page: ViewedManagedPage | null) => void
   pickEnclosingTable?: () => void
+  /** 点选识别：下一次点画面时识别整张表（不是指认单个元素），识别结果交给 onResult。 */
+  beginTablePick: (onResult: (observation: TableDetectObservation) => void) => void
+  /** 以指定表根重新识别（“范围大一点 / 小一点”“不是这一张”）。 */
+  detectTableRoot: (rootSelector: string, framePath: TargetDescriptor['framePath']) => Promise<TableDetectObservation | undefined>
+  /** 按计划读一遍当前画面，用于预览；没有可读的受管画面时返回 undefined。 */
+  previewTable: (plan: TableReadPlan) => Promise<TableObservation | undefined>
+  /** 画面正在查看的是不是“非执行当前页”的弹出页（执行时这一步在“当前页”运行，需要先切过去）。 */
+  viewingPopup: () => boolean
   applyForTrial: (target?: TargetDescriptor) => void
   clearOverlay: (stepId: string) => void
   writeBack: () => void
@@ -155,6 +166,10 @@ const closedObserve: AuthoringObserveValue = {
   pickAt: () => undefined,
   setViewedPage: () => undefined,
   pickEnclosingTable: () => undefined,
+  beginTablePick: () => undefined,
+  detectTableRoot: async () => undefined,
+  previewTable: async () => undefined,
+  viewingPopup: () => false,
   applyForTrial: () => undefined,
   clearOverlay: () => undefined,
   writeBack: () => undefined,
@@ -222,6 +237,7 @@ export function AuthoringObserveProvider({
   const [enclosingTable, setEnclosingTable] = useState<TargetDescriptor | undefined>()
   const [tableMarkers, setTableMarkersState] = useState<TableMarkers | null>(null)
   const viewedPage = useRef<ViewedManagedPage | null>(null)
+  const tablePickHandler = useRef<((observation: TableDetectObservation) => void) | null>(null)
   const setTableMarkers = (markers: TableMarkers | null) => setTableMarkersState(markers)
   const holding = Boolean(
     run && run.status === 'HOLDING' && run.debugMode !== 'runThrough'
@@ -302,6 +318,17 @@ export function AuthoringObserveProvider({
     return Promise.reject(new Error('没有可观察的受管页面'))
   }
 
+  const withViewedPage = <T extends object>(operation: T): T & { pageId?: string } => {
+    const pageId = viewedPage.current?.pageId
+    return pageId ? { ...operation, pageId } : operation
+  }
+  const detectOnPage = (op: Extract<ObserveOperation, { op: 'table'; subOp: 'detect' }>): Promise<TableDetectObservation> => {
+    const body = withViewedPage(op)
+    if (holding && runId) return detectTableOnRun(runId, body)
+    if (sessionId) return detectTableOnSession(sessionId, body)
+    return Promise.reject(new Error('没有可观察的受管页面'))
+  }
+
   const value = useMemo<AuthoringObserveValue>(
     () => ({
       runId,
@@ -334,6 +361,7 @@ export function AuthoringObserveProvider({
           toast.message('请先选择要设置成功条件的步骤')
           return
         }
+        if (!next) tablePickHandler.current = null
         if (next) setEnclosingTable(undefined)
         setPickOutcome(next && outcome
           ? { ...outcome, ...(outcome.scope === 'step' ? { stepId: selectedStepId! } : {}) }
@@ -382,6 +410,21 @@ export function AuthoringObserveProvider({
       },
       pickAt: (x, y) => {
         if (!canIndicate || !livePage) return
+        const tableHandler = tablePickHandler.current
+        if (tableHandler) {
+          void detectOnPage({ op: 'table', subOp: 'detect', x, y })
+            .then((observation) => {
+              tablePickHandler.current = null
+              setPickModeState(false)
+              tableHandler(observation)
+            })
+            .catch((error) => {
+              tablePickHandler.current = null
+              setPickModeState(false)
+              toast.error(error instanceof ApiRequestError ? error.message : '识别表格失败，请再试一次')
+            })
+          return
+        }
         void observePage({ op: 'pick', x, y })
           .then((observation) => {
             setHighlight(observation)
@@ -463,6 +506,35 @@ export function AuthoringObserveProvider({
             .catch(() => undefined)
         }
       },
+      beginTablePick: (onResult) => {
+        if (!canIndicate || !livePage) {
+          toast.message('没有可点选的受管画面。请先连接目标账号会话，或开试跑并等到步骤挂起。')
+          return
+        }
+        setEnclosingTable(undefined)
+        setPickOutcome(undefined)
+        tablePickHandler.current = onResult
+        setPickModeState(true)
+        void observePage({ op: 'highlight' }).catch(() => undefined)
+      },
+      detectTableRoot: async (rootSelector, framePath) => {
+        if (!livePage) return undefined
+        try {
+          return await detectOnPage({ op: 'table', subOp: 'detect', rootSelector, framePath })
+        } catch (error) {
+          toast.error(error instanceof ApiRequestError ? error.message : '识别表格失败')
+          return undefined
+        }
+      },
+      previewTable: async (plan) => {
+        if (!livePage) return undefined
+        const body = withViewedPage({ op: 'table' as const, subOp: 'sample' as const, plan })
+        if (holding && runId) return observeRun(runId, body)
+        if (sessionId) return sampleTableOnSession(sessionId, body)
+        return undefined
+      },
+      // 只有查看的是“非执行当前页”的弹出页时才提示（跟随当前页时 pageId 为空）
+      viewingPopup: () => viewedPage.current?.kind === 'popup' && viewedPage.current.pageId !== undefined,
       applyForTrial: (target) => {
         const next = target ?? lastPicked ?? highlight?.target
         if (!runId || !holding || !next) {

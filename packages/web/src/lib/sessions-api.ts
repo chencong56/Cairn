@@ -15,8 +15,13 @@ import {
   type SessionEventDto,
   observeOperationSchema,
   targetObservationSchema,
+  tableDetectObservationSchema,
   type ObserveOperation,
   type TargetObservation,
+  type TableDetectObservation,
+  type TableObservation,
+  tableObservationSchema,
+  type ObserveTableDetectOperation,
   accountSessionDetailSchema,
   requestSessionOperationBodySchema,
   sessionEventListResponseSchema,
@@ -61,6 +66,24 @@ export function fetchAccountSession(targetId: string, accountId: string): Promis
 
 export function observeSession(sessionId: string, body: ObserveOperation): Promise<TargetObservation> {
   return apiFetch(`/api/browser-sessions/${sessionId}/observe`, targetObservationSchema, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(observeOperationSchema.parse(body)),
+  })
+}
+
+/** 读取预览（受管会话态，未试跑时）：按当前计划读一遍，不落库。 */
+export function sampleTableOnSession(sessionId: string, body: Extract<ObserveOperation, { op: 'table'; subOp: 'sample' }>): Promise<TableObservation> {
+  return apiFetch(`/api/browser-sessions/${sessionId}/observe`, tableObservationSchema, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(observeOperationSchema.parse(body)),
+  })
+}
+
+/** 点选识别（受管会话态，未试跑时）。 */
+export function detectTableOnSession(sessionId: string, body: ObserveTableDetectOperation): Promise<TableDetectObservation> {
+  return apiFetch(`/api/browser-sessions/${sessionId}/observe`, tableDetectObservationSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(observeOperationSchema.parse(body)),

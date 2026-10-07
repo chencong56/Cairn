@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>虚拟滚动表格（只渲染可视行，占位撑高）</title></head>
+<body>
+<div id="viewport" style="height:200px;overflow:auto;position:relative">
+  <div style="height:6000px;position:relative">
+    <table id="virtual" style="position:absolute;top:0;left:0;width:100%">
+      <thead><tr><th>编号</th><th>名称</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>行一</td></tr><tr><td>2</td><td>行二</td></tr><tr><td>3</td><td>行三</td></tr>
+        <tr><td>4</td><td>行四</td></tr><tr><td>5</td><td>行五</td></tr><tr><td>6</td><td>行六</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<h3>对照：普通滚动区，所有行都已渲染</h3>
+<div id="viewport2" style="height:120px;overflow:auto">
+  <table id="plain">
+    <thead><tr><th>编号</th><th>名称</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>甲</td></tr><tr><td>2</td><td>乙</td></tr><tr><td>3</td><td>丙</td></tr>
+      <tr><td>4</td><td>丁</td></tr><tr><td>5</td><td>戊</td></tr><tr><td>6</td><td>己</td></tr><tr><td>7</td><td>庚</td></tr>
+    </tbody>
+  </table>
+</div>
+</body>
+</html>

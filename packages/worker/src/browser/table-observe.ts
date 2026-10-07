@@ -18,7 +18,14 @@ const DEFAULT_TABLE_SELECTOR = 'table, [role="table"], [role="grid"]'
 
 export class TableObserveError extends Error {
   constructor(
-    readonly code: 'TABLE_NOT_FOUND' | 'TABLE_AMBIGUOUS' | 'TABLE_PLAN_INVALID',
+    readonly code:
+      | 'TABLE_NOT_FOUND'
+      | 'TABLE_AMBIGUOUS'
+      | 'TABLE_PLAN_INVALID'
+      | 'TABLE_COLUMN_NOT_FOUND'
+      | 'TABLE_COLUMN_AMBIGUOUS'
+      | 'TABLE_HEADER_NOT_FOUND'
+      | 'TABLE_SHAPE_UNSUPPORTED',
     message: string,
   ) {
     super(message)
@@ -278,9 +285,9 @@ export async function sampleTableOnPage(
     protocol: 'table.sample@1',
     source: {
       runId: options.meta?.runId ?? randomUUID(),
-      stepRunId: options.meta?.stepRunId,
-      attemptId: options.meta?.attemptId,
-      pageRef: options.meta?.pageRef,
+      ...(options.meta?.stepRunId ? { stepRunId: options.meta.stepRunId } : {}),
+      ...(options.meta?.attemptId ? { attemptId: options.meta.attemptId } : {}),
+      ...(options.meta?.pageRef ? { pageRef: options.meta.pageRef } : {}),
       sampledAt: sampleTime,
       planDigest,
     },
@@ -472,7 +479,7 @@ function areSnapshotsEqual(a: DomSampleSnapshot, b: DomSampleSnapshot): boolean 
   return true
 }
 
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
+export function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('Aborted'))
     const timer = setTimeout(() => {

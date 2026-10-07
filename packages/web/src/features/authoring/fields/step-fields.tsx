@@ -24,6 +24,8 @@ import { AssertFields } from './assert'
 import { BindingFields } from './binding'
 import { CATEGORY_LABELS } from './labels'
 import { TargetFields } from './target'
+import { TableDataFields } from './table-data-fields'
+import { createPlaceholderTablePlan } from './table-plan-edit'
 
 function policyHandlers(step: Step, onChange: (step: Step) => void) {
   return {
@@ -691,14 +693,6 @@ export function StepFields({
       const tableInput = extractStep.input
       return (
         <div className='space-y-3'>
-          <TargetFields
-            {...policyHandlers(extractStep, onChange)}
-            target={tableInput.target}
-            disabled={disabled}
-            onChange={(target) =>
-              onChange({ ...extractStep, input: { ...tableInput, target } })
-            }
-          />
           <div className='space-y-2'>
             <Label>提取类型</Label>
             <Select
@@ -723,10 +717,11 @@ export function StepFields({
                 <SelectItem value='text'>文本</SelectItem>
                 <SelectItem value='value'>输入值</SelectItem>
                 <SelectItem value='attribute'>元素属性</SelectItem>
-                <SelectItem value='table'>表格数据</SelectItem>
+                <SelectItem value='table'>表格 / 列表数据</SelectItem>
               </SelectContent>
             </Select>
           </div>
+          <TableDataFields step={extractStep} disabled={disabled} onChange={onChange} />
         </div>
       )
     }
@@ -750,19 +745,10 @@ export function StepFields({
               disabled={disabled}
               onValueChange={(value) => {
                 if (value === 'table') {
+                  const placeholder = createPlaceholderTablePlan()
                   onChange({
                     ...extractStep,
-                    input: {
-                      target: standardInput.target,
-                      as: 'table',
-                      table: {
-                        protocol: 'table.read@1',
-                        target: standardInput.target,
-                        scope: 'current_page',
-                        columns: [{ key: 'col_1', name: '数据列', valueType: 'text' }],
-                        limits: { maxRows: 200, maxCols: 32 },
-                      },
-                    },
+                    input: { target: placeholder.target, as: 'table', table: placeholder },
                   })
                 } else if (value === 'attribute') {
                   onChange({
@@ -791,7 +777,7 @@ export function StepFields({
                 <SelectItem value='text'>文本</SelectItem>
                 <SelectItem value='value'>输入值</SelectItem>
                 <SelectItem value='attribute'>元素属性</SelectItem>
-                <SelectItem value='table'>表格数据</SelectItem>
+                <SelectItem value='table'>表格 / 列表数据</SelectItem>
               </SelectContent>
             </Select>
           </div>

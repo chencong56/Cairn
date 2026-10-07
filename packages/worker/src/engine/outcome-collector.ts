@@ -48,7 +48,7 @@ export function collectAttemptOutcomeResults(input: {
 
   if (isAssertionFailure) {
     const actual = extractActual(outcome.output)
-    const details = extractDetails(outcome.output)
+    const details = extractDetails(outcome.output, outcome.error.safeMessage)
     const continueMode = entries.every((e) => e.onViolation === 'continue')
 
     const results: OutcomeResultInsertItem[] = entries.map((e) => ({
@@ -76,7 +76,7 @@ export function collectAttemptOutcomeResults(input: {
   if (outcome.error.code === 'DURATION_UNAVAILABLE' || outcome.error.code === 'TABLE_FACTS_UNAVAILABLE') {
     const continueMode = entries.every((e) => e.onViolation === 'continue')
     const actual = extractActual(outcome.output)
-    const details = extractDetails(outcome.output) ?? { code: outcome.error.code, safeMessage: outcome.error.safeMessage }
+    const details = extractDetails(outcome.output, outcome.error.safeMessage) ?? { code: outcome.error.code, safeMessage: outcome.error.safeMessage }
     const results: OutcomeResultInsertItem[] = entries.map((e) => ({
       contractId: e.contractId,
       scope: e.scope,
@@ -142,8 +142,25 @@ function extractExpected(step: Step, entry?: OutcomeManifestEntry): JsonValue | 
   return null
 }
 
+function tableOutcomeDetailsOf(output: unknown): Record<string, JsonValue> | null {
+  if (!output || typeof output !== 'object') return null
+  const details = (output as { details?: unknown }).details
+  if (!details || typeof details !== 'object') return null
+  return (details as { protocol?: unknown }).protocol === 'table.outcome@1'
+    ? (details as Record<string, JsonValue>)
+    : null
+}
+
 function extractActual(output: unknown): JsonValue | null {
   if (!output || typeof output !== 'object') return null
+  // 表格检查：整张表已在步骤输出里，业务结果只留检查规模与范围，不重复存整表
+  const table = tableOutcomeDetailsOf(output)
+  if (table) {
+    return {
+      rowsChecked: (table.totalRowsChecked ?? null) as JsonValue,
+      coverage: ((table.coverage as { status?: JsonValue } | undefined)?.status ?? null) as JsonValue,
+    }
+  }
   if ('actual' in output) {
     return (output as { actual: JsonValue }).actual
   }
@@ -153,9 +170,14 @@ function extractActual(output: unknown): JsonValue | null {
   return output as JsonValue
 }
 
-function extractDetails(output: unknown): Record<string, JsonValue> | null {
+function extractDetails(output: unknown, safeMessage?: string): Record<string, JsonValue> | null {
   if (!output || typeof output !== 'object') return null
   const res: Record<string, JsonValue> = {}
+  const table = tableOutcomeDetailsOf(output)
+  if (table) {
+    res.table = table
+    if (safeMessage) res.safeMessage = safeMessage
+  }
   if ('reason' in output && typeof (output as { reason: unknown }).reason === 'string') {
     res.reason = (output as { reason: string }).reason
   }

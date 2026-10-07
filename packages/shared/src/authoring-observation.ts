@@ -5,7 +5,7 @@ import { isSensitiveLocatorHay } from './sensitive-fill.js'
 import { stepSchema } from './step.js'
 import { targetDescriptorSchema } from './target-descriptor.js'
 import { entityIdSchema } from './wire.js'
-import { tableSampleSchema, tableReadPlanSchema, type TableSample } from './table-acceptance.js'
+import { tableSampleSchema, tableReadPlanSchema, tableReadPlanV2Schema, type TableSample } from './table-acceptance.js'
 
 export const TARGET_OBSERVATION_OUTCOMES = [
   'FOUND',
@@ -102,9 +102,30 @@ export const observeTableSampleOperationSchema = z.strictObject({
 })
 export type ObserveTableSampleOperation = z.infer<typeof observeTableSampleOperationSchema>
 
-export const observeTableOperationSchema = z.discriminatedUnion('subOp', [
+/**
+ * 点选识别：用户在受管画面点一下表格里任意位置，Worker 找出整张表并给出建议的读取计划与预览。
+ * 点选位置（x / y）与指定表根（rootSelector，用于“范围大一点 / 小一点”）二选一。
+ */
+export const observeTableDetectOperationSchema = z
+  .strictObject({
+    op: z.literal('table'),
+    subOp: z.literal('detect'),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    rootSelector: z.string().min(1).max(512).optional(),
+    framePath: targetDescriptorSchema.shape.framePath.optional(),
+    pageId: observePageIdSchema,
+  })
+  .refine(
+    (op) => (op.rootSelector !== undefined) !== (op.x !== undefined && op.y !== undefined),
+    { message: '点选识别必须且只能提供点选位置（x / y）或表根（rootSelector）之一' },
+  )
+export type ObserveTableDetectOperation = z.infer<typeof observeTableDetectOperationSchema>
+
+export const observeTableOperationSchema = z.union([
   observeTableDiscoverOperationSchema,
   observeTableSampleOperationSchema,
+  observeTableDetectOperationSchema,
 ])
 export type ObserveTableOperation = z.infer<typeof observeTableOperationSchema>
 
@@ -169,6 +190,67 @@ export const tableDiscoveryObservationSchema = z.strictObject({
   source: z.enum(['managed', 'extension']).default('managed'),
 })
 export type TableDiscoveryObservation = z.infer<typeof tableDiscoveryObservationSchema>
+
+export const tableDetectedColumnSchema = z.strictObject({
+  key: z.string(),
+  name: z.string(),
+  groupPath: z.string().optional(),
+  /** 被自动排除的原因：复选框 / 序号 / 操作按钮。 */
+  excludedReason: z.enum(['checkbox', 'index', 'action', 'hidden']).optional(),
+  /** 依据样本单元格给出的类型建议，供勾回被排除的列或改类型时使用。 */
+  valueType: z.enum(['text', 'number', 'boolean', 'date']),
+  numericKind: z.enum(['integer', 'decimal']).optional(),
+  /** 控件里的列字段名（easyui / jqGrid / layui）。 */
+  field: z.string().optional(),
+  source: z.enum(['header', 'index']),
+  /** DOM 列序号（从 0 起）。 */
+  index: z.number().int().nonnegative(),
+  /** 表头为空或重名，只能按第几列取。 */
+  indexOnly: z.boolean().optional(),
+})
+export type TableDetectedColumn = z.infer<typeof tableDetectedColumnSchema>
+
+export const tableDetectedSchema = z.strictObject({
+  plan: tableReadPlanV2Schema,
+  sample: tableSampleSchema,
+  title: z.string().optional(),
+  selectorQuality: z.enum(['stable', 'positional']),
+  rowCount: z.number().int().nonnegative(),
+  colCount: z.number().int().nonnegative(),
+  columns: z.array(tableDetectedColumnSchema).max(64),
+  /** 可切换的其它表根（外层 / 内层），供“范围大一点 / 小一点”。 */
+  alternatives: z
+    .array(
+      z.strictObject({
+        selector: z.string(),
+        level: z.enum(['inner', 'outer', 'chosen']),
+        title: z.string().optional(),
+        rowCount: z.number().int().nonnegative(),
+        colCount: z.number().int().nonnegative(),
+        selectorQuality: z.enum(['stable', 'positional']),
+      }),
+    )
+    .max(6),
+  /** 识别出的控件形态：原生表格 / ARIA 网格 / easyui / jqGrid / ExtJS / layui。 */
+  shape: z.enum(['native', 'aria', 'easyui', 'jqgrid', 'extjs', 'layui', 'elementui', 'finereport', 'cards', 'keyvalue']).optional(),
+  /** 给用户看的识别说明（自动排除了哪些列、表没有表头等）。 */
+  notes: z.array(z.string()).max(16),
+})
+export type TableDetected = z.infer<typeof tableDetectedSchema>
+
+export const tableDetectObservationSchema = z.strictObject({
+  outcome: targetObservationOutcomeSchema,
+  page: z.strictObject({
+    pageRef: pageRefSchema.optional(),
+    url: z.string().optional(),
+    title: z.string().optional(),
+  }),
+  detected: tableDetectedSchema.optional(),
+  /** 没认出时的原因（给用户看的话 + 错误码）。 */
+  reason: z.strictObject({ code: z.string(), message: z.string(), feedback: z.string().max(9000).optional() }).optional(),
+  source: z.enum(['managed', 'extension']).default('managed'),
+})
+export type TableDetectObservation = z.infer<typeof tableDetectObservationSchema>
 
 export const tableObservationSchema = z.strictObject({
   outcome: targetObservationOutcomeSchema,

@@ -16,7 +16,7 @@ import { EXPORT_ARTIFACTS_PROTOCOL } from './reports.js'
 import { SERVICE_WEBHOOK_DELIVERY_PROTOCOL } from './service-webhooks.js'
 import { SUITE_ADMISSION_PROTOCOL, SUITE_SCHEDULER_PROTOCOL } from './suites.js'
 import { CONTROL_FLOW_PROTOCOL, CONTROL_FLOW_PROTOCOL_V2 } from './run.js'
-import { TABLE_ACCEPTANCE_PROTOCOL } from './table-acceptance.js'
+import { TABLE_ACCEPTANCE_PROTOCOL, TABLE_READ_PROTOCOL_V2 } from './table-acceptance.js'
 
 export const WORKER_ROLES = ['executor', 'scheduler', 'maintenance', 'analyst', 'all'] as const
 export type WorkerRole = (typeof WORKER_ROLES)[number]
@@ -51,6 +51,7 @@ const PROTOCOL_ORDER = [
   CONTROL_FLOW_PROTOCOL,
   CONTROL_FLOW_PROTOCOL_V2,
   TABLE_ACCEPTANCE_PROTOCOL,
+  TABLE_READ_PROTOCOL_V2,
 ] as const
 
 export type WorkerRoleSet = {

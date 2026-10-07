@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>指标卡片：重复块</title>
+<style>.card{border:1px solid #ccc;margin:8px;padding:8px;width:220px;float:left}.row{display:flex;gap:8px}.label{color:#666}</style></head>
+<body>
+<h2 class="panel-title">机房运行看板</h2>
+<div id="board">
+  <div class="card"><h3 class="card-title">服务器A</h3>
+    <div class="row"><span class="label">CPU：</span><span class="value">35%</span></div>
+    <div class="row"><span class="label">内存：</span><span class="value">62%</span></div>
+    <div class="row"><span class="label">告警数：</span><span class="value">2</span></div></div>
+  <div class="card"><h3 class="card-title">服务器B</h3>
+    <div class="row"><span class="label">CPU：</span><span class="value">81%</span></div>
+    <div class="row"><span class="label">内存：</span><span class="value">70%</span></div>
+    <div class="row"><span class="label">告警数：</span><span class="value">0</span></div></div>
+  <div class="card"><h3 class="card-title">服务器C</h3>
+    <div class="row"><span class="label">CPU：</span><span class="value">12%</span></div>
+    <div class="row"><span class="label">内存：</span><span class="value">40%</span></div>
+    <div class="row"><span class="label">告警数：</span><span class="value">5</span></div></div>
+</div>
+<div style="clear:both"></div>
+<button id="outside">刷新</button>
+</body>
+</html>

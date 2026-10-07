@@ -2,10 +2,10 @@
  * S-LIVE：有 CAIRN_S_LIVE=1 且能启动 Chromium 才测画面 / 输入 / popup。
  * 跳过不等于通过，也不能把默认 capabilities.open 写成 BV08。
  */
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   claimRun,
@@ -33,12 +33,15 @@ import { startScreencast } from './screencast.js'
 const enabled = process.env.CAIRN_S_LIVE === '1' || process.env.CAIRN_S_LIVE === 'true'
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_slive`
 
+/** tests/target-surface-lab 里的“门户 → 报表中心 → 明细”弹出页靶场。 */
+const PORTAL_LAB_DIR = resolve(__dirname, '../../../../tests/target-surface-lab/public')
+
 const PROBE_HTML = `<!doctype html><html lang="zh-CN"><body>
 <input id="name" />
 <button type="button" id="open-child">打开子窗</button>
 <script>
 document.getElementById('open-child').addEventListener('click', () => {
-  window.open('/child.html', 'lab-child', 'width=360,height=240')
+  window.open('/child.html', '_blank', 'width=360,height=240')
 })
 </script>
 </body></html>`
@@ -119,6 +122,14 @@ describe.skipIf(!enabled)('S-LIVE 受管浏览器探针', { timeout: 180_000 }, 
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
         res.end(CHILD_HTML)
         return
+      }
+      if (url.pathname.startsWith('/portal-') && url.pathname.endsWith('.html')) {
+        const name = url.pathname.slice(1)
+        if (/^portal-[a-z]+\.html$/.test(name)) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+          res.end(readFileSync(join(PORTAL_LAB_DIR, name), 'utf8'))
+          return
+        }
       }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(PROBE_HTML)
@@ -319,6 +330,84 @@ describe.skipIf(!enabled)('S-LIVE 受管浏览器探针', { timeout: 180_000 }, 
     expect(process.platform).toBeTruthy()
 
     await manager.release(grant.leaseId, 's-live')
+  })
+
+  it('门户→报表中心→明细：未声明 pageAfter 时留在原页；声明 popup 后逐页用非 AI 规则提取表格与列表', async () => {
+    const { grant } = await acquireProbe()
+    try {
+    const origin = new URL(baseUrl).origin
+    const nav = await manager.execute(grant, { type: 'navigate', url: `${baseUrl}/portal-home.html`, allowedOrigins: [origin] })
+    expect(nav.ok).toBe(true)
+    const regionTable = {
+      type: 'extract' as const,
+      as: 'table' as const,
+      target: cssTarget('#region-table'),
+      table: {
+        protocol: 'table.read@1' as const,
+        target: cssTarget('#region-table'),
+        scope: 'current_page' as const,
+        columns: [
+          { key: 'region', name: '区域', valueType: 'text' as const },
+          { key: 'income', name: '收入(万元)', valueType: 'number' as const, numericKind: 'decimal' as const },
+        ],
+        limits: { maxRows: 200, maxCols: 32 },
+      },
+    }
+
+    // 1) 未声明：新页被标记，但执行页没变，表格找不到（用户遇到的现象）
+    const home = manager.pageForGrant(grant)
+    const undeclared = await manager.execute(grant, { type: 'click', target: cssTarget('#menu-report') })
+    expect(undeclared).toMatchObject({ ok: true, output: { popupOpened: true } })
+    expect(manager.pageForGrant(grant)).toBe(home)
+    expect((await manager.execute(grant, regionTable)).ok).toBe(false)
+
+    // 2) 声明 popup：交接到报表中心，表格 + 列表都能提取
+    const toReport = await manager.execute(grant, { type: 'click', target: cssTarget('#menu-report'), pageAfter: 'popup' })
+    expect(toReport.ok ? null : toReport.error).toBeNull()
+    expect(manager.pageForGrant(grant)?.url()).toContain('/portal-report.html')
+    const region = await manager.execute(grant, regionTable)
+    expect(region.ok ? null : region.error).toBeNull()
+    const regionText = JSON.stringify(region.ok && region.output)
+    for (const expected of ['辽宁', '24145.16', '上海', '23050.99', '贵州', '22820.29']) expect(regionText).toContain(expected)
+
+    const kpis = await manager.execute(grant, {
+      type: 'extract',
+      target: cssTarget('#kpi-list .kpi'),
+      as: 'text',
+      many: { maxItems: 10, minItems: 3 },
+    })
+    expect(kpis.ok ? null : kpis.error).toBeNull()
+    expect(kpis.ok && kpis.output).toMatchObject({
+      count: 3,
+      value: ['拆站率 0.20%', '维护扣罚比例 0.22%', '超期未立项批复项目数 3915个'],
+    })
+
+    // 3) 在报表页再次声明 popup：第三页明细表（含数字、布尔列）
+    const toDetail = await manager.execute(grant, { type: 'click', target: cssTarget('#open-detail'), pageAfter: 'popup' })
+    expect(toDetail.ok ? null : toDetail.error).toBeNull()
+    expect(manager.pageForGrant(grant)?.url()).toContain('/portal-detail.html')
+    const detail = await manager.execute(grant, {
+      type: 'extract',
+      as: 'table',
+      target: cssTarget('#detail-table'),
+      table: {
+        protocol: 'table.read@1',
+        target: cssTarget('#detail-table'),
+        scope: 'current_page',
+        columns: [
+          { key: 'project', name: '项目', valueType: 'text' },
+          { key: 'count', name: '数量', valueType: 'number', numericKind: 'integer' },
+        ],
+        limits: { maxRows: 200, maxCols: 32 },
+      },
+    })
+    expect(detail.ok ? null : detail.error).toBeNull()
+    const detailText = JSON.stringify(detail.ok && detail.output)
+    for (const expected of ['合同续签', '场租支付']) expect(detailText).toContain(expected)
+
+    } finally {
+      await manager.release(grant.leaseId, 's-live')
+    }
   })
 
   it('20 次订阅/关闭不残留采集，首帧回调 p95 ≤ 3s', async () => {

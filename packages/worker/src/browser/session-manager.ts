@@ -37,6 +37,7 @@ import {
   type StructureObservation,
   type TableObservation,
   type TableDiscoveryObservation,
+  type TableDetectObservation,
   type RunSnapshot,
   type SessionErrorCode,
   type SessionEventType,
@@ -910,7 +911,7 @@ export class BrowserSessionManager {
     return describeHoldPage.call(this, runId)
   }
 
-  async observeRun(input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation> {
+  async observeRun(input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation | TableDetectObservation> {
     return observeRun.call(this, input)
   }
 

@@ -34,8 +34,9 @@ import {
   watchActionNavigation,
 } from './runtime'
 import { sampleTableOnPage } from './table-observe.js'
+import { sampleTableV2 } from './table-read-v2.js'
 import { candidateTries, errorForOutcome, pickResolvedCandidate } from './resolver'
-import { isPageLevelAssertExpect, safeDownloadFileName, sanitizeAriaSnapshot } from '@cairn/shared'
+import { isPageLevelAssertExpect, isTableReadPlanV2, redactAuthUrl, safeDownloadFileName, sanitizeAriaSnapshot } from '@cairn/shared'
 import { matchAriaSnapshot } from './aria-match.js'
 
 export type SurfacePage = Page
@@ -323,14 +324,14 @@ export async function executeOnPage(
         }
       }
       try {
-        const sample = await sampleTableOnPage(page, command.table, {
-          signal,
-          meta: {
-            runId: evidence?.runId,
-            stepRunId: evidence?.stepRunId,
-            attemptId: evidence?.attemptId,
-          },
-        })
+        const sampleMeta = {
+          runId: evidence?.runId,
+          stepRunId: evidence?.stepRunId,
+          attemptId: evidence?.attemptId,
+        }
+        const sample = isTableReadPlanV2(command.table)
+          ? await sampleTableV2(page, command.table, { locate, signal, meta: sampleMeta })
+          : await sampleTableOnPage(page, command.table, { signal, meta: sampleMeta })
         return {
           ok: true,
           output: { value: sample },
@@ -341,7 +342,7 @@ export async function executeOnPage(
           ok: false,
           error: {
             code: err?.code ?? 'TABLE_EXTRACT_FAILED',
-            category: err?.code === 'TABLE_NOT_FOUND' || err?.code === 'TABLE_AMBIGUOUS' ? 'VALIDATION' : 'EXECUTOR',
+            category: typeof err?.code === 'string' && err.code.startsWith('TABLE_') ? 'VALIDATION' : 'EXECUTOR',
             retryable: false,
             safeMessage: err?.message ?? '表格提取失败',
           },
@@ -407,7 +408,12 @@ export async function executeOnPage(
       if (lost) return { ...lost, diagnostics }
       if (popup) {
         // P5：点击可以打开 popup，但不把新窗收成后续步骤的当前 Surface。
-        await (popup as import('playwright').Page).waitForLoadState('domcontentloaded').catch(() => undefined)
+        const popupPage = popup as import('playwright').Page
+        await popupPage.waitForLoadState('domcontentloaded').catch(() => undefined)
+        // 作者没声明点击后页面时，只标记“打开了新页”，供编排侧提示并补全 pageAfter；执行行为不变。
+        if (command.pageAfter === undefined) {
+          return { ok: true, output: { popupOpened: true, popupUrl: redactAuthUrl(popupPage.url()) ?? '' }, diagnostics }
+        }
       }
       return { ok: true, output: {}, diagnostics }
     }

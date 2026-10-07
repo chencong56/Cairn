@@ -19,10 +19,13 @@ const onWriteBack = vi.fn(async () => true)
 
 vi.mock('@/lib/runs-api', () => ({
   observeRun: (...args: unknown[]) => observeRun(...args),
+  detectTableOnRun: vi.fn(),
 }))
 
 vi.mock('@/lib/sessions-api', () => ({
   observeSession: (...args: unknown[]) => observeSession(...args),
+  detectTableOnSession: vi.fn(),
+  sampleTableOnSession: vi.fn(),
 }))
 
 vi.mock('@/features/runs/use-run-observation', () => ({

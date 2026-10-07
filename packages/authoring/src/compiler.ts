@@ -24,6 +24,9 @@ import {
   type ScenarioDocument,
   type Step,
   type TargetDescriptor,
+  isTablePlanUnconfigured,
+  isTableReadPlanV2,
+  validateTableExpectRuleAgainstPlan,
 } from '@cairn/shared'
 import { parse as parseYaml } from 'yaml'
 
@@ -515,6 +518,7 @@ export function compileScenarioDocument(document: ScenarioDocument, ctx: Compile
   }
 
   addOutcomeCoverageDiagnostics(diagnostics, document, ctx.outcomeManifest, release)
+  addTableCheckDiagnostics(diagnostics, document, ctx.outcomeManifest, release)
 
   if (ctx.target) {
     if (!ctx.target.exists) {
@@ -529,6 +533,45 @@ export function compileScenarioDocument(document: ScenarioDocument, ctx: Compile
     compilerVersion: COMPILER_VERSION,
     definition: document,
     diagnostics,
+  }
+}
+
+/**
+ * 表格数据检查必须和读取计划对得上：引用的列要存在、聚合只用数字列、卡片 / 键值没有“合计行”。
+ * 否则重新点选换了表之后，旧检查会在运行时悄悄变成“无法确认”。
+ */
+function addTableCheckDiagnostics(
+  diagnostics: CompileDiagnostic[],
+  document: ScenarioDocument,
+  manifest: OutcomeManifest | null | undefined,
+  release: boolean,
+): void {
+  for (const entry of manifest?.entries ?? []) {
+    if (entry.rule.kind !== 'context' || entry.rule.expect.kind !== 'table') continue
+    const key = entry.rule.key
+    const source = document.steps.find(
+      (step) => !step.disabled && step.type === 'extract' && step.input.as === 'table' && step.outputKey === key,
+    )
+    if (!source || source.type !== 'extract' || source.input.as !== 'table') continue
+    const plan = source.input.table
+    const rule = entry.rule.expect.rule
+    const kind = isTableReadPlanV2(plan) ? plan.kind : undefined
+    let message: string | null = null
+    if (rule.rule === 'total_row_match' && (kind === 'cards' || kind === 'keyvalue')) {
+      message = '卡片和详情信息没有合计行，不能做“各行相加等于合计行”'
+    } else {
+      const checked = validateTableExpectRuleAgainstPlan(rule, plan.columns)
+      if (!checked.valid) message = checked.message
+    }
+    if (message) {
+      add(
+        diagnostics,
+        'SCENARIO_TABLE_CHECK_INVALID',
+        release ? 'error' : 'warning',
+        `数据检查「${entry.meaning}」与读取的数据对不上：${message}。请修改或删除这条检查`,
+        { stepId: source.id },
+      )
+    }
   }
 }
 
@@ -636,6 +679,16 @@ function addTargetResolutionDiagnostics(
   release: boolean,
 ): void {
   if (!target) return
+  // 结构化数据读取（表格 / 列表）：表根由读取计划自己解析、只用规则，不走定位阶梯；
+  // 没点选过表格的占位计划在发布时拦截，草稿里给出提醒。
+  if (step.type === 'extract' && step.input.as === 'table') {
+    if (isTablePlanUnconfigured(step.input.table)) {
+      add(diagnostics, 'SCENARIO_TABLE_UNCONFIGURED', release ? 'error' : 'warning',
+        `步骤「${step.name}」还没有选择要读取的表格，请在受管画面上点一下表格`,
+        { stepId: step.id, fieldPath: ['input', 'table'] })
+    }
+    return
+  }
   if (step.type === 'assert') {
     if (target.candidates.length === 0) add(diagnostics, 'SCENARIO_TARGET_EMPTY', release ? 'error' : 'warning',
       `步骤「${step.name}」的成功条件只使用规则判定，请提供规则候选`,

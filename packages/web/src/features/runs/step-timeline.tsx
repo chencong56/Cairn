@@ -1,3 +1,4 @@
+import { TableSampleOutput } from './table-sample-view'
 import { useEffect, useMemo, useState } from 'react'
 import {
   candidateGroupsOf,
@@ -633,6 +634,7 @@ export function StepRunItem({
               </pre>
             </div>
           ) : null}
+          <TableSampleOutput output={attempt.output} />
           {isAiStepType(step.type) ? (
             <AiAttemptSummary
               output={attempt.output}

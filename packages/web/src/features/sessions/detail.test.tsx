@@ -49,6 +49,8 @@ vi.mock('@/lib/sessions-api', () => ({
   setAccountSessionRetention: mocks.setAccountSessionRetention,
   newSessionIdempotencyKey: () => 'session-VERIFY-test-key',
   observeSession: vi.fn(),
+  detectTableOnSession: vi.fn(),
+  sampleTableOnSession: vi.fn(),
 }))
 vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-router')>()

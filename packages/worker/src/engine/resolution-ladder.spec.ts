@@ -134,6 +134,12 @@ describe('解析阶梯', () => {
   it('只对带 target 的命令走阶梯', () => {
     expect(commandHasResolvableTarget({ type: 'navigate', url: 'https://lab.example', allowedOrigins: ['https://lab.example'] })).toBe(false)
     expect(commandHasResolvableTarget(commandFor(clickStep()))).toBe(true)
+    // table.read@2：表根由读取计划自己解析，不进入定位阶梯（不走 AI 档位）；@1 保持原行为
+    const tableTarget = { framePath: [], candidates: [{ by: 'css' as const, value: '#t' }] }
+    const planV2 = { protocol: 'table.read@2' as const, target: tableTarget, scope: 'current_page' as const, rows: { excludeHeader: true, header: 'auto' as const }, columns: [{ key: 'a', name: 'A', valueType: 'text' as const }], limits: { maxRows: 200, maxCols: 32, maxBytes: 196608 } }
+    const planV1 = { protocol: 'table.read@1' as const, target: tableTarget, scope: 'current_page' as const, columns: [{ key: 'a', name: 'A', valueType: 'text' as const }], limits: { maxRows: 200, maxCols: 32 } }
+    expect(commandHasResolvableTarget({ type: 'extract', as: 'table', target: tableTarget, table: planV2 })).toBe(false)
+    expect(commandHasResolvableTarget({ type: 'extract', as: 'table', target: tableTarget, table: planV1 })).toBe(true)
     expect(outcomeFromBrowser(found())).toBe('FOUND')
     expect(resolutionError('CROSS_CHECK_FAILED', '不匹配').retryable).toBe(false)
   })

@@ -71,12 +71,15 @@ import {
   debugPresenceResponseSchema,
   tableObservationSchema,
   tableDiscoveryObservationSchema,
+  tableDetectObservationSchema,
   structureObservationSchema,
   type DebugPresenceBody,
   type DebugPresenceResponse,
   type TableObservation,
   type StructureObservation,
   type TableDiscoveryObservation,
+  type TableDetectObservation,
+  type ObserveTableDetectOperation,
   REQUEST_ID_HEADER,
 } from '@cairn/shared'
 import { z, type ZodType } from 'zod'
@@ -258,6 +261,15 @@ export function observeRun(id: string, body: ObserveOperation): Promise<TargetOb
         ? structureObservationSchema
         : targetObservationSchema
   return apiFetch(`/api/runs/${id}/observe`, schema as ZodType<TargetObservation | TableDiscoveryObservation | TableObservation | StructureObservation>, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(observeOperationSchema.parse(body)),
+  })
+}
+
+/** 点选识别：在受管画面点一下表格，返回建议的读取计划与预览（运行挂起时）。 */
+export function detectTableOnRun(id: string, body: ObserveTableDetectOperation): Promise<TableDetectObservation> {
+  return apiFetch(`/api/runs/${id}/observe`, tableDetectObservationSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(observeOperationSchema.parse(body)),

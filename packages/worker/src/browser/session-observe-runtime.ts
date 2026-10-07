@@ -41,7 +41,9 @@ import {
   type StructureObservation,
   type TableObservation,
   type TableDiscoveryObservation,
+  type TableDetectObservation,
   tableReadPlanSchema,
+  isTableReadPlanV2,
   type JsonValue,
   MAX_STRUCTURE_SNAPSHOT_CHARS,
   stepRunFor,
@@ -49,6 +51,8 @@ import {
 } from '@cairn/shared'
 import { getAriaSnapshot } from './aria-snapshot.js'
 import { discoverTablesOnPage, sampleTableOnPage } from './table-observe.js'
+import { detectTable, sampleTableV2 } from './table-read-v2.js'
+import { locate } from './surface.js'
 import { highlightOnPage, pickOnPage } from './observe'
 import { resolveObserveGrant } from './observe-grant'
 import { refreshScreencastIfStale, startScreencast } from './screencast'
@@ -174,7 +178,7 @@ export async function describeHoldPage(this: SessionManagerContext, runId: strin
     }
   }
 
-export async function observeRun(this: SessionManagerContext, input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation> {
+export async function observeRun(this: SessionManagerContext, input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation | TableDetectObservation> {
     const { session, live, run } = await this.requireLiveAuthSession(input.runId)
     const detail = await loadRunDetail(this.dbHandle, input.runId)
     const sessionAuthoring = !detail && session?.status === 'OPEN'
@@ -205,6 +209,16 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
           source: 'managed' as const,
         }
       }
+      if (input.op.subOp === 'detect') {
+        const detectInput =
+          input.op.rootSelector !== undefined
+            ? { kind: 'root' as const, selector: input.op.rootSelector, framePath: input.op.framePath ?? [] }
+            : { kind: 'point' as const, x: input.op.x ?? 0, y: input.op.y ?? 0 }
+        const detected = await detectTable(entry.page, detectInput, { locate, pick: pickOnPage }, { runId: input.runId, pageRef })
+        return detected.outcome === 'FOUND'
+          ? { outcome: 'FOUND' as const, page: { pageRef, url, title }, detected: detected.detected, source: 'managed' as const }
+          : { outcome: 'NOT_FOUND' as const, page: { pageRef, url, title }, reason: detected.reason, source: 'managed' as const }
+      }
       const planParsed = tableReadPlanSchema.safeParse(input.op.plan)
       if (!planParsed.success) {
         throw conflict('TABLE_PLAN_INVALID', '表格采样请求携带的读取计划未通过契约校验')
@@ -214,16 +228,18 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
         ? stepRunFor(detail.stepRuns, checkpointStepId)
         : undefined
       const lastAttempt = stepRun?.attempts[stepRun.attempts.length - 1]
-      const sample = await sampleTableOnPage(entry.page, planParsed.data, {
-        meta: {
-          runId: input.runId,
-          stepRunId: stepRun?.id,
-          attemptId: lastAttempt?.id,
-          pageRef,
-        },
-      })
+      const sampleMeta = {
+        runId: input.runId,
+        stepRunId: stepRun?.id,
+        attemptId: lastAttempt?.id,
+        pageRef,
+      }
+      const sample = isTableReadPlanV2(planParsed.data)
+        ? await sampleTableV2(entry.page, planParsed.data, { locate, meta: sampleMeta })
+        : await sampleTableOnPage(entry.page, planParsed.data, { meta: sampleMeta })
       const evidenceId = randomUUID()
-      await insertLogEvidence(this.dbHandle, {
+      // 会话态（还没有试跑）没有运行事实可挂证据，预览只回传，不落库。
+      if (detail) await insertLogEvidence(this.dbHandle, {
         evidenceId,
         runId: input.runId,
         stepRunId: stepRun?.id,

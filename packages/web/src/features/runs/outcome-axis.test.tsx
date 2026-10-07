@@ -192,3 +192,62 @@ describe('OutcomeAxisSummary', () => {
     expect(screen.container.textContent).not.toMatch(/还没评完/)
   })
 })
+
+describe('OutcomeConditionList 表格数据检查', () => {
+  const contractId = '00000000-0000-4000-8000-000000000041'
+  const stepId = '00000000-0000-4000-8000-000000000042'
+  const runId = '00000000-0000-4000-8000-000000000043'
+  const tableSnapshot = {
+    outcomeManifest: {
+      entries: [
+        {
+          contractId,
+          scope: 'step',
+          meaning: '「收入」各行相加等于合计行',
+          severity: 'MUST',
+          onViolation: 'continue',
+          provenance: 'manual',
+          stepId,
+          rule: { kind: 'context', key: 'report', expect: { kind: 'table', rule: { rule: 'total_row_match', column: 'amount', precision: 'display' } } },
+        },
+      ],
+    },
+  } as RunSnapshot
+
+  it('只给出检查规模和原因，不倾倒整张表', async () => {
+    const result: OutcomeResultDto = {
+      id: '00000000-0000-4000-8000-000000000044',
+      runId,
+      stepRunId: '00000000-0000-4000-8000-000000000045',
+      attemptId: '00000000-0000-4000-8000-000000000046',
+      contractId,
+      scope: 'step',
+      meaning: '「收入」各行相加等于合计行',
+      severity: 'MUST',
+      onViolation: 'continue',
+      provenance: 'manual',
+      verdict: 'FAIL',
+      expected: null,
+      actual: { rowsChecked: 0, coverage: 'complete' },
+      details: {
+        safeMessage: '「收入」各行相加是 4480.75，合计行显示 4500.00',
+        table: {
+          protocol: 'table.outcome@1',
+          totalRowsChecked: 3,
+          violatingRowsCount: 1,
+          violatingRows: [{ rowIndex: 0, reasonSummary: '各行相加 4480.75，合计行 4500.00' }],
+        },
+      },
+      evaluatedAt: '2026-10-07T00:00:00.000Z',
+    }
+    const screen = await render(
+      <OutcomeConditionList runId={runId} run={{ snapshot: tableSnapshot, outcomeResults: [result] }} />,
+    )
+    const text = screen.container.textContent ?? ''
+    expect(text).toMatch(/检查了 3 行数据/)
+    expect(text).toMatch(/合计行显示 4500\.00/)
+    expect(text).toMatch(/各行相加 4480\.75，合计行 4500\.00/)
+    expect(text).not.toMatch(/按业务指令判断/)
+    expect(text).not.toMatch(/rowsChecked/)
+  })
+})

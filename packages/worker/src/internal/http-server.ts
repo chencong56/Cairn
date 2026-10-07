@@ -17,6 +17,7 @@ import {
   structureObservationSchema,
   tableObservationSchema,
   tableDiscoveryObservationSchema,
+  tableDetectObservationSchema,
   targetObservationSchema,
   verifyInternalHeaders,
   verifyNodeHealthHeaders,
@@ -219,7 +220,9 @@ async function handleRequest(
       : body.op === 'table'
         ? body.subOp === 'discover'
           ? tableDiscoveryObservationSchema.parse(result)
-          : tableObservationSchema.parse(result)
+          : body.subOp === 'detect'
+            ? tableDetectObservationSchema.parse(result)
+            : tableObservationSchema.parse(result)
         : targetObservationSchema.parse(result)
     writeJson(res, 200, parsed)
     return

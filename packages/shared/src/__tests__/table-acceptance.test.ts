@@ -5,6 +5,11 @@ import {
   compareWithNumericPolicy,
   numericComparisonPolicySchema,
   tableReadPlanSchema,
+  isTableReadPlanV2,
+  TABLE_READ_PROTOCOL_V2,
+  TABLE_READ_DEFAULT_MAX_BYTES,
+  snapshotUsesTableReadV2,
+  stepSchema,
   tableSampleSchema,
   tablePredicateSchema,
   tableExpectRuleSchema,
@@ -628,3 +633,177 @@ describe('validateTableExpectRuleAgainstPlan', () => {
   })
 })
 
+describe('table.read@2 读取计划契约', () => {
+  const target = { framePath: [], candidates: [{ by: 'css' as const, value: '#report' }] }
+
+  it('显式带 protocol 的走 v2；缺省 protocol 的旧计划仍按 v1 解析', () => {
+    const v2 = tableReadPlanSchema.parse({
+      protocol: TABLE_READ_PROTOCOL_V2,
+      target,
+      columns: [{ key: 'region', name: '区域', valueType: 'text' }],
+    })
+    expect(v2.protocol).toBe(TABLE_READ_PROTOCOL_V2)
+    if (isTableReadPlanV2(v2)) {
+      expect(v2.rows).toEqual({ excludeHeader: true, header: 'auto' })
+      expect(v2.limits.maxBytes).toBe(TABLE_READ_DEFAULT_MAX_BYTES)
+    }
+    const v1 = tableReadPlanSchema.parse({
+      target,
+      columns: [{ key: 'region', name: '区域', valueType: 'text' }],
+    })
+    expect(v1.protocol).toBe('table.read@1')
+    expect(isTableReadPlanV2(v1)).toBe(false)
+  })
+
+  it('按序号取列必须给出 index；数字列必须声明 numericKind；输出预算有上限', () => {
+    const base = { protocol: TABLE_READ_PROTOCOL_V2, target }
+    expect(tableReadPlanSchema.safeParse({ ...base, columns: [{ key: 'a', name: 'A', valueType: 'text', source: 'index' }] }).success).toBe(false)
+    expect(tableReadPlanSchema.safeParse({ ...base, columns: [{ key: 'a', name: 'A', valueType: 'text', source: 'index', index: 2 }] }).success).toBe(true)
+    expect(tableReadPlanSchema.safeParse({ ...base, columns: [{ key: 'a', name: 'A', valueType: 'number' }] }).success).toBe(false)
+    expect(
+      tableReadPlanSchema.safeParse({
+        ...base,
+        columns: [{ key: 'a', name: 'A', valueType: 'text' }],
+        limits: { maxRows: 10, maxCols: 5, maxBytes: 10 * 1024 * 1024 },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('旧 worker 看不懂 v2：快照里含 v2 计划必须声明 table.read@2 能力', () => {
+    const planV2 = {
+      protocol: TABLE_READ_PROTOCOL_V2,
+      target,
+      columns: [{ key: 'a', name: 'A', valueType: 'text' }],
+    }
+    const step = {
+      id: '00000000-0000-4000-8000-0000000000a1',
+      name: '提取表格',
+      type: 'extract' as const,
+      effectType: 'READ_ONLY' as const,
+      outputKey: 'tbl',
+      input: { target, as: 'table' as const, table: planV2 },
+    }
+    const parsed = stepSchema.parse(step)
+    expect(snapshotUsesTableReadV2([parsed])).toBe(true)
+    expect(snapshotUsesTableReadV2([{ ...parsed, input: { ...parsed.input, table: { ...planV2, protocol: 'table.read@1' } } } as never])).toBe(false)
+  })
+})
+
+
+describe('列聚合 / 合计行核对 / 列唯一', () => {
+  type Cell = { value: string | number | null; rawText?: string; decimalValue?: string; status: 'ok' | 'missing' | 'parse_error' }
+  const num = (text: string): Cell => ({ value: Number(text), rawText: text, decimalValue: text, status: 'ok' })
+  const sampleOf = (amounts: Cell[], summary?: Cell, names?: string[]) => ({
+    protocol: 'table.sample@1' as const,
+    source: { runId: '11111111-1111-4111-8111-111111111111', sampledAt: new Date().toISOString(), planDigest: 'a'.repeat(64) },
+    columns: [
+      { key: 'name', name: '名称', valueType: 'text' as const },
+      { key: 'amount', name: '金额', valueType: 'number' as const, numericKind: 'decimal' as const },
+    ],
+    rows: amounts.map((a, i) => ({
+      name: { value: names?.[i] ?? `N${i}`, rawText: names?.[i] ?? `N${i}`, status: 'ok' as const },
+      amount: a,
+    })),
+    ...(summary ? { summaryRows: [{ name: { value: '合计', rawText: '合计', status: 'ok' as const }, amount: summary }] } : {}),
+    rowCount: amounts.length,
+    coverage: { requestedScope: 'current_page' as const, observedScope: 'current_page' as const, status: 'complete' as const },
+    presentation: { omitted: false, previewCount: 20 },
+  })
+  const parseRule = (r: unknown) => tableExpectRuleSchema.parse(r)
+
+  it('column_stat 用精确十进制：0.1+0.2 等于 0.3', () => {
+    const s = sampleOf([num('0.1'), num('0.2')])
+    const r = evaluateTableExpectation(s as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'sum', op: 'eq', value: 0.3 }))
+    expect(r.passed).toBe(true)
+  })
+
+  it('column_stat 不满足时给出实际值', () => {
+    const s = sampleOf([num('10'), num('20')])
+    const r = evaluateTableExpectation(s as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'max', op: 'lt', value: 15 }))
+    expect(r.passed).toBe(false)
+    expect(r.reasonMessage).toContain('20')
+  })
+
+  it('column_stat avg / min', () => {
+    const s = sampleOf([num('1'), num('2'), num('4')])
+    expect(evaluateTableExpectation(s as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'min', op: 'eq', value: 1 })).passed).toBe(true)
+    expect(evaluateTableExpectation(s as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'avg', op: 'gt', value: 2.3 })).passed).toBe(true)
+  })
+
+  it('column_stat 空值默认无法确认，勾选忽略后可判定', () => {
+    const s = sampleOf([num('10'), { value: null, rawText: '', status: 'ok' }])
+    const strict = evaluateTableExpectation(s as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'sum', op: 'eq', value: 10 }))
+    expect(strict.factsUnavailable).toBe(true)
+    const lax = evaluateTableExpectation(s as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'sum', op: 'eq', value: 10, ignoreEmpty: true }))
+    expect(lax.passed).toBe(true)
+  })
+
+  it('column_stat 有读不出的数字 → 无法确认；空表 sum=0，avg 无法确认', () => {
+    const bad = sampleOf([num('1'), { value: null, rawText: 'abc', status: 'parse_error' }])
+    expect(evaluateTableExpectation(bad as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'sum', op: 'eq', value: 1 })).factsUnavailable).toBe(true)
+    const empty = sampleOf([])
+    expect(evaluateTableExpectation(empty as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'sum', op: 'eq', value: 0 })).passed).toBe(true)
+    expect(evaluateTableExpectation(empty as never, parseRule({ rule: 'column_stat', column: 'amount', stat: 'avg', op: 'eq', value: 0 })).factsUnavailable).toBe(true)
+  })
+
+  it('total_row_match：一致 / 不一致 / 无合计行', () => {
+    const ok = sampleOf([num('10.50'), num('20.25')], num('30.75'))
+    expect(evaluateTableExpectation(ok as never, parseRule({ rule: 'total_row_match', column: 'amount' })).passed).toBe(true)
+    const bad = sampleOf([num('10.50'), num('20.25')], num('31.00'))
+    const r = evaluateTableExpectation(bad as never, parseRule({ rule: 'total_row_match', column: 'amount' }))
+    expect(r.passed).toBe(false)
+    expect(r.reasonCode).toBe('TOTAL_ROW_MISMATCH')
+    const none = sampleOf([num('1')])
+    expect(evaluateTableExpectation(none as never, parseRule({ rule: 'total_row_match', column: 'amount' })).factsUnavailable).toBe(true)
+  })
+
+  it('total_row_match：display 按合计行小数位舍入，exact 不舍入', () => {
+    const s = sampleOf([num('1.004'), num('2.004')], num('3.01'))
+    expect(evaluateTableExpectation(s as never, parseRule({ rule: 'total_row_match', column: 'amount', precision: 'display' })).passed).toBe(true)
+    expect(evaluateTableExpectation(s as never, parseRule({ rule: 'total_row_match', column: 'amount', precision: 'exact' })).passed).toBe(false)
+  })
+
+  it('column_unique：重复 → 不通过；空值不参与', () => {
+    const dup = sampleOf([num('1'), num('2'), num('3')], undefined, ['A', ' A ', 'B'])
+    const r = evaluateTableExpectation(dup as never, parseRule({ rule: 'column_unique', column: 'name' }))
+    expect(r.passed).toBe(false)
+    expect(r.reasonCode).toBe('COLUMN_NOT_UNIQUE')
+    const ok = sampleOf([num('1'), num('2')], undefined, ['A', 'B'])
+    expect(evaluateTableExpectation(ok as never, parseRule({ rule: 'column_unique', column: 'name' })).passed).toBe(true)
+  })
+
+  it('覆盖不完整时一律无法确认', () => {
+    const s = { ...sampleOf([num('1')]), coverage: { requestedScope: 'current_page' as const, observedScope: 'current_page' as const, status: 'partial' as const, reasonCode: 'TABLE_VIRTUAL_SCROLL', reasonMessage: 'x' } }
+    expect(evaluateTableExpectation(s as never, parseRule({ rule: 'column_unique', column: 'name' })).factsUnavailable).toBe(true)
+  })
+
+  it('编译期校验：未声明列 / 非数字列', () => {
+    const cols = [
+      { key: 'name', name: '名称', valueType: 'text' as const },
+      { key: 'amount', name: '金额', valueType: 'number' as const, numericKind: 'decimal' as const },
+    ]
+    const v = (rule: unknown) => validateTableExpectRuleAgainstPlan(parseRule(rule), cols)
+    expect(v({ rule: 'column_unique', column: 'name' }).valid).toBe(true)
+    expect(v({ rule: 'column_unique', column: 'zzz' }).valid).toBe(false)
+    expect(v({ rule: 'column_stat', column: 'name', stat: 'sum', op: 'eq', value: 1 }).valid).toBe(false)
+    expect(v({ rule: 'total_row_match', column: 'amount' }).valid).toBe(true)
+  })
+})
+
+describe('table.read@2 读取形态 kind', () => {
+  const base = {
+    protocol: TABLE_READ_PROTOCOL_V2,
+    target: { framePath: [], candidates: [{ by: 'css', value: '#board' }] },
+    columns: [{ key: 'col_1', name: '标题', valueType: 'text' }],
+  }
+  it('cards / keyvalue 合法；缺省不带 kind（旧计划形状不变）', () => {
+    for (const kind of ['table', 'cards', 'keyvalue'] as const) {
+      expect(tableReadPlanSchema.safeParse({ ...base, kind }).success, kind).toBe(true)
+    }
+    const parsed = tableReadPlanSchema.parse(base)
+    expect('kind' in parsed).toBe(false)
+  })
+  it('未知形态拒绝', () => {
+    expect(tableReadPlanSchema.safeParse({ ...base, kind: 'tree' }).success).toBe(false)
+  })
+})

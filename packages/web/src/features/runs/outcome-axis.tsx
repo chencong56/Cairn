@@ -59,6 +59,45 @@ function formatExpected(value: unknown, kindLabel: string): string {
   return kindLabel
 }
 
+type TableCheckDetails = {
+  totalRowsChecked?: number
+  violatingRowsCount?: number | null
+  violatingRows?: { rowIndex: number; reasonSummary?: string }[]
+}
+
+function tableCheckOf(result: { details?: Record<string, unknown> | null } | undefined): {
+  table: TableCheckDetails | null
+  message: string | null
+} {
+  const details = result?.details
+  const table = details && typeof details.table === 'object' && details.table ? (details.table as TableCheckDetails) : null
+  const message = details && typeof details.safeMessage === 'string' ? details.safeMessage : null
+  return { table, message }
+}
+
+function TableCheckResult({ result }: { result: { details?: Record<string, unknown> | null } | undefined }) {
+  const { table, message } = tableCheckOf(result)
+  if (!table && !message) return null
+  const rows = (table?.violatingRows ?? []).slice(0, 5)
+  const total = table?.violatingRowsCount ?? rows.length
+  return (
+    <div className='space-y-1 text-label text-muted-foreground' data-testid='table-check-result'>
+      {table?.totalRowsChecked !== undefined ? <p>检查了 {table.totalRowsChecked} 行数据</p> : null}
+      {message ? <p>{message}</p> : null}
+      {rows.length > 0 ? (
+        <ul className='list-disc pl-4'>
+          {rows.map((row, i) => (
+            <li key={`${row.rowIndex}-${i}`}>
+              {row.reasonSummary ?? `第 ${row.rowIndex + 1} 行不满足`}
+            </li>
+          ))}
+          {total > rows.length ? <li>另有 {total - rows.length} 处未列出</li> : null}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
 function outcomeStatusHint(status: OutcomeStatus, hasContracts?: boolean): string {
   if (status !== 'NOT_EVALUATED') return RUN_OUTCOME_STATUS_HINTS[status]
   return hasContracts
@@ -187,13 +226,17 @@ export function OutcomeConditionList({
                       : RUN_OUTCOME_STATUS_LABELS[row.displayVerdict]}
               </StatusBadge>
             </div>
-            <p className='text-label text-muted-foreground'>
-              {expectLabel}
-              {' · '}
-              期望 {formatExpected(row.result?.expected ?? (row.entry.rule.kind === 'deterministic' ? row.entry.rule.expect : undefined), expectLabel)}
-              {' · '}
-              实际 {formatValue(row.result?.actual)}
-            </p>
+            {row.entry.rule.kind === 'context' && row.entry.rule.expect.kind === 'table' ? (
+              <TableCheckResult result={row.result ?? undefined} />
+            ) : (
+              <p className='text-label text-muted-foreground'>
+                {expectLabel}
+                {' · '}
+                期望 {formatExpected(row.result?.expected ?? (row.entry.rule.kind === 'deterministic' ? row.entry.rule.expect : undefined), expectLabel)}
+                {' · '}
+                实际 {formatValue(row.result?.actual)}
+              </p>
+            )}
             {row.displayVerdict === 'NOT_EVALUATED' ? (
               <p className='text-label text-muted-foreground'>运行尚未执行到这条条件。</p>
             ) : null}

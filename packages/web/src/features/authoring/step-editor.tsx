@@ -10,6 +10,8 @@ import {
   type Step,
 } from '@cairn/shared'
 import { OutcomeListEditor } from './outcome-editor'
+import { TableChecksEditor } from './fields/table-checks'
+import { splitTableChecks } from './fields/table-checks-model'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ChevronDown, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -57,6 +59,8 @@ export function StepEditor({
 }: StepEditorProps) {
   const own = diagnostics.filter((item) => item.stepId === step.id)
   const aiLocked = isAiStepType(step.type)
+  const tableStep = step.type === 'extract' && step.input.as === 'table' ? step : null
+  const tableSplit = splitTableChecks(outcomes ?? [])
   const typeOptions = (
     editableTypes.includes(step.type) ? editableTypes : [step.type, ...editableTypes]
   ).filter((type) => type !== 'ai_action')
@@ -143,14 +147,35 @@ export function StepEditor({
         ) : null}
       </section>
       {onOutcomesChange ? (
-        <div className='border-t border-border-divider pt-4'>
-          <OutcomeListEditor
-            outcomes={outcomes ?? []}
-            scope='step'
-            disabled={disabled}
-            onChange={onOutcomesChange}
-          />
-        </div>
+        tableStep ? (
+          <>
+            <div className='border-t border-border-divider pt-4'>
+              <TableChecksEditor
+                step={tableStep}
+                checks={tableSplit.checks}
+                disabled={disabled}
+                onChange={(next) => onOutcomesChange([...next, ...tableSplit.others])}
+              />
+            </div>
+            <div className='border-t border-border-divider pt-4'>
+              <OutcomeListEditor
+                outcomes={tableSplit.others}
+                scope='step'
+                disabled={disabled}
+                onChange={(next) => onOutcomesChange([...tableSplit.checks, ...next])}
+              />
+            </div>
+          </>
+        ) : (
+          <div className='border-t border-border-divider pt-4'>
+            <OutcomeListEditor
+              outcomes={outcomes ?? []}
+              scope='step'
+              disabled={disabled}
+              onChange={onOutcomesChange}
+            />
+          </div>
+        )
       ) : null}
       <div className='border-t border-border-divider pt-2'>
         <Collapsible>

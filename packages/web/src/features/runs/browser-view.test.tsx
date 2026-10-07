@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   fetchRunObservation: vi.fn(),
   subscribeRunEvents: vi.fn(),
   observeRun: vi.fn(),
+  detectTableOnRun: vi.fn(),
   fetchManagedBrowser: vi.fn(),
   subscribeBrowserFrames: vi.fn(),
   acquireAuthControl: vi.fn(),

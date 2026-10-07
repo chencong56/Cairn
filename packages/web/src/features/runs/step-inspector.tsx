@@ -1,3 +1,4 @@
+import { TableSampleOutput } from './table-sample-view'
 import { useState } from 'react'
 import {
   isAiStepType,
@@ -338,6 +339,9 @@ export function StepInspector({
               </div>
             )}
           </div>
+
+          {/* B2. 表格读取结果（表格 / 列表数据提取步骤） */}
+          {activeAttempt ? <TableSampleOutput output={activeAttempt.output} /> : null}
 
           {/* C. AI 执行摘要（若为 AI 步骤） */}
           {isAi && activeAttempt ? (

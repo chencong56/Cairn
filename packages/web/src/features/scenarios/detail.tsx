@@ -525,6 +525,7 @@ export function ScenarioDetailPage() {
 
   const openedPageForRun = useRef<string | null>(null)
   const holdingSelectKey = useRef<string | null>(null)
+  const popupAutoHandoffKeys = useRef(new Set<string>())
   useEffect(() => {
     if (!runId || !trialRun) return
     if (!['QUEUED', 'RUNNING', 'RECOVERING', 'WAITING_FOR_AUTH', 'HOLDING'].includes(trialRun.status)) {
@@ -579,6 +580,26 @@ export function ScenarioDetailPage() {
     }
     toast.message('挂起的步骤无法对应到当前草稿，未改选中步')
   }, [holdingDraftStepId, holdingStepId, trialRun])
+  // 试跑中点击打开了新页但步骤没声明「点击后页面」：后续步骤仍在原页，会找不到新页元素。
+  // 自动补成「切换到弹出窗口」并提示重新试跑，让正式运行与编排所见一致。
+  useEffect(() => {
+    if (!trialRun || !canWrite || trialRun.scenarioId !== scenarioId) return
+    for (const stepRun of trialRun.stepRuns) {
+      if (stepRun.type !== 'click' || stepRun.status !== 'SUCCEEDED') continue
+      const popupOpened = stepRun.attempts.some((attempt) => {
+        const output = attempt.output
+        return Boolean(output && typeof output === 'object' && !Array.isArray(output) && output.popupOpened === true)
+      })
+      if (!popupOpened) continue
+      const key = `${trialRun.id}:${stepRun.stepId}`
+      if (popupAutoHandoffKeys.current.has(key)) continue
+      popupAutoHandoffKeys.current.add(key)
+      const step = authoringSteps(draft.v2Document).find((item) => item.id === stepRun.stepId)
+      if (!step || step.type !== 'click' || step.input.pageAfter) continue
+      draft.updateStep({ ...step, input: { ...step.input, pageAfter: 'popup' } })
+      toast.message(`「${step.name}」打开了新页面，已设为「切换到弹出窗口」，请重新试跑让后续步骤在新页执行`)
+    }
+  }, [trialRun, canWrite, scenarioId, draft])
   const canRecord = canWrite && canReadTarget
   const recordingQuery = useQuery({
     queryKey: ['scenarios', scenarioId, 'recording-imports'],
