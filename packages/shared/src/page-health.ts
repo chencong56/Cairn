@@ -455,3 +455,104 @@ export function isSystemAddress(
   }
   return false
 }
+
+// ---------------------------------------------------------------------------
+// 页面请求条件（成功条件 page_request）：命中的请求与求值（纯函数，Worker 与测试共用）
+// ---------------------------------------------------------------------------
+
+/** 采集器按「关注清单」记录的命中请求。完成的请求 status 为响应状态码，失败的请求为 0。 */
+export type WatchedRequest = {
+  method: string
+  /** 归一化地址（源 + 路径）。 */
+  url: string
+  status: number
+  /** 浏览器视角耗时（毫秒），未知为 undefined。 */
+  durationMs?: number
+  stepId?: string
+  stepRunId?: string
+  attemptId?: string
+  /** 请求失败（连接被拒绝等）。 */
+  failed?: boolean
+  /** 命中的关注清单下标（按快照里 page_request 条件的顺序）；规则按原始路径匹配，展示用的 url 已把编号段归一。 */
+  rules?: number[]
+}
+
+export type PageRequestRuleLike = {
+  match: string
+  method?: string
+  status: '2xx' | '2xx_3xx'
+  maxMs?: number
+  minCount?: number
+  graceMs?: number
+}
+
+export const MAX_WATCHED_REQUESTS = 200
+
+export function pageRequestStatusOk(rule: Pick<PageRequestRuleLike, 'status'>, status: number): boolean {
+  if (status >= 200 && status < 300) return true
+  return rule.status === '2xx_3xx' && status >= 300 && status < 400
+}
+
+export function pageRequestRuleMatches(rule: Pick<PageRequestRuleLike, 'match' | 'method'>, request: Pick<WatchedRequest, 'method' | 'url'>): boolean {
+  if (rule.method && rule.method !== request.method.toUpperCase()) return false
+  const parsed = normalizePageUrl(request.url)
+  if (!parsed) return false
+  return matchesPageHealthIgnore(parsed, [rule.match])
+}
+
+export type PageRequestEvaluation = {
+  verdict: 'PASS' | 'FAIL'
+  /** 命中规则的请求（含不满足状态 / 耗时的）。 */
+  matched: WatchedRequest[]
+  /** 命中且满足状态与耗时的请求数。 */
+  satisfied: number
+  /** 不满足时的人话原因。 */
+  reason?: string
+}
+
+/**
+ * 判定一条规则：命中请求里满足状态（与耗时上限）的数量 ≥ minCount 即通过。
+ * 多次命中时，状态与耗时以**最后一次**命中为准（重试 / 轮询类接口后一次更可信）：
+ * 只要最后一次命中满足就算满足，前面失败的不拖累。
+ */
+export function evaluatePageRequestRule(
+  rule: PageRequestRuleLike,
+  requests: readonly WatchedRequest[],
+  /** 已由采集器按原始路径预匹配（requests 只含命中该规则的请求）。 */
+  options: { prematched?: boolean } = {},
+): PageRequestEvaluation {
+  const matched = options.prematched ? [...requests] : requests.filter((request) => pageRequestRuleMatches(rule, request))
+  const minCount = rule.minCount ?? 1
+  const okOf = (request: WatchedRequest) =>
+    !request.failed && pageRequestStatusOk(rule, request.status) && (rule.maxMs === undefined || (request.durationMs ?? 0) <= rule.maxMs)
+  const last = matched[matched.length - 1]
+  const satisfied = matched.filter(okOf).length
+  if (matched.length === 0) {
+    return { verdict: 'FAIL', matched, satisfied: 0, reason: '步骤期间没有出现该请求' }
+  }
+  if (matched.length >= minCount && satisfied >= minCount && last && okOf(last)) {
+    return { verdict: 'PASS', matched, satisfied }
+  }
+  if (matched.length < minCount) {
+    return { verdict: 'FAIL', matched, satisfied, reason: `只出现 ${matched.length} 次，至少需要 ${minCount} 次` }
+  }
+  if (last?.failed) return { verdict: 'FAIL', matched, satisfied, reason: '请求失败（没有拿到响应）' }
+  if (last && !pageRequestStatusOk(rule, last.status)) {
+    return { verdict: 'FAIL', matched, satisfied, reason: `返回 ${last.status}，期望 ${rule.status === '2xx' ? '2xx' : '2xx 或 3xx'}` }
+  }
+  if (last && rule.maxMs !== undefined && (last.durationMs ?? 0) > rule.maxMs) {
+    return { verdict: 'FAIL', matched, satisfied, reason: `耗时 ${last.durationMs}ms，超过上限 ${rule.maxMs}ms` }
+  }
+  return { verdict: 'FAIL', matched, satisfied, reason: `满足条件的请求只有 ${satisfied} 次，至少需要 ${minCount} 次` }
+}
+
+export function describePageRequestRule(rule: PageRequestRuleLike): string {
+  return `${rule.method ? `${rule.method} ` : ''}${rule.match} 返回 ${rule.status === '2xx' ? '2xx' : '2xx / 3xx'}${rule.maxMs ? `，耗时 ≤ ${rule.maxMs}ms` : ''}${rule.minCount && rule.minCount > 1 ? `，至少 ${rule.minCount} 次` : ''}`
+}
+
+/** 从快照的成功条件清单里取出 page_request 条件（保持清单顺序，下标即采集器关注清单的下标）。 */
+export function pageRequestEntriesOf<T extends { rule: { kind: string } }>(
+  manifest: { entries: readonly T[] } | null | undefined,
+): Array<T & { rule: PageRequestRuleLike & { kind: 'page_request' } }> {
+  return (manifest?.entries ?? []).filter((entry) => entry.rule.kind === 'page_request') as never
+}

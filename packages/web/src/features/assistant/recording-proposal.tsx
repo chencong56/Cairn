@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { newUuid } from '@/lib/uuid'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { assistantRecordingSelectionError, authoringNodeId, expectKindLabel, normalizeAuthoringDocument, type AssistantRecordingProposalResult, type ConfirmRecordingOutcomeResult, type OutcomeRule, type RecordingInsertAnchor, type RecordingPreviewResult, type TargetDescriptor } from '@cairn/shared'
+import { assistantRecordingSelectionError, authoringNodeId, describePageRequestRule, expectKindLabel, normalizeAuthoringDocument, type AssistantRecordingProposalResult, type ConfirmRecordingOutcomeResult, type OutcomeRule, type RecordingInsertAnchor, type RecordingPreviewResult, type TargetDescriptor } from '@cairn/shared'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -41,6 +41,7 @@ function locatorText(target: TargetDescriptor) {
 function outcomeRuleText(rule: OutcomeRule): string {
   const operators = { eq: '等于', neq: '不等于', gt: '大于', gte: '大于等于', lt: '小于', lte: '小于等于' }
   if (rule.kind === 'ai') return `AI 核对：${rule.instruction}`
+  if (rule.kind === 'page_request') return `页面请求：${describePageRequestRule(rule)}`
   if (rule.kind === 'step_duration' || rule.kind === 'run_duration') return `${rule.kind === 'step_duration' ? '步骤' : '场景'}耗时${operators[rule.op]} ${rule.valueMs} 毫秒`
   if (rule.kind === 'context') return `运行数据 ${rule.key}${rule.field ? `.${rule.field}` : ''}：${rule.expect.kind === 'non_empty' ? '非空' : rule.expect.kind === 'number_compare' ? `${operators[rule.expect.op]} ${rule.expect.value}` : rule.expect.kind === 'text_contains' ? `包含「${rule.expect.value}」` : `已记录的检查：${JSON.stringify(rule.expect)}`}`
   const expect = rule.expect

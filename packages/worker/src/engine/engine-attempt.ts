@@ -36,7 +36,7 @@ import { planBranchSuccess } from './engine-branch-plan.js'
 import { chargedAttemptCount, contextValue, evidencePayloadForStep, sessionLeaseFor } from './engine-step-plan.js'
 import { shouldNeedsReview, shouldRetry } from './engine-decisions.js'
 import { collectAttemptOutcomeResults } from './outcome-collector.js'
-import { collectPageHealthResults, type PageHealthCollected } from './page-health.js'
+import { collectPageHealthResults, evaluatePageRequests, type PageHealthCollected, type PageRequestCollected } from './page-health.js'
 import {
   collectErrorSurfaceResults,
   ERROR_SURFACE_VIOLATED,
@@ -146,6 +146,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
     let outcome: ExecutorOutcome | undefined
     let mapFacts: MapFactBatchItem[] | undefined
     let beforeMatches: import('@cairn/shared').ErrorSurfaceNode[] | undefined
+    let pageRequestCollected: PageRequestCollected = { results: [], halt: false }
     if (skipDispatch) {
       outcome = {
         kind: 'failed',
@@ -239,6 +240,18 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
           snapshot: input.snapshot,
           scopePath: input.scopePath,
         })
+        // 页面请求条件：步骤仍「进行中」时求值（含宽限期），宽限期内发起的请求仍归到本步骤。
+        if (outcome.kind === 'success' && input.sessionGrant && this.browser?.peekPageRequests) {
+          const grant = input.sessionGrant
+          const peek = this.browser.peekPageRequests.bind(this.browser)
+          pageRequestCollected = await evaluatePageRequests({
+            snapshot: input.snapshot,
+            stepId: input.step.id,
+            now: () => new Date(input.clock.now()),
+            peek: () => peek(grant, input.step.id),
+            signal: input.stop,
+          })
+        }
         } finally {
           if (trackPageHealth) this.browser!.markPageHealthStep!(input.sessionGrant!, null)
         }
@@ -333,10 +346,16 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
       attemptId,
       now: new Date(input.clock.now()),
     })
-    const outcomeResults = [...stepOutcomeResults, ...(surfaceCollected?.results ?? []), ...pageHealthCollected.results]
+    const outcomeResults = [
+      ...stepOutcomeResults,
+      ...(surfaceCollected?.results ?? []),
+      ...pageHealthCollected.results,
+      ...pageRequestCollected.results,
+    ]
     const haltAfterSurface =
       Boolean(surfaceCollected?.halt && surfaceCollected.violated && outcome.kind === 'success') ||
-      Boolean(pageHealthCollected.halt && outcome.kind === 'success')
+      Boolean(pageHealthCollected.halt && outcome.kind === 'success') ||
+      Boolean(pageRequestCollected.halt && outcome.kind === 'success')
 
     // 成功也要看写入结果：取消请求抢先到达时 finishAttempt 会把它改写成取消，此时必须停手。
     // 在 continue 模式下，即便断言失败也视为业务巡检步骤完成，按成功继续下一逻辑步，OutcomeResult 记 FAIL。
@@ -453,6 +472,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         mapFacts,
         outcomeResults,
         pageHealth: pageHealthCollected.evidence,
+        pageRequests: pageRequestCollected.evidence,
       })
       if (!closed) return input.stop.aborted && !input.yielding() ? 'cancelled' : input.yielding() ? 'yielded' : 'stopped'
       if (hold) return 'await_hold'
@@ -512,6 +532,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         mapFacts,
         outcomeResults,
         pageHealth: pageHealthCollected.evidence,
+        pageRequests: pageRequestCollected.evidence,
       })
       return 'stopped'
     }
@@ -540,6 +561,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         mapFacts,
         outcomeResults,
         pageHealth: pageHealthCollected.evidence,
+        pageRequests: pageRequestCollected.evidence,
       })
       return 'cancelled'
     }
@@ -613,6 +635,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
         mapFacts,
         outcomeResults,
         pageHealth: pageHealthCollected.evidence,
+        pageRequests: pageRequestCollected.evidence,
       })
       if (!closed) return input.stop.aborted && !input.yielding() ? 'cancelled' : input.yielding() ? 'yielded' : 'stopped'
       if (hold) return 'await_hold'
@@ -670,6 +693,7 @@ export async function completeAttempt(this: ExecutionEngine, input: CompleteAtte
       mapFacts,
       outcomeResults,
       pageHealth: pageHealthCollected.evidence,
+      pageRequests: pageRequestCollected.evidence,
     })
     if (!closed) return input.stop.aborted && !input.yielding() ? 'cancelled' : input.yielding() ? 'yielded' : 'stopped'
     if (hold) return 'await_hold'

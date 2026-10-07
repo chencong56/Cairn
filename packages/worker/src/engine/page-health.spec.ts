@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRuntimeInvariant, defaultPageHealthInvariants, type RunSnapshot } from '@cairn/shared'
-import { clearPageHealthRun, collectPageHealthResults, pageHealthOverflowOf } from './page-health.js'
+import { clearPageHealthRun, collectPageHealthResults, evaluatePageRequests, pageHealthOverflowOf } from './page-health.js'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const snapshotOf = (entries = defaultPageHealthInvariants(() => id(1))) =>
@@ -45,5 +45,59 @@ describe('collectPageHealthResults', () => {
     expect(over.evidence).toBeUndefined()
     expect(pageHealthOverflowOf('r3')).toBe(3)
     clearPageHealthRun('r3')
+  })
+})
+
+describe('evaluatePageRequests', () => {
+  const entry = (rule: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    contractId: id(50), scope: 'step', meaning: '提交后必须调用下单接口', severity: 'MUST', onViolation: 'halt', provenance: 'manual',
+    stepId: id(60), rule: { kind: 'page_request', status: '2xx', ...rule }, ...extra,
+  })
+  const snapshot = (entries: unknown[]) => ({ outcomeManifest: { entries } }) as unknown as RunSnapshot
+  const hit = (over: Record<string, unknown> = {}) => ({ method: 'POST', url: 'https://a/api/order/*', status: 200, durationMs: 80, rules: [0], stepId: id(60), ...over })
+  const instant = async () => undefined
+
+  it('已满足：立即通过，不等宽限期', async () => {
+    let sleeps = 0
+    const out = await evaluatePageRequests({
+      snapshot: snapshot([entry({ match: '/api/order/*', method: 'POST' })]), stepId: id(60), now: () => new Date(),
+      peek: () => [hit()] as never, sleep: async () => { sleeps += 1 },
+    })
+    expect(out.results[0]).toMatchObject({ verdict: 'PASS', provenance: 'manual', scope: 'step' })
+    expect(out.results[0]!.evidenceId).toBe(out.evidence!.evidenceId)
+    expect(out.halt).toBe(false)
+    expect(sleeps).toBe(0)
+  })
+
+  it('宽限期内请求才出现：等到了就通过；一直没有则到期判失败并按配置停止', async () => {
+    let calls = 0
+    const late = await evaluatePageRequests({
+      snapshot: snapshot([entry({ match: '/api/order/*', graceMs: 1000 })]), stepId: id(60), now: () => new Date(),
+      peek: () => (++calls < 4 ? [] : [hit()]) as never, sleep: instant,
+    })
+    expect(late.results[0]!.verdict).toBe('PASS')
+    const never = await evaluatePageRequests({
+      snapshot: snapshot([entry({ match: '/api/order/*', graceMs: 300 })]), stepId: id(60), now: () => new Date(),
+      peek: () => [] as never, sleep: instant,
+    })
+    expect(never.results[0]).toMatchObject({ verdict: 'FAIL' })
+    expect((never.results[0]!.actual as { reason: string }).reason).toBe('步骤期间没有出现该请求')
+    expect(never.halt).toBe(true)
+    const soft = await evaluatePageRequests({
+      snapshot: snapshot([entry({ match: '/api/order/*', graceMs: 0 }, { severity: 'SHOULD', onViolation: 'continue' })]), stepId: id(60), now: () => new Date(),
+      peek: () => [] as never, sleep: instant,
+    })
+    expect(soft.halt).toBe(false)
+  })
+
+  it('采集器不可用判无法判断，不判失败；只处理本步骤的条件', async () => {
+    const out = await evaluatePageRequests({
+      snapshot: snapshot([entry({ match: '/a' }), entry({ match: '/b' }, { contractId: id(51), stepId: id(61) })]), stepId: id(60), now: () => new Date(),
+      peek: () => undefined, sleep: instant,
+    })
+    expect(out.results).toHaveLength(1)
+    expect(out.results[0]).toMatchObject({ contractId: id(50), verdict: 'UNKNOWN' })
+    expect(out.halt).toBe(false)
+    expect((await evaluatePageRequests({ snapshot: snapshot([]), stepId: id(60), now: () => new Date(), peek: () => [] as never })).results).toEqual([])
   })
 })

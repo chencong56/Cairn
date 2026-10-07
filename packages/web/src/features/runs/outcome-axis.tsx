@@ -11,6 +11,7 @@ import {
   type RunDetailDto,
   type EvidenceMetadata,
   isPageHealthKind,
+  describePageRequestRule,
   pageHealthFactFromResult,
   pageHealthSampleText,
   type PageHealthSample,
@@ -227,6 +228,41 @@ function PageHealthResult({
   )
 }
 
+/** 页面请求条件的结果：期望一句话，实际写命中次数、没通过的原因与最近几条请求。 */
+function PageRequestOutcome({
+  expected,
+  actual,
+  rule,
+}: {
+  expected: unknown
+  actual: unknown
+  rule: Parameters<typeof describePageRequestRule>[0]
+}) {
+  const detail = actual && typeof actual === 'object' && !Array.isArray(actual) ? (actual as { matchedCount?: number; reason?: string; samples?: { method?: string; url?: string; status?: number; durationMs?: number; failed?: boolean }[] }) : null
+  return (
+    <div className='space-y-1 text-label text-muted-foreground' data-testid='page-request-outcome'>
+      <p>期望：{typeof expected === 'string' ? expected : describePageRequestRule(rule)}</p>
+      {detail ? (
+        <>
+          <p>
+            实际：命中 {detail.matchedCount ?? 0} 次{detail.reason ? `；${detail.reason}` : ''}
+          </p>
+          {(detail.samples ?? []).length > 0 ? (
+            <ul className='list-disc pl-4 font-mono'>
+              {(detail.samples ?? []).map((sample, index) => (
+                <li key={index} className='break-all'>
+                  {sample.method} {sample.url} → {sample.failed ? '请求失败' : sample.status}
+                  {sample.durationMs !== undefined ? `（${sample.durationMs}ms）` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 function outcomeStatusHint(status: OutcomeStatus, hasContracts?: boolean): string {
   if (status !== 'NOT_EVALUATED') return RUN_OUTCOME_STATUS_HINTS[status]
   return hasContracts
@@ -344,7 +380,9 @@ export function OutcomeConditionList({
         const expectLabel =
           row.entry.rule.kind === 'deterministic'
             ? expectKindLabel(row.entry.rule.expect.kind)
-            : '按业务指令判断'
+            : row.entry.rule.kind === 'page_request'
+              ? '页面请求'
+              : '按业务指令判断'
         return (
           <li
             key={row.entry.contractId}
@@ -364,6 +402,8 @@ export function OutcomeConditionList({
             </div>
             {row.entry.rule.kind === 'context' && row.entry.rule.expect.kind === 'table' ? (
               <TableCheckResult result={row.result ?? undefined} />
+            ) : row.entry.rule.kind === 'page_request' ? (
+              <PageRequestOutcome expected={row.result?.expected} actual={row.result?.actual} rule={row.entry.rule} />
             ) : (
               <p className='text-label text-muted-foreground'>
                 {expectLabel}

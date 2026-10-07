@@ -26,6 +26,8 @@ import { defaultTarget } from './step-registry'
 import { TargetFields } from './fields/target'
 import { useAuthoringObserve } from './observe'
 import { expectFromPreviewText, observationPreviewText } from './pick-apply'
+import { PageRequestConditions } from './page-request-conditions'
+import { isPageRequestContract } from './page-request-conditions-utils'
 
 const EXPECT_OPTIONS: { kind: AssertExpect['kind']; label: string }[] = [
   { kind: 'exists', label: '对象存在' },
@@ -64,7 +66,7 @@ function ruleTarget(contract: OutcomeContract): TargetDescriptor | undefined {
 }
 
 export function OutcomeListEditor({
-  outcomes,
+  outcomes: allOutcomes,
   scope,
   disabled,
   onChange,
@@ -74,6 +76,10 @@ export function OutcomeListEditor({
   disabled?: boolean
   onChange: (next: OutcomeContract[]) => void
 }) {
+  // 页面请求条件是高级能力：不混在普通成功条件里，单独放在默认折叠的区块中。
+  const requests = scope === 'step' ? allOutcomes.filter(isPageRequestContract) : []
+  const outcomes = allOutcomes.filter((contract) => !isPageRequestContract(contract))
+  const emit = (next: OutcomeContract[]) => onChange([...next, ...requests])
   return (
     <div className='space-y-3'>
       <div className='flex items-center justify-between gap-2'>
@@ -88,7 +94,7 @@ export function OutcomeListEditor({
           size='sm'
           variant='outline'
           disabled={disabled}
-          onClick={() => onChange([...outcomes, blankContract(scope)])}
+          onClick={() => emit([...outcomes, blankContract(scope)])}
         >
           添加条件
         </Button>
@@ -113,14 +119,21 @@ export function OutcomeListEditor({
                 index={index}
                 disabled={disabled}
                 onChange={(next) =>
-                  onChange(outcomes.map((item) => (item.id === next.id ? next : item)))
+                  emit(outcomes.map((item) => (item.id === next.id ? next : item)))
                 }
-                onRemove={() => onChange(outcomes.filter((item) => item.id !== contract.id))}
+                onRemove={() => emit(outcomes.filter((item) => item.id !== contract.id))}
               />
             </li>
           ))}
         </ul>
       )}
+      {scope === 'step' ? (
+        <PageRequestConditions
+          outcomes={allOutcomes}
+          disabled={disabled}
+          onChange={(nextRequests) => onChange([...outcomes, ...nextRequests])}
+        />
+      ) : null}
     </div>
   )
 }

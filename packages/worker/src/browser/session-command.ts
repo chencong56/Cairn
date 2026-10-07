@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   isPageHealthKind,
+  pageRequestEntriesOf,
   isSideEffectBrowserCommand,
   requiredScreenshotRole,
   resolveEvidencePolicy,
@@ -461,12 +462,16 @@ export function startPageHealthForLease(this: SessionManagerContext, leaseId: st
     this.pageHealthByLease.get(leaseId)?.dispose()
     this.pageHealthByLease.delete(leaseId)
     const invariants = (run.runtimeInvariantManifest?.entries ?? []).filter((item) => isPageHealthKind(item.kind))
-    if (invariants.length === 0) return
+    const watchRules = pageRequestEntriesOf(run.outcomeManifest).map((entry) => ({
+      match: entry.rule.match,
+      ...(entry.rule.method ? { method: entry.rule.method } : {}),
+    }))
+    if (invariants.length === 0 && watchRules.length === 0) return
     const live = this.lives.get(sessionId)
     const context = live?.handle.context
     if (!context || typeof context.on !== 'function') return
     const knownOrigins = [...(run.allowedOrigins ?? []), ...(run.loginOrigin ? [run.loginOrigin] : [])]
-    const collector = new PageHealthCollector(context as never, { invariants, knownOrigins })
+    const collector = new PageHealthCollector(context as never, { invariants, knownOrigins, watchRules })
     collector.attach()
     this.pageHealthByLease.set(leaseId, collector)
   }

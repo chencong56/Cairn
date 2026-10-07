@@ -184,3 +184,52 @@ describe('PageHealthCollector 耗时阈值与控制台', () => {
     expect(fact.samples[0]!.text).toContain('token=***')
   })
 })
+
+describe('PageHealthCollector 关注清单（page_request）', () => {
+  const finishedWith = (context: EventEmitter, request: ReturnType<typeof req>, status: number, responseEnd: number) => {
+    context.emit('request', request)
+    context.emit('response', resp(request, status))
+    context.emit('requestfinished', Object.assign(request, { timing: () => ({ responseEnd }) }))
+  }
+  const watchSetup = () => {
+    const context = new EventEmitter()
+    const collector = new PageHealthCollector(context, {
+      invariants: [],
+      knownOrigins: [],
+      watchRules: [{ match: '/api/order/*', method: 'POST' }, { match: '/api/ok' }],
+    })
+    collector.attach()
+    return { context, collector }
+  }
+
+  it('只有关注清单、没有页面健康约束也会挂监听；只记命中的请求，带命中下标与发起步骤，不受系统地址限制', () => {
+    const { context, collector } = watchSetup()
+    expect(collector.enabled).toBe(true)
+    collector.beginStep({ stepId: 's1', stepRunId: 'sr-1' })
+    finishedWith(context, req('https://cdn.external.example/api/order/123456', { method: 'POST' }), 200, 150)
+    finishedWith(context, req('https://portal.corp.com/api/ok'), 200, 20)
+    finishedWith(context, req('https://portal.corp.com/api/other'), 200, 20)
+    const hits = collector.peekWatched('s1')
+    expect(hits.map((hit) => hit.rules)).toEqual([[0], [1]])
+    expect(hits[0]).toMatchObject({ method: 'POST', url: 'https://cdn.external.example/api/order/*', status: 200, durationMs: 150, stepId: 's1' })
+    expect(collector.peekWatched('other-step')).toEqual([])
+    // 取数后清空；没有页面健康约束时取数结果为空
+    expect(collector.drain()).toEqual({ dropped: 0 })
+    expect(collector.peekWatched('s1')).toEqual([])
+  })
+
+  it('请求失败记 status 0 / failed，ERR_ABORTED 不记，方法不符不命中', () => {
+    const { context, collector } = watchSetup()
+    collector.beginStep({ stepId: 's1' })
+    const refused = req('https://a.corp/api/order/9', { method: 'POST', failure: 'net::ERR_CONNECTION_REFUSED' })
+    context.emit('request', refused)
+    context.emit('requestfailed', refused)
+    const aborted = req('https://a.corp/api/order/8', { method: 'POST', failure: 'net::ERR_ABORTED' })
+    context.emit('request', aborted)
+    context.emit('requestfailed', aborted)
+    finishedWith(context, req('https://a.corp/api/order/7', { method: 'GET' }), 200, 5)
+    const hits = collector.peekWatched('s1')
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toMatchObject({ failed: true, status: 0, rules: [0] })
+  })
+})

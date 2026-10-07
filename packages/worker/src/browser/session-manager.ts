@@ -75,7 +75,7 @@ import { settleOccupiedLanding, type SettleOccupiedLandingInput } from './landin
 import { acquireRunAuthControl, applyRecoveryRule, executeAuthInput, expiredAuthObservation, failInRunAuthRecovery, heartbeatRunAuthControl, inputRunAuthControl, observeInRunAuth, observeInRunAuthHeld, releaseRunAuthControl, restoreAuthGateFromCheckpoint, resumeRunAuth, verifyInRunAuth } from './session-auth-control.js'
 import { adoptPage, assertCommand, closeManagedPage, closeRunPage, ensureRunPage, execute, invalidate, pageForGrant, runManagedPage, runSurfaceCommand, startTracingForLease, stopTracingForLease, withManagedPage } from './session-command.js'
 import { type PageHealthCollector } from './page-health-collector.js'
-import { type PageHealthDrain, type PageHealthStepInfo } from '@cairn/shared'
+import { type PageHealthDrain, type PageHealthStepInfo, type WatchedRequest } from '@cairn/shared'
 import {
   discardSealedVideo,
   finalizeSealedVideo,
@@ -392,6 +392,11 @@ export class BrowserSessionManager {
     if (context && typeof context.on === 'function' && !collector.isBoundTo(context)) collector.rebind(context as never)
     if (info) collector.beginStep(info)
     else collector.endStep()
+  }
+
+  /** 该步骤发起的、命中成功条件关注清单的请求；没有采集器时返回 undefined（调用方判「无法判断」）。 */
+  peekPageRequests(grant: SessionGrant, stepId: string): WatchedRequest[] | undefined {
+    return this.pageHealthByLease.get(grant.leaseId)?.peekWatched(stepId)
   }
 
   drainPageHealth(grant: SessionGrant): PageHealthDrain | undefined {

@@ -23,6 +23,7 @@ import type {
   ErrorSurfaceNode,
   PageHealthDrain,
   PageHealthStepInfo,
+  WatchedRequest,
   JsonValue,
   Step,
   ExploreGuardOptions,
@@ -98,6 +99,8 @@ export type BrowserPort = {
   /** 页面健康采集：标记 / 结束当前浏览器步骤，并取回上次取数以来的违规。没有页面健康约束时无操作。 */
   markPageHealthStep?(grant: SessionGrant, info: PageHealthStepInfo | null): void
   drainPageHealth?(grant: SessionGrant): PageHealthDrain | undefined
+  /** 成功条件 page_request 求值：该步骤发起的命中请求（不清空）；没有采集器返回 undefined。 */
+  peekPageRequests?(grant: SessionGrant, stepId: string): WatchedRequest[] | undefined
   bindResolvedFromPoint?(
     grant: SessionGrant,
     input: { center: [number, number]; dpr: number; token: string },

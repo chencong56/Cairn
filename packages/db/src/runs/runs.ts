@@ -1695,6 +1695,8 @@ export type FinishAttemptInput = {
   mapFacts?: MapFactBatchItem[]
   /** 本次 Attempt 产生的结果轴评价项（若有），与 Attempt 同事务持久化 */
   outcomeResults?: OutcomeResultInsertItem[]
+  /** 页面请求条件（成功条件 page_request）的求值证据，结果行的 evidenceId 指向它 */
+  pageRequests?: { evidenceId: string; payload: JsonValue }
   /** 调试运行自动采集的页面结构快照，作为 log/structure 证据落库 */
   /** 页面健康违规清单（接口 / 脚本错误），作为 Attempt 级 log 证据落库；结果行的 evidenceId 指向它 */
   pageHealth?: { evidenceId: string; payload: JsonValue }
@@ -1859,6 +1861,21 @@ export async function finishAttemptTx(
       createdAt: now,
     })
     recorded.push({ evidenceId, type: 'log', status: 'available' })
+  }
+
+  if (input.pageRequests) {
+    await tx.insert(evidences).values({
+      id: input.pageRequests.evidenceId,
+      runId: input.runId,
+      stepRunId: attempt.stepRunId,
+      attemptId: input.attemptId,
+      type: 'log',
+      status: 'available',
+      schemaVersion: 1,
+      payload: redactJson(input.pageRequests.payload, secrets),
+      createdAt: now,
+    })
+    recorded.push({ evidenceId: input.pageRequests.evidenceId, type: 'log', status: 'available' })
   }
 
   if (!cancelled && input.structureSnapshot) {

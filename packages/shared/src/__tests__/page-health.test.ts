@@ -181,3 +181,45 @@ describe('页面健康：发现项', () => {
     expect(text).toBe('共 2 处：第 2 步 POST https://a/x → 503 ×2')
   })
 })
+
+describe('页面请求条件（page_request）', () => {
+  const req = (over: Partial<import('../page-health.js').WatchedRequest>) => ({ method: 'POST', url: 'https://a.corp/api/order/*', status: 200, durationMs: 100, ...over })
+  const rule = { match: '/api/order/*', method: 'POST', status: '2xx' as const }
+
+  it('契约：只能挂在步骤上，默认状态 2xx，非浏览器步骤被拒', async () => {
+    const { outcomeContractSchema, scenarioAuthoringDocumentV2Schema } = await import('../index.js')
+    const contract = {
+      id: id(1), scope: 'step', meaning: '提交后必须调用下单接口', severity: 'MUST', onViolation: 'halt', provenance: 'manual',
+      rule: { kind: 'page_request', match: '/api/order/*', method: 'post' },
+    }
+    const parsed = outcomeContractSchema.parse(contract)
+    expect(parsed.rule).toMatchObject({ kind: 'page_request', method: 'POST', status: '2xx' })
+    expect(() => outcomeContractSchema.parse({ ...contract, scope: 'scenario' })).toThrow()
+    const doc = (type: 'click' | 'echo') => ({
+      authoringSchemaVersion: 2, schemaVersion: 1, inputs: [],
+      nodes: [{ kind: 'step', step: type === 'click'
+        ? { id: id(2), name: '点击', type: 'click', effectType: 'SIDE_EFFECT', input: { target: { framePath: [], candidates: [{ by: 'css', value: 'a' }] } } }
+        : { id: id(2), name: '回显', type: 'echo', effectType: 'READ_ONLY', input: { value: 1 } }, outcomes: [contract] }],
+    })
+    expect(() => scenarioAuthoringDocumentV2Schema.parse(doc('click'))).not.toThrow()
+    expect(() => scenarioAuthoringDocumentV2Schema.parse(doc('echo'))).toThrow(/浏览器步骤/)
+  })
+
+  it('没有命中请求判失败；命中且状态满足判通过', async () => {
+    const { evaluatePageRequestRule } = await import('../page-health.js')
+    expect(evaluatePageRequestRule(rule, [], { prematched: true })).toMatchObject({ verdict: 'FAIL', reason: '步骤期间没有出现该请求' })
+    expect(evaluatePageRequestRule(rule, [req({})], { prematched: true }).verdict).toBe('PASS')
+    expect(evaluatePageRequestRule(rule, [req({ url: 'https://a.corp/api/other' })]).reason).toBe('步骤期间没有出现该请求')
+  })
+
+  it('状态 / 耗时 / 次数：多次命中以最后一次为准', async () => {
+    const { evaluatePageRequestRule } = await import('../page-health.js')
+    expect(evaluatePageRequestRule(rule, [req({ status: 500 })], { prematched: true }).reason).toContain('返回 500')
+    expect(evaluatePageRequestRule(rule, [req({ status: 500 }), req({ status: 200 })], { prematched: true }).verdict).toBe('PASS')
+    expect(evaluatePageRequestRule(rule, [req({ status: 200 }), req({ status: 503 })], { prematched: true }).verdict).toBe('FAIL')
+    expect(evaluatePageRequestRule({ ...rule, status: '2xx_3xx' }, [req({ status: 302 })], { prematched: true }).verdict).toBe('PASS')
+    expect(evaluatePageRequestRule({ ...rule, maxMs: 50 }, [req({ durationMs: 120 })], { prematched: true }).reason).toContain('超过上限 50ms')
+    expect(evaluatePageRequestRule({ ...rule, minCount: 2 }, [req({})], { prematched: true }).reason).toContain('至少需要 2 次')
+    expect(evaluatePageRequestRule(rule, [req({ failed: true, status: 0 })], { prematched: true }).reason).toContain('请求失败')
+  })
+})

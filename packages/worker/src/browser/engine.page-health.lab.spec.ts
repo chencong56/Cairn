@@ -30,6 +30,7 @@ import {
   defaultPageHealthInvariants,
   createRuntimeInvariant,
   type AuthoringNode,
+  type OutcomeContract,
   type RuntimeInvariant,
   type Step,
 } from '@cairn/shared'
@@ -231,14 +232,18 @@ describe('ExecutionEngine × 真浏览器 页面健康约束', { timeout: 240_00
     input: { kind: 'time', durationMs: ms },
   })
 
-  async function execute(input: { steps: Step[]; invariants: RuntimeInvariant[] }) {
+  async function execute(input: { steps: Step[]; invariants: RuntimeInvariant[]; outcomes?: Record<string, OutcomeContract[]> }) {
     const scenario = await createScenarioWithVersion(handle.db, {
       targetId,
       name: `ph-${newId()}`,
       steps: [{ id: newId(), name: 'init', type: 'echo', effectType: 'READ_ONLY', input: { value: 'init' } }],
       actor: { id: actorId },
     })
-    const nodes: AuthoringNode[] = input.steps.map((step) => ({ kind: 'step', step }))
+    const nodes: AuthoringNode[] = input.steps.map((step) => ({
+      kind: 'step',
+      step,
+      ...(input.outcomes?.[step.id] ? { outcomes: input.outcomes[step.id] } : {}),
+    }))
     await saveScenarioDraft(handle.db, scenario.id, {
       revision: 1,
       document: {
@@ -321,5 +326,65 @@ describe('ExecutionEngine × 真浏览器 页面健康约束', { timeout: 240_00
     })
     expect(detail.outcomeStatus).toBe('FAIL')
     expect(detail.status).toBe('FAILED')
+  })
+
+  const requestRule = (rule: Record<string, unknown>, overrides: Partial<OutcomeContract> = {}): OutcomeContract =>
+    ({
+      id: newId(),
+      scope: 'step',
+      meaning: '点击后必须调用接口',
+      severity: 'MUST',
+      onViolation: 'halt',
+      provenance: 'manual',
+      rule: { kind: 'page_request', status: '2xx', graceMs: 1_500, ...rule },
+      ...overrides,
+    }) as OutcomeContract
+
+  it('页面请求条件：点击后出现且 2xx 通过；请求在步骤结束后才发出也在宽限期内等到', async () => {
+    const stepNav = newId()
+    const stepClick = newId()
+    const okRule = requestRule({ match: '/api/ok', method: 'GET' })
+    const detail = await execute({
+      steps: [navigate(stepNav, '/'), click(stepClick, '#fine-btn')],
+      invariants: [],
+      outcomes: { [stepClick]: [okRule] },
+    })
+    expect(detail.status).toBe('SUCCEEDED')
+    const row = detail.outcomeResults.find((item) => item.contractId === okRule.id)
+    expect(row).toMatchObject({ verdict: 'PASS', provenance: 'manual' })
+    expect(detail.outcomeStatus).toBe('PASS')
+    const evidence = await handle.pool.query(`SELECT type, payload FROM evidences WHERE id = $1`, [row!.evidenceId])
+    expect(evidence.rows[0]).toMatchObject({ type: 'log', payload: { role: 'page_requests' } })
+  })
+
+  it('页面请求条件：没有出现该请求 / 返回 500 判不通过，按严重级别决定警告或失败并停止', async () => {
+    const stepClick = newId()
+    const never = requestRule({ match: '/api/never', graceMs: 300 }, { severity: 'SHOULD', onViolation: 'continue' })
+    const soft = await execute({
+      steps: [navigate(newId(), '/'), click(stepClick, '#fine-btn')],
+      invariants: [],
+      outcomes: { [stepClick]: [never] },
+    })
+    expect(soft.status).toBe('SUCCEEDED')
+    expect(soft.outcomeStatus).toBe('WARN')
+    expect(soft.outcomeResults.find((item) => item.contractId === never.id)).toMatchObject({
+      verdict: 'FAIL',
+      actual: { reason: '步骤期间没有出现该请求' },
+    })
+
+    const stepOrder = newId()
+    const lastStep = newId()
+    const status500 = requestRule({ match: '/api/order/*', method: 'POST', graceMs: 1_000 })
+    const hard = await execute({
+      steps: [navigate(newId(), '/'), click(stepOrder, '#action-btn'), click(lastStep, '#fine-btn')],
+      invariants: [],
+      outcomes: { [stepOrder]: [status500] },
+    })
+    expect(hard.status).toBe('FAILED')
+    expect(hard.outcomeStatus).toBe('FAIL')
+    expect(hard.outcomeResults.find((item) => item.contractId === status500.id)).toMatchObject({
+      verdict: 'FAIL',
+      actual: { reason: expect.stringContaining('返回 500') },
+    })
   })
 })

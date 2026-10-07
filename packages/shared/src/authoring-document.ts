@@ -6,7 +6,7 @@ import {
   moduleExecutionModeSchema,
   type ModuleExecutionMode,
 } from './action-module-vocabulary.js'
-import { outcomeContractSchema, type OutcomeContract } from './outcome.js'
+import { MAX_PAGE_REQUEST_RULES, outcomeContractSchema, type OutcomeContract } from './outcome.js'
 import { isPageHealthKind } from './page-health.js'
 import { runtimeInvariantSchema } from './runtime-invariant.js'
 import { outputFieldNameSchema } from './output-schema.js'
@@ -18,6 +18,7 @@ import {
   contextKeySchema,
   effectTypeSchema,
   FORBIDDEN_CONTEXT_KEYS,
+  stepUsesBrowser,
   scenarioInputDeclSchema,
   stepSchema,
   listRefSchema,
@@ -362,8 +363,26 @@ export const scenarioAuthoringDocumentV2Schema = z
             })
           }
           stepIds.add(node.step.id)
+          let pageRequestCount = 0
           for (const [outcomeIndex, contract] of (node.outcomes ?? []).entries()) {
             registerContractId(contract.id, [...nodePath, 'outcomes', outcomeIndex, 'id'])
+            if (contract.rule.kind === 'page_request') {
+              pageRequestCount += 1
+              if (!stepUsesBrowser(node.step.type)) {
+                ctx.addIssue({
+                  code: 'custom',
+                  path: [...nodePath, 'outcomes', outcomeIndex, 'rule'],
+                  message: '页面请求条件只能挂在浏览器步骤上（打开页面、点击、填写等）',
+                })
+              }
+            }
+          }
+          if (pageRequestCount > MAX_PAGE_REQUEST_RULES) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [...nodePath, 'outcomes'],
+              message: `一个步骤最多 ${MAX_PAGE_REQUEST_RULES} 条页面请求条件`,
+            })
           }
         } else if (node.kind === 'module') {
           if (invocationIds.has(node.invocationId) || stepIds.has(node.invocationId) || blockIds.has(node.invocationId)) {

@@ -414,3 +414,42 @@ describe('OutcomeConditionList 页面健康', () => {
     expect(onIgnore).toHaveBeenCalledWith(net.id, [{ kind: 'network_health', value: 'https://a.corp/api/order' }])
   })
 })
+
+describe('OutcomeConditionList 页面请求条件', () => {
+  const contractId = '00000000-0000-4000-8000-000000000041'
+  const snapshotWithRequest = {
+    outcomeManifest: {
+      entries: [
+        {
+          contractId,
+          scope: 'step',
+          meaning: '这一步之后应出现请求：POST /api/order 返回 2xx',
+          severity: 'MUST',
+          onViolation: 'halt',
+          provenance: 'manual',
+          stepId: '00000000-0000-4000-8000-000000000042',
+          rule: { kind: 'page_request', match: '/api/order', method: 'POST', status: '2xx' },
+        },
+      ],
+    },
+  } as unknown as RunSnapshot
+
+  it('显示期望、命中次数、没通过的原因与最近请求', async () => {
+    const result: OutcomeResultDto = {
+      ...failRow,
+      contractId,
+      scope: 'step',
+      severity: 'MUST',
+      provenance: 'manual',
+      expected: 'POST /api/order 返回 2xx',
+      actual: { matchedCount: 1, satisfied: 0, reason: '返回 500，期望 2xx', samples: [{ method: 'POST', url: 'https://a.corp/api/order/*', status: 500, durationMs: 80 }] },
+    }
+    const screen = await render(
+      <OutcomeConditionList runId={result.runId} run={{ snapshot: snapshotWithRequest, outcomeResults: [result] }} />,
+    )
+    const text = screen.container.textContent ?? ''
+    expect(text).toMatch(/期望：POST \/api\/order 返回 2xx/)
+    expect(text).toMatch(/实际：命中 1 次；返回 500，期望 2xx/)
+    expect(text).toMatch(/POST https:\/\/a\.corp\/api\/order\/\* → 500（80ms）/)
+  })
+})

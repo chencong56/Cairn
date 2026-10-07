@@ -305,7 +305,7 @@ export const authoringDiffOutcomeAddSchema = z.strictObject({
   stepName: z.string().min(1).max(128).optional(),
   contractId: entityIdSchema,
   meaning: z.string().min(1).max(512),
-  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table']),
+  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table', 'page_request']),
   severity: outcomeSeveritySchema,
   onViolation: outcomeOnViolationSchema,
   scope: outcomeScopeSchema.optional(),
@@ -317,7 +317,7 @@ export const authoringDiffOutcomeUpdateSchema = z.strictObject({
   type: z.literal('outcome_update'),
   contractId: entityIdSchema,
   meaning: z.string().min(1).max(512),
-  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table']),
+  ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table', 'page_request']),
   severity: outcomeSeveritySchema,
   onViolation: outcomeOnViolationSchema,
   scope: outcomeScopeSchema.optional(),
@@ -560,7 +560,7 @@ export const acceptanceProposalCardSchema = z.strictObject({
   rationale: z.string().max(512).optional(),
   config: z
     .strictObject({
-      ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table']),
+      ruleKind: z.enum(['deterministic', 'ai', 'context', 'step_duration', 'run_duration', 'table', 'page_request']),
       metric: scenarioMetricDeclSchema.optional(),
       summaryTemplateSnippet: z.string().optional(),
       stepName: z.string().optional(),

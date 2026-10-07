@@ -123,6 +123,8 @@ export function deterministicStepId(
  * 上下文与耗时规则与宿主结果无关，必须派生独立检查步骤才会真正求值。
  */
 export function isEvaluatedByHostStep(step: Pick<Step, 'type'>, rule: OutcomeRule): boolean {
+  // 页面请求条件挂在任意浏览器步骤上，由该步骤的尝试结束时求值，不派生检查步骤。
+  if (rule.kind === 'page_request') return true
   return (step.type === 'assert' || step.type === 'ai_assert') && (rule.kind === 'deterministic' || rule.kind === 'ai')
 }
 
@@ -185,6 +187,9 @@ export function deriveStepFromOutcomeRule(
           valueMs: rule.valueMs,
         },
       }
+    case 'page_request':
+      // 页面请求条件由宿主步骤求值（isEvaluatedByHostStep），不应走到派生检查步骤。
+      throw new Error('page_request 成功条件由宿主步骤求值，不派生检查步骤')
     case 'run_duration':
       return {
         id: derivedId,

@@ -58,6 +58,9 @@ export function createBrowserPort(manager: BrowserSessionManager, objects?: Obje
     drainPageHealth(grant) {
       return manager.drainPageHealth(grant)
     },
+    peekPageRequests(grant, stepId) {
+      return manager.peekPageRequests(grant, stepId)
+    },
     async captureStructureSnapshot(grant, signal) {
       return manager.captureStructureSnapshot(grant, signal)
     },

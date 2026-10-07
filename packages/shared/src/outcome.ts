@@ -125,12 +125,36 @@ export const outcomeRunDurationRuleSchema = z.strictObject({
 })
 export type OutcomeRunDurationRule = z.infer<typeof outcomeRunDurationRuleSchema>
 
+/**
+ * 页面请求条件：这一步之后，必须出现某个接口请求（可限定方法、状态、耗时）。
+ * 只能挂在浏览器步骤上，由 Worker 在步骤尝试结束时按采集到的请求求值；是高级能力，编辑器里默认折叠。
+ */
+export const PAGE_REQUEST_STATUS_EXPECTS = ['2xx', '2xx_3xx'] as const
+export const MAX_PAGE_REQUEST_RULES = 20
+export const MAX_PAGE_REQUEST_GRACE_MS = 15_000
+export const DEFAULT_PAGE_REQUEST_GRACE_MS = 3_000
+export const outcomePageRequestRuleSchema = z.strictObject({
+  kind: z.literal('page_request'),
+  /** 「源 + 路径」通配，规则同页面健康忽略清单；以 / 开头只匹配路径。 */
+  match: z.string().trim().min(1).max(256),
+  method: z.string().trim().toUpperCase().regex(/^[A-Z]{1,10}$/).optional(),
+  status: z.enum(PAGE_REQUEST_STATUS_EXPECTS).default('2xx'),
+  /** 该请求耗时上限（浏览器视角，毫秒）。 */
+  maxMs: z.number().int().min(1).max(600_000).optional(),
+  /** 至少出现几次，默认 1。 */
+  minCount: z.number().int().min(1).max(100).optional(),
+  /** 步骤结束后再等多久（毫秒），默认 3000；请求常在步骤结束后才发出。 */
+  graceMs: z.number().int().min(0).max(MAX_PAGE_REQUEST_GRACE_MS).optional(),
+})
+export type OutcomePageRequestRule = z.infer<typeof outcomePageRequestRuleSchema>
+
 export const outcomeRuleSchema = z.discriminatedUnion('kind', [
   outcomeDeterministicRuleSchema,
   outcomeAiRuleSchema,
   outcomeContextRuleSchema,
   outcomeStepDurationRuleSchema,
   outcomeRunDurationRuleSchema,
+  outcomePageRequestRuleSchema,
 ])
 export type OutcomeRule = z.infer<typeof outcomeRuleSchema>
 
@@ -150,6 +174,13 @@ export const outcomeContractSchema = z
         code: 'custom',
         path: ['rule', 'kind'],
         message: '步骤耗时条件只能挂在具体步骤上，不能作为场景级条件',
+      })
+    }
+    if (contract.rule.kind === 'page_request' && contract.scope !== 'step') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rule', 'kind'],
+        message: '页面请求条件只能挂在具体步骤上，不能作为场景级条件',
       })
     }
     if (contract.rule.kind === 'run_duration' && contract.scope !== 'scenario') {

@@ -14,7 +14,9 @@ export function collectAttemptOutcomeResults(input: {
   attemptId: string
   now: Date
 }): OutcomeCollection {
-  const entries = input.snapshot.outcomeManifest?.entries.filter((e) => e.stepId === input.step.id) ?? []
+  // page_request 条件由页面请求求值单独处理（engine/page-health.ts），不走断言通过 / 失败的通用分支。
+  const entries =
+    input.snapshot.outcomeManifest?.entries.filter((e) => e.stepId === input.step.id && e.rule.kind !== 'page_request') ?? []
   if (entries.length === 0) {
     return { outcomeResults: [], continueMode: false }
   }

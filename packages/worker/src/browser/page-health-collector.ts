@@ -9,10 +9,12 @@ import {
   resolveNetworkHealthConfig,
   resolveScriptErrorsConfig,
   statusClassOf,
+  MAX_WATCHED_REQUESTS,
   type PageHealthDrain,
   type PageHealthFact,
   type PageHealthSample,
   type PageHealthStepInfo,
+  type WatchedRequest,
   type ResolvedNetworkHealthConfig,
   type ResolvedScriptErrorsConfig,
   type RuntimeInvariant,
@@ -72,20 +74,31 @@ export class PageHealthCollector {
 
   constructor(
     private context: Emitter,
-    options: { invariants: readonly RuntimeInvariant[]; knownOrigins: readonly string[]; now?: () => number },
+    options: {
+      invariants: readonly RuntimeInvariant[]
+      knownOrigins: readonly string[]
+      /** 成功条件 page_request 的关注清单：只记录命中的请求（不受系统地址限制）。 */
+      watchRules?: readonly { match: string; method?: string }[]
+      now?: () => number
+    },
   ) {
     const net = options.invariants.find((item) => item.kind === 'network_health')
     const script = options.invariants.find((item) => item.kind === 'script_errors')
     this.network = net ? resolveNetworkHealthConfig(net.network) : null
     this.script = script ? resolveScriptErrorsConfig(script.script) : null
     this.knownOrigins = new Set(options.knownOrigins)
+    this.watchRules = options.watchRules ?? []
     this.now = options.now ?? Date.now
   }
 
   private readonly now: () => number
+  private readonly watchRules: readonly { match: string; method?: string }[]
+  private watched: WatchedRequest[] = []
+  private watchedDropped = 0
+  private readonly statusByRequest = new WeakMap<object, number>()
 
   get enabled(): boolean {
-    return this.network !== null || this.script !== null
+    return this.network !== null || this.script !== null || this.watchRules.length > 0
   }
 
   attach(): void {
@@ -95,11 +108,13 @@ export class PageHealthCollector {
       this.context.on(event, handler)
       this.handlers.push([event, handler])
     }
-    if (this.network) {
+    if (this.network || this.watchRules.length > 0) {
       add('request', (request: RequestLike) => this.onRequest(request))
       add('response', (response: ResponseLike) => this.onResponse(response))
       add('requestfailed', (request: RequestLike) => this.onRequestFailed(request))
-      if (this.network.slowRules.length > 0) add('requestfinished', (request: RequestLike) => this.onRequestFinished(request))
+      if ((this.network?.slowRules.length ?? 0) > 0 || this.watchRules.length > 0) {
+        add('requestfinished', (request: RequestLike) => this.onRequestFinished(request))
+      }
     }
     if (this.script) {
       add('weberror', (webError: { error(): Error }) => this.onScriptError(webError))
@@ -182,6 +197,7 @@ export class PageHealthCollector {
     if (!url) return
     // 只要拿到 HTTP 响应的页面加载，其源就成为系统地址（状态码不限）。
     if (resourceType === 'document') this.knownOrigins.add(url.origin)
+    if (this.watchRules.length > 0) this.statusByRequest.set(request, status)
     const config = this.network
     if (!config) return
     const cls = statusClassOf(status)
@@ -194,17 +210,60 @@ export class PageHealthCollector {
   /** 耗时阈值：浏览器视角从发起到响应结束的毫秒数，不是服务端耗时。允许超阈次数按规则整次运行累计。 */
   private readonly slowHits = new Map<number, number>()
 
-  private onRequestFinished(request: RequestLike): void {
-    const config = this.network
-    if (!config || config.slowRules.length === 0) return
+  /** 命中关注清单的请求（成功条件 page_request 求值用）：按原始路径预匹配，记命中的清单下标。 */
+  private recordWatched(request: RequestLike, status: number, durationMs: number | undefined, failed: boolean): void {
+    if (this.watchRules.length === 0) return
     const meta = this.metas.get(request)
     if (!meta) return
+    let raw: URL
+    try {
+      raw = new URL(request.url())
+    } catch {
+      return
+    }
+    if (raw.protocol !== 'http:' && raw.protocol !== 'https:') return
+    const method = request.method().toUpperCase()
+    const target = { origin: raw.origin, path: raw.pathname }
+    const hits: number[] = []
+    this.watchRules.forEach((rule, index) => {
+      if ((!rule.method || rule.method === method) && matchesPageHealthIgnore(target, [rule.match])) hits.push(index)
+    })
+    if (hits.length === 0) return
+    if (this.watched.length >= MAX_WATCHED_REQUESTS) {
+      this.watchedDropped += 1
+      return
+    }
+    const display = normalizePageUrl(request.url())
+    this.watched.push({
+      method,
+      url: display?.display ?? `${raw.origin}${raw.pathname}`,
+      status,
+      ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
+      ...(failed ? { failed: true } : {}),
+      rules: hits,
+      stepId: meta.step.stepId,
+      ...(meta.step.stepRunId ? { stepRunId: meta.step.stepRunId } : {}),
+      ...(meta.step.attemptId ? { attemptId: meta.step.attemptId } : {}),
+    })
+  }
+
+  /** 不清空地取某个步骤发起的命中请求（引擎在宽限期内轮询用）。 */
+  peekWatched(stepId: string): WatchedRequest[] {
+    return this.watched.filter((item) => item.stepId === stepId)
+  }
+
+  private onRequestFinished(request: RequestLike): void {
     let duration = -1
     try {
       duration = request.timing?.().responseEnd ?? -1
     } catch {
-      return
+      duration = -1
     }
+    this.recordWatched(request, this.statusByRequest.get(request) ?? 0, duration >= 0 ? duration : undefined, false)
+    const config = this.network
+    if (!config || config.slowRules.length === 0) return
+    const meta = this.metas.get(request)
+    if (!meta) return
     if (!(duration >= 0)) return
     const url = normalizePageUrl(request.url())
     if (!url) return
@@ -228,6 +287,7 @@ export class PageHealthCollector {
   }
 
   private onRequestFailed(request: RequestLike): void {
+    if (!(request.failure()?.errorText ?? '').includes('ERR_ABORTED')) this.recordWatched(request, 0, undefined, true)
     const config = this.network
     if (!config || !config.requestFailed) return
     const meta = this.metas.get(request)
@@ -336,6 +396,8 @@ export class PageHealthCollector {
   drain(): PageHealthDrain {
     const events = this.pending
     this.pending = []
+    this.watched = []
+    this.watchedDropped = 0
     const dropped = this.dropped
     this.dropped = 0
     const network = this.network
