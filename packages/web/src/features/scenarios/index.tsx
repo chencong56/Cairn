@@ -4,6 +4,7 @@ import { Link, getRouteApi, useNavigate } from '@tanstack/react-router'
 import type { ScenarioDto } from '@cairn/shared'
 import {
   CalendarClock,
+  Copy,
   History,
   Timer,
   ListOrdered,
@@ -44,6 +45,7 @@ import { Can } from '@/components/rbac/can'
 import { StatusBadge } from '@/components/status-badge'
 import { useAssistantContextBinding } from '@/features/assistant/use-assistant-context-binding'
 import { ScenarioCreateDialog } from './create-dialog'
+import { useCopyScenario } from './use-copy-scenario'
 import { SCENARIO_STATUS_LABELS, formatRelativeTime } from './labels'
 
 const route = getRouteApi('/_authenticated/scenarios/')
@@ -61,6 +63,7 @@ export function ScenariosPage() {
   const routeSearch = route.useSearch()
   const [createOpen, setCreateOpen] = useState(false)
   const [removing, setRemoving] = useState<ScenarioDto | null>(null)
+  const { copy, copyingId } = useCopyScenario()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<'all' | 'active' | 'disabled'>('all')
   const targetId = routeSearch.targetId ?? 'all'
@@ -424,6 +427,23 @@ export function ScenariosPage() {
                                 <Timer className='size-3.5' />
                                 耗时
                               </Link>
+                            </Button>
+                          </Can>
+                          <Can permission='workflow:write'>
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-7 text-muted-foreground hover:text-text-primary hover:bg-surface-subtle transition-colors'
+                              disabled={copyingId !== null}
+                              onClick={() => void copy(item.id)}
+                              aria-label={`复制场景：${item.name}`}
+                              title='复制场景'
+                            >
+                              {copyingId === item.id ? (
+                                <Loader2 className='size-3.5 animate-spin' />
+                              ) : (
+                                <Copy className='size-3.5' />
+                              )}
                             </Button>
                           </Can>
                           <Can permission='workflow:delete'>

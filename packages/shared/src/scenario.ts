@@ -37,6 +37,7 @@ export const SCENARIO_ERROR_CODES = [
   'SCENARIO_DRAFT_CONFLICT',
   'SCENARIO_COMPILE_BLOCKED',
   'SCENARIO_VERSION_NOT_PUBLISHED',
+  'SCENARIO_COPY_UNSUPPORTED',
 ] as const
 export type ScenarioErrorCode = (typeof SCENARIO_ERROR_CODES)[number]
 
@@ -427,6 +428,48 @@ export const createScenarioBodySchema = z.strictObject({
   status: scenarioStatusSchema.optional(),
 })
 export type CreateScenarioBody = z.infer<typeof createScenarioBodySchema>
+
+const SCENARIO_NAME_MAX = 128
+const COPY_SUFFIX = /-copy-(\d+)$/
+
+function fitCopyName(base: string, n: number): string {
+  const suffix = `-copy-${n}`
+  const chars = Array.from(base)
+  while (chars.join('').length + suffix.length > SCENARIO_NAME_MAX) chars.pop()
+  return `${chars.join('')}${suffix}`
+}
+
+/**
+ * 复制场景的新名称：去掉来源名末尾的 `-copy-N`，接上 `-copy-<已用最大序号 + 1>`。
+ * existingNames 须包含同一目标系统下的全部场景名（含已删除，唯一约束把它们也算在内）。
+ */
+export function scenarioCopyName(sourceName: string, existingNames: Iterable<string>): string {
+  const base = sourceName.replace(COPY_SUFFIX, '') || sourceName
+  const taken = new Set(existingNames)
+  let max = 0
+  for (const name of taken) {
+    const match = COPY_SUFFIX.exec(name)
+    if (!match) continue
+    const n = Number(match[1])
+    if (Number.isSafeInteger(n) && fitCopyName(base, n) === name) max = Math.max(max, n)
+  }
+  let next = max + 1
+  while (taken.has(fitCopyName(base, next))) next += 1
+  return fitCopyName(base, next)
+}
+
+/** 复制时因操作者缺少对应权限而未带过去的配置。 */
+export const SCENARIO_COPY_NOT_COPIED_ITEMS = ['outbound_policy', 'auto_report'] as const
+export const copyScenarioResponseSchema = scenarioDetailSchema.extend({
+  notCopied: z.array(
+    z.strictObject({
+      item: z.enum(SCENARIO_COPY_NOT_COPIED_ITEMS),
+      reason: z.string().min(1),
+    }),
+  ),
+})
+export type CopyScenarioResponse = z.infer<typeof copyScenarioResponseSchema>
+export type ScenarioCopyNotCopied = CopyScenarioResponse['notCopied'][number]
 
 export const updateScenarioBodySchema = z
   .strictObject({

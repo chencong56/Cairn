@@ -140,6 +140,12 @@ export class ScenariosController {
     return this.scenarios.previewAcceptance(scenarioId, body, actor)
   }
 
+  @Post(':scenarioId/copy')
+  @RequirePermissions('workflow:read', 'workflow:write')
+  copy(@Param('scenarioId') scenarioId: string, @CurrentAccount() actor: RequestAccount) {
+    return this.scenarios.copy(scenarioId, actor)
+  }
+
   @Post(':scenarioId')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('workflow:write')

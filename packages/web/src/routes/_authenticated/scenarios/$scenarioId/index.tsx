@@ -16,6 +16,8 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute('/_authenticated/scenarios/$scenarioId/')({
   validateSearch: searchSchema,
+  // 场景间跳转（如复制后进入副本）要换一套干净的编排页状态
+  remountDeps: ({ params }) => params.scenarioId,
   staticData: {
     assistant: {
       routeKey: 'scenarios.$scenarioId',

@@ -9,8 +9,12 @@ const mocks = vi.hoisted(() => ({
   fetchTargets: vi.fn(async () => ({ items: [{ id: 'target-1', name: '商城后台' }], nextCursor: undefined })),
   previewDeleteScenario: vi.fn(async () => ({ impact: 'none' })),
   deleteScenario: vi.fn(async () => ({ success: true })),
+  copyScenario: vi.fn(),
   navigate: vi.fn(),
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }))
+
+vi.mock('sonner', () => ({ toast: mocks.toast }))
 
 vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tanstack/react-router')>()
@@ -28,6 +32,7 @@ vi.mock('@/lib/scenarios-api', () => ({
   fetchScenarios: mocks.fetchScenarios,
   previewDeleteScenario: mocks.previewDeleteScenario,
   deleteScenario: mocks.deleteScenario,
+  copyScenario: mocks.copyScenario,
   createScenario: vi.fn(),
 }))
 
@@ -186,6 +191,57 @@ describe('场景编排主列表', () => {
     // 运行记录与删除不可见
     await expect.element(screen.getByRole('link', { name: /运行记录/ })).not.toBeInTheDocument()
     await expect.element(screen.getByRole('button', { name: /删除场景/ })).not.toBeInTheDocument()
+    await expect.element(screen.getByRole('button', { name: /复制场景/ })).not.toBeInTheDocument()
+  })
+
+  it('复制场景后刷新列表，提示里可打开副本，未复制的配置逐条提醒', async () => {
+    useAuthStore.getState().auth.setUser({
+      id: 'u3',
+      displayName: '编排工程师',
+      email: null,
+      roles: [],
+      permissions: ['workflow:read', 'workflow:write', 'target:read'],
+    })
+    mocks.fetchScenarios.mockResolvedValue({
+      items: [
+        {
+          id: 'sc-3',
+          targetId: 'target-1',
+          name: '月结对账',
+          status: 'active',
+          purpose: 'user',
+          latestVersionId: 'v-3',
+          latestVersionNo: 2,
+          stepCount: 4,
+          draftDirty: false,
+          createdAt: '2026-09-28T00:00:00.000Z',
+          updatedAt: '2026-09-28T02:00:00.000Z',
+        },
+      ],
+      nextCursor: undefined,
+    })
+    mocks.copyScenario.mockResolvedValue({
+      id: 'sc-copy',
+      name: '月结对账-copy-1',
+      notCopied: [{ item: 'outbound_policy', reason: '缺少运行查看权限，副本未复制消息推送设置' }],
+    })
+
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ScenariosPage />
+      </QueryClientProvider>,
+    )
+
+    await screen.getByRole('button', { name: '复制场景：月结对账' }).click()
+
+    await vi.waitFor(() => expect(mocks.copyScenario).toHaveBeenCalledWith('sc-3'))
+    await vi.waitFor(() => expect(mocks.fetchScenarios).toHaveBeenCalledTimes(2))
+    expect(mocks.toast.warning).toHaveBeenCalledWith('缺少运行查看权限，副本未复制消息推送设置')
+    const [message, options] = mocks.toast.success.mock.calls[0]!
+    expect(message).toBe('已复制为「月结对账-copy-1」')
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    options.action.onClick()
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: '/scenarios/$scenarioId', params: { scenarioId: 'sc-copy' } })
   })
 })
 

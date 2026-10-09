@@ -14,6 +14,7 @@ import {
   resolutionStatsResponseSchema,
   scenarioCapabilitiesSchema,
   scenarioDetailSchema,
+  copyScenarioResponseSchema,
   scenarioVersionListResponseSchema,
   scenarioListResponseSchema,
   trialRunBodySchema,
@@ -33,6 +34,7 @@ import {
   type SaveScenarioDraftBody,
   type ScenarioCapabilities,
   type ScenarioDetailDto,
+  type CopyScenarioResponse,
   type ScenarioListQuery,
   type ScenarioListResponse,
   type TrialRunBody,
@@ -124,6 +126,10 @@ export function createScenario(body: CreateScenarioBody): Promise<ScenarioDetail
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(createScenarioBodySchema.parse(body)),
   })
+}
+
+export function copyScenario(id: string): Promise<CopyScenarioResponse> {
+  return apiFetch(`/api/scenarios/${id}/copy`, copyScenarioResponseSchema, { method: 'POST' })
 }
 
 export function updateScenario(id: string, body: UpdateScenarioBody): Promise<ScenarioDetailDto> {

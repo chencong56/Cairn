@@ -72,6 +72,9 @@ export type StudioToolbarProps = {
   onOpenRename: () => void
   onRename?: (newName: string) => Promise<boolean | void> | void
   onToggleStatus: () => void
+  /** 复制为新场景；未提供时不显示入口（如非普通场景）。 */
+  onCopy?: () => void
+  copying?: boolean
   onOpenRemove: () => void
   onOpenSettings?: () => void
   /** 打开右栏「补全验收」。 */
@@ -115,6 +118,8 @@ export function StudioToolbar({
   onOpenRename,
   onRename,
   onToggleStatus,
+  onCopy,
+  copying = false,
   onOpenRemove,
   onOpenSettings,
   onOpenAcceptance,
@@ -585,6 +590,11 @@ export function StudioToolbar({
                   <DropdownMenuItem onClick={onOpenRename}>
                     <span className='whitespace-nowrap'>重命名</span>
                   </DropdownMenuItem>
+                  {onCopy ? (
+                    <DropdownMenuItem disabled={copying} onClick={onCopy}>
+                      <span className='whitespace-nowrap'>{copying ? '复制中…' : '复制场景'}</span>
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem disabled={disabled} onClick={onToggleStatus}>
                     <span className='whitespace-nowrap'>{scenario?.status === 'active' ? '停用' : '启用'}</span>
                   </DropdownMenuItem>

@@ -120,6 +120,7 @@ export { computeIdempotencyDigest } from "./runs/index.js";
 export { computeSnapshotDigest } from "./runs/index.js";
 export { sha256Hex } from "./runs/index.js";
 export const appendScenarioVersion = operation(impl0.appendScenarioVersion);
+export const copyScenario = operation(impl0.copyScenario);
 export const countRunsForScenario = operation(impl0.countRunsForScenario);
 export const countScenariosForTarget = operation(impl0.countScenariosForTarget);
 export const createScenarioWithVersion = operation(

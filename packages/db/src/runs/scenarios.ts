@@ -1,5 +1,5 @@
 import type { ScenarioRow, ScenarioVersionRow } from '../records.js'
-import { atomic, locked, schemaFor } from '../native.js'
+import { atomic, locked, lockedShared, schemaFor } from '../native.js'
 import { and, asc, count, desc, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm'
 import {
   compileScenarioDocument,
@@ -16,6 +16,8 @@ import {
   resolutionCapabilitiesFromPlatform,
   stepsNeedLocatorAiExecute,
   canonicalJson,
+  copyScenarioResponseSchema,
+  scenarioCopyName,
   syncSha256,
   ScenarioValidationError,
   assertRunFromResolved,
@@ -47,6 +49,8 @@ import {
   validateScenarioDefinition,
   type AuthoringStepNode,
   type CompileResult,
+  type CopyScenarioResponse,
+  type ScenarioCopyNotCopied,
   type DeletePreviewResponse,
   type DeleteResourceBody,
   type DeleteResourceResult,
@@ -81,8 +85,15 @@ import {
   computeContractDigest,
   computeImplementationDigest,
 } from '../action-modules/digest.js'
-import { badRequest, conflict, forbidden, isUniqueViolation, mapRestriction, notFound } from './errors.js'
-import { assertTargetPermission, lockConsoleAuthorization, targetScopeFor } from '../console/target-authorization.js'
+import { badRequest, conflict, constraintName, forbidden, isUniqueViolation, mapRestriction, notFound } from './errors.js'
+import {
+  assertTargetPermission,
+  loadAccountGrants,
+  lockConsoleAuthorization,
+  scopeFromGrants,
+  shareConsoleAuthorization,
+  targetScopeFor,
+} from '../console/target-authorization.js'
 import { draftValidationSubject, saveValidationSubjectTx } from './validation.js'
 import { suiteReferenceBlockers, suitesReferencingScenario } from '../suites/suites.js'
 import { cursorFilter, paginateResults } from '../cursor.js'
@@ -880,6 +891,203 @@ export async function createScenarioWithVersion(
   const detail = await getScenario(db, id, input)
   if (!detail.latestVersionId || !detail.latestVersionNo) throw notFound('SCENARIO_VERSION_NOT_FOUND', '新建发布版本不可读取')
   return { ...detail, latestVersionId: detail.latestVersionId, latestVersionNo: detail.latestVersionNo }
+}
+
+/**
+ * 复制为同一目标系统下的独立新场景：草稿与最新发布版本原样带过去（节点 id 不变，不重新编译），
+ * 连同地图绑定、模块引用、报告配置与推送策略。运行事实、调度、套件与批量任务不复制。
+ */
+export async function copyScenario(
+  db: Db,
+  sourceScenarioId: string,
+  input: { actor: AuditActor },
+): Promise<CopyScenarioResponse> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const copied = await db.transaction((tx) => copyScenarioTx(tx as unknown as Db, sourceScenarioId, input.actor))
+      return copyScenarioResponseSchema.parse({ ...(await getScenario(db, copied.id)), notCopied: copied.notCopied })
+    } catch (error) {
+      // 并发复制同一原名会抢到同一序号：整笔重来，下一轮能读到对方已占用的名字
+      if (attempt < 3 && isUniqueViolation(error) && constraintName(error) === 'scenarios_target_name_idx') continue
+      rethrow(error)
+    }
+  }
+}
+
+async function copyScenarioTx(
+  tx: Db,
+  sourceScenarioId: string,
+  actor: AuditActor,
+): Promise<{ id: string; notCopied: ScenarioCopyNotCopied[] }> {
+  const {
+    mapScenarioBindings,
+    scenarioDrafts,
+    scenarioModuleRefs,
+    scenarioOutboundPolicies,
+    scenarioReportDefaults,
+    scenarioValidationSubjects,
+    scenarioVersions,
+    scenarios,
+  } = schemaFor(tx)
+  await shareConsoleAuthorization(tx, actor.id)
+  // 共享锁挡住同时保存草稿或发布，读到的草稿与发布版本是同一时刻的；不挡该场景新建运行
+  const [source] = await lockedShared(
+    tx,
+    tx.select().from(scenarios).where(and(eq(scenarios.id, sourceScenarioId), isNull(scenarios.deletedAt))).limit(1),
+  )
+  if (!source) throw notFound('SCENARIO_NOT_FOUND', '场景不存在')
+  await assertTargetPermission(tx, actor.id, source.targetId, 'workflow:write')
+  if ((source.purpose ?? 'user') !== 'user') throw badRequest('SCENARIO_COPY_UNSUPPORTED', '只能复制普通场景')
+  const target = await loadTargetContext(tx, source.targetId)
+  if (!target.exists) throw notFound('TARGET_NOT_FOUND', '目标系统不存在')
+  if (target.status === 'disabled') throw conflict('TARGET_DISABLED', '目标系统已停用，不能复制场景')
+  const [draft] = await tx.select().from(scenarioDrafts).where(eq(scenarioDrafts.scenarioId, source.id)).limit(1)
+  if (!draft) throw notFound('SCENARIO_NOT_FOUND', '场景草稿不存在')
+  const latest = await latestPublishedVersion(tx, source.id)
+
+  // 已删除场景的名字仍占唯一约束，编号时一并避开
+  const names = await tx.select({ name: scenarios.name }).from(scenarios).where(eq(scenarios.targetId, source.targetId))
+  const name = scenarioCopyName(source.name, names.map((row) => row.name))
+  const id = newId()
+  const versionId = newId()
+  const now = new Date()
+  await tx.insert(scenarios).values({
+    id,
+    targetId: source.targetId,
+    name,
+    status: 'active',
+    purpose: 'user',
+    createdByConsoleAccountId: actor.id,
+    createdAt: now,
+    updatedAt: now,
+  })
+  await tx.insert(scenarioVersions).values({
+    id: versionId,
+    scenarioId: id,
+    versionNo: 1,
+    kind: 'published',
+    definition: latest.definition,
+    compilerVersion: latest.compilerVersion,
+    sourceDigest: latest.sourceDigest,
+    authoringDocument: latest.authoringDocument,
+    moduleManifest: latest.moduleManifest,
+    createdByConsoleAccountId: actor.id,
+    createdAt: now,
+  })
+  await tx.insert(scenarioDrafts).values({
+    scenarioId: id,
+    revision: 1,
+    document: draft.document,
+    updatedByConsoleAccountId: actor.id,
+    updatedAt: now,
+  })
+  // 校验主体只由编排内容决定，与场景 id 无关；验证样本（试跑）不复制，副本从未验证起步
+  const [subject] = await tx
+    .select()
+    .from(scenarioValidationSubjects)
+    .where(eq(scenarioValidationSubjects.scenarioVersionId, latest.id))
+    .limit(1)
+  if (subject) {
+    await tx.insert(scenarioValidationSubjects).values({
+      scenarioVersionId: versionId,
+      protocolVersion: subject.protocolVersion,
+      subjectDigest: subject.subjectDigest,
+      createdAt: now,
+    })
+  }
+  const refs = await tx
+    .select()
+    .from(scenarioModuleRefs)
+    .where(
+      and(
+        eq(scenarioModuleRefs.scenarioId, source.id),
+        or(isNull(scenarioModuleRefs.scenarioVersionId), eq(scenarioModuleRefs.scenarioVersionId, latest.id)),
+      ),
+    )
+  for (const ref of refs) {
+    await tx.insert(scenarioModuleRefs).values({
+      id: newId(),
+      scenarioId: id,
+      scenarioVersionId: ref.scenarioVersionId === null ? null : versionId,
+      invocationId: ref.invocationId,
+      moduleId: ref.moduleId,
+      moduleVersionId: ref.moduleVersionId,
+      createdAt: now,
+    })
+  }
+  const bindings = await tx
+    .select()
+    .from(mapScenarioBindings)
+    .where(
+      and(
+        eq(mapScenarioBindings.scenarioId, source.id),
+        eq(mapScenarioBindings.targetId, source.targetId),
+        eq(mapScenarioBindings.status, 'active'),
+        or(eq(mapScenarioBindings.versionSlot, 'draft'), eq(mapScenarioBindings.versionSlot, latest.id)),
+      ),
+    )
+  for (const row of bindings) {
+    const draftSlot = row.versionSlot === 'draft'
+    await tx.insert(mapScenarioBindings).values({
+      ...row,
+      id: newId(),
+      scenarioId: id,
+      draftRevision: draftSlot ? 1 : null,
+      scenarioVersionId: draftSlot ? null : versionId,
+      versionSlot: draftSlot ? 'draft' : versionId,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  // 推送策略与自动报告各有额外权限门槛，复制不能绕过：缺权限的项不带过去并如实返回
+  const grants = await loadAccountGrants(tx, actor.id)
+  const allows = (permission: string) => {
+    const scope = scopeFromGrants(grants, permission)
+    return scope.all || scope.ids.includes(source.targetId)
+  }
+  const notCopied: ScenarioCopyNotCopied[] = []
+  const [report] = await tx
+    .select()
+    .from(scenarioReportDefaults)
+    .where(eq(scenarioReportDefaults.scenarioId, source.id))
+    .limit(1)
+  if (report) {
+    let outputPolicy = report.outputPolicy
+    if (outputPolicy?.autoGenerateReport && !allows('report:export')) {
+      outputPolicy = { ...outputPolicy, autoGenerateReport: false }
+      notCopied.push({ item: 'auto_report', reason: '缺少报告导出权限，副本未开启自动生成报告' })
+    }
+    await tx.insert(scenarioReportDefaults).values({ scenarioId: id, profileId: report.profileId, revision: 1, outputPolicy })
+  }
+  const [outbound] = await tx
+    .select()
+    .from(scenarioOutboundPolicies)
+    .where(eq(scenarioOutboundPolicies.scenarioId, source.id))
+    .limit(1)
+  if (outbound) {
+    if (outbound.policy.enabled && !allows('run:read')) {
+      notCopied.push({ item: 'outbound_policy', reason: '缺少运行查看权限，副本未复制消息推送设置' })
+    } else {
+      await tx.insert(scenarioOutboundPolicies).values({
+        scenarioId: id,
+        revision: 1,
+        policy: outbound.policy,
+        updatedBy: actor.id,
+        updatedAt: now,
+      })
+    }
+  }
+
+  await recordAudit(
+    tx,
+    actor,
+    'scenario.create',
+    'scenario',
+    id,
+    `复制场景「${source.name}」（草稿 r${draft.revision}，发布版本 ${publishedVersionNo(latest)}）为「${name}」`,
+  )
+  return { id, notCopied }
 }
 
 export async function updateScenarioMeta(

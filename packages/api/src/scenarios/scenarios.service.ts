@@ -5,6 +5,7 @@ import {
   applyDemonstrationImport,
   previewDemonstrationImport,
   createRecordingBinding,
+  copyScenario,
   createScenarioWithVersion,
   createTrialRunFromDraft,
   deleteScenario,
@@ -164,6 +165,14 @@ export class ScenariosService {
         // 新建场景默认带页面接口 / 脚本错误约束（平台开关，默认开；存量场景不回填）。
         ...(await this.pageHealthDefaults()),
       })
+    } catch (error) {
+      rethrowDomain(error)
+    }
+  }
+
+  async copy(id: string, actor: RequestAccount) {
+    try {
+      return await copyScenario(this.db, id, { actor: { id: actor.id } })
     } catch (error) {
       rethrowDomain(error)
     }

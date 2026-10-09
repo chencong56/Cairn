@@ -51,6 +51,7 @@ const mocks = vi.hoisted(() => ({
   fetchTargets: vi.fn(),
   fetchTargetAccounts: vi.fn(),
   fetchScenarioResolutionStats: vi.fn(),
+  copyScenario: vi.fn(),
 }))
 
 const runMocks = vi.hoisted(() => ({
@@ -507,6 +508,27 @@ describe('Scenario Studio', () => {
     await expect
       .element(screen.getByText(/试跑不可用：先保存草稿/))
       .toBeInTheDocument()
+  })
+
+  it('复制场景后直接进入副本', async () => {
+    const COPY_ID = '99999999-9999-4999-8999-999999999999'
+    mocks.copyScenario.mockResolvedValue({ ...detail({ id: COPY_ID, name: '打开商城-copy-1' }), notCopied: [] })
+    const { screen } = await renderPage()
+    await screen.getByRole('button', { name: '更多' }).click()
+    await screen.getByRole('menuitem', { name: '复制场景' }).click()
+    await vi.waitFor(() => expect(mocks.copyScenario).toHaveBeenCalledWith(SCENARIO_ID))
+    await vi.waitFor(() =>
+      expect(router.navigate).toHaveBeenCalledWith({ to: '/scenarios/$scenarioId', params: { scenarioId: COPY_ID } }),
+    )
+  })
+
+  it('有未保存修改时不复制，提示先保存', async () => {
+    const { screen } = await renderPage()
+    await screen.getByLabelText('页面地址').fill('https://shop.example.com/search')
+    await screen.getByRole('button', { name: '更多' }).click()
+    await screen.getByRole('menuitem', { name: '复制场景' }).click()
+    await expect.element(screen.getByRole('button', { name: '保存草稿' })).toBeEnabled()
+    expect(mocks.copyScenario).not.toHaveBeenCalled()
   })
 
   it('空地址只留在字段草稿，保存不会发出请求', async () => {

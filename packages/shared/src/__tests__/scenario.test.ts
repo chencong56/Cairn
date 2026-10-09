@@ -8,6 +8,7 @@ import {
   assertRunFromResolved,
   createScenarioBodySchema,
   requiredRunInputKeys,
+  scenarioCopyName,
   unresolvedRunInputs,
   updateScenarioBodySchema,
   validateScenarioDocument,
@@ -198,6 +199,7 @@ describe('领域码常量', () => {
       'SCENARIO_DRAFT_CONFLICT',
       'SCENARIO_COMPILE_BLOCKED',
       'SCENARIO_VERSION_NOT_PUBLISHED',
+      'SCENARIO_COPY_UNSUPPORTED',
     ])
     expect(RUN_ERROR_CODES).toEqual([
       'RUN_NOT_FOUND',
@@ -286,5 +288,38 @@ describe('createScenarioBodySchema / updateScenarioBodySchema', () => {
         steps: [echo(ids.a, '回显', { input: { value: 1 } })],
       }),
     ).toThrow()
+  })
+})
+
+describe('scenarioCopyName', () => {
+  it('首次复制接 -copy-1，之后按已用最大序号递增', () => {
+    expect(scenarioCopyName('报销流程', ['报销流程'])).toBe('报销流程-copy-1')
+    expect(scenarioCopyName('报销流程', ['报销流程', '报销流程-copy-1', '报销流程-copy-3'])).toBe('报销流程-copy-4')
+  })
+
+  it('复制副本时在原名上续号，不叠加后缀', () => {
+    expect(scenarioCopyName('报销流程-copy-2', ['报销流程', '报销流程-copy-1', '报销流程-copy-2'])).toBe(
+      '报销流程-copy-3',
+    )
+  })
+
+  it('只认同一原名的副本，其他场景的序号不干扰', () => {
+    expect(scenarioCopyName('报销', ['报销流程-copy-7', '报销-copy-x', 'x报销-copy-2'])).toBe('报销-copy-1')
+  })
+
+  it('超长名称截断原名部分，序号与长度上限都守住', () => {
+    const long = '长'.repeat(128)
+    const first = scenarioCopyName(long, [long])
+    expect(first).toBe(`${'长'.repeat(121)}-copy-1`)
+    expect(first.length).toBe(128)
+    expect(scenarioCopyName(long, [long, first])).toBe(`${'长'.repeat(121)}-copy-2`)
+    expect(scenarioCopyName(first, [long, first])).toBe(`${'长'.repeat(121)}-copy-2`)
+    const tenth = `${'长'.repeat(120)}-copy-10`
+    expect(scenarioCopyName(long, [long, tenth])).toBe(`${'长'.repeat(120)}-copy-11`)
+  })
+
+  it('截断不拆开代理对', () => {
+    // 按 UTF-16 直接切到 121 会留下半个 emoji；应整字退掉
+    expect(scenarioCopyName(`${'a'.repeat(120)}😀😀`, [])).toBe(`${'a'.repeat(120)}-copy-1`)
   })
 })

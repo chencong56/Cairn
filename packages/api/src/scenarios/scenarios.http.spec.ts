@@ -76,6 +76,7 @@ function mockService() {
     list: vi.fn(async () => ({ items: [scenario] })),
     get: vi.fn(async () => scenario),
     create: vi.fn(async () => scenario),
+    copy: vi.fn(async () => ({ ...scenario, name: '回显-copy-1', notCopied: [] })),
     update: vi.fn(async () => scenario),
     saveDraft: vi.fn(async () => scenario),
     publish: vi.fn(async () => scenario),
@@ -182,6 +183,22 @@ describe('Scenarios HTTP', () => {
       .send({ targetId: scenario.targetId, name: 'x', steps: scenario.steps })
       .expect(201)
     await request(adminApp.getHttpServer()).post(`/scenarios/${scenario.id}/delete`).expect(200)
+  })
+
+  it('复制需要 workflow:write，成功返回 201，领域码原样透传', async () => {
+    await request(viewerApp.getHttpServer()).post(`/scenarios/${scenario.id}/copy`).expect(403)
+    expect(service.copy).not.toHaveBeenCalled()
+
+    const copied = await request(writerApp.getHttpServer()).post(`/scenarios/${scenario.id}/copy`).expect(201)
+    expect(copied.body).toMatchObject({ name: '回显-copy-1', notCopied: [] })
+    expect(service.copy).toHaveBeenCalledWith(scenario.id, writer)
+
+    service.copy.mockRejectedValueOnce(
+      new BadRequestException({ code: 'SCENARIO_COPY_UNSUPPORTED', message: '只能复制普通场景' }),
+    )
+    const unsupported = await request(writerApp.getHttpServer()).post(`/scenarios/${scenario.id}/copy`).expect(400)
+    expect(unsupported.body.code).toBe('SCENARIO_COPY_UNSUPPORTED')
+    expect(SCENARIO_ERROR_CODES).toContain(unsupported.body.code)
   })
 
   it('领域码 SCENARIO_DISABLED / TARGET_DISABLED / SCENARIO_HAS_RUNS 原样透传', async () => {

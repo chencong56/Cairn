@@ -4,7 +4,7 @@ import { userEvent } from 'vitest/browser'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { RunDetailDto, ScenarioDetailDto, TargetDto } from '@cairn/shared'
 import '@/styles/index.css'
-import { StudioToolbar } from './studio-toolbar'
+import { StudioToolbar, type StudioToolbarProps } from './studio-toolbar'
 import { useAssistantStore } from '@/stores/assistant-store'
 import type { MockLinkProps } from '@/test-utils/router-mocks'
 
@@ -51,7 +51,7 @@ const mockTarget = {
   updatedAt: '2026-09-01T00:00:00Z',
 } as unknown as TargetDto
 
-function renderToolbar(containerWidth = 1000) {
+function renderToolbar(containerWidth = 1000, extra: Partial<StudioToolbarProps> = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -87,6 +87,7 @@ function renderToolbar(containerWidth = 1000) {
           onToggleStatus={() => {}}
           onOpenRemove={() => {}}
           onLeave={() => {}}
+          {...extra}
         />
       </div>
     </QueryClientProvider>
@@ -350,6 +351,27 @@ describe('StudioToolbar 容器响应式与侧边栏自适应', () => {
 
     await importDraftBtn.click()
     expect(onPreviewImportDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('未提供 onCopy 时更多菜单不出现「复制场景」', async () => {
+    const screen = await renderToolbar(1200)
+    await screen.getByRole('button', { name: '更多' }).click()
+    await expect.element(screen.getByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '复制场景' }).elements()).toHaveLength(0)
+  })
+
+  it('更多菜单的「复制场景」触发 onCopy', async () => {
+    const onCopy = vi.fn()
+    const screen = await renderToolbar(1200, { onCopy })
+    await screen.getByRole('button', { name: '更多' }).click()
+    await screen.getByRole('menuitem', { name: '复制场景' }).click()
+    expect(onCopy).toHaveBeenCalledTimes(1)
+  })
+
+  it('复制进行中「复制场景」置灰', async () => {
+    const screen = await renderToolbar(1200, { onCopy: vi.fn(), copying: true })
+    await screen.getByRole('button', { name: '更多' }).click()
+    await expect.element(screen.getByRole('menuitem', { name: '复制中…' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('更多下拉菜单不重复展示顶栏已有的场景配置，导入已有录制项触发 onOpenImport 且无冗余徽章干扰', async () => {

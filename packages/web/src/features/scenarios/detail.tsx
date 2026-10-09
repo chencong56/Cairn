@@ -133,6 +133,7 @@ import { OutcomeListEditor } from '@/features/authoring/outcome-editor'
 import { RuntimeInvariantEditor } from '@/features/authoring/invariant-editor'
 import { fetchPlatformConfig } from '@/lib/platform-config-api'
 import { TrialDialog } from './trial-dialog'
+import { useCopyScenario } from './use-copy-scenario'
 import { TrialResultDialog } from './trial-result-dialog'
 import { StudioScreen } from './studio-screen'
 import { HealingCard } from '@/features/authoring/fields/healing-card'
@@ -249,6 +250,7 @@ export function ScenarioDetailPage() {
     return undefined
   }, [importPlacementParam, importNodeIdParam])
   const navigate = useNavigate()
+  const copyScenarioAction = useCopyScenario()
   const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.auth.user)
   const query = useQuery({
@@ -2194,6 +2196,18 @@ export function ScenarioDetailPage() {
                 )
               })
           }}
+          onCopy={
+            canWrite && scenario?.purpose === 'user'
+              ? () => {
+                  if (draft.dirty || draft.hasFieldDrafts) {
+                    toast.error('先保存草稿再复制')
+                    return
+                  }
+                  void copyScenarioAction.copy(scenarioId, { open: true })
+                }
+              : undefined
+          }
+          copying={copyScenarioAction.copyingId !== null}
           onOpenRemove={() => setRemoving(true)}
           isScenarioView={effectiveInspectorView === 'scenario'}
           onOpenSettings={() => {

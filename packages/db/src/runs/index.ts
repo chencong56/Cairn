@@ -4,6 +4,7 @@ export { loadResolutionLayers, stepsNeedAiExecute } from './resolution-layers.js
 export { computeIdempotencyDigest, computeSnapshotDigest, sha256Hex } from './digest.js'
 export {
   appendScenarioVersion,
+  copyScenario,
   countRunsForScenario,
   countScenariosForTarget,
   createScenarioWithVersion,
