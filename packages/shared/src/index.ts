@@ -2093,7 +2093,7 @@ export {
   type ResolutionUnavailableCode,
   type CompileResolutionContext,
 } from './resolution.js'
-export { canonicalJson } from './canonical.js'
+export { canonicalJson, sha256Hex } from './canonical.js'
 export { diffKnowledgeDocuments } from './business-knowledge.js'
 export { syncSha256, syncSha256Bytes } from './sha256-sync.js'
 export { inspectRecordingImage } from './recording-image.js'
@@ -3117,7 +3117,6 @@ export {
   workerInternalPath,
   workerRunsInternalPath,
   internalCanonicalString,
-  sha256Hex,
   hmacSha256Hex,
   requireInternalSecret,
   INTERNAL_SIGNATURE_HEADERS,

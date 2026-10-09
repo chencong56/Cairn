@@ -636,6 +636,10 @@ export function AssistantPanel({
                                       } else {
                                         toast.error(adopted.reason || '采纳失败')
                                       }
+                                    } catch (error) {
+                                      toast.error(
+                                        `采纳失败：${error instanceof Error ? error.message : String(error)}`,
+                                      )
                                     } finally {
                                       setAdopting(false)
                                     }
@@ -655,14 +659,20 @@ export function AssistantPanel({
                                       )
                                       return
                                     }
-                                    const res = await rollbackHandler(proposal)
-                                    if (res.ok) {
-                                      setLastAdopted(null)
-                                      if (proposal.kind !== 'target_form') {
-                                        toast.success('已撤销本次采纳')
+                                    try {
+                                      const res = await rollbackHandler(proposal)
+                                      if (res.ok) {
+                                        setLastAdopted(null)
+                                        if (proposal.kind !== 'target_form') {
+                                          toast.success('已撤销本次采纳')
+                                        }
+                                      } else {
+                                        toast.error(res.reason || '撤销失败')
                                       }
-                                    } else {
-                                      toast.error(res.reason || '撤销失败')
+                                    } catch (error) {
+                                      toast.error(
+                                        `撤销失败：${error instanceof Error ? error.message : String(error)}`,
+                                      )
                                     }
                                   }
                                 : undefined

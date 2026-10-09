@@ -9,7 +9,12 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react'
-import { canonicalJson, type ActionModuleDetail, type JsonValue } from '@cairn/shared'
+import {
+  canonicalJson,
+  sha256Hex as sharedSha256Hex,
+  type ActionModuleDetail,
+  type JsonValue,
+} from '@cairn/shared'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -49,13 +54,8 @@ interface ActionModuleCasesPanelProps {
   canExecute: boolean
 }
 
-async function sha256Hex(value: unknown): Promise<string> {
-  const json = canonicalJson(value)
-  const encoded = new TextEncoder().encode(json)
-  const hashBuf = await crypto.subtle.digest('SHA-256', encoded)
-  return Array.from(new Uint8Array(hashBuf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
+function sha256Hex(value: unknown): Promise<string> {
+  return sharedSha256Hex(canonicalJson(value))
 }
 
 export function ActionModuleCasesPanel({
