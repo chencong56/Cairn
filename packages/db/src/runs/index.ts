@@ -114,6 +114,32 @@ export {
 } from './outcome-results.js'
 export { settleRunOutput } from './output.js'
 export { readOverviewAnalytics } from './analytics.js'
+export { computeRunDurationFacts, type DurationCalculatorInput, type DurationCalculatorOutput } from './duration-calculator.js'
+export {
+  readRunDuration,
+  readScenarioDurationAnalysis,
+  readScenarioNodeChildren,
+  readScenarioNodeHistory,
+  readSuiteRunDuration,
+  readTargetDurationAnalysis,
+} from './duration-analysis.js'
+export {
+  DURATION_ROLLUP_CALC_VERSION,
+  processDurationRollups,
+  readDurationRollupState,
+  recomputeDurationRollupDay,
+  type DurationRollupState,
+  type DurationRollupTickResult,
+} from './duration-rollup.js'
+export {
+  isComparableRun,
+  readRunDurationFacts,
+  syncRunDurationFacts,
+  type DurationFactsCursor,
+  type RunDurationFactsReadout,
+  type SyncRunDurationFactsInput,
+  type SyncRunDurationFactsResult,
+} from './duration-facts.js'
 export * from './ai-path-learning.js'
 
 export { assertRunDebugOwner } from './debug-owner.js'

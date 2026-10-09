@@ -3,6 +3,8 @@
 # 前置：/data/wp/cairn/cluster/build 为源码目录（由 Mac push-src.sh 增量同步）
 # 产物：/data/wp/cairn/cluster/apps/{api,worker,web}
 # 用法：./build-apps.sh [api|worker|web|all]
+# 网络策略：registry 走 npmmirror 国内源（npmjs 直连慢且易 ETIMEDOUT）；
+#           pnpm store 持久化到宿主 apps/.pnpm-store，预热后后续构建基本零下载。
 set -euo pipefail
 CLUSTER=/data/wp/cairn/cluster
 SRC=$CLUSTER/build
@@ -19,6 +21,9 @@ build_one() {
     -v "$SRC":/repo -w /repo \
     -v "$OUT":/out \
     -e ONNXRUNTIME_NODE_INSTALL=skip \
+    -e COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    -e npm_config_registry=https://registry.npmmirror.com \
+    -e npm_config_store_dir=/out/.pnpm-store \
     node:24-bookworm-slim \
     bash -c "set -e; corepack enable;
       pnpm install --frozen-lockfile --filter $pkg... ;
@@ -36,6 +41,9 @@ build_web() {
   docker run --rm \
     -v "$SRC":/repo -w /repo \
     -v "$OUT":/out \
+    -e COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    -e npm_config_registry=https://registry.npmmirror.com \
+    -e npm_config_store_dir=/out/.pnpm-store \
     node:24-bookworm-slim \
     bash -c "set -e; corepack enable;
       pnpm install --frozen-lockfile --filter @cairn/web...;

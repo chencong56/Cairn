@@ -76,6 +76,7 @@ function subscribeManager() {
   const manager = Object.create(BrowserSessionManager.prototype) as BrowserSessionManager
   Object.assign(manager, {
     dbHandle: {},
+    logger: { log: vi.fn(), warn: vi.fn(), debug: vi.fn() },
     workerInstanceId: 'test-worker',
     options: { workerId: 'test-worker' },
     lives: new Map([[sessionId, live]]),

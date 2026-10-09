@@ -1,13 +1,9 @@
-import { and, eq, isNull, gt, or } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import {
   DEFAULT_OUTBOUND_POLICY,
   canonicalJson,
   hasPermission,
   outboundPolicyWriteSchema,
-  OUTBOUND_WORKER_PROTOCOL,
-  RUN_OUTBOUND_PROTOCOL,
-  MAP_SCHEDULER_PROTOCOL,
-  SUITE_SCHEDULER_PROTOCOL,
   type OutboundChannel,
   type OutboundSmtp,
   type PlatformConfigDocument,
@@ -85,7 +81,6 @@ export async function validateOutboundConfigChangeTx(
       throw badRequest('OUTBOUND_USE_SMTP_API', '邮件配置须通过推送接口登记')
   }
   await lockOutboundDispatch(tx)
-  if (b.enabled) await assertOutboundWriterRollout(tx)
   const { outboundControls: controls } = schemaFor(tx)
   for (const c of b.channels) {
     const [revoked] = await tx
@@ -269,42 +264,6 @@ async function allocateVersion(tx: Db, key: string, current: number) {
   const generation = Math.max(row!.generation, current) + 1
   await tx.update(c).set({ generation }).where(eq(c.key, key))
   return generation
-}
-
-export async function assertOutboundWriterRollout(tx: Db) {
-  const { workers } = schemaFor(tx)
-  const now = await clockNow(tx)
-  const live = await tx
-    .select({ protocols: workers.protocolCapabilities })
-    .from(workers)
-    .where(
-      and(
-        inArrayReady(workers.status),
-        or(isNull(workers.heartbeatExpiresAt), gt(workers.heartbeatExpiresAt, now)),
-      ),
-    )
-  const schedulerOnly = (p: string[]) =>
-    p.length > 0 &&
-    p.every((v) =>
-      [MAP_SCHEDULER_PROTOCOL, SUITE_SCHEDULER_PROTOCOL].includes(
-        v as typeof MAP_SCHEDULER_PROTOCOL,
-      ),
-    )
-  if (
-    live.some(
-      (w) =>
-        !w.protocols.includes(OUTBOUND_WORKER_PROTOCOL) &&
-        !w.protocols.includes(RUN_OUTBOUND_PROTOCOL) &&
-        !schedulerOnly(w.protocols),
-    )
-  )
-    throw conflict(
-      'OUTBOUND_ROLLOUT_REQUIRED',
-      '仍有旧版 Worker 在线，请完成停写升级后启用推送',
-    )
-}
-function inArrayReady(column: typeof import('../schema/worker.js').workers.status) {
-  return or(eq(column, 'READY'), eq(column, 'DRAINING'))
 }
 
 export async function readOutboundPolicy(db: Db, scenarioId: string, actorId: string) {

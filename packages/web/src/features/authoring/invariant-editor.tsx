@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { newUuid } from '@/lib/uuid'
 import {
-  RUNTIME_INVARIANT_KINDS,
+  ADDABLE_RUNTIME_INVARIANT_KINDS,
   createRuntimeInvariant,
+  isRetiredRuntimeInvariantKind,
   type OutcomeOnViolation,
   type OutcomeSeverity,
   type RuntimeInvariant,
@@ -65,7 +66,7 @@ export function RuntimeInvariantEditor({
             <SelectValue placeholder='添加约束' />
           </SelectTrigger>
           <SelectContent>
-            {RUNTIME_INVARIANT_KINDS.map((kind) => (
+            {ADDABLE_RUNTIME_INVARIANT_KINDS.map((kind) => (
               <SelectItem key={kind} value={kind}>
                 {KIND_LABELS[kind]}
               </SelectItem>
@@ -75,7 +76,7 @@ export function RuntimeInvariantEditor({
       </div>
       {invariants.length === 0 ? (
         <p className='text-small text-muted-foreground'>
-          约束检查整个运行期间不能被破坏的事，例如不得离开允许范围、登录保持有效。
+          约束检查整个运行期间不能被破坏的事，例如登录保持有效、页面接口不得报错。
         </p>
       ) : (
         <ul className='space-y-3'>
@@ -144,9 +145,14 @@ function InvariantCard({
         disabled={disabled}
         onChange={(event) => onChange({ ...invariant, meaning: event.target.value })}
       />
-      {invariant.kind === 'navigation_boundary' || invariant.kind === 'auth_validity' ? (
+      {isRetiredRuntimeInvariantKind(invariant.kind) ? (
+        <p className='text-label text-warning'>
+          已停用：目标系统的访问范围已移除，运行时不再检查这条约束，也不会写进运行结果。请删除它。
+        </p>
+      ) : null}
+      {invariant.kind === 'auth_validity' ? (
         <p className='text-label text-muted-foreground'>
-          越界导航和登录失效仍按原规则拦截或恢复；这里只决定如何记入业务结论。
+          登录失效仍按原规则恢复；这里只决定如何记入业务结论。
         </p>
       ) : null}
       {invariant.kind === 'readonly_guarantee' ? (

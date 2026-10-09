@@ -2,21 +2,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { parseDemonstrationFile } from '@cairn/authoring'
 import {
-  AI_ATOMIC_ACTIONS_PROTOCOL,
-  IMPORTED_OUTCOME_PROTOCOL,
-  OUTCOME_MANIFEST_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   DEMONSTRATION_PROTOCOL,
   normalizeAuthoringDocument,
-  parseWorkerRoles,
-  protocolCapabilitiesForRoles,
   stepRunFor,
   walkAuthoringNodes,
   syncSha256Bytes,
   type AiExecutionConfig,
   type ApplyDemonstrationBody,
   type DemonstrationSource,
-  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import type { DbHandle } from '../client.js'
@@ -40,7 +34,7 @@ import {
   settleRecordingArtifactCleanup,
   readRecordingArtifact,
 } from '../recordings/artifacts.js'
-import { assertDemonstrationExecutorRolloutTx, getScenarioValidation } from '../runs/validation.js'
+import { getScenarioValidation } from '../runs/validation.js'
 import {
   createRunWithSnapshot,
   finishAttempt,
@@ -400,145 +394,102 @@ describe.each(DRIVERS)(
       ).toHaveLength(1)
     })
 
-    it.each(['aiAtomicActionsProtocol', 'importedOutcomeProtocol'] as const)(
-      'rejects an old live executor and filters missing capability: %s',
-      async (field) => {
-        const current = await scenario()
-        const recording = await upload(source())
-        const request = {
-          protocolVersion: DEMONSTRATION_PROTOCOL,
-          recordingDraftId: recording.recordingDraftId,
-          baseRevision: current.draft!.revision,
-          placement: { kind: 'start' as const },
-        }
-        const preview = await previewDemonstrationImport(handle.db, current.id, request, actorId)
-        const applied = await applyDemonstrationImport(
-          handle.db,
-          current.id,
-          {
-            ...request,
-            idempotencyKey: newId(),
-            factDigest: preview.factDigest,
-            suggestionDigest: preview.suggestionDigest,
-            adapterVersion: preview.adapterVersion,
-            ruleVersion: preview.ruleVersion,
-            decisions: preview.suggestions.map((s) => ({ id: s.id, disposition: 'accept' })),
-          },
-          actor(),
-        )
-        await publishScenarioDraft(handle.db, current.id, {
-          revision: applied.scenario.draft!.revision,
-          actor: actor(),
-        })
-        const aiExecution: AiExecutionConfig = {
-          adapter: 'midscene',
-          adapterVersion: '1',
-          sdkVersion: '1.12.6',
-          routeId: 'browser-default',
-          configVersion: '1',
-          modelBaseUrl: 'https://example.test/v1',
-          modelName: 'offline-fixture',
-          modelFamily: 'qwen3-vl',
-          promptVersion: '1',
-          policyVersion: '1',
-          maxCalls: 5,
-          maxOutputTokens: 256,
-          requestTimeoutMs: 5000,
-          hangWaitMs: 50,
-        }
-        const created = await createRunWithSnapshot(handle.db, {
-          scenarioId: current.id,
-          actor: actor(),
-          aiExecution,
-        })
-        const capability =
-          field === 'aiAtomicActionsProtocol'
-            ? AI_ATOMIC_ACTIONS_PROTOCOL
-            : IMPORTED_OUTCOME_PROTOCOL
-        const snapshot = created.detail.snapshot
-        expect(snapshot.aiAtomicActionsProtocol).toBe(AI_ATOMIC_ACTIONS_PROTOCOL)
-        expect(snapshot.importedOutcomeProtocol).toBe(IMPORTED_OUTCOME_PROTOCOL)
-        const protocols = [
-          LOCATOR_RESOLUTION_PROTOCOL,
-          SESSION_OCCUPANCY_PROTOCOL,
-          OUTCOME_MANIFEST_PROTOCOL,
-          AI_ATOMIC_ACTIONS_PROTOCOL,
-          IMPORTED_OUTCOME_PROTOCOL,
-        ]
-        const old = {
-          workerId: `di-old-${newId()}`,
-          instanceId: newId(),
-          capacity: 1,
-          lostAfterSeconds: 60,
-          protocolCapabilities: protocols.filter((p) => p !== capability),
-        }
-        // 分角色的调度/分析/维护节点不领 Run，不应被当作旧执行节点拦截。
-        const roleWorkers = (['scheduler', 'analyst', 'maintenance'] as const).map((role) => ({
-          workerId: `di-${role}-${newId()}`,
-          instanceId: newId(),
-          capacity: 1,
-          lostAfterSeconds: 60,
-          protocolCapabilities: protocolCapabilitiesForRoles(parseWorkerRoles(role)),
-        }))
-        for (const worker of roleWorkers) await registerWorker(handle.db, worker)
-        await assertDemonstrationExecutorRolloutTx(handle.db, snapshot)
-        await registerWorker(handle.db, old)
-        await expect(
-          assertDemonstrationExecutorRolloutTx(handle.db, snapshot),
-        ).rejects.toMatchObject({
-          code: 'DEMONSTRATION_EXECUTOR_UPGRADE_REQUIRED',
-          details: { workers: [{ workerId: old.workerId, missing: [capability] }] },
-        })
-        await expect(
-          createRunWithSnapshot(handle.db, { scenarioId: current.id, actor: actor(), aiExecution }),
-        ).rejects.toMatchObject({ code: 'DEMONSTRATION_EXECUTOR_UPGRADE_REQUIRED' })
-        expect(await claimRun(handle, { ...old, leaseTtlSeconds: 60 })).toBeNull()
-        await markWorkerStopped(handle.db, old.workerId, old.instanceId)
-        for (const worker of roleWorkers)
-          await markWorkerStopped(handle.db, worker.workerId, worker.instanceId)
-        const upgraded = {
-          ...old,
-          workerId: `di-new-${newId()}`,
-          instanceId: newId(),
-          protocolCapabilities: protocols,
-        }
-        await registerWorker(handle.db, upgraded)
-        await assertDemonstrationExecutorRolloutTx(handle.db, snapshot)
-        const grant = await claimRun(handle, { ...upgraded, leaseTtlSeconds: 60 })
-        expect(grant?.runId).toBe(created.detail.id)
-        const contract = snapshot.outcomeManifest!.entries.find(
-          (entry) => entry.provenance === 'imported',
-        )!
-        const stepRun = stepRunFor(created.detail.stepRuns, contract.stepId)!
-        const attempt = await startAttempt(handle.db, {
-          runId: created.detail.id,
-          stepRunId: stepRun.id,
-          grant: grant!,
-          inputPayload: {},
-        })
-        const { rule: _rule, stepId: _stepId, ...result } = contract
-        await finishAttempt(handle.db, {
-          runId: created.detail.id,
-          attemptId: attempt!.attemptId,
-          attemptStatus: 'SUCCEEDED',
-          stepRunStatus: 'SUCCEEDED',
-          output: { passed: true },
-          grant: grant!,
-          outcomeResults: [
-            { ...result, verdict: 'PASS', expected: true, actual: true, evaluatedAt: new Date() },
-          ],
-        })
-        const tables = schemaFor(handle.db)
-        expect(
-          await handle.db
-            .select()
-            .from(tables.outcomeResults)
-            .where(eq(tables.outcomeResults.attemptId, attempt!.attemptId)),
-        ).toEqual([expect.objectContaining({ provenance: 'imported', verdict: 'PASS' })])
-        await markRunCancelled(handle.db, created.detail.id, { grant: grant! })
-        await markWorkerStopped(handle.db, upgraded.workerId, upgraded.instanceId)
-      },
-    )
+    it('锁步部署：带原子 AI 操作与导入成功条件的运行不写协议标记，只声明会话占用的执行节点就能领取', async () => {
+      const current = await scenario()
+      const recording = await upload(source())
+      const request = {
+        protocolVersion: DEMONSTRATION_PROTOCOL,
+        recordingDraftId: recording.recordingDraftId,
+        baseRevision: current.draft!.revision,
+        placement: { kind: 'start' as const },
+      }
+      const preview = await previewDemonstrationImport(handle.db, current.id, request, actorId)
+      const applied = await applyDemonstrationImport(
+        handle.db,
+        current.id,
+        {
+          ...request,
+          idempotencyKey: newId(),
+          factDigest: preview.factDigest,
+          suggestionDigest: preview.suggestionDigest,
+          adapterVersion: preview.adapterVersion,
+          ruleVersion: preview.ruleVersion,
+          decisions: preview.suggestions.map((s) => ({ id: s.id, disposition: 'accept' })),
+        },
+        actor(),
+      )
+      await publishScenarioDraft(handle.db, current.id, {
+        revision: applied.scenario.draft!.revision,
+        actor: actor(),
+      })
+      const aiExecution: AiExecutionConfig = {
+        adapter: 'midscene',
+        adapterVersion: '1',
+        sdkVersion: '1.12.6',
+        routeId: 'browser-default',
+        configVersion: '1',
+        modelBaseUrl: 'https://example.test/v1',
+        modelName: 'offline-fixture',
+        modelFamily: 'qwen3-vl',
+        promptVersion: '1',
+        policyVersion: '1',
+        maxCalls: 5,
+        maxOutputTokens: 256,
+        requestTimeoutMs: 5000,
+        hangWaitMs: 50,
+      }
+      const created = await createRunWithSnapshot(handle.db, {
+        scenarioId: current.id,
+        actor: actor(),
+        aiExecution,
+      })
+      const snapshot = created.detail.snapshot
+      // 锁步部署：不再写执行协议标记，也不再拦「旧执行节点」
+      expect(snapshot.aiAtomicActionsProtocol).toBeUndefined()
+      expect(snapshot.importedOutcomeProtocol).toBeUndefined()
+      expect(snapshot.outcomeManifest!.entries.some((entry) => entry.provenance === 'imported')).toBe(true)
+      const executor = {
+        workerId: `di-executor-${newId()}`,
+        instanceId: newId(),
+        capacity: 1,
+        lostAfterSeconds: 60,
+        protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      }
+      await registerWorker(handle.db, executor)
+      const grant = await claimRun(handle, { ...executor, leaseTtlSeconds: 60 })
+      expect(grant?.runId).toBe(created.detail.id)
+      const contract = snapshot.outcomeManifest!.entries.find(
+        (entry) => entry.provenance === 'imported',
+      )!
+      const stepRun = stepRunFor(created.detail.stepRuns, contract.stepId)!
+      const attempt = await startAttempt(handle.db, {
+        runId: created.detail.id,
+        stepRunId: stepRun.id,
+        grant: grant!,
+        inputPayload: {},
+      })
+      const { rule: _rule, stepId: _stepId, ...result } = contract
+      await finishAttempt(handle.db, {
+        runId: created.detail.id,
+        attemptId: attempt!.attemptId,
+        attemptStatus: 'SUCCEEDED',
+        stepRunStatus: 'SUCCEEDED',
+        output: { passed: true },
+        grant: grant!,
+        outcomeResults: [
+          { ...result, verdict: 'PASS', expected: true, actual: true, evaluatedAt: new Date() },
+        ],
+      })
+      const tables = schemaFor(handle.db)
+      expect(
+        await handle.db
+          .select()
+          .from(tables.outcomeResults)
+          .where(eq(tables.outcomeResults.attemptId, attempt!.attemptId)),
+      ).toEqual([expect.objectContaining({ provenance: 'imported', verdict: 'PASS' })])
+      await markRunCancelled(handle.db, created.detail.id, { grant: grant! })
+      await markWorkerStopped(handle.db, executor.workerId, executor.instanceId)
+    })
 
     it('transfers immutable facts, available artifacts, receipts and trial validation associations', async () => {
       const original = handle as Awaited<ReturnType<typeof openContractDb>>

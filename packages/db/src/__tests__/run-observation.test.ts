@@ -14,6 +14,7 @@ import {
   loadRunObservation,
   loadRunObservationProgress,
   purgeExpiredRunEvents,
+  syncRunDurationFacts,
   requestRunCancel,
   resetChangeHintPublisher,
   reviewRun,
@@ -236,6 +237,24 @@ describe.each(DRIVERS)('%s 运行观察账本', { timeout: 30_000 }, (driver) =>
     expect(published.at(-1)).toBe(events.at(-1)?.sequence)
   })
 
+  it('认证等待进出的状态事件只记账，不唤醒执行面运行控制；其他状态事件照旧唤醒', async () => {
+    const created = await seedRun()
+    const hints: Array<boolean | undefined> = []
+    setChangeHintPublisher((hint) => {
+      hints.push(hint.runControlChanged)
+    })
+    await appendRunEvents(handle.db, created.detail.id, [
+      { type: 'run.status_changed', payload: { status: 'WAITING_FOR_AUTH' } },
+      { type: 'run.auth_wait', payload: { status: 'WAITING_FOR_AUTH' } },
+    ])
+    await appendRunEvents(handle.db, created.detail.id, [
+      { type: 'run.status_changed', payload: { status: 'RECOVERING', reason: 'auth_resumed' } },
+    ])
+    await appendRunEvents(handle.db, created.detail.id, [{ type: 'run.status_changed', payload: { status: 'RECOVERING' } }])
+    await appendRunEvents(handle.db, created.detail.id, [{ type: 'run.status_changed', payload: { status: 'RUNNING' } }])
+    expect(hints).toEqual([false, false, true, true])
+  })
+
   it('进行中的 Run 不会被保留清理删事件', async () => {
     const created = await seedRun()
     const { runEvents } = schemaFor(handle.db)
@@ -247,17 +266,20 @@ describe.each(DRIVERS)('%s 运行观察账本', { timeout: 30_000 }, (driver) =>
     expect(await listRunEventsAfter(handle.db, created.detail.id, 0, 20)).toHaveLength(1)
   })
 
-  it('已终态且证据非 PENDING 的过期前缀可删，高水位保留', async () => {
+  it('已终态、证据非 PENDING 且耗时事实已落库的过期前缀可删，高水位保留', async () => {
     const created = await seedRun()
     const { runEvents, runs } = schemaFor(handle.db)
     await handle.db
       .update(runs)
-      .set({ status: 'SUCCEEDED', evidenceStatus: 'COMPLETE' })
+      .set({ status: 'SUCCEEDED', evidenceStatus: 'COMPLETE', finishedAt: new Date() })
       .where(eq(runs.id, created.detail.id))
     await handle.db
       .update(runEvents)
       .set({ occurredAt: new Date('2000-01-01T00:00:00.000Z') })
       .where(eq(runEvents.runId, created.detail.id))
+    // 耗时事实从事件重建，落库前不清理
+    expect(await purgeExpiredRunEvents(handle.db, 7)).toBe(0)
+    await syncRunDurationFacts(handle.db, { catchUp: { before: null } })
     expect(await purgeExpiredRunEvents(handle.db, 7)).toBe(1)
     expect(await listRunEventsAfter(handle.db, created.detail.id, 0, 20)).toHaveLength(0)
     const observation = await loadRunObservation(handle.db, created.detail.id)

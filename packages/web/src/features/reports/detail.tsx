@@ -11,6 +11,10 @@ import { Main } from '@/components/layout/main'
 import { PageHeader } from '@/components/layout/page-header'
 import { PageSkeleton } from '@/components/page-skeleton'
 import { QueryErrorState } from '@/components/query-error-state'
+import { durationPeriodReportOf } from '@cairn/shared'
+import { DurationPeriodReportView } from '@/features/duration-analysis/report-view'
+import { consoleSearchOf } from '@/features/duration-analysis/search'
+import { DurationReportActions } from './duration-report-actions'
 import { ReportPanel } from './panel'
 import { SuiteReportView } from './suite-report-view'
 
@@ -32,6 +36,8 @@ export function ReportDetailPage() {
     enabled: Boolean(reportId && currentRevisionId),
   })
 
+  const durationReport = revisionDetail.data?.document ? durationPeriodReportOf(revisionDetail.data.document) : null
+  const isDuration = report.data?.subject.kind === 'DURATION_PERIOD'
   const [sharing, setSharing] = useState(false)
   const [copied, setCopied] = useState(false)
 
@@ -58,8 +64,8 @@ export function ReportDetailPage() {
   return (
     <Main className='flex min-w-0 flex-1 flex-col gap-6'>
       <PageHeader
-        title='运行报告'
-        description='查看固定修订、导出进度和交付文件。'
+        title={isDuration ? '耗时报告' : '运行报告'}
+        description={isDuration ? '周期耗时报告：生成时封存的快照，可导出 HTML 或按最新数据生成新修订。' : '查看固定修订、导出进度和交付文件。'}
         parent={
           <Link
             to='/runs'
@@ -77,6 +83,22 @@ export function ReportDetailPage() {
           title='报告已删除或不可访问'
           onRetry={() => void report.refetch()}
         />
+      ) : report.data.subject.kind === 'DURATION_PERIOD' ? (
+        <>
+          {durationReport ? (
+            <DurationPeriodReportView report={durationReport} />
+          ) : revisionDetail.isPending ? (
+            <PageSkeleton />
+          ) : (
+            <p className='text-body text-muted-foreground'>
+              报告内容暂不可用。
+              <Link className='ml-1 text-link' to='/duration-analysis' search={consoleSearchOf(report.data.subject)}>
+                在耗时分析中查看
+              </Link>
+            </p>
+          )}
+          <DurationReportActions report={report.data} />
+        </>
       ) : (
         <>
           <div className='flex items-center justify-between gap-4'>

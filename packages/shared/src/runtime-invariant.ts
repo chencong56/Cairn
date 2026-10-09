@@ -27,6 +27,21 @@ export const RUNTIME_INVARIANT_KINDS = [
 export type RuntimeInvariantKind = (typeof RUNTIME_INVARIANT_KINDS)[number]
 export const runtimeInvariantKindSchema = z.enum(RUNTIME_INVARIANT_KINDS)
 
+/**
+ * 已停用的约束种类：保留在枚举里只为旧草稿 / 旧快照还能解析。
+ * navigation_boundary 依赖的目标访问范围已于 2026-10-06 移除（迁移 0147），Worker 不再拦截越界导航，
+ * 再编进快照只会得到一条永远通过的假保证，所以编译时剔除、编辑器不再提供。
+ */
+export const RETIRED_RUNTIME_INVARIANT_KINDS: readonly RuntimeInvariantKind[] = ['navigation_boundary']
+
+export const ADDABLE_RUNTIME_INVARIANT_KINDS: readonly RuntimeInvariantKind[] = RUNTIME_INVARIANT_KINDS.filter(
+  (kind) => !RETIRED_RUNTIME_INVARIANT_KINDS.includes(kind),
+)
+
+export function isRetiredRuntimeInvariantKind(kind: RuntimeInvariantKind): boolean {
+  return RETIRED_RUNTIME_INVARIANT_KINDS.includes(kind)
+}
+
 export const RUNTIME_INVARIANT_EVALUATE_ATS = [
   'step_boundary',
   'before_side_effect',

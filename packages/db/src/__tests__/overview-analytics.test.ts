@@ -6,6 +6,7 @@ import {
   createRunWithSnapshot,
   createScenarioWithVersion,
   readOverviewAnalytics,
+  writeRunWithSnapshot,
   schemaFor,
   clockNow,
   newId,
@@ -155,6 +156,26 @@ describe.each(DRIVERS)('%s 总览多维分析聚合', { timeout: 30_000 }, (driv
     const troubledA = res.troubledScenarios.find((s) => s.scenarioId === scenarioA.id)
     expect(troubledA).toBeDefined()
     expect(troubledA?.failCount).toBeGreaterThanOrEqual(1)
+  })
+
+  it('触发来源按发起方互斥计数，场景集成员单独计数且与发起方重叠', async () => {
+    const triggerTarget = newId()
+    const { targets, runs } = schemaFor(handle.db)
+    await handle.db.insert(targets).values({ id: triggerTarget, code: `trigger-${triggerTarget.slice(0, 8)}`, name: '发起方目标', entryUrl: 'https://trigger.example' })
+    const scenario = await createScenarioWithVersion(handle.db, {
+      targetId: triggerTarget,
+      name: `发起方场景-${triggerTarget.slice(0, 6)}`,
+      steps: [testStep],
+      actor: { id: actorId },
+    })
+    // 调度准入的运行，操作者同样是控制台账号——以前会被算成手动
+    await createRunWithSnapshot(handle.db, { scenarioId: scenario.id, scenarioVersionId: scenario.latestVersionId, actor: { id: actorId } })
+    await writeRunWithSnapshot(handle.db, { scenarioId: scenario.id, scenarioVersionId: scenario.latestVersionId, actor: { kind: 'console', id: actorId }, triggerSource: 'schedule' })
+    const member = await writeRunWithSnapshot(handle.db, { scenarioId: scenario.id, scenarioVersionId: scenario.latestVersionId, actor: { kind: 'console', id: actorId }, triggerSource: 'schedule' })
+    await handle.db.update(runs).set({ executionOrigin: 'suite_member' }).where(eq(runs.id, member.runId))
+
+    const res = await readOverviewAnalytics(handle.db, { range: '24h', targetId: triggerTarget }, fleetScope)
+    expect(res.triggers).toEqual({ manual: 1, schedule: 2, serviceApi: 0, suiteMember: 1 })
   })
 
   it('省略 targetId 时只聚合 target:read 与 run:read 的交集', async () => {

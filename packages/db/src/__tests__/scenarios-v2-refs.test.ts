@@ -3,9 +3,7 @@ import { schemaFor } from '../native.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { and, eq, isNull } from 'drizzle-orm'
 import {
-  MODULE_MANIFEST_PROTOCOL,
   LOCATOR_RESOLUTION_PROTOCOL,
-  OUTCOME_MANIFEST_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   ALL_WORKER_ROLES,
   protocolCapabilitiesForRoles,
@@ -269,7 +267,14 @@ describe.each(DRIVERS)('%s 场景 V2 动作模块引用与展开（集成）', {
     ).rejects.toThrow()
   })
 
-  it('创建 Run 带 moduleManifest，协议闸门拦截无协议能力 Worker', async () => {
+  /** 本文件其它用例留下的排队运行，领取时排除，确保拿到的是要验证的那一条。 */
+  async function otherRunIds(keep: string): Promise<string[]> {
+    const { runs } = schemaFor(handle.db)
+    const rows = await handle.db.select({ id: runs.id }).from(runs)
+    return rows.map((row) => row.id).filter((id) => id !== keep)
+  }
+
+  it('锁步部署：带 moduleManifest 的 Run 只声明会话占用的执行节点就能领取', async () => {
     const assertStepId = newId()
     const moduleContent: ModuleContent = {
       contract: {
@@ -365,48 +370,26 @@ describe.each(DRIVERS)('%s 场景 V2 动作模块引用与展开（集成）', {
     })
     expect(runResult.detail.snapshot.moduleManifest?.entries).toHaveLength(1)
 
-    // 注册 Worker A：仅具备 SESSION_OCCUPANCY_PROTOCOL，缺少 MODULE_MANIFEST_PROTOCOL
-    const workerAId = newId()
-    const instAId = newId()
+    const workerId = newId()
+    const instanceId = newId()
     await registerWorker(handle.db, {
-      workerId: workerAId,
-      instanceId: instAId,
+      workerId,
+      instanceId,
       capacity: 2,
       maxSessions: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
+      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
     })
-
-    // 注册 Worker B：具备 MODULE_MANIFEST_PROTOCOL
-    const workerBId = newId()
-    const instBId = newId()
-    await registerWorker(handle.db, {
-      workerId: workerBId,
-      instanceId: instBId,
-      capacity: 2,
-      maxSessions: 2,
-      lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, MODULE_MANIFEST_PROTOCOL, OUTCOME_MANIFEST_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
-    })
-
-    // Worker A 领不到带有 moduleManifest 的 Run
-    const claimA = await claimRun(handle, {
-      workerId: workerAId,
-      instanceId: instAId,
+    const claim = await claimRun(handle, {
+      workerId,
+      instanceId,
       leaseTtlSeconds: 30,
+      excludeRunIds: await otherRunIds(runResult.detail.id),
     })
-    expect(claimA).toBeNull()
-
-    // Worker B 成功领走该 Run
-    const claimB = await claimRun(handle, {
-      workerId: workerBId,
-      instanceId: instBId,
-      leaseTtlSeconds: 30,
-    })
-    expect(claimB?.runId).toBe(runResult.detail.id)
+    expect(claim?.runId).toBe(runResult.detail.id)
   })
 
-  it('新版定位快照只交给声明了 v2 定位协议的 Worker', async () => {
+  it('新版定位快照照常写定位协议，任一执行节点都能领取', async () => {
     const scenario = await createScenarioWithVersion(handle.db, {
       targetId,
       name: '定位协议闸门场景',
@@ -424,37 +407,21 @@ describe.each(DRIVERS)('%s 场景 V2 动作模块引用与展开（集成）', {
     })
     expect(run.detail.snapshot.resolution?.protocol).toBe(LOCATOR_RESOLUTION_PROTOCOL)
 
-    const capabilities = protocolCapabilitiesForRoles(ALL_WORKER_ROLES)
-    const oldWorkerId = newId()
-    const oldInstanceId = newId()
+    const workerId = newId()
+    const instanceId = newId()
     await registerWorker(handle.db, {
-      workerId: oldWorkerId,
-      instanceId: oldInstanceId,
+      workerId,
+      instanceId,
       capacity: 1,
       maxSessions: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: capabilities.filter((protocol) => protocol !== LOCATOR_RESOLUTION_PROTOCOL),
-    })
-    expect(await claimRun(handle, {
-      workerId: oldWorkerId,
-      instanceId: oldInstanceId,
-      leaseTtlSeconds: 30,
-    })).toBeNull()
-
-    const newWorkerId = newId()
-    const newInstanceId = newId()
-    await registerWorker(handle.db, {
-      workerId: newWorkerId,
-      instanceId: newInstanceId,
-      capacity: 1,
-      maxSessions: 1,
-      lostAfterSeconds: 60,
-      protocolCapabilities: capabilities,
+      protocolCapabilities: protocolCapabilitiesForRoles(ALL_WORKER_ROLES),
     })
     expect((await claimRun(handle, {
-      workerId: newWorkerId,
-      instanceId: newInstanceId,
+      workerId,
+      instanceId,
       leaseTtlSeconds: 30,
+      excludeRunIds: await otherRunIds(run.detail.id),
     }))?.runId).toBe(run.detail.id)
   })
 

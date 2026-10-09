@@ -30,6 +30,7 @@ import { fetchReports, fetchReportRevision } from '@/lib/reports-api'
 import { fetchTarget, fetchTargetAccounts } from '@/lib/targets-api'
 import { useCan } from '@/hooks/use-permissions'
 import { useBreadcrumb } from '@/stores/breadcrumb-store'
+import { SuiteRunDurationCard } from './suite-run-duration-card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -420,6 +421,8 @@ export function SuiteRunDetailPage() {
                   </p>
                 </div>
               </section>
+
+              {isTerminal ? <SuiteRunDurationCard suiteRunId={run.id} suiteId={run.suiteId} targetId={run.targetId} /> : null}
 
               {/* Inline Notice */}
               <div className='flex items-center gap-2 rounded-lg border border-border-default/60 bg-muted/30 px-3.5 py-2.5 text-label text-muted-foreground'>

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it } from 'vitest'
 import { createRuntimeInvariant, type RuntimeInvariant } from '@cairn/shared'
-import { PageHealthCollector, PAGE_HEALTH_GAP_MS } from './page-health-collector.js'
+import { PageHealthCollector, PAGE_HEALTH_GAP_MS, pageHealthKnownOrigins } from './page-health-collector.js'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
@@ -121,6 +121,38 @@ describe('PageHealthCollector', () => {
     expect(drained.script).toBeUndefined()
     collector.dispose()
     expect(context.listenerCount('response')).toBe(0)
+  })
+})
+
+describe('pageHealthKnownOrigins', () => {
+  const targetAuth = {
+    entryUrl: 'https://erp.example-a.com/home',
+    loginUrl: 'https://sso.example-b.com/login',
+    authMethod: 'NONE',
+    captchaMode: 'NONE',
+    loginFields: {},
+  } as never
+
+  it('入口与登录页一开始就算系统地址，不依赖快照里已不再写入的 allowedOrigins', () => {
+    expect(pageHealthKnownOrigins({ targetAuth }).sort()).toEqual(['https://erp.example-a.com', 'https://sso.example-b.com'])
+    expect(pageHealthKnownOrigins({ allowedOrigins: ['https://old.example-c.com'], loginOrigin: 'https://sso.example-b.com' }).sort()).toEqual([
+      'https://old.example-c.com',
+      'https://sso.example-b.com',
+    ])
+  })
+
+  it('复用会话、本次没有整页跳转时，入口系统的接口错误也计入', () => {
+    const context = new EventEmitter()
+    const collector = new PageHealthCollector(context, {
+      invariants: [createRuntimeInvariant('network_health', id(1))],
+      knownOrigins: pageHealthKnownOrigins({ targetAuth }),
+    })
+    collector.attach()
+    collector.beginStep({ stepId: 's' })
+    const request = req('https://erp.example-a.com/api/orders')
+    context.emit('request', request)
+    context.emit('response', resp(request, 500))
+    expect(collector.drain().network?.samples.map((sample) => sample.url)).toEqual(['https://erp.example-a.com/api/orders'])
   })
 })
 

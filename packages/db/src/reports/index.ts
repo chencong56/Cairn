@@ -36,3 +36,12 @@ export { deriveMemberReport, previewMemberReport, createReportBundle, getReportB
 export { generateDueReports, generateDueSuiteReports } from './automatic.js'
 export { listReportRevisions, listReportExportJobs, getReportSourceOptions, reserveReportLogo } from './queries.js'
 export { recordReportDownload } from './queries.js'
+export {
+  createDurationReportSubscription,
+  deleteDurationReportSubscription,
+  listDurationReportSubscriptions,
+  previewDurationReportSubscription,
+  processDurationReportSubscriptions,
+  updateDurationReportSubscription,
+  type DurationReportTickResult,
+} from './duration-subscriptions.js'

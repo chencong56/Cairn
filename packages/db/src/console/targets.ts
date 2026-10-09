@@ -1,5 +1,6 @@
 import type { Target, TargetAccount } from '../records.js'
 import { schemaFor, locked } from '../native.js'
+import { markDurationRollupDirty } from '../runs/duration-rollup.js'
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm'
 import {
   consoleAuditEvents,
@@ -682,7 +683,7 @@ export class TargetsStore {
         if (current.deletedAt) return
 
         const targetRunRows = await tx
-          .select({ id: runs.id, status: runs.status })
+          .select({ id: runs.id, status: runs.status, scenarioId: runs.scenarioId, finishedAt: runs.finishedAt })
           .from(runs)
           .where(and(eq(runs.targetId, id), isNull(runs.deletedAt)))
 
@@ -821,6 +822,8 @@ export class TargetsStore {
             .update(runs)
             .set({ deletedAt: now, deletedBy, updatedAt: now })
             .where(and(eq(runs.targetId, id), isNull(runs.deletedAt)))
+          // 已删除运行不计入耗时汇总：同事务登记需要重算的天
+          await markDurationRollupDirty(tx as unknown as Db, targetRunRows)
         }
 
         if (runIds.length > 0) {

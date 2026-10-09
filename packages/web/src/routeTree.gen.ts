@@ -25,6 +25,7 @@ import { Route as AuthenticatedAuditOperationsRouteImport } from './routes/_auth
 import { Route as AuthenticatedBatchesIndexRouteImport } from './routes/_authenticated/batches/index'
 import { Route as AuthenticatedCredentialsIndexRouteImport } from './routes/_authenticated/credentials/index'
 import { Route as AuthenticatedDatasetsIndexRouteImport } from './routes/_authenticated/datasets/index'
+import { Route as AuthenticatedDurationAnalysisIndexRouteImport } from './routes/_authenticated/duration-analysis/index'
 import { Route as AuthenticatedEvidenceIndexRouteImport } from './routes/_authenticated/evidence/index'
 import { Route as AuthenticatedMaintenanceIndexRouteImport } from './routes/_authenticated/maintenance/index'
 import { Route as AuthenticatedMonitoringIndexRouteImport } from './routes/_authenticated/monitoring/index'
@@ -61,6 +62,7 @@ import { Route as AuthenticatedSuiteRunsSuiteRunIdIndexRouteImport } from './rou
 import { Route as AuthenticatedSuitesSuiteIdIndexRouteImport } from './routes/_authenticated/suites/$suiteId/index'
 import { Route as AuthenticatedTargetsTargetIdIndexRouteImport } from './routes/_authenticated/targets/$targetId/index'
 import { Route as AuthenticatedWorkersWorkerIdIndexRouteImport } from './routes/_authenticated/workers/$workerId/index'
+import { Route as AuthenticatedDurationAnalysisScenariosScenarioIdIndexRouteImport } from './routes/_authenticated/duration-analysis/scenarios/$scenarioId/index'
 import { Route as AuthenticatedMaintenanceIncidentsIncidentIdIndexRouteImport } from './routes/_authenticated/maintenance/incidents/$incidentId/index'
 import { Route as AuthenticatedSessionsTargetIdAccountIdIndexRouteImport } from './routes/_authenticated/sessions/$targetId/$accountId/index'
 import { Route as AuthenticatedTargetsTargetIdMapIndexRouteImport } from './routes/_authenticated/targets/$targetId/map/index'
@@ -149,6 +151,12 @@ const AuthenticatedDatasetsIndexRoute =
   AuthenticatedDatasetsIndexRouteImport.update({
     id: '/datasets/',
     path: '/datasets/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedDurationAnalysisIndexRoute =
+  AuthenticatedDurationAnalysisIndexRouteImport.update({
+    id: '/duration-analysis/',
+    path: '/duration-analysis/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedEvidenceIndexRoute =
@@ -363,6 +371,12 @@ const AuthenticatedWorkersWorkerIdIndexRoute =
     path: '/workers/$workerId/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedDurationAnalysisScenariosScenarioIdIndexRoute =
+  AuthenticatedDurationAnalysisScenariosScenarioIdIndexRouteImport.update({
+    id: '/duration-analysis/scenarios/$scenarioId/',
+    path: '/duration-analysis/scenarios/$scenarioId/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedMaintenanceIncidentsIncidentIdIndexRoute =
   AuthenticatedMaintenanceIncidentsIncidentIdIndexRouteImport.update({
     id: '/maintenance/incidents/$incidentId/',
@@ -402,6 +416,7 @@ export interface FileRoutesByFullPath {
   '/batches/': typeof AuthenticatedBatchesIndexRoute
   '/credentials/': typeof AuthenticatedCredentialsIndexRoute
   '/datasets/': typeof AuthenticatedDatasetsIndexRoute
+  '/duration-analysis/': typeof AuthenticatedDurationAnalysisIndexRoute
   '/evidence/': typeof AuthenticatedEvidenceIndexRoute
   '/maintenance/': typeof AuthenticatedMaintenanceIndexRoute
   '/monitoring/': typeof AuthenticatedMonitoringIndexRoute
@@ -434,6 +449,7 @@ export interface FileRoutesByFullPath {
   '/suites/$suiteId/': typeof AuthenticatedSuitesSuiteIdIndexRoute
   '/targets/$targetId/': typeof AuthenticatedTargetsTargetIdIndexRoute
   '/workers/$workerId/': typeof AuthenticatedWorkersWorkerIdIndexRoute
+  '/duration-analysis/scenarios/$scenarioId/': typeof AuthenticatedDurationAnalysisScenariosScenarioIdIndexRoute
   '/maintenance/incidents/$incidentId/': typeof AuthenticatedMaintenanceIncidentsIncidentIdIndexRoute
   '/sessions/$targetId/$accountId/': typeof AuthenticatedSessionsTargetIdAccountIdIndexRoute
   '/targets/$targetId/map/': typeof AuthenticatedTargetsTargetIdMapIndexRoute
@@ -457,6 +473,7 @@ export interface FileRoutesByTo {
   '/batches': typeof AuthenticatedBatchesIndexRoute
   '/credentials': typeof AuthenticatedCredentialsIndexRoute
   '/datasets': typeof AuthenticatedDatasetsIndexRoute
+  '/duration-analysis': typeof AuthenticatedDurationAnalysisIndexRoute
   '/evidence': typeof AuthenticatedEvidenceIndexRoute
   '/maintenance': typeof AuthenticatedMaintenanceIndexRoute
   '/monitoring': typeof AuthenticatedMonitoringIndexRoute
@@ -489,6 +506,7 @@ export interface FileRoutesByTo {
   '/suites/$suiteId': typeof AuthenticatedSuitesSuiteIdIndexRoute
   '/targets/$targetId': typeof AuthenticatedTargetsTargetIdIndexRoute
   '/workers/$workerId': typeof AuthenticatedWorkersWorkerIdIndexRoute
+  '/duration-analysis/scenarios/$scenarioId': typeof AuthenticatedDurationAnalysisScenariosScenarioIdIndexRoute
   '/maintenance/incidents/$incidentId': typeof AuthenticatedMaintenanceIncidentsIncidentIdIndexRoute
   '/sessions/$targetId/$accountId': typeof AuthenticatedSessionsTargetIdAccountIdIndexRoute
   '/targets/$targetId/map': typeof AuthenticatedTargetsTargetIdMapIndexRoute
@@ -515,6 +533,7 @@ export interface FileRoutesById {
   '/_authenticated/batches/': typeof AuthenticatedBatchesIndexRoute
   '/_authenticated/credentials/': typeof AuthenticatedCredentialsIndexRoute
   '/_authenticated/datasets/': typeof AuthenticatedDatasetsIndexRoute
+  '/_authenticated/duration-analysis/': typeof AuthenticatedDurationAnalysisIndexRoute
   '/_authenticated/evidence/': typeof AuthenticatedEvidenceIndexRoute
   '/_authenticated/maintenance/': typeof AuthenticatedMaintenanceIndexRoute
   '/_authenticated/monitoring/': typeof AuthenticatedMonitoringIndexRoute
@@ -547,6 +566,7 @@ export interface FileRoutesById {
   '/_authenticated/suites/$suiteId/': typeof AuthenticatedSuitesSuiteIdIndexRoute
   '/_authenticated/targets/$targetId/': typeof AuthenticatedTargetsTargetIdIndexRoute
   '/_authenticated/workers/$workerId/': typeof AuthenticatedWorkersWorkerIdIndexRoute
+  '/_authenticated/duration-analysis/scenarios/$scenarioId/': typeof AuthenticatedDurationAnalysisScenariosScenarioIdIndexRoute
   '/_authenticated/maintenance/incidents/$incidentId/': typeof AuthenticatedMaintenanceIncidentsIncidentIdIndexRoute
   '/_authenticated/sessions/$targetId/$accountId/': typeof AuthenticatedSessionsTargetIdAccountIdIndexRoute
   '/_authenticated/targets/$targetId/map/': typeof AuthenticatedTargetsTargetIdMapIndexRoute
@@ -573,6 +593,7 @@ export interface FileRouteTypes {
     | '/batches/'
     | '/credentials/'
     | '/datasets/'
+    | '/duration-analysis/'
     | '/evidence/'
     | '/maintenance/'
     | '/monitoring/'
@@ -605,6 +626,7 @@ export interface FileRouteTypes {
     | '/suites/$suiteId/'
     | '/targets/$targetId/'
     | '/workers/$workerId/'
+    | '/duration-analysis/scenarios/$scenarioId/'
     | '/maintenance/incidents/$incidentId/'
     | '/sessions/$targetId/$accountId/'
     | '/targets/$targetId/map/'
@@ -628,6 +650,7 @@ export interface FileRouteTypes {
     | '/batches'
     | '/credentials'
     | '/datasets'
+    | '/duration-analysis'
     | '/evidence'
     | '/maintenance'
     | '/monitoring'
@@ -660,6 +683,7 @@ export interface FileRouteTypes {
     | '/suites/$suiteId'
     | '/targets/$targetId'
     | '/workers/$workerId'
+    | '/duration-analysis/scenarios/$scenarioId'
     | '/maintenance/incidents/$incidentId'
     | '/sessions/$targetId/$accountId'
     | '/targets/$targetId/map'
@@ -685,6 +709,7 @@ export interface FileRouteTypes {
     | '/_authenticated/batches/'
     | '/_authenticated/credentials/'
     | '/_authenticated/datasets/'
+    | '/_authenticated/duration-analysis/'
     | '/_authenticated/evidence/'
     | '/_authenticated/maintenance/'
     | '/_authenticated/monitoring/'
@@ -717,6 +742,7 @@ export interface FileRouteTypes {
     | '/_authenticated/suites/$suiteId/'
     | '/_authenticated/targets/$targetId/'
     | '/_authenticated/workers/$workerId/'
+    | '/_authenticated/duration-analysis/scenarios/$scenarioId/'
     | '/_authenticated/maintenance/incidents/$incidentId/'
     | '/_authenticated/sessions/$targetId/$accountId/'
     | '/_authenticated/targets/$targetId/map/'
@@ -845,6 +871,13 @@ declare module '@tanstack/react-router' {
       path: '/datasets'
       fullPath: '/datasets/'
       preLoaderRoute: typeof AuthenticatedDatasetsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/duration-analysis/': {
+      id: '/_authenticated/duration-analysis/'
+      path: '/duration-analysis'
+      fullPath: '/duration-analysis/'
+      preLoaderRoute: typeof AuthenticatedDurationAnalysisIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/evidence/': {
@@ -1099,6 +1132,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedWorkersWorkerIdIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/duration-analysis/scenarios/$scenarioId/': {
+      id: '/_authenticated/duration-analysis/scenarios/$scenarioId/'
+      path: '/duration-analysis/scenarios/$scenarioId'
+      fullPath: '/duration-analysis/scenarios/$scenarioId/'
+      preLoaderRoute: typeof AuthenticatedDurationAnalysisScenariosScenarioIdIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/maintenance/incidents/$incidentId/': {
       id: '/_authenticated/maintenance/incidents/$incidentId/'
       path: '/maintenance/incidents/$incidentId'
@@ -1154,6 +1194,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedBatchesIndexRoute: typeof AuthenticatedBatchesIndexRoute
   AuthenticatedCredentialsIndexRoute: typeof AuthenticatedCredentialsIndexRoute
   AuthenticatedDatasetsIndexRoute: typeof AuthenticatedDatasetsIndexRoute
+  AuthenticatedDurationAnalysisIndexRoute: typeof AuthenticatedDurationAnalysisIndexRoute
   AuthenticatedEvidenceIndexRoute: typeof AuthenticatedEvidenceIndexRoute
   AuthenticatedMaintenanceIndexRoute: typeof AuthenticatedMaintenanceIndexRoute
   AuthenticatedMonitoringIndexRoute: typeof AuthenticatedMonitoringIndexRoute
@@ -1185,6 +1226,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSuitesSuiteIdIndexRoute: typeof AuthenticatedSuitesSuiteIdIndexRoute
   AuthenticatedTargetsTargetIdIndexRoute: typeof AuthenticatedTargetsTargetIdIndexRoute
   AuthenticatedWorkersWorkerIdIndexRoute: typeof AuthenticatedWorkersWorkerIdIndexRoute
+  AuthenticatedDurationAnalysisScenariosScenarioIdIndexRoute: typeof AuthenticatedDurationAnalysisScenariosScenarioIdIndexRoute
   AuthenticatedMaintenanceIncidentsIncidentIdIndexRoute: typeof AuthenticatedMaintenanceIncidentsIncidentIdIndexRoute
   AuthenticatedSessionsTargetIdAccountIdIndexRoute: typeof AuthenticatedSessionsTargetIdAccountIdIndexRoute
   AuthenticatedTargetsTargetIdMapIndexRoute: typeof AuthenticatedTargetsTargetIdMapIndexRoute
@@ -1200,6 +1242,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedBatchesIndexRoute: AuthenticatedBatchesIndexRoute,
   AuthenticatedCredentialsIndexRoute: AuthenticatedCredentialsIndexRoute,
   AuthenticatedDatasetsIndexRoute: AuthenticatedDatasetsIndexRoute,
+  AuthenticatedDurationAnalysisIndexRoute:
+    AuthenticatedDurationAnalysisIndexRoute,
   AuthenticatedEvidenceIndexRoute: AuthenticatedEvidenceIndexRoute,
   AuthenticatedMaintenanceIndexRoute: AuthenticatedMaintenanceIndexRoute,
   AuthenticatedMonitoringIndexRoute: AuthenticatedMonitoringIndexRoute,
@@ -1241,6 +1285,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedTargetsTargetIdIndexRoute,
   AuthenticatedWorkersWorkerIdIndexRoute:
     AuthenticatedWorkersWorkerIdIndexRoute,
+  AuthenticatedDurationAnalysisScenariosScenarioIdIndexRoute:
+    AuthenticatedDurationAnalysisScenariosScenarioIdIndexRoute,
   AuthenticatedMaintenanceIncidentsIncidentIdIndexRoute:
     AuthenticatedMaintenanceIncidentsIncidentIdIndexRoute,
   AuthenticatedSessionsTargetIdAccountIdIndexRoute:

@@ -61,6 +61,10 @@ export const overviewOutcomesSchema = z.object({
 })
 export type OverviewOutcomes = z.infer<typeof overviewOutcomesSchema>
 
+/**
+ * 运行发起方构成：manual / schedule / serviceApi 按 runs.trigger_source 互斥计数，合计等于总运行数；
+ * suiteMember 是其中属于场景集成员的运行数（容器维度，与发起方重叠，不参与合计）。
+ */
 export const overviewTriggersSchema = z.object({
   manual: z.number().int().nonnegative(),
   schedule: z.number().int().nonnegative(),

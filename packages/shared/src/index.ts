@@ -179,6 +179,17 @@ export {
   type MonitorAlertSilenceBody,
 } from './alerting.js'
 export {
+  METRIC_GROUP_ORDER,
+  METRIC_LABELS,
+  metricLabel,
+  metricUnitLabel,
+  describeAlertRule,
+  describeAlertReading,
+  describeAlertScope,
+  metricOptionGroups,
+  type MetricGroup,
+} from './monitor-metric-labels.js'
+export {
   type MonitorLayer,
   type MonitorUnit,
   type MonitorSampleScope,
@@ -1020,6 +1031,8 @@ export {
   scheduleDtoSchema,
   scheduleWriteResponseSchema,
   scheduleTriggerResponseSchema,
+  scheduleDeleteBodySchema,
+  scheduleDeleteResponseSchema,
   scheduleListQuerySchema,
   scheduleListResponseSchema,
   scheduleOccurrenceListQuerySchema,
@@ -1081,6 +1094,8 @@ export {
   type ScheduleDto,
   type ScheduleWriteResponse,
   type ScheduleTriggerResponse,
+  type ScheduleDeleteBody,
+  type ScheduleDeleteResponse,
   type ScheduleListQuery,
   type ScheduleListResponse,
   type ScheduleOccurrenceListQuery,
@@ -2140,6 +2155,9 @@ export {
   type BrowserPrewarmMode,
   FACTORY_BROWSER_PREWARM,
   platformBrowserPrewarmSchema,
+  FACTORY_STATISTICS,
+  platformStatisticsSchema,
+  type PlatformStatistics,
   type PlatformBrowserPrewarm,
   platformRuntimeDefaultsSchema,
   platformConfigCurrentSchema,
@@ -3763,6 +3781,9 @@ export {
   RUNTIME_INVARIANT_MANIFEST_PROTOCOL,
   RUNTIME_INVARIANT_KINDS,
   runtimeInvariantKindSchema,
+  RETIRED_RUNTIME_INVARIANT_KINDS,
+  ADDABLE_RUNTIME_INVARIANT_KINDS,
+  isRetiredRuntimeInvariantKind,
   RUNTIME_INVARIANT_EVALUATE_ATS,
   runtimeInvariantEvaluateAtSchema,
   NAVIGATION_BOUNDARY_ERROR_CODES,
@@ -3819,6 +3840,12 @@ export * from './suites.js'
 export * from './reports.js'
 export * from './reports-policy.js'
 export * from './overview-analytics.js'
+export * from './duration-facts.js'
+export * from './duration-analysis.js'
+export * from './duration-period.js'
+export * from './duration-report.js'
+export * from './duration-sketch.js'
+export * from './time-zone.js'
 export * from './data-generator.js'
 export * from './dataset.js'
 export * from './batch.js'

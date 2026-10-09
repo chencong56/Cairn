@@ -334,7 +334,14 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
       workerInstanceId: worker.instanceId,
       holdSeconds: 600,
     })
-    const { sessionLeases } = schemaFor(handle.db)
+    const { sessionLeases, runEvents } = schemaFor(handle.db)
+    // 进入认证等待必须留下状态事件，耗时事实据此把等待与执行分开
+    const statusEvents = await handle.db
+      .select({ type: runEvents.type, payload: runEvents.payload })
+      .from(runEvents)
+      .where(eq(runEvents.runId, created.detail.id))
+    expect(statusEvents).toContainEqual({ type: 'run.status_changed', payload: { status: 'WAITING_FOR_AUTH' } })
+    expect(statusEvents).toContainEqual({ type: 'run.auth_wait', payload: { status: 'WAITING_FOR_AUTH' } })
     await handle.db
       .update(sessionLeases)
       .set({ expiresAt: afterSeconds(handle.db, -5) })

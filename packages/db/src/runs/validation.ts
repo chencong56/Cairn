@@ -8,12 +8,7 @@ import {
   type ExpansionResult,
 } from '@cairn/authoring'
 import {
-  AI_ATOMIC_ACTIONS_PROTOCOL,
-  LIST_OUTPUT_PROTOCOL,
-  AI_TASK_EVIDENCE_PROTOCOL,
-  IMPORTED_OUTCOME_PROTOCOL,
   VALIDATION_SUBJECT_PROTOCOL,
-  advertisesRunExecution,
   normalizeAuthoringDocument,
   scenarioValidationSchema,
   type RunSnapshot,
@@ -21,7 +16,7 @@ import {
   type ScenarioValidationSample,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
-import { clockNow, locked, schemaFor } from '../native.js'
+import { locked, schemaFor } from '../native.js'
 import { assertTargetPermission } from '../console/target-authorization.js'
 import { conflict, notFound } from './errors.js'
 import { expandWithLoader } from './scenarios.js'
@@ -115,56 +110,6 @@ export async function markValidationInterventionTx(tx: Db, runId: string, reason
     .update(contexts)
     .set({ provenance: 'intervened', interventions: [...row.interventions, reason] })
     .where(eq(contexts.runId, runId))
-}
-
-/** Rollout guard supplements claim filtering; an old binary does not know new snapshot fields. */
-export async function assertDemonstrationExecutorRolloutTx(tx: Db, snapshot: RunSnapshot) {
-  const required = [
-    snapshot.aiAtomicActionsProtocol ? AI_ATOMIC_ACTIONS_PROTOCOL : null,
-    snapshot.listOutputProtocol ? LIST_OUTPUT_PROTOCOL : null,
-    snapshot.importedOutcomeProtocol ? IMPORTED_OUTCOME_PROTOCOL : null,
-    snapshot.aiTaskEvidence?.actionEdge === 'record' ? AI_TASK_EVIDENCE_PROTOCOL : null,
-  ].filter((v): v is NonNullable<typeof v> => v !== null)
-  if (!required.length) return
-  const { workers } = schemaFor(tx)
-  const now = await clockNow(tx)
-  const live = await tx
-    .select()
-    .from(workers)
-    .where(inArray(workers.status, ['READY', 'DRAINING']))
-  // 分角色部署下调度/分析/维护节点不领 Run，也不会广告执行协议，不能算作旧执行节点。
-  const incompatible = live
-    .filter(
-      (worker) =>
-        worker.capacity > 0 &&
-        advertisesRunExecution(worker.protocolCapabilities) &&
-        (worker.heartbeatExpiresAt?.getTime() ??
-          worker.heartbeatAt.getTime() + (worker.lostAfterSeconds ?? 60) * 1000) > now.getTime(),
-    )
-    .map((worker) => ({
-      workerId: worker.id,
-      missing: required.filter((capability) => !worker.protocolCapabilities.includes(capability)),
-    }))
-    .filter((worker) => worker.missing.length > 0)
-  if (incompatible.length) {
-    const features = [
-      ...new Set(incompatible.flatMap((worker) => worker.missing.map((p) => ROLLOUT_FEATURE_LABELS[p]))),
-    ]
-    const ids = incompatible.map((worker) => worker.workerId)
-    const shown = ids.length > 3 ? `${ids.slice(0, 3).join('、')} 等 ${ids.length} 个` : ids.join('、')
-    throw conflict(
-      'DEMONSTRATION_EXECUTOR_UPGRADE_REQUIRED',
-      `执行节点版本过旧，暂不支持本草稿用到的${features.join('、')}，因此无法开始运行。请联系管理员升级执行节点（${shown}）后重试。`,
-      { workers: incompatible },
-    )
-  }
-}
-
-const ROLLOUT_FEATURE_LABELS: Record<string, string> = {
-  [AI_ATOMIC_ACTIONS_PROTOCOL]: 'AI 动作',
-  [LIST_OUTPUT_PROTOCOL]: '列表输出',
-  [IMPORTED_OUTCOME_PROTOCOL]: '导入的业务结果',
-  [AI_TASK_EVIDENCE_PROTOCOL]: 'AI 任务证据记录',
 }
 
 export async function getScenarioValidation(db: Db, scenarioId: string, actorId: string) {

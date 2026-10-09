@@ -247,6 +247,101 @@ describe('消息推送真实 HTTPS / SMTP 协议与外部副作用', () => {
     expect(outboundEmailText(job())).toContain('证据仍在收集中')
   })
 
+  it('目标级告警：推送里看得出哪个系统、哪个指标与读数；IM 机器人出卡片，旧格式不带 scopeName', () => {
+    const alertJob = () => {
+      const j = job()
+      j.event.type = 'alert.firing'
+      j.event.runId = null
+      j.event.scenarioId = null
+      j.event.consoleUrl = 'https://console.example.com/monitoring'
+      j.event.payload = {
+        title: '告警触发：页面接口错误',
+        alert: {
+          kind: 'firing',
+          alertId: randomUUID(),
+          ruleId: 'factory.target.api_error',
+          ruleName: '页面接口错误',
+          metricKey: 'target.apiErrorCount',
+          source: null,
+          scope: 'target',
+          scopeId: randomUUID(),
+          scopeName: '订单中心',
+          value: 12,
+          threshold: 10,
+          comparator: 'gte',
+          severity: 'critical',
+          occurredAt: fixedDate.toISOString(),
+          consolePath: '/monitoring',
+        },
+      }
+      ;(j.delivery.binding.channel as { host: string }).host = 'hooks.example.com'
+      return j
+    }
+    const text = outboundEmailText(alertJob())
+    expect(text).toContain('告警：页面接口错误（触发 / 严重）')
+    expect(text).toContain('目标系统：订单中心')
+    expect(text).toContain('目标系统接口错误次数（近 1 小时），当前 12，规则 大于等于 10')
+
+    const feishu = alertJob()
+    ;(feishu.delivery.binding.channel as { host: string }).host = 'open.feishu.cn'
+    const card = JSON.parse(outboundWebhookBody(feishu))
+    expect(card.msg_type).toBe('interactive')
+    expect(card.card.header.template).toBe('red')
+    expect(card.card.elements[0].text.content).toContain('目标系统：订单中心')
+    expect(card.card.elements[1].actions[0].url).toBe('https://console.example.com/monitoring')
+
+    const body = JSON.parse(outboundWebhookBody(alertJob()))
+    expect(body).toMatchObject({ protocol: 'cairn.outbound@1', type: 'alert.firing' })
+    expect(body.data.alert.scopeName).toBe('订单中心')
+
+    const legacy = alertJob()
+    legacy.delivery.binding.channel.format = 'legacy_alert@1'
+    const notice = JSON.parse(outboundWebhookBody(legacy))
+    expect(notice).not.toHaveProperty('scopeName')
+    expect(notice.scope).toBe('target')
+  })
+
+  it('周期耗时报告：IM 机器人地址出卡片，其它地址走 cairn.outbound@1，邮件正文带周期与要点', () => {
+    const reportJob = () => {
+      const j = job()
+      j.event.type = 'report.duration_period'
+      j.event.runId = null
+      j.event.scenarioId = null
+      j.event.consoleUrl = 'https://console.example.com/reports/r1'
+      j.event.payload = {
+        title: '商城 耗时周报 · 2026 年第 40 周（9/28–10/4）',
+        report: {
+          reportId: randomUUID(),
+          title: '商城 耗时周报 · 2026 年第 40 周（9/28–10/4）',
+          periodLabel: '2026 年第 40 周（9/28–10/4）',
+          targetName: '商城',
+          highlights: ['本周整体执行耗时 P50 为 13s，比上周慢 30%。', '明显变慢 1 个场景，最突出的是『订单巡检』（+30%）。'],
+          consolePath: '/reports/r1',
+        },
+      }
+      return j
+    }
+    const wechat = reportJob()
+    ;(wechat.delivery.binding.channel as { host: string }).host = 'qyapi.weixin.qq.com'
+    const card = JSON.parse(outboundWebhookBody(wechat))
+    expect(card.msgtype).toBe('markdown')
+    expect(card.markdown.content).toContain('本周整体执行耗时 P50 为 13s')
+    expect(card.markdown.content).toContain('https://console.example.com/reports/r1')
+
+    const generic = reportJob()
+    ;(generic.delivery.binding.channel as { host: string }).host = 'hooks.example.com'
+    const body = JSON.parse(outboundWebhookBody(generic))
+    expect(body).toMatchObject({ protocol: 'cairn.outbound@1', type: 'report.duration_period', consoleUrl: 'https://console.example.com/reports/r1' })
+    expect(body.data.report.highlights).toHaveLength(2)
+
+    const text = outboundEmailText(reportJob(), { hasAttachment: true })
+    expect(text).toContain('目标系统：商城')
+    expect(text).toContain('周期：2026 年第 40 周（9/28–10/4）')
+    expect(text).toContain('· 明显变慢 1 个场景')
+    expect(text).toContain('附件：已包含耗时报告 HTML')
+    expect(text).toContain('https://console.example.com/reports/r1')
+  })
+
   async function smtpReceiver(
     secure: boolean,
     behavior: 'accept' | 'authfail' | 'temporary' | 'permanent' | 'disconnect' = 'accept',

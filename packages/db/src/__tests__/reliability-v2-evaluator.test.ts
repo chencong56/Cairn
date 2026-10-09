@@ -274,6 +274,35 @@ describe.each(DRIVERS)('%s reliability v2 evaluator (receipts / signals / incide
     expect(receipts).toHaveLength(1)
   })
 
+  it('不可比运行（如地图作业场景）的耗时样本标为不可比，不进耗时基线；可比运行照常', async () => {
+    await seedTarget()
+    const t = schemaFor(handle.db)
+    const stepId = '00000000-0000-0040-8040-0000000000c1'
+    const comparableRun = await insertTerminalRun({
+      status: 'SUCCEEDED',
+      finishedAt: new Date(),
+      steps: [{ stepId, status: 'SUCCEEDED', attempts: [{ status: 'SUCCEEDED' }] }],
+    })
+    await runEvaluation()
+    await handle.db.update(t.scenarios).set({ purpose: 'map_job' }).where(eq(t.scenarios.id, ctx.scenarioId))
+    const nonComparableRun = await insertTerminalRun({
+      status: 'SUCCEEDED',
+      finishedAt: new Date(),
+      steps: [{ stepId, status: 'SUCCEEDED', attempts: [{ status: 'SUCCEEDED' }] }],
+    })
+    await runEvaluation()
+
+    const samples = await handle.db
+      .select({ runId: t.reliabilityRunSamples.runId, scopeKind: t.reliabilityRunSamples.scopeKind, isComparable: t.reliabilityRunSamples.isComparable })
+      .from(t.reliabilityRunSamples)
+      .where(eq(t.reliabilityRunSamples.targetId, ctx.targetId))
+    const of = (runId: string, scopeKind: string) => samples.find((row) => row.runId === runId && row.scopeKind === scopeKind)?.isComparable
+    expect(of(comparableRun, 'scenario_step')).toBe(true)
+    expect(of(comparableRun, 'scenario')).toBe(true)
+    expect(of(nonComparableRun, 'scenario_step')).toBe(false)
+    expect(of(nonComparableRun, 'scenario')).toBe(false)
+  })
+
   it('单次失败仅记录信号，绝不生成事件', async () => {
     await seedTarget()
     const failedError = { code: 'ELEMENT_NOT_FOUND', message: '元素未找到' }

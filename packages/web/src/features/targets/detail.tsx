@@ -13,10 +13,12 @@ import {
   Shield,
   ShieldCheck,
   SlidersHorizontal,
+  Timer,
   Users,
   Database,
   KeyRound,
 } from 'lucide-react'
+import { Can } from '@/components/rbac/can'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
 import { ApiRequestError } from '@/lib/api-client'
@@ -291,6 +293,14 @@ export function TargetDetailPage() {
                   <SlidersHorizontal className='size-4' />
                   系统资料
                 </Button>
+                <Can permission='run:read'>
+                  <Button variant='outline' asChild>
+                    <Link to='/duration-analysis' search={{ targetId }}>
+                      <Timer className='size-4' />
+                      耗时分析
+                    </Link>
+                  </Button>
+                </Can>
                 {canReadMap ? (
                   <Button variant='outline' asChild>
                     <Link to='/targets/$targetId/map' params={{ targetId }}>

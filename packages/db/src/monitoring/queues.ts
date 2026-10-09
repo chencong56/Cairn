@@ -4,7 +4,7 @@ import type { Db } from '../client.js'
 import { clockNow, schemaFor } from '../native.js'
 import { GLOBAL_RECLAIM_WATERMARK, readRuntimeWatermark } from '../runtime/watermarks.js'
 import { readLatestClaimScanCount } from './samples.js'
-import { asCount, claimableRunCondition, onlineClaimerCondition, workerCoversSnapshot } from './util.js'
+import { asCount, claimableRunCondition, onlineClaimerCondition, workerExecutesRuns } from './util.js'
 
 function percentileNearestRank(values: number[], percentile: number): number {
   if (values.length === 0) return 0
@@ -61,7 +61,7 @@ export async function summarizeQueues(
         sql`NOT EXISTS (
           SELECT 1 FROM ${workers}
            WHERE ${onlineClaimerCondition(db, resolved)}
-             AND ${workerCoversSnapshot(db)}
+             AND ${workerExecutesRuns(db)}
         )`,
       ),
     )

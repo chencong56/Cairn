@@ -38,6 +38,23 @@ describe('INV002 Worker 不持有控制面地址', () => {
   })
 })
 
+describe('INV020 运行状态变化必有事件', () => {
+  const rel = 'packages/db/src/runs/x.ts'
+  it('改写 runs.status 而函数内无 run.status_changed 即违规', () => {
+    assert.equal(check('INV020', rel, "export async function f(tx) { await tx.update(runs).set({ status: 'RECOVERING' }).where(w) }").length, 1)
+    assert.equal(check('INV020', rel, "export async function f(tx) { await updateRows(tx, runs, { status }, w) }").length, 1)
+  })
+  it('同一函数（含事务回调）内追加了事件则通过', () => {
+    assert.deepEqual(check('INV020', rel, `export async function f(db) {
+  await db.transaction(async (tx) => { await updateRows(tx, runs, { status: 'WAITING_FOR_AUTH' }, w) })
+  await appendRunEvents(db, id, [{ type: 'run.status_changed', payload: { status: 'WAITING_FOR_AUTH' } }])
+}`), [])
+  })
+  it('不改状态、其它表不拦', () => {
+    assert.deepEqual(check('INV020', rel, "export async function f(tx) { await tx.update(runs).set({ output }).where(w); await tx.update(stepRuns).set({ status: 'FAILED' }).where(w) }"), [])
+  })
+})
+
 describe('INV003 快照冻结', () => {
   const rel = 'packages/db/src/runs/x.ts'
   it('drizzle update().set() 显式写冻结列即违规', () => {

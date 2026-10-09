@@ -81,6 +81,7 @@ function mockService() {
       purgedBytes: 0,
     })),
     stream: vi.fn(),
+    duration: vi.fn(async () => ({ members: [], summary: '' })),
   }
 }
 
@@ -181,5 +182,17 @@ describe('SuiteRuns HTTP', () => {
       .get(`/suite-runs/${suiteRunId}/cleanup`)
       .expect(200)
     expect(service.cleanupStatus).toHaveBeenCalledWith(suiteRunId)
+  })
+
+  it('与上次对比需要 suite:read 和 run:read 权限', async () => {
+    await request(viewerApp.getHttpServer())
+      .get(`/suite-runs/${suiteRunId}/duration`)
+      .expect(403)
+    expect(service.duration).not.toHaveBeenCalled()
+
+    await request(adminApp.getHttpServer())
+      .get(`/suite-runs/${suiteRunId}/duration`)
+      .expect(200)
+    expect(service.duration).toHaveBeenCalledWith(suiteRunId, admin.id)
   })
 })

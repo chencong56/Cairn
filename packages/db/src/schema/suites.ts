@@ -9,6 +9,7 @@ import type {
   SuiteFailurePolicy,
   SuiteMemberAdmission,
   SuiteRunStatus,
+  SuiteRunTriggerSource,
   SuiteStatus,
   SuiteVerdict,
 } from '@cairn/shared'
@@ -108,6 +109,8 @@ export const suiteRuns = cairnSchema.table(
     failurePolicy: text('failure_policy').notNull().$type<SuiteFailurePolicy>(),
     executionMode: text('execution_mode').notNull().default('parallel').$type<SuiteExecutionMode>(),
     maxConcurrency: integer('max_concurrency').notNull().default(3),
+    /** 发起方：手动或调度；成员运行继承它。 */
+    triggerSource: text('trigger_source').notNull().default('manual').$type<SuiteRunTriggerSource>(),
     cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
     reason: text('reason'),
     deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull(),

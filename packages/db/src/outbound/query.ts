@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { and, asc, desc, eq, exists, gt, gte, inArray, isNull, like, lt, lte, or, sql } from 'drizzle-orm'
 import {
+  DURATION_REPORT_OUTBOUND_TYPE,
   canonicalJson,
   outboundActionSchema,
   outboundEventSchema,
@@ -62,6 +63,7 @@ function visibleFromGrants(db: Db, rows: ScopeGrantRow[]) {
     )
   return or(
     and(eq(e.type, 'run.finished'), scoped('run:read'), scoped('outbound:read')),
+    and(eq(e.type, DURATION_REPORT_OUTBOUND_TYPE), scoped('report:read'), scoped('outbound:read')),
     hasPermissionFromGrants(rows, 'monitor:read') ? like(e.type, 'alert.%') : sql`1 = 0`,
     hasPermissionFromGrants(rows, 'platform-config:read') ? eq(e.type, 'channel.test') : sql`1 = 0`,
   )
@@ -152,6 +154,7 @@ export async function listOutboundEvents(db: Db, actorId: string, raw: unknown =
   const scopes = [
     'target:read',
     'run:read',
+    'report:read',
     'outbound:read',
     'monitor:read',
     'platform-config:read',
@@ -181,7 +184,7 @@ export async function listOutboundEvents(db: Db, actorId: string, raw: unknown =
         input.type
           ? input.type === 'alert'
             ? like(e.type, 'alert.%')
-            : eq(e.type, input.type === 'run' ? 'run.finished' : 'channel.test')
+            : eq(e.type, input.type === 'run' ? 'run.finished' : input.type === 'report' ? DURATION_REPORT_OUTBOUND_TYPE : 'channel.test')
           : undefined,
         input.targetId ? eq(e.targetId, input.targetId) : undefined,
         input.scenarioId ? eq(e.scenarioId, input.scenarioId) : undefined,

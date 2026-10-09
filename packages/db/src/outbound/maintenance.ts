@@ -3,10 +3,8 @@ import type { Db } from '../client.js'
 import { atomic, clockNow, locked, schemaFor } from '../native.js'
 import { enqueueAlertOutboundTx, lockOutboundDispatch, bindingSuppression } from './core.js'
 
-/** Old senders must be stopped before migration. Existing new-format event means this alert is already owned. */
+/** Existing new-format event means this alert is already owned. */
 export async function importLegacyOutboundNotices(db: Db) {
-  const { assertOutboundWriterRollout } = await import('./config.js')
-  await assertOutboundWriterRollout(db)
   const { monitoringAlerts: a, outboundEvents: e, outboundDeliveries: d } = schemaFor(db)
   const rows = await db
     .select({ id: a.id })

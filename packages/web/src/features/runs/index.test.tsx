@@ -101,6 +101,7 @@ const list: RunListResponse = {
       evidenceStatus: 'INCOMPLETE',
       outcomeStatus: 'FAIL',
       outputSummary: '巡检发现 1 项登录超时异常',
+      duration: { totalMs: 20_000, activeMs: 15_000, authWaitMs: 5_000, requeueMs: 0, reviewMs: 0, holdMs: 0, queueMs: 800, complete: true },
     }),
   ],
 }
@@ -256,12 +257,13 @@ describe('RunsPage', () => {
     const headers = [...document.querySelectorAll('thead th')].map((node) =>
       node.textContent?.trim()
     )
-    expect(headers.slice(0, 6)).toEqual([
+    expect(headers.slice(0, 7)).toEqual([
       '状态',
       '业务结果',
       '证据',
       '场景',
       '目标系统',
+      '耗时',
       '创建时间',
     ])
     const incompleteRow = [...document.querySelectorAll('tbody tr')].find(
@@ -275,6 +277,12 @@ describe('RunsPage', () => {
     expect(cells[2]).toContain('证据不完整')
     expect(cells[3]).toContain('登录巡检')
     expect(cells[1]).not.toContain('登录巡检')
+    // 已结束的运行给总耗时，未结束的给占位
+    expect(cells[5]).toBe('20s')
+    const queuedRow = [...document.querySelectorAll('tbody tr')].find(
+      (row) => row.textContent?.includes('下单巡检')
+    )
+    expect(queuedRow?.querySelectorAll('td')[5]?.textContent).toBe('—')
     await expect
       .element(screen.getByRole('combobox', { name: '业务结果筛选' }))
       .toBeInTheDocument()

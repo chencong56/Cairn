@@ -424,6 +424,10 @@ export async function pipeFrames(this: SessionManagerContext, input: {
     if (!cast) {
       cast = await startScreencast(entry.page, getPageRef)
       live.screencasts.set(entry.pageId, cast)
+      this.logger.log(
+        { sessionId: live.sessionId, pageId: entry.pageId, by: 'observer', screencasts: live.screencasts.size },
+        'screencast.started',
+      )
     }
     live.screencastObservers.set(entry.pageId, (live.screencastObservers.get(entry.pageId) ?? 0) + 1)
     if (cast) await refreshScreencastIfStale(entry.page, cast, getPageRef)
@@ -525,6 +529,12 @@ export async function dropScreencastObserver(this: SessionManagerContext, live: 
       const cast = live.screencasts.get(pageId)
       live.screencasts.delete(pageId)
       await cast?.stop().catch(() => undefined)
+      if (cast) {
+        this.logger.log(
+          { sessionId: live.sessionId, pageId, by: 'observer', screencasts: live.screencasts.size },
+          'screencast.stopped',
+        )
+      }
       return
     }
     live.screencastObservers.set(pageId, current - 1)

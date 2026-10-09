@@ -4,7 +4,17 @@ import type { ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from 'vitest-browser-react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runPlacement, type RunDetailDto, type RunEvidenceListResponse, type RunObservation } from '@cairn/shared'
+import {
+  attributeDurationDifference,
+  runPlacement,
+  summarizeDurationDifference,
+  type NodeDurationFacts,
+  type RunDetailDto,
+  type RunDurationFacts,
+  type RunDurationReadout,
+  type RunEvidenceListResponse,
+  type RunObservation,
+} from '@cairn/shared'
 import { useAuthStore } from '@/stores/auth-store'
 import { useAssistantStore } from '@/stores/assistant-store'
 import { RunDetailPage } from './detail'
@@ -33,10 +43,15 @@ const mocks = vi.hoisted(() => ({
   createRun: vi.fn(),
   fetchRunMapDecisions: vi.fn(),
   fetchRunResolutionDecisions: vi.fn(),
-  search: {} as { invocation?: string },
+  fetchRunDuration: vi.fn(),
+  search: {} as { invocation?: string; duration?: 'compare' },
 }))
 
 vi.mock('@/lib/runs-api', async (original) => ({ ...await original<typeof import('@/lib/runs-api')>(), ...mocks }))
+vi.mock('@/lib/duration-api', async (original) => ({
+  ...await original<typeof import('@/lib/duration-api')>(),
+  fetchRunDuration: mocks.fetchRunDuration,
+}))
 vi.mock('@/lib/reports-api', async (original) => ({
   ...await original<typeof import('@/lib/reports-api')>(),
   fetchReports: vi.fn(async () => ({ items: [], nextCursor: undefined })),
@@ -190,6 +205,53 @@ function signIn(permissions: string[]) {
   })
 }
 
+function durationFacts(overrides: Partial<RunDurationFacts> = {}): RunDurationFacts {
+  return {
+    runId: RUN_ID,
+    targetId: '11111111-1111-4111-8111-111111111111',
+    scenarioId: '33333333-3333-4333-8333-333333333333',
+    scenarioVersionId: '55555555-5555-4555-8555-555555555555',
+    suiteRunId: null,
+    triggerSource: 'manual',
+    comparable: true,
+    status: 'SUCCEEDED',
+    finishedAt: '2026-09-11T02:28:36.000Z',
+    totalMs: 1_716_000,
+    activeMs: 16_000,
+    authWaitMs: 1_700_000,
+    requeueMs: 0,
+    reviewMs: 0,
+    holdMs: 0,
+    unclassifiedMs: 0,
+    queueMs: 1_000,
+    overheadMs: 7_000,
+    workerLost: false,
+    complete: true,
+    incompleteReason: null,
+    calcVersion: 1,
+    ...overrides,
+  }
+}
+
+function durationNode(overrides: Partial<NodeDurationFacts> & Pick<NodeDurationFacts, 'nodeKey' | 'name'>): NodeDurationFacts {
+  return {
+    parentKey: null,
+    kind: 'step',
+    ordinal: 0,
+    status: 'SUCCEEDED',
+    activeMs: 0,
+    windowMs: null,
+    attemptCount: 1,
+    iterationCount: 1,
+    maxResolution: null,
+    ...overrides,
+  }
+}
+
+function durationReadout(overrides: Partial<RunDurationReadout> = {}): RunDurationReadout {
+  return { facts: durationFacts(), nodes: [], source: 'stored', comparison: null, comparisonUnavailable: null, ...overrides }
+}
+
 async function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -206,6 +268,7 @@ describe('RunDetailPage', () => {
     mocks.fetchRunObservation.mockResolvedValue(observationOf(runDetail()))
     mocks.fetchRunMapDecisions.mockResolvedValue({ items: [] })
     mocks.fetchRunResolutionDecisions.mockResolvedValue({ items: [] })
+    mocks.fetchRunDuration.mockResolvedValue(durationReadout())
     hangSubscribe()
     mocks.cancelRun.mockResolvedValue({ status: 'CANCELLED' })
     mocks.reviewRun.mockResolvedValue(undefined)
@@ -309,67 +372,94 @@ describe('RunDetailPage', () => {
     expect(document.body.textContent).toContain('greeting')
   })
 
-  it('耗时分布区分运行历时、已执行步骤耗时与步骤外等待，未执行步骤不参与占比', async () => {
-    const originalStep = runDetail().stepRuns[0]
-    const firstStep = {
-      ...originalStep,
-      name: '读取页面',
-      status: 'SUCCEEDED' as const,
-      startedAt: '2026-09-11T02:00:01.000Z',
-      finishedAt: '2026-09-11T02:00:03.900Z',
-      attempts: [{
-        ...originalStep.attempts[0],
-        status: 'SUCCEEDED' as const,
-        startedAt: '2026-09-11T02:00:01.000Z',
-        finishedAt: '2026-09-11T02:00:03.900Z',
-        error: null,
-      }],
-    }
-    const secondStep = {
-      ...firstStep,
-      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      stepId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-      name: '提交页面',
-      ordinal: 1,
-      startedAt: '2026-09-11T02:00:03.900Z',
-      finishedAt: '2026-09-11T02:00:10.000Z',
-      attempts: [{
-        ...firstStep.attempts[0],
-        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-        startedAt: '2026-09-11T02:00:09.000Z',
-        finishedAt: '2026-09-11T02:00:10.000Z',
-      }],
-    }
-    const pendingStep = {
-      ...firstStep,
-      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-      stepId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-      name: '尚未执行',
-      ordinal: 2,
-      status: 'PENDING' as const,
-      startedAt: null,
-      finishedAt: null,
-      attempts: [],
-    }
-    mocks.fetchRunObservation.mockResolvedValue(observationOf(runDetail({
-      status: 'SUCCEEDED',
-      startedAt: '2026-09-11T02:00:00.000Z',
-      finishedAt: '2026-09-11T02:28:36.000Z',
-      stepRuns: [firstStep, secondStep, pendingStep],
-    })))
+  it('耗时区块按编排节点展示执行耗时与分解，未执行步骤不出现', async () => {
+    const step = runDetail().stepRuns[0]
+    mocks.fetchRunObservation.mockResolvedValue(observationOf(runDetail({ status: 'SUCCEEDED', stepRuns: [{ ...step, status: 'SUCCEEDED' }] })))
+    mocks.fetchRunDuration.mockResolvedValue(durationReadout({
+      nodes: [
+        durationNode({ nodeKey: `step:${step.stepId}`, name: '读取页面', activeMs: 2_900 }),
+        durationNode({ nodeKey: 'step:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: '提交页面', ordinal: 1, activeMs: 6_100, attemptCount: 2 }),
+      ],
+    }))
     signIn(['run:read'])
     const screen = await renderPage()
 
-    await expect.element(screen.getByText('耗时分布与性能透视')).toBeInTheDocument()
-    const performance = screen.getByText('耗时分布与性能透视').element().closest('section')
-    expect(performance).not.toBeNull()
-    expect(performance?.textContent).toContain('运行历时: 1716 s')
-    expect(performance?.textContent).toContain('已记录步骤耗时总和: 9.0s')
-    expect(performance?.textContent).toContain('未归于步骤的耗时：1707s')
-    expect(performance?.textContent).toContain('已执行步骤: 2 / 编排步骤: 3')
-    expect(performance?.textContent).toContain('占已记录步骤耗时 32%')
-    expect(performance?.textContent).toContain('6.1s')
-    expect(performance?.textContent).not.toContain('尚未执行')
+    await expect.element(screen.getByText('耗时分布与对比')).toBeInTheDocument()
+    expect(mocks.fetchRunDuration).toHaveBeenCalledWith(RUN_ID, { compare: 'none' })
+    const section = screen.getByText('耗时分布与对比').element().closest('section')
+    await expect.poll(() => section?.textContent).toContain('提交页面')
+    const text = section?.textContent ?? ''
+    expect(text).toContain('总耗时 28m36s')
+    expect(text).toContain('认证等待 28m20s')
+    // 等待类分项为 0 的不展示，排队单列
+    expect(text).not.toContain('重新排队')
+    expect(text).toContain('开跑前排队 1.0s')
+    // 百分比以顶层节点执行耗时合计为分母：6.1 / 9.0 ≈ 68%
+    expect(text).toContain('68%')
+    expect(text).toContain('重试 1')
+    expect(text).not.toContain('尚未执行')
+  })
+
+  it('打开「与上次对比」后展示归因摘要、分项差值与逐步差异', async () => {
+    mocks.search = { duration: 'compare' }
+    const base = {
+      facts: durationFacts({ totalMs: 20_000, activeMs: 15_000, authWaitMs: 0, overheadMs: 1_000 }),
+      nodes: [
+        durationNode({ nodeKey: 'step:a', name: '登录', activeMs: 4_000 }),
+        durationNode({ nodeKey: 'step:b', name: '查询订单', ordinal: 1, activeMs: 10_000 }),
+      ],
+    }
+    const target = {
+      facts: durationFacts({ totalMs: 35_000, activeMs: 30_000, authWaitMs: 0, overheadMs: 2_500 }),
+      nodes: [
+        durationNode({ nodeKey: 'step:a', name: '登录', activeMs: 4_000 }),
+        durationNode({ nodeKey: 'step:b', name: '查询订单', ordinal: 1, activeMs: 25_000, attemptCount: 3 }),
+        durationNode({ nodeKey: 'module:inv1', name: '导出报表', kind: 'module', ordinal: 2, activeMs: 1_000 }),
+        durationNode({ nodeKey: 'module:inv1/step:x', parentKey: 'module:inv1', name: '点击导出', kind: 'module_step', ordinal: 0, activeMs: 900 }),
+      ],
+    }
+    const attribution = attributeDurationDifference(base, target)
+    const summary = summarizeDurationDifference(attribution)
+    mocks.fetchRunDuration.mockResolvedValue(durationReadout({
+      ...target,
+      comparison: {
+        mode: 'previous',
+        trial: false,
+        baseRunId: '99999999-9999-4999-8999-999999999999',
+        baseFinishedAt: '2026-09-10T02:00:00.000Z',
+        baseSamples: 1,
+        baseScenarioVersionId: '55555555-5555-4555-8555-555555555555',
+        attribution,
+        summary,
+      },
+    }))
+    signIn(['run:read'])
+    const screen = await renderPage()
+
+    await expect.element(screen.getByText(summary)).toBeInTheDocument()
+    expect(mocks.fetchRunDuration).toHaveBeenCalledWith(RUN_ID, { compare: 'previous' })
+    const table = screen.getByRole('table').element()
+    const row = [...table.querySelectorAll('tbody tr')].find((tr) => tr.textContent?.includes('查询订单'))
+    expect(row?.textContent).toContain('+15s')
+    expect(row?.textContent).toContain('(+150%)')
+    expect(row?.textContent).toContain('重试 0→2 次')
+
+    // 运行开销单独一行；模块调用可展开内部步骤
+    const overheadRow = [...table.querySelectorAll('tbody tr')].find((tr) => tr.textContent?.includes('运行开销'))
+    expect(overheadRow?.textContent).toContain('+1.5s')
+    expect(table.textContent).not.toContain('点击导出')
+    const moduleRow = [...table.querySelectorAll('tbody tr')].find((tr) => tr.textContent?.includes('导出报表'))
+    ;(moduleRow?.querySelector('button[aria-label="展开子节点"]') as HTMLButtonElement).click()
+    await expect.poll(() => screen.getByRole('table').element().textContent).toContain('点击导出')
+  })
+
+  it('没有可对比的运行时说明原因', async () => {
+    mocks.search = { duration: 'compare' }
+    mocks.fetchRunDuration.mockResolvedValue(durationReadout({ comparisonUnavailable: 'first_run' }))
+    signIn(['run:read'])
+    const screen = await renderPage()
+
+    await expect.element(screen.getByText('这是该场景的第一次运行，没有可对比的上一次。')).toBeInTheDocument()
   })
 
   it('核查写入说明并调用接口', async () => {

@@ -92,6 +92,7 @@ import { PageSkeleton } from '@/components/page-skeleton'
 import { QueryErrorState } from '@/components/query-error-state'
 import { StatusBadge } from '@/components/status-badge'
 import { TruncatedText } from '@/components/truncated-text'
+import { consoleSearchOf } from '@/features/duration-analysis/search'
 import {
   RUN_STATUS_LABELS,
   ATTEMPT_STATUS_LABELS,
@@ -1549,6 +1550,14 @@ export function ReportsCenterPanel({ search }: { search: EvidencePageSearch }) {
                       className='text-link'
                     >
                       运行
+                    </Link>
+                  ) : item.subject.kind === 'DURATION_PERIOD' ? (
+                    <Link
+                      to='/duration-analysis'
+                      search={consoleSearchOf(item.subject)}
+                      className='text-link'
+                    >
+                      {item.subject.period === 'week' ? '耗时周报' : '耗时月报'}
                     </Link>
                   ) : (
                     <Link

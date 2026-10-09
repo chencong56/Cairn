@@ -18,9 +18,11 @@ import {
   createScenarioWithVersion,
   createSuite,
   prepareAnalysisJob,
+  deleteSchedule,
   getSchedule,
   indexRunForAnalysis,
   listPendingScheduleAdmits,
+  listSchedules,
   listScheduleEvents,
   listScheduleOccurrences,
   materializeDueSchedules,
@@ -254,6 +256,8 @@ describe.each(DRIVERS)('%s 统一定时调度', { timeout: 60_000 }, (driver) =>
     const { runs } = schemaFor(handle.db)
     const [run] = await handle.db.select().from(runs).where(eq(runs.id, admitted.runId!))
     expect(run?.scenarioVersionId).toBe(scenario.latestVersionId)
+    // 调度准入的运行操作者仍是授权账号，发起方必须记为调度
+    expect(run?.triggerSource).toBe('schedule')
     await setScheduleEnabled(handle.db, enabled.scheduleId, { expectedRevision: enabled.revision, idempotencyKey: newId(), enabled: false, cancelAdmittedJobs: true }, actor())
     const [cancelled] = await handle.db.select().from(runs).where(eq(runs.id, admitted.runId!))
     expect(cancelled?.status).toBe('CANCELLED')
@@ -339,6 +343,12 @@ describe.each(DRIVERS)('%s 统一定时调度', { timeout: 60_000 }, (driver) =>
     )
     expect(admitted.admissionStatus).toBe('ADMITTED')
     expect(admitted.suiteRunId).toBeTruthy()
+    const { suiteRuns, runs } = schemaFor(handle.db)
+    const [suiteRun] = await handle.db.select().from(suiteRuns).where(eq(suiteRuns.id, admitted.suiteRunId!))
+    expect(suiteRun?.triggerSource).toBe('schedule')
+    const members = await handle.db.select({ triggerSource: runs.triggerSource }).from(runs).where(eq(runs.suiteRunId, admitted.suiteRunId!))
+    expect(members.length).toBeGreaterThan(0)
+    expect(members.every((member) => member.triggerSource === 'schedule')).toBe(true)
   })
 
   it('地图工厂关闭不阻断场景计划物化', async () => {
@@ -504,6 +514,7 @@ describe.each(DRIVERS)('%s 统一定时调度', { timeout: 60_000 }, (driver) =>
       scenarioId: scenario.id,
       scenarioVersionId: scenario.latestVersionId,
       actor: actor(),
+      triggerSource: 'manual',
       idempotencyKey: `run-${newId()}`,
     })
     const { runs } = schemaFor(handle.db)
@@ -582,6 +593,12 @@ describe.each(DRIVERS)('%s 统一定时调度', { timeout: 60_000 }, (driver) =>
     const first = await triggerScheduleOnce(handle.db, created.schedule.scheduleId, { idempotencyKey: newId() }, actor())
     const admitted = await admitScheduleOccurrence(handle.db, first.occurrence.occurrenceId, { steps: [], includedCount: 1 }, actor())
     expect(admitted.runId).toBeTruthy()
+    {
+      // 「立即执行」是人点的，发起方记手动
+      const { runs } = schemaFor(handle.db)
+      const [manual] = await handle.db.select({ triggerSource: runs.triggerSource }).from(runs).where(eq(runs.id, admitted.runId!))
+      expect(manual?.triggerSource).toBe('manual')
+    }
     const overlap = await triggerScheduleOnce(handle.db, created.schedule.scheduleId, { idempotencyKey: newId() }, actor())
     expect(overlap.occurrence.reason).toBe('OVERLAP_ACTIVE')
     const { runs } = schemaFor(handle.db)
@@ -646,7 +663,7 @@ describe.each(DRIVERS)('%s 统一定时调度', { timeout: 60_000 }, (driver) =>
     await handle.db.update(analysisJobs).set({ status: 'CANCELLED' })
     const ids: string[] = []
     for (const scenario of [ignored, ignored, selected]) {
-      const run = await writeRunWithSnapshot(handle.db, { scenarioId: scenario.id, actor: actor(), idempotencyKey: newId() })
+      const run = await writeRunWithSnapshot(handle.db, { scenarioId: scenario.id, actor: actor(), triggerSource: 'manual', idempotencyKey: newId() })
       await handle.db.update(runs).set({ status: 'SUCCEEDED', finishedAt: new Date() }).where(eq(runs.id, run.runId))
       await appendRunEvents(handle.db, run.runId, [{ type: 'run.status_changed', payload: { status: 'SUCCEEDED' } }])
       ids.push(run.runId)
@@ -711,5 +728,51 @@ describe.each(DRIVERS)('%s 统一定时调度', { timeout: 60_000 }, (driver) =>
     const updated = await writeSchedule(handle.db, { expectedRevision: 1, idempotencyKey: newId(), definition: { ...created.schedule.definition, name: '只改名称' } }, { kind: 'console', id: editor }, created.schedule.scheduleId)
     const [version] = await handle.db.select().from(scheduleVersions).where(eq(scheduleVersions.id, updated.schedule.currentVersionId))
     expect(version?.authorizedActorId).toBe(actorId)
+  })
+
+  it('支持软删除定时任务，解除守卫并对查询过滤，支持幂等', async () => {
+    const { targetId } = await freshTarget()
+    const { schedules } = schemaFor(handle.db)
+    const definition = {
+      name: '待删除任务',
+      timeRule: { kind: 'interval' as const, intervalMs: 300_000, anchorUtc: new Date().toISOString(), misfire: 'coalesce' as const },
+      consumer: { type: 'knowledge_analysis' as const, targetId, mode: 'map_quality' as const },
+    }
+    const created = await writeSchedule(handle.db, { expectedRevision: 0, idempotencyKey: newId(), definition }, actor())
+    const scheduleId = created.schedule.scheduleId
+    await setScheduleEnabled(handle.db, scheduleId, { expectedRevision: 1, idempotencyKey: newId(), enabled: true }, actor())
+
+    // 验证启用状态与 identityGuard 存在
+    const [beforeDelete] = await handle.db.select().from(schedules).where(eq(schedules.id, scheduleId))
+    expect(beforeDelete?.enabled).toBe(1)
+    expect(beforeDelete?.identityGuard).toBeTruthy()
+    expect(beforeDelete?.deletedAt).toBeNull()
+
+    // 执行软删除
+    const res = await deleteSchedule(handle.db, scheduleId, actor(), { cancelAdmittedJobs: true })
+    expect(res).toEqual({ scheduleId, deleted: true })
+
+    // 数据库中检查标记与守卫解除
+    const [afterDelete] = await handle.db.select().from(schedules).where(eq(schedules.id, scheduleId))
+    expect(afterDelete?.deletedAt).toBeInstanceOf(Date)
+    expect(afterDelete?.enabled).toBe(0)
+    expect(afterDelete?.identityGuard).toBeNull()
+    expect(afterDelete?.enabledGuard).toBeNull()
+    expect(afterDelete?.nextDueAt).toBeNull()
+    expect(afterDelete?.deletedBy).toMatchObject({ id: actorId })
+
+    // getSchedule 抛出 404
+    await expect(getSchedule(handle.db, scheduleId)).rejects.toMatchObject({ code: 'SCHEDULE_NOT_FOUND' })
+
+    // listSchedules 不返回已删除调度
+    const list = await listSchedules(handle.db, { targetId, limit: 50 })
+    expect(list.items.some((item) => item.scheduleId === scheduleId)).toBe(false)
+
+    // 重复删除幂等返回
+    const secondDelete = await deleteSchedule(handle.db, scheduleId, actor())
+    expect(secondDelete).toEqual({ scheduleId, deleted: true })
+
+    // 删除不存在的调度报错
+    await expect(deleteSchedule(handle.db, newId(), actor())).rejects.toMatchObject({ code: 'SCHEDULE_NOT_FOUND' })
   })
 })

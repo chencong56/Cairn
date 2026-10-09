@@ -739,33 +739,19 @@ describe.each(DRIVERS)('%s 消息推送持久化与故障恢复', { timeout: 60_
     await finishOutboundDelivery(h.db, first, { outcome: 'accepted' })
     expect((await oneJob()).event.type).toBe('alert.interrupted')
   })
-  it('存活旧 Worker 阻止开放外发，停机后允许启用', async () => {
-    await testMessage()
-    const job = await oneJob()
+  it('锁步部署：有没声明推送协议的节点在线，也照常启用推送', async () => {
     await write({ settings: { enabled: false, consoleBaseUrl: 'https://console.example.com' } })
-    const old = { workerId: newId(), instanceId: newId() }
+    const other = { workerId: newId(), instanceId: newId() }
     await registerWorker(h.db, {
-      ...old,
+      ...other,
       capacity: 1,
       lostAfterSeconds: 3600,
       protocolCapabilities: [],
     })
     try {
-      await expect(claimOutboundDeliveries(h.db, worker)).rejects.toMatchObject({
-        code: 'OUTBOUND_ROLLOUT_REQUIRED',
-      })
-      await expect(beginOutboundSubmission(h.db, job)).rejects.toMatchObject({
-        code: 'OUTBOUND_ROLLOUT_REQUIRED',
-      })
-      await expect(importLegacyOutboundNotices(h.db)).rejects.toMatchObject({
-        code: 'OUTBOUND_ROLLOUT_REQUIRED',
-      })
-      await expect(
-        write({ settings: { enabled: true, consoleBaseUrl: 'https://console.example.com' } }),
-      ).rejects.toMatchObject({ kind: 'conflict' })
+      await write({ settings: { enabled: true, consoleBaseUrl: 'https://console.example.com' } })
     } finally {
-      await h.db.update(t.workers).set({ status: 'STOPPED' }).where(eq(t.workers.id, old.workerId))
+      await h.db.update(t.workers).set({ status: 'STOPPED' }).where(eq(t.workers.id, other.workerId))
     }
-    await write({ settings: { enabled: true, consoleBaseUrl: 'https://console.example.com' } })
   })
 })

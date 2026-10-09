@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { startScreencast } from './screencast.js'
+import { SCREENCAST_MIN_FRAME_INTERVAL_MS, startScreencast } from './screencast.js'
 import type { CapturedFrame } from './captured-frame.js'
 import type { PageRef } from '@cairn/shared'
 import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
@@ -128,3 +128,44 @@ describe('screencast 帧身份', () => {
   }, 30_000)
 })
 
+
+describe('screencast 产帧限速（延迟 ack）', () => {
+  it('帧间隔下限小于消费端间隔，保证消费端拿到的帧够新', () => {
+    expect(SCREENCAST_MIN_FRAME_INTERVAL_MS).toBeGreaterThanOrEqual(100)
+    expect(SCREENCAST_MIN_FRAME_INTERVAL_MS).toBeLessThanOrEqual(500)
+  })
+
+  it('持续重绘的页面产帧被限制在消费端间隔的一半以内', async ({ skip }) => {
+    if (!(await isChromiumAvailableCached())) {
+      skip()
+      return
+    }
+    const { chromium } = await import('playwright')
+    const browser = await chromium.launch({ headless: true })
+    const page = await browser.newPage({ viewport: { width: 320, height: 240 } })
+    const pageRef: PageRef = {
+      sessionId: '00000000-0000-4000-8000-000000000021',
+      sessionGeneration: 1,
+      pageId: '00000000-0000-4000-8000-000000000024',
+      documentEpoch: 1,
+    }
+    try {
+      await page.setContent(
+        '<html><body id="b" style="margin:0"><div id="x" style="width:50px;height:50px;background:red"></div>' +
+          '<script>let n=0;const x=document.getElementById("x");' +
+          'const t=setInterval(()=>{n++;x.style.transform="translateX("+(n%200)+"px)";if(n>=120){clearInterval(t);document.body.style.background="rgb(1,2,3)"}},16)</script></body></html>',
+      )
+      const handle = await startScreencast(page, pageRef)
+      const frames: CapturedFrame[] = []
+      handle.subscribeCaptured((frame) => frames.push(frame))
+      await page.waitForTimeout(2500)
+      await handle.stop()
+      // 页面约 60fps 重绘约 2 秒；不限速时会有上百帧。
+      const ceiling = Math.ceil(2500 / SCREENCAST_MIN_FRAME_INTERVAL_MS) + 3
+      expect(frames.length).toBeGreaterThan(0)
+      expect(frames.length).toBeLessThanOrEqual(ceiling)
+    } finally {
+      await browser.close()
+    }
+  }, 30_000)
+})

@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lt, min } from 'drizzle-orm'
+import { and, asc, eq, exists, gt, inArray, lt, min } from 'drizzle-orm'
 import {
   FINISHED_RUN_STATUSES,
   RUNTIME_SCHEMA_VERSION,
@@ -75,10 +75,21 @@ export async function appendRunEvents(
   const { enqueueRunOutboundIntentTx } = await import('../outbound/core.js')
   await enqueueRunOutboundIntentTx(tx, runId)
   const runControlChanged = drafts.some(
-    (draft) => draft.type === 'run.cancel_requested' || draft.type === 'run.status_changed',
+    (draft) => draft.type === 'run.cancel_requested' || (draft.type === 'run.status_changed' && !isAuthWaitBookkeeping(draft.payload)),
   )
   onCommit(tx, () => publishChangeHint({ runId, eventSeq: sequence, runControlChanged }))
   return sequence
+}
+
+/**
+ * 进入认证等待、认证恢复后重新排队的状态事件只为耗时事实记账，不唤醒执行面的运行控制。
+ * 执行面自己发起认证等待并在等待期间管理会话；唤醒会让取消监视看到「非 RUNNING」而打断它。
+ * 这两类事件补齐之前从不带运行控制标记，这里保持原行为。
+ */
+function isAuthWaitBookkeeping(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false
+  const { status, reason } = payload as { status?: unknown; reason?: unknown }
+  return status === 'WAITING_FOR_AUTH' || (status === 'RECOVERING' && reason === 'auth_resumed')
 }
 
 export async function earliestEventSeq(db: Db, runId: string): Promise<number> {
@@ -180,16 +191,20 @@ export function diagnoseRunEventCursor(input: {
 }
 
 export async function purgeExpiredRunEvents(db: Db, retainDays: number): Promise<number> {
-  const { runEvents, runs } = schemaFor(db)
+  const { runEvents, runs, runDurationFacts } = schemaFor(db)
   const cutoff = new Date(Date.now() - retainDays * 24 * 60 * 60 * 1000)
+  // 耗时事实从运行事件重建状态时间线；事实落库前不得清理该运行的事件。
+  const hasDurationFacts = exists(
+    db.select({ runId: runDurationFacts.runId }).from(runDurationFacts).where(eq(runDurationFacts.runId, runs.id)),
+  )
   const eligible = await db
     .select({ id: runs.id })
     .from(runs)
-    .where(and(inArray(runs.status, [...FINISHED_RUN_STATUSES]), eq(runs.evidenceStatus, 'COMPLETE')))
+    .where(and(inArray(runs.status, [...FINISHED_RUN_STATUSES]), eq(runs.evidenceStatus, 'COMPLETE'), hasDurationFacts))
   const incomplete = await db
     .select({ id: runs.id })
     .from(runs)
-    .where(and(inArray(runs.status, [...FINISHED_RUN_STATUSES]), eq(runs.evidenceStatus, 'INCOMPLETE')))
+    .where(and(inArray(runs.status, [...FINISHED_RUN_STATUSES]), eq(runs.evidenceStatus, 'INCOMPLETE'), hasDurationFacts))
   const runIds = [...eligible, ...incomplete].map((row) => row.id)
   if (runIds.length === 0) return 0
   const deleted = await deleteRows(

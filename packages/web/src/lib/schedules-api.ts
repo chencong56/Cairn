@@ -1,5 +1,6 @@
 import {
   analysisJobDtoSchema,
+  scheduleDeleteResponseSchema,
   scheduleDtoSchema,
   scheduleEventListResponseSchema,
   scheduleListResponseSchema,
@@ -7,6 +8,7 @@ import {
   schedulePreviewResponseSchema,
   scheduleTriggerResponseSchema,
   scheduleWriteResponseSchema,
+  type ScheduleDeleteBody,
   type ScheduleEnabledBody,
   type ScheduleEventListQuery,
   type ScheduleListQuery,
@@ -63,6 +65,14 @@ export function triggerSchedule(scheduleId: string, body: ScheduleTriggerBody) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+  })
+}
+
+export function deleteSchedule(scheduleId: string, body?: ScheduleDeleteBody) {
+  return apiFetch(`/api/schedules/${scheduleId}/delete`, scheduleDeleteResponseSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? { cancelAdmittedJobs: false }),
   })
 }
 

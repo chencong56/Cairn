@@ -510,9 +510,12 @@ export async function resumeRunAfterAuth(
     if (moved.length === 0) {
       throw conflict('RUN_NOT_WAITING_FOR_AUTH', '只有等待认证的运行可以恢复领取')
     }
-    if (checkpoint?.status === 'recovering') {
-      await appendRunEvents(tx as unknown as Db, input.runId, [{ type: 'run.auth_recovered', payload: { ...checkpoint, status: 'recovered' } }])
-    }
+    await appendRunEvents(tx as unknown as Db, input.runId, [
+      { type: 'run.status_changed', payload: { status: 'RECOVERING', reason: 'auth_resumed' } },
+      ...(checkpoint?.status === 'recovering'
+        ? [{ type: 'run.auth_recovered' as const, payload: { ...checkpoint, status: 'recovered' as const } }]
+        : []),
+    ])
     const [runRow] = await tx.select({ snapshot: runs.snapshot }).from(runs).where(eq(runs.id, input.runId)).limit(1)
     if (runRow) {
       await recalculateRunOutcomeTx(tx as unknown as Db, input.runId, runRow.snapshot as RunSnapshot, now)

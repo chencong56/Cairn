@@ -394,6 +394,7 @@ export async function advanceBatch(
         scenarioVersionId: batch.scenarioVersionId,
         targetAccountId: batch.targetAccountId ?? undefined,
         executionOrigin: 'batch_item',
+        triggerSource: 'manual',
         input: itemInput,
         actor: {
           kind: 'console',

@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Step } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -274,6 +275,14 @@ describe.each(DRIVERS)('%s AuthHold / AuthControl 原子性', { timeout: 60_000 
       token: control.token,
     })
     expect((await getRun(handle.db, created.detail.id)).status).toBe('RECOVERING')
+    // 认证恢复留下带 reason 的状态事件：耗时事实计为重新排队，且不误判为执行节点失联
+    const { runEvents } = schemaFor(handle.db)
+    const events = await handle.db
+      .select({ type: runEvents.type, payload: runEvents.payload })
+      .from(runEvents)
+      .where(eq(runEvents.runId, created.detail.id))
+    expect(events).toContainEqual({ type: 'run.status_changed', payload: { status: 'WAITING_FOR_AUTH' } })
+    expect(events).toContainEqual({ type: 'run.status_changed', payload: { status: 'RECOVERING', reason: 'auth_resumed' } })
     expect(await findSessionByAuthWaitRun(handle.db, created.detail.id)).toBeNull()
     await closeSession(session.id, worker.workerId)
   })

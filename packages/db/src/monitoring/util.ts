@@ -1,11 +1,6 @@
 import { and, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import {
-  CANDIDATE_GROUPS_PROTOCOL,
-  MAP_JOBS_PROTOCOL,
-  MODULE_MANIFEST_PROTOCOL,
-  OUTCOME_MANIFEST_PROTOCOL,
-  RUNTIME_INVARIANT_MANIFEST_PROTOCOL,
-  SUITE_ADMISSION_PROTOCOL,
+  SESSION_OCCUPANCY_PROTOCOL,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { clockNow, jsonArrayIncludes, jsonHasKey, schemaFor } from '../native.js'
@@ -41,34 +36,10 @@ export function claimableRunCondition(db: Db, asOf: Date): SQL {
   )!
 }
 
-export function workerCoversSnapshot(db: Db): SQL {
-  const { runs, workers } = schemaFor(db)
-  return and(
-    or(
-      sql`NOT (${jsonHasKey(db, runs.snapshot, 'moduleManifest')})`,
-      jsonArrayIncludes(db, workers.protocolCapabilities, MODULE_MANIFEST_PROTOCOL),
-    ),
-    or(
-      sql`NOT (${jsonHasKey(db, runs.snapshot, 'candidateGroups')})`,
-      jsonArrayIncludes(db, workers.protocolCapabilities, CANDIDATE_GROUPS_PROTOCOL),
-    ),
-    or(
-      sql`NOT (${jsonHasKey(db, runs.snapshot, 'mapJob')})`,
-      jsonArrayIncludes(db, workers.protocolCapabilities, MAP_JOBS_PROTOCOL),
-    ),
-    or(
-      sql`NOT (${jsonHasKey(db, runs.snapshot, 'outcomeManifest')})`,
-      jsonArrayIncludes(db, workers.protocolCapabilities, OUTCOME_MANIFEST_PROTOCOL),
-    ),
-    or(
-      sql`NOT (${jsonHasKey(db, runs.snapshot, 'runtimeInvariantManifest')})`,
-      jsonArrayIncludes(db, workers.protocolCapabilities, RUNTIME_INVARIANT_MANIFEST_PROTOCOL),
-    ),
-    or(
-      sql`NOT (${jsonHasKey(db, runs.snapshot, 'suiteAdmission')})`,
-      jsonArrayIncludes(db, workers.protocolCapabilities, SUITE_ADMISSION_PROTOCOL),
-    ),
-  )!
+/** 能领取运行的执行节点：声明了会话占用（调度 / 分析 / 维护节点不声明）。锁步部署下不再按快照特性区分。 */
+export function workerExecutesRuns(db: Db): SQL {
+  const { workers } = schemaFor(db)
+  return jsonArrayIncludes(db, workers.protocolCapabilities, SESSION_OCCUPANCY_PROTOCOL)
 }
 
 export function onlineClaimerCondition(db: Db, asOf: Date): SQL {

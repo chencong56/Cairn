@@ -1,6 +1,7 @@
 import { BadRequestException, HttpException, HttpStatus, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common'
 import {
   authorizeTargetRequest,
+  readRunDuration,
   createDemonstration,
   createRunWithSnapshot,
   deleteRun,
@@ -28,6 +29,8 @@ import {
 } from '@cairn/db'
 import { aiTraceToDemonstrationSource } from '@cairn/authoring'
 import {
+  type RunDurationQueryParsed,
+  type RunDurationReadout,
   computeStepDefinitionDigest,
   normalizeAuthoringDocument,
   parseHttpRange,
@@ -285,6 +288,17 @@ export class RunsService {
 
   evidence(id: string, actorId: string) {
     return listRunEvidence(this.db, id, actorId).catch(rethrowDomain)
+  }
+
+  /** 单次运行耗时分解与对比；事实未生成（含运行中）时现算。对比基准须同为当前账号可读。 */
+  async duration(runId: string, query: RunDurationQueryParsed, actorId: string): Promise<RunDurationReadout> {
+    await this.requireRunScope(runId, actorId)
+    if (query.baseRunId) await this.requireRunScope(query.baseRunId, actorId)
+    try {
+      return await readRunDuration(this.db, runId, query)
+    } catch (error) {
+      rethrowDomain(error)
+    }
   }
 
   async iterations(id: string, actorId: string, query?: StepIterationListQuery) {

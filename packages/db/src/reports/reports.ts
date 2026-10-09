@@ -60,13 +60,31 @@ import { snapshotDeletedBy } from '../lifecycle.js'
 import { prepareReportMaterials, sealReportMaterials } from './materials.js'
 import { validateReportConfigAssets } from './profiles.js'
 import { revokeReportTrees } from './cleanup.js'
-import { assertReportDeploymentReady } from './protocol.js'
 import { appendRunEvents } from '../observe/events.js'
+import { buildDurationPeriodReport } from '../runs/duration-report.js'
 
-function subjectOf(row: { subjectKind: 'RUN' | 'SUITE_RUN'; runId: string | null; suiteRunId: string | null }): ReportSubject {
-  return row.subjectKind === 'RUN'
-    ? { kind: 'RUN', runId: row.runId! }
-    : { kind: 'SUITE_RUN', suiteRunId: row.suiteRunId! }
+function subjectOf(row: {
+  subjectKind: ReportSubject['kind']
+  targetId: string
+  runId: string | null
+  suiteRunId: string | null
+  suiteId: string | null
+  periodKind: 'week' | 'month' | null
+  periodStart: string | null
+  periodTimeZone: string | null
+  triggerFilter: 'all' | 'manual' | 'schedule' | 'service' | null
+}): ReportSubject {
+  if (row.subjectKind === 'RUN') return { kind: 'RUN', runId: row.runId! }
+  if (row.subjectKind === 'SUITE_RUN') return { kind: 'SUITE_RUN', suiteRunId: row.suiteRunId! }
+  return {
+    kind: 'DURATION_PERIOD',
+    targetId: row.targetId,
+    ...(row.suiteId ? { suiteId: row.suiteId } : {}),
+    period: row.periodKind!,
+    periodStart: row.periodStart!,
+    timeZone: row.periodTimeZone!,
+    trigger: row.triggerFilter!,
+  }
 }
 
 export function toRevision(row: {
@@ -164,9 +182,16 @@ export async function getReport(db: Db, reportId: string, actorId?: string) {
 }
 
 export async function assertReportSourceReadable(db: Db, subject: ReportSubject, actorId?: string) {
-  const { runs, suiteRuns, suiteRunItems, targets } = schemaFor(db)
+  const { runs, suiteRuns, suiteRunItems, targets, scenarioSuites } = schemaFor(db)
   let targetId: string
-  if (subject.kind === 'RUN') {
+  if (subject.kind === 'DURATION_PERIOD') {
+    targetId = subject.targetId
+    if (subject.suiteId) {
+      const [suite] = await db.select({ targetId: scenarioSuites.targetId }).from(scenarioSuites).where(and(eq(scenarioSuites.id, subject.suiteId), isNull(scenarioSuites.deletedAt))).limit(1)
+      if (!suite || suite.targetId !== targetId) throw notFound('REPORT_SOURCE_NOT_FOUND', '场景集已删除或不属于该目标系统')
+      if (actorId) await assertTargetPermission(db, actorId, targetId, 'suite:read')
+    }
+  } else if (subject.kind === 'RUN') {
     const [run] = await db.select().from(runs).where(and(eq(runs.id, subject.runId), isNull(runs.deletedAt))).limit(1)
     if (!run) throw notFound('REPORT_SOURCE_NOT_FOUND', '报告来源已删除或不可访问')
     targetId = run.targetId
@@ -194,16 +219,18 @@ export async function listReports(db: Db, query: Partial<ReportListQuery> = {}, 
   const filters: (SQL | undefined)[] = [
     await scopedTargetFilter(db, actorId, reports.targetId, 'report:read'),
     await scopedTargetFilter(db, actorId, reports.targetId, 'run:read'),
-    suiteScope ? or(eq(reports.subjectKind, 'RUN'), suiteScope) : undefined,
+    suiteScope ? or(eq(reports.subjectKind, 'RUN'), and(eq(reports.subjectKind, 'DURATION_PERIOD'), isNull(reports.suiteId)), suiteScope) : undefined,
     isNull(reports.deletedAt),
     sql`EXISTS (SELECT 1 FROM ${targets} t WHERE t.id = ${reports.targetId} AND t.deleted_at IS NULL)`,
     sql`((${reports.subjectKind} = 'RUN' AND EXISTS (SELECT 1 FROM ${runs} r WHERE r.id = ${reports.runId} AND r.deleted_at IS NULL))
-      OR (${reports.subjectKind} = 'SUITE_RUN' AND NOT EXISTS (SELECT 1 FROM ${suiteRunItems} i INNER JOIN ${runs} r ON r.id = i.child_run_id WHERE i.suite_run_id = ${reports.suiteRunId} AND r.deleted_at IS NOT NULL)))`,
+      OR (${reports.subjectKind} = 'SUITE_RUN' AND NOT EXISTS (SELECT 1 FROM ${suiteRunItems} i INNER JOIN ${runs} r ON r.id = i.child_run_id WHERE i.suite_run_id = ${reports.suiteRunId} AND r.deleted_at IS NOT NULL))
+      OR ${reports.subjectKind} = 'DURATION_PERIOD')`,
+    parsed.subjectKind ? eq(reports.subjectKind, parsed.subjectKind) : undefined,
     parsed.scope ? sql`EXISTS (SELECT 1 FROM ${reportRevisions} rev WHERE rev.report_id = ${reports.id} AND rev.scope = ${parsed.scope})` : undefined,
     parsed.targetId ? eq(reports.targetId, parsed.targetId) : undefined,
     parsed.runId ? eq(reports.runId, parsed.runId) : undefined,
     parsed.suiteRunId ? or(eq(reports.suiteRunId, parsed.suiteRunId), sql`EXISTS (SELECT 1 FROM ${runs} r WHERE r.id = ${reports.runId} AND r.suite_run_id = ${parsed.suiteRunId})`) : undefined,
-    parsed.suiteId ? sql`EXISTS (SELECT 1 FROM ${suiteRuns} s WHERE s.suite_id = ${parsed.suiteId} AND (s.id = ${reports.suiteRunId} OR EXISTS (SELECT 1 FROM ${runs} r WHERE r.id = ${reports.runId} AND r.suite_run_id = s.id)))` : undefined,
+    parsed.suiteId ? or(eq(reports.suiteId, parsed.suiteId), sql`EXISTS (SELECT 1 FROM ${suiteRuns} s WHERE s.suite_id = ${parsed.suiteId} AND (s.id = ${reports.suiteRunId} OR EXISTS (SELECT 1 FROM ${runs} r WHERE r.id = ${reports.runId} AND r.suite_run_id = s.id)))`) : undefined,
     cursorFilter(reports.createdAt, reports.id, parsed.cursor),
   ]
   const rows = await db
@@ -374,6 +401,26 @@ function pageHealthSourceBlock(results: readonly { contractId: string; meaning: 
 type CapturedSource = { targetId: string; defaults: ReportConfig; payload: Record<string, JsonValue>; terminal: boolean; evidencePending: boolean; titleVars: Partial<Record<ReportTitleVariable, string>> }
 export async function captureSource(db: Db, subject: ReportSubject, actorId?: string): Promise<CapturedSource> {
   await assertReportSourceReadable(db, subject, actorId)
+  if (subject.kind === 'DURATION_PERIOD') {
+    // 周期耗时报告：取数一次封存进来源快照；报告标题即生成的周期名称，不走运行报告的标题模板
+    const built = await buildDurationPeriodReport(db, subject)
+    return {
+      targetId: subject.targetId,
+      defaults: { ...DEFAULT_REPORT_CONFIG, title: built.title, timeZone: subject.timeZone },
+      payload: JSON.parse(JSON.stringify({
+        kind: 'DURATION_PERIOD',
+        subject,
+        targetName: built.targetName,
+        suiteName: built.suiteName,
+        startedAt: built.from.toISOString(),
+        finishedAt: built.to.toISOString(),
+        report: built.block,
+      })) as Record<string, JsonValue>,
+      terminal: true,
+      evidencePending: false,
+      titleVars: {},
+    }
+  }
   if (subject.kind === 'RUN') {
     const { runs, evidences, runReportContexts } = schemaFor(db)
     const [row] = await locked(db, db.select().from(runs).where(eq(runs.id, subject.runId)))
@@ -688,6 +735,26 @@ export function buildDocument(input: {
   const gaps = [...input.gaps]
   if (input.source.namesSource === 'generation_time') gaps.push('历史运行未冻结名称，本报告使用生成时可获得的名称')
   const asOf = new Date().toISOString()
+  if (input.source.kind === 'DURATION_PERIOD') {
+    // 报告内容整体是一个块；数据缺口写在块内附录，不把「上期无数据」之类算作文档不完整
+    return {
+      stage: input.stage,
+      title: input.title,
+      subtitle: input.config.subtitle,
+      organization: input.config.organization,
+      authorDisplayName: input.config.authorDisplayName,
+      timeZone: input.config.timeZone,
+      generatedAt: asOf,
+      asOf,
+      source: input.source,
+      summary: {},
+      sections: [{ id: 'duration', title: '耗时报告', required: true, blocks: [input.source.report as Record<string, JsonValue>] }],
+      gaps,
+      verdict: null,
+      outcomeStatus: null,
+      evidenceStatus: null,
+    }
+  }
   return {
     stage: input.stage,
     title: input.title,
@@ -738,7 +805,9 @@ export function buildDocument(input: {
 export async function previewReport(db: Db, body: CreateReportBody, actorId?: string): Promise<ReportPreviewResponse> {
   const input = createReportBodySchema.parse(body)
   if (input.scope === 'suite_bundle') throw badRequest('REPORT_SCOPE_UNSUPPORTED', '请先创建集合总报告，再从固定修订生成报告包')
-  if ((input.subject.kind === 'RUN') !== (input.scope === 'run')) throw badRequest('REPORT_SCOPE_MISMATCH', '报告范围与来源类型不匹配')
+  if ((input.subject.kind === 'RUN') !== (input.scope === 'run') || (input.subject.kind === 'DURATION_PERIOD') !== (input.scope === 'duration_period')) {
+    throw badRequest('REPORT_SCOPE_MISMATCH', '报告范围与来源类型不匹配')
+  }
   return atomic(db, async (tx) => previewReportTx(tx, input, actorId))
 }
 
@@ -787,6 +856,7 @@ function reportPreviewIssues(captured: CapturedSource, stage: ReportStage): stri
 }
 
 export function reportTitle(config: ReportConfig, captured: CapturedSource) {
+  if (captured.payload.kind === 'DURATION_PERIOD') return config.title
   try {
     const format = new Intl.DateTimeFormat('en-CA', { timeZone: config.timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
     const started = new Date(String(captured.payload.startedAt ?? captured.payload.createdAt))
@@ -827,7 +897,6 @@ export async function createReport(db: Db, body: CreateReportBody, actor: AuditA
 }
 
 async function createReportTx(db: Db, input: CreateReportBody, actor: AuditActor, digest: string) {
-  await assertReportDeploymentReady(db)
   const preview = await previewReport(db, input, actor.kind === 'service' ? undefined : actor.id)
   if (input.stage === 'final' && !preview.canGenerateFinal) {
     throw badRequest('REPORT_NOT_READY', preview.issues[0] ?? '来源尚未结束')
@@ -847,6 +916,15 @@ async function createReportTx(db: Db, input: CreateReportBody, actor: AuditActor
       subjectKind: input.subject.kind,
       runId: input.subject.kind === 'RUN' ? input.subject.runId : null,
       suiteRunId: input.subject.kind === 'SUITE_RUN' ? input.subject.suiteRunId : null,
+      ...(input.subject.kind === 'DURATION_PERIOD'
+        ? {
+            suiteId: input.subject.suiteId ?? null,
+            periodKind: input.subject.period,
+            periodStart: input.subject.periodStart,
+            periodTimeZone: input.subject.timeZone,
+            triggerFilter: input.subject.trigger,
+          }
+        : {}),
       createdByConsoleAccountId: actor.kind === 'service' ? null : actor.id,
       serviceCallerId: actor.kind === 'service' ? actor.id : null,
       idempotencyKey: input.idempotencyKey,
@@ -883,7 +961,10 @@ async function createReportTx(db: Db, input: CreateReportBody, actor: AuditActor
     await prepareReportMaterials(tx, { reportId, revisionId, targetId: captured.targetId, source: captured.payload, config, actorId: actor.kind === 'service' ? undefined : actor.id })
 
     let aiPolicy: 'inherit' | 'disabled' = 'inherit'
-    if (input.subject.kind === 'RUN') {
+    if (input.subject.kind === 'DURATION_PERIOD') {
+      // 周期报告的原因说明全部来自规则与差异归因，不生成 AI 解读
+      aiPolicy = 'disabled'
+    } else if (input.subject.kind === 'RUN') {
       const { runReportContexts } = schemaFor(tx)
       const [ctx] = await tx.select({ outputPolicy: runReportContexts.outputPolicy }).from(runReportContexts).where(eq(runReportContexts.runId, input.subject.runId)).limit(1)
       aiPolicy = ctx?.outputPolicy?.aiSummaryPolicy ?? 'inherit'
@@ -933,7 +1014,6 @@ export async function createReportRevision(db: Db, reportId: string, body: Creat
 }
 
 async function createReportRevisionTx(db: Db, reportId: string, input: CreateReportRevisionBody, actor: AuditActor, digest: string) {
-  await assertReportDeploymentReady(db)
   const current = await getReport(db, reportId, actor.kind === 'service' ? undefined : actor.id)
   if (actor.kind !== 'service') {
     await assertTargetPermission(db, actor.id, current.targetId, 'report:export')
@@ -966,7 +1046,7 @@ async function createReportRevisionTx(db: Db, reportId: string, input: CreateRep
       idempotencyKey: input.idempotencyKey,
       requestDigest: digest,
       stage: input.stage ?? current.currentRevision?.stage ?? 'final',
-      scope: current.currentRevision?.scope ?? (current.subject.kind === 'RUN' ? 'run' : 'suite_summary'),
+      scope: current.currentRevision?.scope ?? (current.subject.kind === 'RUN' ? 'run' : current.subject.kind === 'DURATION_PERIOD' ? 'duration_period' : 'suite_summary'),
       title,
       config,
       templateVersion: REPORT_TEMPLATE_VERSION,
@@ -1009,7 +1089,6 @@ export async function enqueueReportExport(
 }
 
 async function enqueueReportExportTx(db: Db, reportId: string, revisionId: string, formats: Array<ReportFormat>, actor: AuditActor, idempotencyKey: string): Promise<ExportJobDto> {
-  await assertReportDeploymentReady(db)
   const report = await getReport(db, reportId, actor.kind === 'service' ? undefined : actor.id)
   if (actor.kind !== 'service') {
     await assertTargetPermission(db, actor.id, report.targetId, 'report:export')
@@ -1582,14 +1661,17 @@ export type LatestHtmlReportArtifact = {
 
 export async function getLatestHtmlReportArtifact(
   db: Db,
-  subject: { runId?: string | null; suiteRunId?: string | null },
+  subject: { runId?: string | null; suiteRunId?: string | null; reportId?: string | null },
 ): Promise<LatestHtmlReportArtifact | null> {
-  if (!subject.runId && !subject.suiteRunId) return null
+  if (!subject.runId && !subject.suiteRunId && !subject.reportId) return null
   const { reports, reportRevisions, reportRevisionOutputs, artifacts, storedObjects } = schemaFor(db)
 
-  const subjectCondition = subject.runId
-    ? eq(reports.runId, subject.runId)
-    : eq(reports.suiteRunId, subject.suiteRunId!)
+  // 周期报告的推送直接指名报告；运行 / 场景集运行按来源取最新的一份
+  const subjectCondition = subject.reportId
+    ? eq(reports.id, subject.reportId)
+    : subject.runId
+      ? eq(reports.runId, subject.runId)
+      : eq(reports.suiteRunId, subject.suiteRunId!)
 
   const [report] = await db
     .select({ id: reports.id })
@@ -1648,9 +1730,9 @@ export async function getLatestHtmlReportArtifact(
 
 export async function isReportGenerationPending(
   db: Db,
-  subject: { runId?: string | null; suiteRunId?: string | null },
+  subject: { runId?: string | null; suiteRunId?: string | null; reportId?: string | null },
 ): Promise<boolean> {
-  if (!subject.runId && !subject.suiteRunId) return false
+  if (!subject.runId && !subject.suiteRunId && !subject.reportId) return false
   const { reportTriggers, reports, exportJobs } = schemaFor(db)
 
   if (subject.runId) {
@@ -1668,9 +1750,11 @@ export async function isReportGenerationPending(
     if (trigger) return true
   }
 
-  const subjectCondition = subject.runId
-    ? eq(reports.runId, subject.runId)
-    : eq(reports.suiteRunId, subject.suiteRunId!)
+  const subjectCondition = subject.reportId
+    ? eq(reports.id, subject.reportId)
+    : subject.runId
+      ? eq(reports.runId, subject.runId)
+      : eq(reports.suiteRunId, subject.suiteRunId!)
 
   const [job] = await db
     .select({ id: exportJobs.id })

@@ -148,6 +148,7 @@ describe.each(DRIVERS)('%s dataset and batch automation domain operations', (dri
     const { runId } = await writeRunWithSnapshot(handle.db, {
       scenarioId,
       scenarioVersionId,
+      triggerSource: 'manual',
       input: {
         sku: 'SKU-999',
         quantity: 10,

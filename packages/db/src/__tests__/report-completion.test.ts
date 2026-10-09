@@ -174,10 +174,10 @@ describe.each(DRIVERS)('%s 报告完整交付', { timeout: 60_000 }, (driver) =>
     expect((await handle.db.select().from(t.storedObjects).where(eq(t.storedObjects.artifactId, orphan.id)))[0]!.deleteRequestedAt).toBeTruthy()
   })
 
-  it('新产物遇到活跃旧协议节点时拒绝写入', async () => {
+  it('锁步部署：有旧协议节点在线也照常写入新产物', async () => {
     const id = await run(), identity = await worker(), t = schemaFor(handle.db)
     await handle.db.update(t.workers).set({ protocolCapabilities: ['export-artifacts@1'] }).where(eq(t.workers.id, identity.workerId))
-    await expect(report(id)).rejects.toMatchObject({ code: 'REPORT_DEPLOYMENT_NOT_READY' })
+    expect((await report(id)).id).toBeTruthy()
   })
 
   it('删除运行的预览、清理状态和重试包含报告产物，不提前宣称清理完成', async () => {

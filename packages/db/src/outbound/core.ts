@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, lte } from 'drizzle-orm'
 import {
   DEFAULT_OUTBOUND_POLICY,
+  DURATION_REPORT_OUTBOUND_TYPE,
   FINISHED_RUN_STATUSES,
   RUN_OUTBOUND_PROTOCOL,
   OUTBOUND_PROTOCOL,
@@ -98,10 +99,6 @@ export async function freezeRunOutboundPolicy(
     policy.enabled &&
     current.document.outbound.enabled &&
     policy.sourceKinds.includes(input.source)
-  if (enabled) {
-    const { assertOutboundWriterRollout } = await import('./config.js')
-    await assertOutboundWriterRollout(tx)
-  }
   return frozenOutboundPolicySchema.parse({
     protocol: RUN_OUTBOUND_PROTOCOL,
     enabled,
@@ -195,6 +192,13 @@ export async function bindingSuppression(
       if (!alert) return 'source_deleted'
       if (alert.silencedUntil && alert.silencedUntil > (await clockNow(db))) return 'alert_silenced'
     }
+  }
+  if (event.type === DURATION_REPORT_OUTBOUND_TYPE) {
+    // 周期报告：渠道须仍授权给该目标系统，目标系统未删除；只走 cairn.outbound@1 渠道
+    if (!event.targetId || !channel.targetIds.includes(event.targetId) || !binding.channel.targetIds.includes(event.targetId)) return 'target_use_revoked'
+    const [target] = await db.select().from(targets).where(eq(targets.id, event.targetId))
+    if (!target || target.deletedAt) return 'source_deleted'
+    if (binding.channel.format !== OUTBOUND_PROTOCOL) return 'channel_protocol_unsupported'
   }
   if (event.type === 'run.finished') {
     if (
@@ -335,15 +339,16 @@ export async function enqueueAlertOutboundTx(
   kind: 'firing' | 'resolved' | 'interrupted',
   legacyKey?: string,
 ) {
-  const { monitoringAlerts: a, outboundEvents: e } = schemaFor(tx)
+  const { monitoringAlerts: a, outboundEvents: e, targets } = schemaFor(tx)
   const [alert] = await tx.select().from(a).where(eq(a.id, alertId))
   if (!alert) return
+  // 目标级告警（页面健康等）推送时要能看出是哪个系统：名称在写事件时冻结
+  const [scopeTarget] =
+    alert.scope === 'target'
+      ? await tx.select({ name: targets.name }).from(targets).where(eq(targets.id, alert.scopeId)).limit(1)
+      : []
   await lockOutboundDispatch(tx)
   const current = await getOrCreatePlatformConfig(tx)
-  if (current.document.outbound.enabled) {
-    const { assertOutboundWriterRollout } = await import('./config.js')
-    await assertOutboundWriterRollout(tx)
-  }
   const bindings = await freezeOutboundBindings(tx, current.document, alert.channelIds)
   const previous = await tx
     .select({ sequence: e.sourceSequence })
@@ -367,6 +372,7 @@ export async function enqueueAlertOutboundTx(
       ruleName: alert.ruleName,
       scope: alert.scope,
       scopeId: alert.scopeId,
+      scopeName: scopeTarget?.name.slice(0, 128) ?? null,
       severity: alert.severity,
       metricKey: alert.metricKey,
       source: alert.staleSource,
@@ -416,8 +422,6 @@ export async function enqueueTakeoverOutboundTx(
   await lockOutboundDispatch(tx)
   const current = await getOrCreatePlatformConfig(tx)
   if (!current.document.outbound.enabled) return
-  const { assertOutboundWriterRollout } = await import('./config.js')
-  await assertOutboundWriterRollout(tx)
   const candidateIds =
     input.channelIds && input.channelIds.length > 0
       ? input.channelIds

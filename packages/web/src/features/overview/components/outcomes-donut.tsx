@@ -20,7 +20,6 @@ const triggerConfig: ChartConfig = {
   manual: { label: '控制台手动', color: 'var(--chart-1)' },
   schedule: { label: '定时自动复查', color: 'var(--chart-2)' },
   serviceApi: { label: '开放服务 API', color: 'var(--chart-4)' },
-  suiteMember: { label: '场景集批量', color: 'var(--chart-5)' },
 }
 
 export function OutcomesDonut({
@@ -48,7 +47,6 @@ export function OutcomesDonut({
       { name: 'manual', value: triggers.manual, label: '控制台手动', color: 'var(--chart-1)' },
       { name: 'schedule', value: triggers.schedule, label: '定时自动复查', color: 'var(--chart-2)' },
       { name: 'serviceApi', value: triggers.serviceApi, label: '开放服务 API', color: 'var(--chart-4)' },
-      { name: 'suiteMember', value: triggers.suiteMember, label: '场景集批量', color: 'var(--chart-5)' },
     ].filter((item) => item.value > 0)
   }, [triggers])
 
@@ -164,6 +162,12 @@ export function OutcomesDonut({
           )
         })}
       </div>
+      {/* 场景集成员是容器维度，与发起方重叠，不进饼图 */}
+      {tab === 'triggers' && triggers && triggers.suiteMember > 0 ? (
+        <p className="mt-2 text-label text-muted-foreground">
+          其中场景集成员运行 <span className="font-mono tabular-nums text-text-primary">{triggers.suiteMember.toLocaleString()}</span> 次
+        </p>
+      ) : null}
     </div>
   )
 }

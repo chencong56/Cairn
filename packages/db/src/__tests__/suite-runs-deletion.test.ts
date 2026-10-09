@@ -19,6 +19,7 @@ import {
   getSuiteRunObservation,
   listPurgeCandidates,
   listSuiteRuns,
+  listSuites,
   previewDeleteRun,
   previewDeleteSuiteRun,
   publishSuite,
@@ -255,6 +256,10 @@ describe.each(DRIVERS)('%s 场景集运行删除与级联清理', { timeout: 60_
     // Excluded from listSuiteRuns
     const list = await listSuiteRuns(handle.db, { suiteId })
     expect(list.items.some((item) => item.id === observation.id)).toBe(false)
+
+    // 场景集列表的「最近运行」不再指向已删除的运行
+    const suites = await listSuites(handle.db, {}, actorId)
+    expect(suites.items.find((item) => item.id === suiteId)?.latestRun ?? null).toBeNull()
 
     // Child run is also soft deleted
     await expect(getRun(handle.db, childRunId)).rejects.toMatchObject({

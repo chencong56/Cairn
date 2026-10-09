@@ -54,6 +54,7 @@ import { FACTORY_RUN_AUTH_RECOVERY, platformRunAuthRecoverySchema } from './sess
 import { isAiStepType, type ExecutionPolicy } from './step.js'
 import { AUTH_METHODS, CAPTCHA_MODES, targetLoginFieldsDtoSchema } from './target.js'
 import { entityIdSchema, timeoutMsSchema, utcInstantSchema } from './wire.js'
+import { DEFAULT_STATISTICS_TIME_ZONE, timeZoneSchema } from './time-zone.js'
 import {
   FACTORY_RUNTIME_INVARIANT_DEFAULTS,
   platformRuntimeInvariantDefaultsSchema,
@@ -387,6 +388,10 @@ function dropRetiredPlatformConfigKeys(value: unknown): unknown {
   return copy
 }
 
+export const platformStatisticsSchema = z.strictObject({ timeZone: timeZoneSchema })
+export type PlatformStatistics = z.infer<typeof platformStatisticsSchema>
+export const FACTORY_STATISTICS: PlatformStatistics = { timeZone: DEFAULT_STATISTICS_TIME_ZONE }
+
 const platformConfigDocumentObjectSchema = z
   .strictObject({
     schemaVersion: z.literal(PLATFORM_CONFIG_SCHEMA_VERSION),
@@ -418,6 +423,8 @@ const platformConfigDocumentObjectSchema = z
     }).default({ rules: FACTORY_ALERTING.rules, credentialMaintenance: FACTORY_ALERTING.credentialMaintenance }),
     outbound: platformOutboundSchema.default(FACTORY_OUTBOUND),
     browserPrewarm: platformBrowserPrewarmSchema.default(FACTORY_BROWSER_PREWARM),
+    /** 按天统计用的时区：耗时分析按天汇总、周期报告都按它切天；改了会整体重建汇总。 */
+    statistics: platformStatisticsSchema.default(FACTORY_STATISTICS),
   })
   .superRefine((document, ctx) => {
     const ids = new Set(document.outbound.channels.map(c => c.id))
@@ -563,6 +570,7 @@ export const FACTORY_PLATFORM_CONFIG: PlatformConfigDocument = {
   alerting: { rules: FACTORY_ALERTING.rules, credentialMaintenance: FACTORY_ALERTING.credentialMaintenance },
   outbound: FACTORY_OUTBOUND,
   browserPrewarm: FACTORY_BROWSER_PREWARM,
+  statistics: FACTORY_STATISTICS,
 }
 
 /**

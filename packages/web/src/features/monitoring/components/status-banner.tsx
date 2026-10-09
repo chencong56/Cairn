@@ -10,6 +10,7 @@ import { useNow } from '@/hooks/use-now'
 import {
   MAX_ALERT_SILENCE_SECONDS,
   MIN_ALERT_SILENCE_SECONDS,
+  metricLabel,
 } from '@cairn/shared'
 import {
   AlertTriangle,
@@ -35,7 +36,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { CursorPagination } from '@/components/data-table'
-import { metricLabel } from '../metric-labels'
 import {
   alertStateTone,
   formatDuration,

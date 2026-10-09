@@ -1,10 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  CONTROL_FLOW_PROTOCOL,
   LOCATOR_RESOLUTION_PROTOCOL,
-  OUTCOME_MANIFEST_PROTOCOL,
-  RUNTIME_INVARIANT_MANIFEST_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   computeContextVersion,
   createRuntimeInvariant,
@@ -45,7 +42,7 @@ import { outcomeStatusForOutboundTx } from '../runs/outcome-results.js'
 import { consoleAccounts as pg_consoleAccounts } from '../schema/console.js'
 import { runs as pg_runs, stepRuns as pg_stepRuns, outcomeResults as pg_outcomeResults } from '../schema/execution.js'
 import { targets as pg_targets } from '../schema/targets.js'
-import { forceGrantForRun, seedWorker } from './lease-harness.js'
+import { forceGrantForRun } from './lease-harness.js'
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_outcome`
 
@@ -206,7 +203,7 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
     expect(computeSnapshotDigest(snapshotInvariant)).not.toBe(digestWithout)
   })
 
-  it('调度排他：未声明 snapshot.outcomeManifest@1 的 Worker 跳过含契约清单的 Run', async () => {
+  it('锁步部署：含契约清单的 Run 不按协议筛 Worker，任一执行节点都能领取', async () => {
     const scenario = await createScenarioWithNodes({
       name: '结果轴调度测试',
       nodes: [
@@ -241,33 +238,12 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
     expect(runCreated.detail.snapshot.outcomeManifest).toBeDefined()
     expect(runCreated.detail.snapshot.outcomeManifest?.entries).toHaveLength(1)
 
-    // Worker 1: 未声明 OUTCOME_MANIFEST_PROTOCOL
-    const workerLegacy = { workerId: `worker-legacy-${newId()}`, instanceId: newId() }
-    await registerWorkerWith(handle.db, {
-      workerId: workerLegacy.workerId,
-      instanceId: workerLegacy.instanceId,
-      capacity: 8,
-      protocolCapabilities: [CONTROL_FLOW_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
-      lostAfterSeconds: 60,
-    })
-    const grantLegacy = await claimRun(handle, {
-      workerId: workerLegacy.workerId,
-      instanceId: workerLegacy.instanceId,
-      leaseTtlSeconds: 30,
-    })
-    expect(grantLegacy).toBeNull()
-
-    // Worker 2: 声明了 OUTCOME_MANIFEST_PROTOCOL
     const workerOutcome = { workerId: `worker-oc-${newId()}`, instanceId: newId() }
     await registerWorkerWith(handle.db, {
       workerId: workerOutcome.workerId,
       instanceId: workerOutcome.instanceId,
       capacity: 8,
-      protocolCapabilities: [
-        CONTROL_FLOW_PROTOCOL,
-        LOCATOR_RESOLUTION_PROTOCOL,
-        OUTCOME_MANIFEST_PROTOCOL,
-      ],
+      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
       lostAfterSeconds: 60,
     })
     const grantOutcome = await claimRun(handle, {
@@ -849,7 +825,7 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
     expect(deletedRow?.outcomeStatus).toBe('NOT_EVALUATED')
   })
 
-  it('OCC：含 runtimeInvariantManifest 的 Run 要求新协议，收尾写 PASS', async () => {
+  it('OCC：含 runtimeInvariantManifest 的 Run 收尾写 PASS', async () => {
     const invariantId = '00000000-0000-4000-8000-000000000083'
     const scenario = await createScenarioWithNodes({
       name: '运行期约束协议',
@@ -861,14 +837,6 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
       actor: { id: actorId },
     })
     expect(created.detail.snapshot.runtimeInvariantManifest?.entries).toHaveLength(1)
-
-    const legacy = await seedWorker(handle, `worker-inv-legacy-${newId()}`)
-    const leftover = await claimRun(handle, {
-      workerId: legacy.workerId,
-      instanceId: legacy.instanceId,
-      leaseTtlSeconds: 30,
-    })
-    expect(leftover?.runId ?? null).not.toBe(created.detail.id)
 
     const grant = await forceGrantForRun(handle, created.detail.id, `worker-inv-${newId()}`)
 
@@ -920,7 +888,8 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
     }
   }
 
-  it('OCC-02：越界导航错误码不变，同时写 navigation_boundary FAIL', async () => {
+  // 旧快照里的 navigation_boundary 判定由 shared runtime-invariant 单测覆盖；这里守住新发布不再冻结它
+  it('OCC-02：已停用的 navigation_boundary 发布后不进快照，越界错误码照常记失败、不写约束行', async () => {
     const invariantId = '00000000-0000-4000-8000-000000000084'
     const scenario = await createScenarioWithNodes({
       name: '越界导航约束',
@@ -953,15 +922,10 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
       grant: grant!,
     })
     const detail = await loadRunDetail(handle.db, created.detail.id)
+    expect(created.detail.snapshot.runtimeInvariantManifest).toBeUndefined()
     expect(detail?.status).toBe('FAILED')
     expect(detail?.stepRuns[0]?.attempts[0]?.error).toMatchObject({ code: 'NAVIGATE_OUT_OF_SCOPE' })
-    expect(detail?.outcomeStatus).toBe('FAIL')
-    const row = detail?.outcomeResults.find((item) => item.contractId === invariantId)
-    expect(row).toMatchObject({
-      provenance: 'runtime_invariant',
-      verdict: 'FAIL',
-      actual: { errorCode: 'NAVIGATE_OUT_OF_SCOPE' },
-    })
+    expect(detail?.outcomeResults.find((item) => item.contractId === invariantId)).toBeUndefined()
   })
 
   it('OCC-03：恢复成功仍保留 auth_validity FAIL，结果轴 WARN，检查点写入即记账', async () => {

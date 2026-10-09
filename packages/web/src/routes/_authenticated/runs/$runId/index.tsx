@@ -9,6 +9,8 @@ const searchSchema = z.object({
   stepRunId: z.string().optional().catch(undefined),
   attemptId: z.string().optional().catch(undefined),
   evidenceId: z.string().optional().catch(undefined),
+  /** 打开耗时区块的「与上次对比」。 */
+  duration: z.enum(['compare']).optional().catch(undefined),
 })
 
 export const Route = createFileRoute('/_authenticated/runs/$runId/')({

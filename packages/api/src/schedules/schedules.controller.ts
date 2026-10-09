@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res } from '@nestjs/common'
 import type { Request, Response } from 'express'
 import {
+  scheduleDeleteBodySchema,
   scheduleEnabledBodySchema,
   scheduleEventListQuerySchema,
   scheduleListQuerySchema,
@@ -9,6 +10,7 @@ import {
   schedulePreviewRequestSchema,
   scheduleTriggerBodySchema,
   scheduleWriteBodySchema,
+  type ScheduleDeleteBody,
   type ScheduleEnabledBody,
   type ScheduleEventListQuery,
   type ScheduleListQuery,
@@ -83,6 +85,17 @@ export class SchedulesController {
     @CurrentAccount() account: RequestAccount,
   ) {
     return this.schedules.enabled(scheduleId, body, account)
+  }
+
+  @Post(':scheduleId/delete')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('schedule:write')
+  delete(
+    @Param('scheduleId') scheduleId: string,
+    @Body(new ZodValidationPipe(scheduleDeleteBodySchema.optional())) body: ScheduleDeleteBody | undefined,
+    @CurrentAccount() account: RequestAccount,
+  ) {
+    return this.schedules.delete(scheduleId, body ?? { cancelAdmittedJobs: false }, account)
   }
 
   @Post(':scheduleId/trigger')

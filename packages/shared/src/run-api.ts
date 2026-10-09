@@ -225,6 +225,20 @@ export const runSummarySchema = z.object({
   reportId: entityIdSchema.nullable().optional(),
   deletedAt: instantOrNull.optional(),
   deletedBy: resourceDeletedBySchema.nullable().optional(),
+  /** 耗时分解（读自耗时事实；事实未生成时为 null，列表只显示总耗时）。仅列表返回。 */
+  duration: z
+    .object({
+      totalMs: z.number().nullable(),
+      activeMs: z.number().nullable(),
+      authWaitMs: z.number().nullable(),
+      requeueMs: z.number().nullable(),
+      reviewMs: z.number().nullable(),
+      holdMs: z.number().nullable(),
+      queueMs: z.number().nullable(),
+      complete: z.boolean(),
+    })
+    .nullable()
+    .optional(),
 })
 export type RunSummaryDto = z.infer<typeof runSummarySchema>
 

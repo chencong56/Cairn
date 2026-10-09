@@ -5,6 +5,7 @@ import { KNOWLEDGE_ANALYSIS_PROTOCOL } from '../analysis-jobs.js'
 import { MAP_SCHEDULER_PROTOCOL, UNIFIED_SCHEDULER_PROTOCOL } from '../schedules.js'
 import { SERVICE_WEBHOOK_DELIVERY_PROTOCOL } from '../service-webhooks.js'
 import { SUITE_SCHEDULER_PROTOCOL } from '../suites.js'
+import { SESSION_OCCUPANCY_PROTOCOL } from '../session-occupancy.js'
 import {
   advertisesRunExecution,
   parseWorkerRoles,
@@ -17,7 +18,10 @@ describe('Worker 角色', () => {
     const all = parseWorkerRoles(undefined)
     expect(all).toEqual({ executor: true, scheduler: true, maintenance: true, analyst: true })
     const caps = protocolCapabilitiesForRoles(all)
-    expect(caps.indexOf(MAP_SCHEDULER_PROTOCOL)).toBeLessThan(caps.indexOf('snapshot.outcomeManifest@1'))
+    expect(caps).toContain(SESSION_OCCUPANCY_PROTOCOL)
+    // 锁步部署：快照特性不再有协议门禁，能力清单只表达角色与会话占用
+    expect(caps.filter((item) => item.startsWith('snapshot.'))).toEqual([])
+    expect(protocolCapabilitiesForRoles(parseWorkerRoles('executor'))).toContain(SESSION_OCCUPANCY_PROTOCOL)
     expect(() => parseWorkerRoles('all,executor')).toThrow(/不能再组合/)
     expect(parseWorkerRoles('scheduler')).toEqual({
       executor: false,

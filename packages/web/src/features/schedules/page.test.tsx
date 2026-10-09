@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   fetchSuites: vi.fn(),
   fetchMapSafeEntries: vi.fn(),
   updateSchedule: vi.fn(),
+  deleteSchedule: vi.fn(async () => ({ scheduleId: 'mock-del', deleted: true })),
   fetchSuite: vi.fn(),
 }))
 
@@ -26,6 +27,7 @@ vi.mock('@/lib/schedules-api', () => ({
   fetchSchedules: mocks.fetchSchedules,
   createSchedule: mocks.createSchedule,
   updateSchedule: mocks.updateSchedule,
+  deleteSchedule: mocks.deleteSchedule,
   setScheduleEnabled: vi.fn(),
   previewSchedule: vi.fn(),
   triggerSchedule: vi.fn(),
@@ -367,7 +369,7 @@ describe('定时任务列表', () => {
     await expect.element(page.getByText('值班账号')).toBeVisible()
     await expect.element(page.getByText('由平台选择采集账号')).toBeVisible()
     await expect
-      .element(page.getByText('已准入（已创建执行对象，不等于业务成功）'))
+      .element(page.getByText('已准入', { exact: true }).first())
       .toBeVisible()
     await expect.element(page.getByText('已跳过 · 错过窗口')).toBeVisible()
     await expect
@@ -420,10 +422,64 @@ describe('定时任务列表', () => {
     })
     await renderPage()
     await expect.element(page.getByText('验收-知识分析-默认停用')).toBeVisible()
-    await expect.element(page.getByText('平台尚未开放此类定时任务；请在平台配置中开放后再执行')).toBeVisible()
+    await expect.element(page.getByText('平台尚未开放此类定时任务')).toBeVisible()
     await expect
       .element(page.getByText('FACTORY_DISABLED', { exact: true }))
       .not.toBeInTheDocument()
+  })
+
+  it('操作菜单支持打开删除确认弹窗并执行删除', async () => {
+    signIn(['schedule:read', 'schedule:write', 'target:read'])
+    mocks.fetchSchedules.mockResolvedValue({
+      items: [
+        {
+          scheduleId: '55555555-5555-4555-8555-555555555555',
+          name: '待删除计划',
+          targetId: '11111111-1111-4111-8111-111111111111',
+          targetAccountId: null,
+          consumerKey: 'map_ingest',
+          enabled: false,
+          revision: 1,
+          currentVersionId: '66666666-6666-4666-8666-666666666666',
+          definition: {
+            timezone: 'Asia/Shanghai',
+            weekdays: [1],
+            windowStart: '02:00',
+            windowEnd: '03:00',
+            misfire: 'skip',
+            timeRule: {
+              kind: 'calendar',
+              timezone: 'Asia/Shanghai',
+              weekdays: [1],
+              windows: [{ ruleId: 'default', windowStart: '02:00', windowEnd: '03:00' }],
+              misfire: 'skip',
+            },
+            consumer: { type: 'map_ingest', targetId: '11111111-1111-4111-8111-111111111111' },
+          },
+          nextDueAt: null,
+          lastOccurrence: null,
+          createdAt: '2026-09-20T00:00:00.000Z',
+          updatedAt: '2026-09-20T00:00:00.000Z',
+        },
+      ],
+    })
+    await renderPage()
+    await expect.element(page.getByText('待删除计划')).toBeVisible()
+
+    const moreBtn = page.getByRole('button', { name: '更多操作' })
+    await moreBtn.click()
+
+    const deleteMenu = page.getByRole('menuitem', { name: '删除计划' })
+    await expect.element(deleteMenu).toBeVisible()
+    await deleteMenu.click()
+
+    await expect.element(page.getByText('确认删除调度计划？')).toBeVisible()
+    await expect.element(page.getByText('删除此计划后，系统将立即停止未来的所有自动触发')).toBeVisible()
+
+    const confirmBtn = page.getByRole('button', { name: '确认删除' })
+    await confirmBtn.click()
+
+    expect(mocks.deleteSchedule).toHaveBeenCalledWith('55555555-5555-4555-8555-555555555555')
   })
 })
 

@@ -1,6 +1,7 @@
 import type { CDPSession, Page } from 'playwright'
 import {
   BROWSER_FRAME_MAX_EDGE,
+  BROWSER_FRAME_MAX_FPS,
   BROWSER_FRAME_QUALITY,
   DEFAULT_MANAGED_VIEWPORT,
   type ManagedBrowserFrame,
@@ -17,6 +18,13 @@ export type ScreencastHandle = {
 }
 
 let nextCaptureEpoch = 1
+
+/**
+ * Chromium 侧产帧的最小间隔：取消费端（SSE 推送、录像写帧）间隔的一半，消费端总能拿到够新的帧。
+ * 靠推迟 ack 实现：未 ack 前 Chromium 不会编码下一帧，所以限速落在产帧端；
+ * 页面停止重绘后，最后一次变化也会在 ack 后送达，不会像丢帧那样停在旧画面。
+ */
+export const SCREENCAST_MIN_FRAME_INTERVAL_MS = Math.max(100, Math.floor(1000 / (BROWSER_FRAME_MAX_FPS * 2)))
 
 function emitLive(
   state: ScreencastHandle & { liveListeners: Set<(frame: ManagedBrowserFrame) => void> },
@@ -98,12 +106,35 @@ export async function startScreencast(page: Page, pageRef: PageRef | (() => Page
     },
     stop: async () => undefined,
   }
+  let stopped = false
+  // Chromium 允许多帧在途：ack 时刻必须串行排队，否则几帧会在同一时刻一起 ack，限速被抵消。
+  let nextAckAt = 0
+  const ackTimers = new Set<ReturnType<typeof setTimeout>>()
+  const ackLater = (cdpSessionId: number) => {
+    const now = Date.now()
+    const at = Math.max(now, nextAckAt)
+    nextAckAt = at + SCREENCAST_MIN_FRAME_INTERVAL_MS
+    const send = () => {
+      if (stopped) return
+      void cdp.send('Page.screencastFrameAck', { sessionId: cdpSessionId }).catch(() => undefined)
+    }
+    if (at <= now) {
+      send()
+      return
+    }
+    const timer = setTimeout(() => {
+      ackTimers.delete(timer)
+      send()
+    }, at - now)
+    ackTimers.add(timer)
+  }
   const onFrame = (event: {
     data: string
     sessionId: number
     metadata?: { deviceWidth?: number; deviceHeight?: number; timestamp?: number }
   }) => {
-    void cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => undefined)
+    if (stopped) return
+    ackLater(event.sessionId)
     sourceSeq += 1
     let jpeg: Buffer
     try {
@@ -147,6 +178,9 @@ export async function startScreencast(page: Page, pageRef: PageRef | (() => Page
     maxHeight: BROWSER_FRAME_MAX_EDGE,
   })
   state.stop = async () => {
+    stopped = true
+    for (const timer of ackTimers) clearTimeout(timer)
+    ackTimers.clear()
     cdp.off('Page.screencastFrame', onFrame)
     liveListeners.clear()
     capturedListeners.clear()

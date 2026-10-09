@@ -30,6 +30,7 @@ import {
   type OutcomeManifestEntry,
   type OutcomeRule,
   runtimeInvariantSchema,
+  isRetiredRuntimeInvariantKind,
   type RuntimeInvariantManifest,
   CONTROL_FLOW_PROTOCOL,
   CONTROL_FLOW_PROTOCOL_V2,
@@ -213,7 +214,7 @@ export function deriveStepFromOutcomeRule(
 export function deriveRuntimeInvariantManifest(
   authoringDocument?: ScenarioAuthoringDocumentV2 | null,
 ): RuntimeInvariantManifest | undefined {
-  const entries = authoringDocument?.runtimeInvariants ?? []
+  const entries = (authoringDocument?.runtimeInvariants ?? []).filter((item) => !isRetiredRuntimeInvariantKind(item.kind))
   return entries.length > 0 ? { entries } : undefined
 }
 
@@ -1774,10 +1775,19 @@ export function expandAuthoringDocument(
         message: parsed.error.issues[0]?.message ?? '运行期约束不合法',
         fieldPath: ['runtimeInvariants', String(index)],
       })
+    } else if (isRetiredRuntimeInvariantKind(parsed.data.kind)) {
+      diagnostics.push({
+        code: 'RUNTIME_INVARIANT_RETIRED',
+        severity: 'warning',
+        message: '「不得离开允许范围」已停用（目标访问范围已移除），运行时不再检查，请删除这条约束',
+        fieldPath: ['runtimeInvariants', String(index)],
+      })
     }
   }
+  // 已停用的种类不进快照：否则运行结果里会出现一条永远通过、实际没有检查的约束
+  const activeRuntimeInvariants = runtimeInvariantEntries.filter((item) => !isRetiredRuntimeInvariantKind(item.kind))
   const runtimeInvariantManifest: RuntimeInvariantManifest | undefined =
-    runtimeInvariantEntries.length > 0 ? { entries: runtimeInvariantEntries } : undefined
+    activeRuntimeInvariants.length > 0 ? { entries: activeRuntimeInvariants } : undefined
 
   // 规则 10：步数上限限制
   if (expandedSteps.length > MAX_COMPILED_SCENARIO_STEPS) {

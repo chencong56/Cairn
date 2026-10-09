@@ -27,6 +27,7 @@ import {
   type MapJobPolicyDto,
   type MapJobPolicyUpdateBody,
   type MapJobStopReason,
+  SESSION_OCCUPANCY_PROTOCOL,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { recordAudit } from '../audit/record.js'
@@ -240,7 +241,7 @@ export async function listMapIngestJobs(db: Db, targetId: string, query: MapInge
 export async function hasReadyMapJobWorker(db: Db): Promise<boolean> {
   const { workers } = schemaFor(db)
   const rows = await db.select().from(workers)
-  return rows.some((row) => row.status === 'READY' && (row.protocolCapabilities ?? []).includes(MAP_JOBS_PROTOCOL))
+  return rows.some((row) => row.status === 'READY' && (row.protocolCapabilities ?? []).includes(SESSION_OCCUPANCY_PROTOCOL))
 }
 
 async function selectIngestAccount(db: Db, targetId: string, requested?: string): Promise<string> {

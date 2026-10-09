@@ -2,6 +2,7 @@ export {
   actorCanAdmitConsumer,
   actorCanAdmitSchedules,
   admitScheduleOccurrence,
+  deleteSchedule,
   expireClosedScheduleWindows,
   expireScheduledMapJobs,
   getSchedule,

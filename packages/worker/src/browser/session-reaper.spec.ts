@@ -26,12 +26,13 @@ function context() {
   const live = {
     handle: { basePage: { isClosed: () => false } },
     runPages: new Map(),
+    screencasts: new Map(),
     lastPage: undefined,
   }
   const ctx = {
     browserUnavailable: false,
     dbHandle: {},
-    logger: { log: vi.fn(), warn: vi.fn() },
+    logger: { log: vi.fn(), warn: vi.fn(), debug: vi.fn() },
     options: { workerId: 'w' },
     workerInstanceId: 'i',
     ownerScope: () => ({ workerId: 'w', ownerWorkerInstanceId: 'i' }),
@@ -48,6 +49,18 @@ function context() {
 describe('sessions.reap 拆分', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('无动作的回收周期只打 debug，有动作才打 info', async () => {
+    const quiet = context()
+    quiet.lives.clear()
+    await reap.call(quiet as unknown as BrowserSessionManager, { includeGlobalLeases: false })
+    expect(quiet.logger.log).not.toHaveBeenCalledWith(expect.anything(), 'reap.cycle')
+    expect(quiet.logger.debug).toHaveBeenCalledWith(expect.objectContaining({ screencasts: 0 }), 'reap.cycle')
+
+    const busy = context()
+    await reap.call(busy as unknown as BrowserSessionManager)
+    expect(busy.logger.log).toHaveBeenCalledWith(expect.objectContaining({ leasesExpired: 3 }), 'reap.cycle')
   })
 
   it('默认仍扫全局会话租约', async () => {

@@ -5,19 +5,13 @@ import {
   hasPermission,
   type RunDetailDto,
   type EvidenceMetadata,
-  type StepRunDto,
 } from '@cairn/shared'
 import {
   AlertTriangle,
   ArrowRight,
-  CheckCircle2,
-  Clock,
-  Flame,
-  MinusCircle,
   Sparkles,
   Target,
   TrendingUp,
-  XCircle,
 } from 'lucide-react'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -28,33 +22,13 @@ import { RunOutputCard } from './run-output-card'
 import { OutcomeAxisSummary, OutcomeConditionList, RUN_EXECUTION_AXIS_LABELS } from './outcome-axis'
 import { hasVisibleConditions, pageHealthSummaryOf } from './outcome-labels'
 import { translateStepError } from './error-translator'
-import { formatDuration } from './labels'
-
-export type StepPerformanceItem = {
-  step: StepRunDto
-  durationMs: number
-  durationFormatted: string
-  percentage: number
-  isBottleneck: boolean
-}
+import { RunDurationSection } from './run-duration-section'
 
 export type RunResultOverviewProps = {
   run: RunDetailDto
   evidenceItems: EvidenceMetadata[]
   onSelectStep: (stepRunId: string) => void
   onFocusEvidence?: (evidenceId: string) => void
-}
-
-function elapsedMs(startedAt: string | null | undefined, finishedAt: string | null | undefined): number | null {
-  if (!startedAt || !finishedAt) return null
-  const duration = Date.parse(finishedAt) - Date.parse(startedAt)
-  return Number.isFinite(duration) && duration >= 0 ? duration : null
-}
-
-function formatElapsedMs(durationMs: number): string {
-  if (durationMs < 1000) return `${durationMs}ms`
-  if (durationMs < 10_000) return `${(durationMs / 1000).toFixed(1)}s`
-  return `${Math.round(durationMs / 1000)}s`
 }
 
 export function RunResultOverview({
@@ -76,49 +50,6 @@ export function RunResultOverview({
 
   const failedAttempt = failedStep?.attempts[failedStep.attempts.length - 1]
   const failedDiagnosis = failedAttempt?.error ? translateStepError(failedAttempt.error) : null
-
-  // 2. 计算步骤耗时分析与性能分布
-  const { recordedStepDurationMs, performanceItems, topBottlenecks } = useMemo(() => {
-    const items = run.stepRuns.filter((step) => step.startedAt || step.attempts.length > 0).map((step) => {
-      const lastAtt = step.attempts[step.attempts.length - 1]
-      const stepElapsedMs = elapsedMs(step.startedAt, step.finishedAt) ??
-        elapsedMs(step.attempts[0]?.startedAt, lastAtt?.finishedAt)
-      const ms = stepElapsedMs ?? 0
-
-      return {
-        step,
-        durationMs: ms,
-        durationFormatted: stepElapsedMs !== null ? formatElapsedMs(ms) : step.status === 'RUNNING' ? '进行中' : '时间未记录',
-        percentage: 0,
-        isBottleneck: false,
-      }
-    })
-
-    // 计算占比
-    const totalMs = items.reduce((sum, item) => sum + item.durationMs, 0)
-    const effectiveTotalMs = totalMs > 0 ? totalMs : 1
-    items.forEach((item) => {
-      item.percentage = Math.round((item.durationMs / effectiveTotalMs) * 100)
-    })
-
-    // 找出耗时最长前 3 个步骤作为潜在瓶颈（要求耗时占比大于 15% 且 > 1 秒）
-    const sorted = [...items].filter((i) => i.durationMs >= 1000).sort((a, b) => b.durationMs - a.durationMs)
-    const bottlenecks = sorted.slice(0, 3)
-    bottlenecks.forEach((b) => {
-      b.isBottleneck = true
-    })
-
-    return {
-      recordedStepDurationMs: totalMs,
-      performanceItems: items,
-      topBottlenecks: bottlenecks,
-    }
-  }, [run.stepRuns])
-
-  const runElapsedMs = elapsedMs(run.startedAt, run.finishedAt)
-  const unassignedMs = runElapsedMs !== null && runElapsedMs >= recordedStepDurationMs
-    ? runElapsedMs - recordedStepDurationMs
-    : null
 
   // 3. 提取全局上下文变量 (run.context 中的键值)
   const contextEntries = useMemo(() => {
@@ -288,122 +219,8 @@ export function RunResultOverview({
         </section>
       )}
 
-      {/* D. 执行性能与耗时分布 (Performance Waterfall & Bottlenecks) */}
-      <section className='rounded-lg border border-border-card bg-card p-4 shadow-card space-y-3.5'>
-        <div className='flex flex-wrap items-center justify-between gap-2 border-b border-border-card/60 pb-2.5'>
-          <div className='flex items-center gap-2'>
-            <Clock className='size-4 text-primary' />
-            <h2 className='text-body font-semibold text-foreground'>耗时分布与性能透视</h2>
-          </div>
-          <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-label text-muted-foreground'>
-            {runElapsedMs !== null ? (
-              <span>运行历时: <strong className='text-foreground font-mono'>{formatDuration(run.startedAt, run.finishedAt)}</strong></span>
-            ) : null}
-            <span>已记录步骤耗时总和: <strong className='text-foreground font-mono'>{formatElapsedMs(recordedStepDurationMs)}</strong></span>
-            <span>已执行步骤: <strong className='text-foreground font-mono'>{performanceItems.length}</strong> / 编排步骤: <strong className='text-foreground font-mono'>{run.stepRuns.length}</strong></span>
-          </div>
-        </div>
-
-        {unassignedMs !== null ? (
-          <p className='text-label text-muted-foreground'>
-            未归于步骤的耗时：<strong className='font-mono text-foreground'>{formatElapsedMs(unassignedMs)}</strong>（可能包含等待、恢复或收尾时间）
-          </p>
-        ) : runElapsedMs !== null ? (
-          <p className='text-label text-muted-foreground'>步骤时间存在重叠，无法直接计算未归于步骤的耗时。</p>
-        ) : null}
-
-        {/* 耗时瓶颈 TOP 步骤提示 */}
-        {topBottlenecks.length > 0 ? (
-          <div className='rounded-md border border-status-warning-foreground/30 bg-status-warning-background/15 p-3 space-y-2'>
-            <div className='flex items-center gap-1.5 text-label font-medium text-status-warning-foreground'>
-              <Flame className='size-4' />
-              <span>耗时最长的步骤（按已记录步骤耗时）：</span>
-            </div>
-            <div className='grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2'>
-              {topBottlenecks.map(({ step, durationFormatted, percentage }) => (
-                <button
-                  key={step.id}
-                  type='button'
-                  onClick={() => onSelectStep(step.id)}
-                  className='flex items-center justify-between rounded bg-card/80 border border-border-card p-2 text-left hover:border-primary transition-colors text-label'
-                >
-                  <div className='min-w-0 pr-2'>
-                    <div className='font-medium text-foreground truncate'>
-                      #{step.ordinal + 1} {step.name}
-                    </div>
-                    <div className='text-caption text-muted-foreground'>
-                      占已记录步骤耗时 {percentage}%
-                    </div>
-                  </div>
-                  <span className='font-mono font-bold text-status-warning-foreground shrink-0'>
-                    {durationFormatted}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {/* 步骤耗时瀑布清单 (Waterfall Bar List) */}
-        <div className='space-y-1.5 pt-1'>
-          <p className='text-caption font-medium text-muted-foreground mb-1'>已执行步骤耗时横向对比（百分比以已记录步骤耗时总和为分母；点击条目直达步骤现场）：</p>
-          {performanceItems.length === 0 ? (
-            <p className='text-label text-muted-foreground'>暂无已执行步骤耗时记录。</p>
-          ) : null}
-          {performanceItems.map(({ step, durationFormatted, percentage }) => (
-            <div
-              key={step.id}
-              onClick={() => onSelectStep(step.id)}
-              className='group flex items-center justify-between rounded-md p-1.5 hover:bg-muted/40 cursor-pointer transition-colors text-label'
-            >
-              <div className='flex items-center gap-2 min-w-0 w-44 md:w-56 shrink-0'>
-                <span className='font-mono text-caption text-muted-foreground w-6 text-right'>
-                  #{step.ordinal + 1}
-                </span>
-                <span className='shrink-0'>
-                  {step.status === 'SUCCEEDED' ? (
-                    <CheckCircle2 className='size-3.5 text-status-success' />
-                  ) : step.status === 'FAILED' ? (
-                    <XCircle className='size-3.5 text-status-error' />
-                  ) : step.status === 'RUNNING' ? (
-                    <Clock className='size-3.5 text-status-warning animate-spin' />
-                  ) : (
-                    <MinusCircle className='size-3.5 text-muted-foreground' />
-                  )}
-                </span>
-                <span className='font-medium text-foreground truncate group-hover:text-primary transition-colors' title={step.name}>
-                  {step.name}
-                </span>
-              </div>
-
-              {/* 耗时可视化条 */}
-              <div className='flex-1 mx-3 flex items-center gap-2 min-w-0'>
-                <div className='h-2 flex-1 rounded-full bg-muted/50 overflow-hidden'>
-                  <div
-                    className={`h-full rounded-full transition-[width] motion-reduce:transition-none ${
-                      step.status === 'FAILED'
-                        ? 'bg-status-error'
-                        : percentage >= 30
-                          ? 'bg-status-warning'
-                          : 'bg-primary/70'
-                    }`}
-                    style={{ width: `${percentage > 0 ? Math.max(2, percentage) : 0}%` }}
-                  />
-                </div>
-              </div>
-
-              <div className='flex items-center gap-2 shrink-0 text-right w-20 justify-end'>
-                <span className='font-mono font-medium text-foreground text-caption'>
-                  {durationFormatted}
-                </span>
-                <span className='font-mono text-muted-foreground text-3xs w-8 text-right'>
-                  {percentage}%
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      {/* D. 耗时分布与对比：按编排节点的耗时事实，可与上次对比 */}
+      <RunDurationSection run={run} onSelectStep={onSelectStep} />
     </div>
   )
 }

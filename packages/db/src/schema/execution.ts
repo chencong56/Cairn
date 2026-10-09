@@ -32,6 +32,7 @@ import type {
   OutcomeVerdict,
   OutcomeManifest,
   RunOutput,
+  RunTriggerSource,
 } from '@cairn/shared'
 import { newId } from '../id.js'
 import { cairnSchema, consoleAccounts } from './console.js'
@@ -159,6 +160,8 @@ export const runs = cairnSchema.table(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     eventSeq: integer('event_seq').notNull().default(0),
     executionOrigin: text('execution_origin').notNull().default('standalone').$type<'standalone' | 'suite_member' | 'batch_item'>(),
+    /** 发起方：谁让这次运行发生；与 execution_origin（容器）正交。创建入口显式写入。 */
+    triggerSource: text('trigger_source').notNull().default('manual').$type<RunTriggerSource>(),
     suiteRunId: uuid('suite_run_id'),
     suiteMemberId: text('suite_member_id'),
   },
@@ -175,6 +178,7 @@ export const runs = cairnSchema.table(
     index('runs_suite_run_id_idx').on(t.suiteRunId),
     index('runs_execution_origin_idx').on(t.executionOrigin, t.createdAt),
     index('runs_target_status_deleted_idx').on(t.targetId, t.status, t.deletedAt),
+    index('runs_finished_at_id_idx').on(t.finishedAt, t.id),
   ],
 )
 

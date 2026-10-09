@@ -375,6 +375,7 @@ export const runSnapshotSchema = z
      * 冻结的浏览器 AI 执行配置。含 AI Step 时必须存在；确定性历史快照可缺省。
      */
     aiExecution: aiExecutionConfigSchema.optional(),
+    /** 旧快照的执行协议标记：锁步部署后新快照不再写入，保留只为旧快照能解析。 */
     aiAtomicActionsProtocol: z.literal(AI_ATOMIC_ACTIONS_PROTOCOL).optional(),
     listOutputProtocol: z.literal(LIST_OUTPUT_PROTOCOL).optional(),
     importedOutcomeProtocol: z.literal(IMPORTED_OUTCOME_PROTOCOL).optional(),
@@ -466,22 +467,6 @@ export const runSnapshotSchema = z
     digest: z.string().min(1).max(128).optional(),
   })
   .superRefine((snapshot, ctx) => {
-    if (snapshot.steps.some((step) => step.type === 'ai_action' && 'operation' in step.input) && !snapshot.aiAtomicActionsProtocol) {
-      ctx.addIssue({ code: 'custom', path: ['aiAtomicActionsProtocol'], message: '原子 AI 操作必须声明执行协议能力' })
-    }
-    if (
-      snapshot.steps.some(
-        (step) =>
-          (step.type === 'extract' && 'many' in step.input && Boolean(step.input.many)) ||
-          (step.type === 'ai_extract' && step.input.outputSchema?.kind === 'list'),
-      ) &&
-      !snapshot.listOutputProtocol
-    ) {
-      ctx.addIssue({ code: 'custom', path: ['listOutputProtocol'], message: '列表型输出必须声明执行协议能力' })
-    }
-    if (snapshot.outcomeManifest?.entries.some((entry) => entry.provenance === 'imported' || entry.provenance === 'generalized') && !snapshot.importedOutcomeProtocol) {
-      ctx.addIssue({ code: 'custom', path: ['importedOutcomeProtocol'], message: '导入或泛化成功条件必须声明执行协议能力' })
-    }
     const hasControlFlowFeatures = snapshot.steps.some(
       (s) => s.type === 'decide' || s.type === 'probe' || s.type === 'compute' || s.type === 'loop' || Boolean(s.optional),
     )

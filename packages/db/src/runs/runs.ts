@@ -4,7 +4,7 @@ import { computeSnapshotDigest } from './digest.js'
 import { freezeAuthVerificationForRun } from '../sessions/auth-profile.js'
 import { assembleRunSnapshot, AssembleRunSnapshotError } from './assemble-snapshot.js'
 import { settleRunOutput } from './output.js'
-import { assertDemonstrationExecutorRolloutTx, saveRunValidationContextTx, markValidationInterventionTx } from './validation.js'
+import { saveRunValidationContextTx, markValidationInterventionTx } from './validation.js'
 import { ensureFrozenAccessPolicyTx } from '../map/access.js'
 import { expireRunDeadlines } from './deadline.js'
 import { settleRunCancellationTx } from './recover.js'
@@ -12,10 +12,11 @@ import { lockRunAccountScope } from './lock-scope.js'
 import { resolveStepModuleIdentity } from './step-module-identity.js'
 import { enqueueReliabilityReceiptTx } from '../reliability/receipts.js'
 import { atomic, databaseNow, locked, schemaFor, updateRows } from '../native.js'
+import { markDurationRollupDirty } from './duration-rollup.js'
 import { and, asc, count, desc, eq, exists, inArray, isNotNull, isNull, max, ne, notExists, or, sql, type SQL } from 'drizzle-orm'
 import { applyPatchToDocument, computeDigestManifest, computeTargetDigest, evaluatePatchGuards, findStepInDocument } from '@cairn/authoring'
 import { createOrUpdateRepairCandidateTx, settleCandidateValidationTx } from '../repair/index.js'
-import { canonicalJson, syncSha256, type OutcomeStatus, type RepairSourceRunKind, type RunReportStatus, type ValidationSubject } from '@cairn/shared'
+import { canonicalJson, runTriggerSourceSchema, syncSha256, type OutcomeStatus, type RepairSourceRunKind, type RunReportStatus, type RunTriggerSource, type ValidationSubject } from '@cairn/shared'
 import {
   assembleRunOutput,
   deriveFallbackSummary,
@@ -319,7 +320,7 @@ export async function listRuns(
   actorId?: string,
 ): Promise<RunListResponse> {
   const parsed = runListQuerySchema.parse(query)
-  const { runs, scenarioVersions, scenarios, targetAccounts, targets } = schemaFor(db)
+  const { runs, scenarioVersions, scenarios, targetAccounts, targets, runDurationFacts } = schemaFor(db)
   const limit = parsed.limit
   const filters: (SQL | undefined)[] = [
     await (await import('../console/target-authorization.js')).scopedTargetFilter(db, actorId, runs.targetId, 'run:read'),
@@ -401,12 +402,21 @@ export async function listRuns(
       scenarioDeletedAt: scenarios.deletedAt,
       targetDeletedAt: targets.deletedAt,
       targetAccountDeletedAt: targetAccounts.deletedAt,
+      factTotalMs: runDurationFacts.totalMs,
+      factActiveMs: runDurationFacts.activeMs,
+      factAuthWaitMs: runDurationFacts.authWaitMs,
+      factRequeueMs: runDurationFacts.requeueMs,
+      factReviewMs: runDurationFacts.reviewMs,
+      factHoldMs: runDurationFacts.holdMs,
+      factQueueMs: runDurationFacts.queueMs,
+      factComplete: runDurationFacts.complete,
     })
     .from(runs)
     .innerJoin(scenarios, eq(scenarios.id, runs.scenarioId))
     .innerJoin(targets, eq(targets.id, runs.targetId))
     .innerJoin(scenarioVersions, eq(scenarioVersions.id, runs.scenarioVersionId))
     .leftJoin(targetAccounts, eq(targetAccounts.id, runs.targetAccountId))
+    .leftJoin(runDurationFacts, eq(runDurationFacts.runId, runs.id))
     .where(and(...filters.filter((f): f is SQL => f !== undefined)))
     .orderBy(desc(runs.createdAt), desc(runs.id))
     .limit(limit + 1)
@@ -463,6 +473,19 @@ export async function listRuns(
       lease: leases.get(row.id) ? { holderWorkerId: leases.get(row.id)!.holderWorkerId } : null,
       runReportStatus: reportStatuses.get(row.id)?.runReportStatus ?? 'not_configured',
       reportId: reportStatuses.get(row.id)?.reportId ?? null,
+      duration:
+        row.factComplete === null
+          ? null
+          : {
+              totalMs: row.factTotalMs,
+              activeMs: row.factActiveMs,
+              authWaitMs: row.factAuthWaitMs,
+              requeueMs: row.factRequeueMs,
+              reviewMs: row.factReviewMs,
+              holdMs: row.factHoldMs,
+              queueMs: row.factQueueMs,
+              complete: row.factComplete,
+            },
     })),
     nextCursor: paginated.nextCursor,
     hasMore: paginated.hasMore,
@@ -535,10 +558,12 @@ export async function softDeleteRunTx(
   deletedBy: ResourceDeletedBy | null,
 ): Promise<{ objectCount: number; byteSize: number }> {
   const { runs, storedObjects } = schemaFor(tx)
-  await tx
-    .update(runs)
-    .set({ deletedAt: now, deletedBy, updatedAt: now })
-    .where(eq(runs.id, runId))
+  const removed = await updateRows(tx, runs, { deletedAt: now, deletedBy, updatedAt: now }, eq(runs.id, runId), {
+    scenarioId: runs.scenarioId,
+    finishedAt: runs.finishedAt,
+  })
+  // 已删除运行不计入耗时汇总：同事务登记需要重算的天
+  await markDurationRollupDirty(tx, removed)
 
   await revokeExternalEvidence(tx as unknown as Db, [runId])
   await tx
@@ -1071,11 +1096,21 @@ export type CreateRunWithSnapshotInput = CreateRunBody & {
   validationSubject?: ValidationSubject
   /** 基线调试运行：每个浏览器步骤结束时自动采集页面结构快照。仅试跑且非 runThrough 时生效。 */
   captureStructure?: boolean
+  /**
+   * 发起方。`writeRunWithSnapshot` 的直接调用方（调度、场景集、批量）必须显式传入；
+   * `createRunWithSnapshot` 缺省按执行者推导：服务调用 → service，控制台 → manual。
+   */
+  triggerSource?: RunTriggerSource
+}
+
+/** 未显式给出发起方时按执行者推导。 */
+function defaultTriggerSource(actor: ExecutionActor): RunTriggerSource {
+  return actor.kind === 'service' ? 'service' : 'manual'
 }
 
 export async function writeRunWithSnapshot(
   db: Db,
-  input: CreateRunWithSnapshotInput,
+  input: CreateRunWithSnapshotInput & { triggerSource: RunTriggerSource },
 ): Promise<{ runId: string; created: boolean }> {
   input = { ...input, actor: executionActorSchema.parse(input.actor), ...(input.serviceAdmission ? { serviceAdmission: serviceAdmissionSchema.parse(input.serviceAdmission) } : {}) }
   if (input.sessionPolicy !== undefined) sessionPolicyOverrideSchema.parse(input.sessionPolicy)
@@ -1321,7 +1356,6 @@ export async function writeRunWithSnapshot(
       snapshot.notificationPolicy = outboundPolicy
       snapshot.digest = computeSnapshotDigest(snapshot)
       const digest = snapshot.digest
-      await assertDemonstrationExecutorRolloutTx(tx as unknown as Db, snapshot)
       await tx.insert(runs).values({
         id: runId,
         targetId: scenario.targetId,
@@ -1345,6 +1379,7 @@ export async function writeRunWithSnapshot(
         createdAt: now,
         updatedAt: now,
         executionOrigin: input.executionOrigin ?? 'standalone',
+        triggerSource: runTriggerSourceSchema.parse(input.triggerSource),
         suiteRunId: input.suiteRunId,
         suiteMemberId: input.suiteMemberId,
       })
@@ -1430,7 +1465,10 @@ export async function createRunWithSnapshot(
   db: Db,
   input: CreateRunWithSnapshotInput,
 ): Promise<{ detail: RunDetailDto; created: boolean }> {
-  const result = await writeRunWithSnapshot(db, input)
+  const result = await writeRunWithSnapshot(db, {
+    ...input,
+    triggerSource: input.triggerSource ?? defaultTriggerSource(executionActorSchema.parse(input.actor)),
+  })
   return { detail: await getRun(db, result.runId), created: result.created }
 }
 
@@ -2733,6 +2771,7 @@ export async function markRunWaitingForAuth(db: Db, grant: RunGrant): Promise<bo
     if (!row) return false
     await releaseRunLeaseTx(tx as unknown as Db, grant, 'waiting_for_auth')
     await appendRunEvents(tx as unknown as Db, grant.runId, [
+      { type: 'run.status_changed', payload: { status: 'WAITING_FOR_AUTH' } },
       { type: 'run.auth_wait', payload: { status: 'WAITING_FOR_AUTH' } },
     ])
     return true

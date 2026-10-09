@@ -38,6 +38,7 @@ import { SuitesModule } from "./suites/suites.module";
 import { SuiteRunsModule } from "./suite-runs/suite-runs.module";
 import { ReportsModule } from "./reports/reports.module";
 import { OverviewModule } from "./overview/overview.module";
+import { DurationAnalysisModule } from "./duration-analysis/duration-analysis.module";
 import { DatasetsModule } from "./datasets/datasets.module";
 import { BatchesModule } from "./batches/batches.module";
 import { ReliabilityModule } from "./reliability/reliability.module";
@@ -58,6 +59,7 @@ import { RepairModule } from "./repair/repair.module";
     AuthModule,
     RbacModule,
     OverviewModule,
+    DurationAnalysisModule,
     TargetsModule,
     MapModule,
     SchedulesModule,

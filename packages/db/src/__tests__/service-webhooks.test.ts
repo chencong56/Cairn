@@ -354,7 +354,7 @@ describe.each(DRIVERS)('%s service webhook facts', (driver) => {
     })
   })
 
-  it('fences a changed destination, permits disabled configuration during staged rollout, and blocks an enabled write while a legacy worker is live', async () => {
+  it('锁步部署：有未声明回调协议的节点在线，也照常启用回调', async () => {
     const f = await fixture(driver)
     const legacy = { workerId: `legacy-${api.newId()}`, instanceId: api.newId() }
     await api.registerWorker(f.db, {
@@ -376,20 +376,6 @@ describe.each(DRIVERS)('%s service webhook facts', (driver) => {
         f.actor,
         { id: api.newId(), ciphertext: Buffer.from('sealed') },
       ),
-    ).rejects.toMatchObject({ code: 'SERVICE_WEBHOOK_ROLLOUT_REQUIRED' })
-    await expect(
-      api.saveServiceWebhook(
-        f.db,
-        f.caller.id,
-        {
-          url: 'https://hooks.example.test/disabled',
-          events: ['run.completed'],
-          enabled: false,
-          secret: 'secret',
-        },
-        f.actor,
-        { id: api.newId(), ciphertext: Buffer.from('sealed') },
-      ),
-    ).resolves.toMatchObject({ status: 'disabled' })
+    ).resolves.toMatchObject({ status: 'active' })
   })
 })

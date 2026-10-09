@@ -1,9 +1,12 @@
-import { FormField } from '@/components/ui/form'
+import { COMMON_TIME_ZONES } from '@cairn/shared'
+import { FormControl, FormField, FormItem, FormMessage } from '@/components/ui/form'
+import { SelectField, SelectFieldOption } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
   FieldGrid,
   NumberSetting,
+  SettingLabel,
   SettingSection,
   SwitchGrid,
   SwitchRow,
@@ -223,6 +226,32 @@ export function ExecutionFields({ canWrite }: { canWrite: boolean }) {
             label='模块连续失败次数'
             canWrite={canWrite}
             help='最近连续失败达到这个次数时，也会标为降级。'
+          />
+        </FieldGrid>
+      </SettingSection>
+
+      <SettingSection title='统计' hint='耗时分析按天汇总、周报 / 月报都按这个时区切分「一天」。'>
+        <FieldGrid>
+          <FormField
+            name='statistics.timeZone'
+            render={({ field }) => (
+              <FormItem>
+                <SettingLabel
+                  label='统计时区'
+                  help='修改后耗时汇总会在后台整体重建，期间耗时分析页面改为现读明细（较慢），重建完成后自动恢复。'
+                />
+                <FormControl>
+                  <SelectField aria-label='统计时区' disabled={!canWrite} value={field.value} onValueChange={field.onChange}>
+                    {[...COMMON_TIME_ZONES, ...(COMMON_TIME_ZONES.some((zone) => zone.value === field.value) ? [] : [{ value: field.value, label: field.value }])].map((zone) => (
+                      <SelectFieldOption key={zone.value} value={zone.value}>
+                        {zone.label}
+                      </SelectFieldOption>
+                    ))}
+                  </SelectField>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
           />
         </FieldGrid>
       </SettingSection>

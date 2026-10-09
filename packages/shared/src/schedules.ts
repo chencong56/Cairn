@@ -459,6 +459,17 @@ export const scheduleTriggerResponseSchema = z.strictObject({
 })
 export type ScheduleTriggerResponse = z.infer<typeof scheduleTriggerResponseSchema>
 
+export const scheduleDeleteBodySchema = z.strictObject({
+  cancelAdmittedJobs: z.boolean().default(false),
+})
+export type ScheduleDeleteBody = z.infer<typeof scheduleDeleteBodySchema>
+
+export const scheduleDeleteResponseSchema = z.strictObject({
+  scheduleId: entityIdSchema,
+  deleted: z.boolean(),
+})
+export type ScheduleDeleteResponse = z.infer<typeof scheduleDeleteResponseSchema>
+
 export const scheduleListQuerySchema = z.strictObject({
   targetId: entityIdSchema.optional(),
   scenarioId: entityIdSchema.optional(),

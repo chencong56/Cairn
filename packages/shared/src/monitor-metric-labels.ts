@@ -1,8 +1,9 @@
-import { ALERTABLE_METRIC_KEYS, MONITOR_METRIC_CATALOG, type AlertRule, type MonitorMetricKey, type MonitorUnit } from '@cairn/shared'
+import { ALERTABLE_METRIC_KEYS, type AlertComparator, type AlertRule } from './alerting.js'
+import { MONITOR_METRIC_CATALOG, type MonitorMetricKey, type MonitorUnit } from './monitoring.js'
 
 /**
- * 监控指标的中文名称与分组。告警规则编辑器、告警列表等面向用户的地方一律用中文名，
- * 英文键只作为次要信息（排查时对照）。新增可告警指标时必须补这里（`metric-labels.test.ts` 会卡住遗漏）。
+ * 监控指标的中文名称与分组。告警规则编辑器、告警列表、告警推送等面向用户的地方一律用中文名，
+ * 英文键只作为次要信息（排查时对照）。新增可告警指标时必须补这里（`monitor-metric-labels.test.ts` 会卡住遗漏）。
  */
 export type MetricGroup = '执行节点' | '执行队列' | '租约' | '证据存储' | '会话与浏览器' | '控制台服务' | 'AI 调用' | '目标系统'
 
@@ -156,4 +157,42 @@ export function metricOptionGroups(): { group: MetricGroup | '其他'; keys: Mon
   return [...METRIC_GROUP_ORDER, '其他' as const]
     .filter((group) => groups.has(group))
     .map((group) => ({ group, keys: groups.get(group)! }))
+}
+
+function readingNumber(value: number): string {
+  return String(Number(value.toFixed(2)))
+}
+
+/**
+ * 告警推送里的一句读数：阈值类给「指标中文名，当前值，规则」，陈旧类说明哪个判断依据没更新。
+ * 推送只拿到事件里冻结的字段，所以参数是宽松的字符串；认不出的比较符 / 来源不硬译。
+ */
+export function describeAlertReading(alert: {
+  metricKey: string | null
+  source: string | null
+  value: number | null
+  threshold: number | null
+  comparator: string | null
+}): string | null {
+  if (alert.metricKey) {
+    const unit = metricUnitLabel(alert.metricKey)
+    const unitText = unit && unit !== '数量' ? ` ${unit}` : ''
+    const parts = [metricLabel(alert.metricKey)]
+    if (alert.value !== null) parts.push(`当前 ${readingNumber(alert.value)}${unitText}`)
+    const comparator = alert.comparator && alert.comparator in COMPARATOR_WORDS ? COMPARATOR_WORDS[alert.comparator as AlertComparator] : null
+    if (comparator && alert.threshold !== null) parts.push(`规则 ${comparator} ${readingNumber(alert.threshold)}${unitText}`)
+    return parts.join('，')
+  }
+  if (alert.source && alert.source in STALE_SOURCE_WORDS) {
+    return `「${STALE_SOURCE_WORDS[alert.source as keyof typeof STALE_SOURCE_WORDS]}」长时间没有更新`
+  }
+  return null
+}
+
+const ALERT_SCOPE_WORDS = { target: '目标系统', worker: '执行节点', api: '控制台服务' } as const
+
+/** 告警作用对象的一句话，如「目标系统：订单中心」；平台级告警没有对象。 */
+export function describeAlertScope(alert: { scope: string; scopeId: string; scopeName?: string | null }): string | null {
+  if (!(alert.scope in ALERT_SCOPE_WORDS)) return null
+  return `${ALERT_SCOPE_WORDS[alert.scope as keyof typeof ALERT_SCOPE_WORDS]}：${alert.scopeName || alert.scopeId}`
 }

@@ -48,8 +48,6 @@ export async function claimOutboundDeliveries(
     await lockOutboundDispatch(tx)
     const now = input.now ?? (await clockNow(tx))
     if (!(await liveWorker(tx, input.workerId, input.instanceId, now))) return []
-    const { assertOutboundWriterRollout } = await import('./config.js')
-    await assertOutboundWriterRollout(tx)
     const {
       outboundDeliveries: d,
       outboundEvents: e,
@@ -235,8 +233,6 @@ export async function beginOutboundSubmission(db: Db, claim: OutboundClaim) {
     const now = await clockNow(tx)
     const row = await claimRow(tx, claim, now)
     if (!row || !(await liveWorker(tx, claim.workerId, claim.instanceId, now))) return false
-    const { assertOutboundWriterRollout } = await import('./config.js')
-    await assertOutboundWriterRollout(tx)
     const reason = await bindingSuppression(tx, row.binding, initial.event)
     if (reason) {
       await tx

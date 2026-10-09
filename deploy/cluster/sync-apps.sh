@@ -14,8 +14,10 @@ sync_to() {
   tar -C "$CLUSTER/apps" -cf - api worker web | ssh "root@$ip" "tar -C $CLUSTER/apps -xf -"
   ssh "root@$ip" "chown -R 1000:1000 $CLUSTER/apps"
   if $RESTART; then
+    # up -d 在 bind mount 仅内容变化时不会重建/重启容器（产物换了进程仍是旧代码），
+    # 必须显式 restart 才重新解析挂载并加载新产物
     echo "▶ [$short] 启动/更新 executor 并清理旧孤儿容器"
-    ssh "root@$ip" "cd $CLUSTER/deploy && docker compose -f executor.compose.yml up -d --remove-orphans"
+    ssh "root@$ip" "cd $CLUSTER/deploy && docker compose -f executor.compose.yml up -d --remove-orphans && docker compose -f executor.compose.yml restart cairn-executor"
   fi
 }
 

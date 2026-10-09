@@ -175,7 +175,8 @@ export async function listSuites(db: Db, query: Partial<SuiteListQuery> = {}, ac
         createdAt: suiteRuns.createdAt,
       })
       .from(suiteRuns)
-      .where(inArray(suiteRuns.suiteId, suiteIds))
+      // 已删除的场景集运行不能再当「最近运行」：链接会 404，状态也已不算数
+      .where(and(inArray(suiteRuns.suiteId, suiteIds), isNull(suiteRuns.deletedAt)))
       .orderBy(desc(suiteRuns.createdAt))
       .limit(suiteIds.length * 10)
 

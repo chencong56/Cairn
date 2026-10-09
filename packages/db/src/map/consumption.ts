@@ -2,7 +2,7 @@ import { and, desc, eq, gt } from 'drizzle-orm'
 import {
   FACTORY_MAP_CONSUMPTION_POLICY,
   MAP_CONSUMPTION_CONSUMER_VERSION,
-  MAP_CONSUMPTION_PROTOCOL,
+  SESSION_OCCUPANCY_PROTOCOL,
   canonicalJson,
   frozenMapConsumptionSchema,
   mapAssetRefKey,
@@ -296,7 +296,7 @@ export async function hasReadyMapConsumptionWorker(db: Db): Promise<boolean> {
   const now = await clockNow(db)
   const rows = await db.select().from(workers).where(gt(workers.heartbeatExpiresAt, now))
   return rows.some(
-    (row) => row.status === 'READY' && (row.protocolCapabilities ?? []).includes(MAP_CONSUMPTION_PROTOCOL),
+    (row) => row.status === 'READY' && (row.protocolCapabilities ?? []).includes(SESSION_OCCUPANCY_PROTOCOL),
   )
 }
 

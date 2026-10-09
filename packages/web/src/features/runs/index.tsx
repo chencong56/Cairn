@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { Link, getRouteApi, useNavigate } from '@tanstack/react-router'
+import { RunDurationCell } from './run-duration-cell'
 import { RunsNavTabs, type RunViewTab } from './runs-nav-tabs'
 import {
   RUN_EXECUTE_ALL_OF,
@@ -584,6 +585,7 @@ export function RunsPage() {
                     {canReadReports ? <TableHead>报告</TableHead> : null}
                     <TableHead>场景</TableHead>
                     <TableHead>目标系统</TableHead>
+                    <TableHead>耗时</TableHead>
                     <TableHead>创建时间</TableHead>
                     <TableHead className='w-40 text-end'>操作</TableHead>
                   </TableRow>
@@ -731,6 +733,9 @@ export function RunsPage() {
                               {item.targetName}
                             </Link>
                           </CatalogName>
+                        </TableCell>
+                        <TableCell className='text-label whitespace-nowrap'>
+                          <RunDurationCell run={item} />
                         </TableCell>
                         <TableCell className='text-label whitespace-nowrap'>
                           {new Date(item.createdAt).toLocaleString()}

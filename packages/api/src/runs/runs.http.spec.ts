@@ -154,6 +154,7 @@ function mockService() {
       unknownByteObjects: 0,
     })),
     mapDecisions: vi.fn(async () => ({ items: [] })),
+    duration: vi.fn(async () => ({ facts: null, nodes: [], comparison: null })),
     resolutionDecisions: vi.fn(async () => ({ items: [] })),
     aiTasks: vi.fn(async () => ({ events: [], observation: null })),
     createSolidificationDraft: vi.fn(async () => ({
@@ -270,6 +271,21 @@ describe('Runs HTTP', () => {
     const app = await buildApp(noRead, service)
     await request(app.getHttpServer()).get(`/runs/${detail.id}`).expect(403)
     await app.close()
+  })
+
+  it('耗时分解与对比：run:read 可读，查询参数校验后传给服务', async () => {
+    await request(viewerApp.getHttpServer()).get(`/runs/${detail.id}/duration`).expect(200)
+    expect(service.duration).toHaveBeenLastCalledWith(detail.id, { compare: 'previous' }, viewer.id)
+    const baseRunId = '77777777-7777-4777-8777-777777777777'
+    await request(viewerApp.getHttpServer()).get(`/runs/${detail.id}/duration?compare=median10&baseRunId=${baseRunId}`).expect(200)
+    expect(service.duration).toHaveBeenLastCalledWith(detail.id, { compare: 'median10', baseRunId }, viewer.id)
+    await request(viewerApp.getHttpServer()).get(`/runs/${detail.id}/duration?compare=yesterday`).expect(400)
+
+    const noRead: RequestAccount = { ...viewer, permissions: ['workflow:read'] }
+    const app = await buildApp(noRead, service)
+    await request(app.getHttpServer()).get(`/runs/${detail.id}/duration`).expect(403)
+    await app.close()
+    expect(service.duration).toHaveBeenCalledTimes(2)
   })
 
   it('创建返回 201，幂等命中返回 200', async () => {

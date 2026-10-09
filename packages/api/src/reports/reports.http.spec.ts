@@ -153,6 +153,30 @@ describe('Reports HTTP', () => {
     expect(service.artifactStream).toHaveBeenCalled()
   })
 
+  it('周期耗时报告：主体按周期契约校验后交给服务，非法周期与多余字段被拒', async () => {
+    const subject = {
+      kind: 'DURATION_PERIOD',
+      targetId: '11111111-1111-4111-8111-111111111111',
+      period: 'week',
+      periodStart: '2026-09-28',
+      timeZone: 'Asia/Shanghai',
+      trigger: 'schedule',
+    }
+    await request(adminApp.getHttpServer())
+      .post('/reports')
+      .send({ subject, scope: 'duration_period', idempotencyKey: 'report-period-01' })
+      .expect(200)
+    expect(service.create).toHaveBeenLastCalledWith(expect.objectContaining({ subject, scope: 'duration_period', stage: 'final' }), expect.anything())
+    await request(adminApp.getHttpServer())
+      .post('/reports')
+      .send({ subject: { ...subject, periodStart: '2026-02-30' }, scope: 'duration_period', idempotencyKey: 'report-period-02' })
+      .expect(400)
+    await request(adminApp.getHttpServer())
+      .post('/reports')
+      .send({ subject: { ...subject, runId: '33333333-3333-4333-8333-333333333333' }, scope: 'duration_period', idempotencyKey: 'report-period-03' })
+      .expect(400)
+  })
+
   it('配置场景自动报告：无 report:export 权限开启时被 403 拒绝，有权限正常保存', async () => {
     const scenarioId = '55555555-5555-4555-8555-555555555555'
     await request(developerApp.getHttpServer())

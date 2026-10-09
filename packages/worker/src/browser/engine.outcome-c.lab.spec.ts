@@ -31,6 +31,7 @@ import {
   DEV_CREDENTIAL_KEY,
   LOCAL_SECRET_PROVIDER,
   createRuntimeInvariant,
+  isRetiredRuntimeInvariantKind,
   stepRunFor,
   targetAuthProfileDefinitionSchema,
   type AuthoringNode,
@@ -433,7 +434,7 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
       actor: { id: actorId },
     })
     expect(created.detail.snapshot.runtimeInvariantManifest?.entries.length ?? 0).toBe(
-      input.runtimeInvariants?.length ?? 0,
+      input.runtimeInvariants?.filter((item) => !isRetiredRuntimeInvariantKind(item.kind)).length ?? 0,
     )
     await handle.pool.query(
       `UPDATE runs
@@ -459,19 +460,16 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
     return detail.outcomeResults.find((item) => item.contractId === contractId)
   }
 
-  it('OCC-02：任意路径导航不再被访问范围拦截，navigation_boundary 记 PASS', async () => {
-    const passId = newId()
+  it('OCC-02：任意路径导航不再被访问范围拦截；已停用的 navigation_boundary 不进快照、不写结果行', async () => {
+    const retiredId = newId()
     const passed = await executeScenario({
       name: `occ-02-pass-${newId()}`,
       steps: [navigate(newId(), '/admin')],
-      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', passId)],
+      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', retiredId)],
     })
     expect(passed.status).toBe('SUCCEEDED')
-    expect(passed.outcomeStatus).toBe('PASS')
-    expect(invariantRow(passed, passId)).toMatchObject({
-      provenance: 'runtime_invariant',
-      verdict: 'PASS',
-    })
+    expect(passed.snapshot.runtimeInvariantManifest).toBeUndefined()
+    expect(invariantRow(passed, retiredId)).toBeUndefined()
   })
 
   // OCC-03「开跑前登录失败 → WAITING_FOR_AUTH + auth_validity SHOULD FAIL / WARN」的

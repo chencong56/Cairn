@@ -5,6 +5,7 @@ import type { ScenarioDto } from '@cairn/shared'
 import {
   CalendarClock,
   History,
+  Timer,
   ListOrdered,
   Loader2,
   Plus,
@@ -409,6 +410,19 @@ export function ScenariosPage() {
                               >
                                 <History className='size-3.5' />
                                 运行记录
+                              </Link>
+                            </Button>
+                          </Can>
+                          <Can permission='run:read'>
+                            <Button
+                              asChild
+                              variant='ghost'
+                              size='sm'
+                              className='h-7 gap-1 px-2 text-label font-normal text-text-secondary hover:text-text-primary hover:bg-surface-subtle transition-colors'
+                            >
+                              <Link to='/duration-analysis/scenarios/$scenarioId' params={{ scenarioId: item.id }}>
+                                <Timer className='size-3.5' />
+                                耗时
                               </Link>
                             </Button>
                           </Can>

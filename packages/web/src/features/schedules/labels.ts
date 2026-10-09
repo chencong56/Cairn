@@ -19,12 +19,7 @@ export const ADMISSION_LABELS: Record<ScheduleAdmissionStatus, string> = {
 }
 
 export const SKIP_LABELS: Record<ScheduleSkipReason, string> = Object.fromEntries(
-  SCHEDULE_SKIP_REASONS.map((reason) => {
-    if (reason === 'FACTORY_DISABLED') {
-      return [reason, '平台尚未开放此类定时任务；请在平台配置中开放后再执行']
-    }
-    return [reason, SCHEDULE_SKIP_REASON_METAS[reason].label]
-  }),
+  SCHEDULE_SKIP_REASONS.map((reason) => [reason, SCHEDULE_SKIP_REASON_METAS[reason].label]),
 ) as Record<ScheduleSkipReason, string>
 
 
@@ -34,7 +29,6 @@ export function consumerLabel(type: ScheduleConsumerType) {
 
 export function lastResult(status: ScheduleAdmissionStatus | undefined, reason: ScheduleSkipReason | null | undefined) {
   if (!status) return '还没有窗口'
-  if (status === 'ADMITTED') return '已准入（已创建执行对象，不等于业务成功）'
   if (status === 'SKIPPED' && reason) return `已跳过 · ${SKIP_LABELS[reason]}`
   return ADMISSION_LABELS[status]
 }

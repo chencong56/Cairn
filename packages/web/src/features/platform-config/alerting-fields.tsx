@@ -6,6 +6,10 @@ import {
   ALERT_COMPARATORS,
   ALERT_SEVERITIES,
   FACTORY_ALERT_RULES,
+  describeAlertRule,
+  metricLabel,
+  metricOptionGroups,
+  metricUnitLabel,
   requiredAlertMetricScope,
   type AlertRule,
   type MonitorMetricKey,
@@ -35,7 +39,6 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
-import { describeAlertRule, metricLabel, metricOptionGroups, metricUnitLabel } from '@/features/monitoring/metric-labels'
 
 const COMPARATOR_LABELS: Record<(typeof ALERT_COMPARATORS)[number], string> = {
   gt: '>',

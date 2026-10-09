@@ -22,6 +22,7 @@ import type { Db } from '../client.js'
 import { newId } from '../id.js'
 import { atomic, clockNow, insertIgnoreRows, schemaFor } from '../native.js'
 import { conflict } from '../runs/errors.js'
+import { isComparableRun } from '../runs/duration-facts.js'
 import { fetchPendingReliabilityReceipts, type PendingReceiptRow } from './receipts.js'
 
 // 定位未命中/漂移白名单
@@ -133,6 +134,8 @@ export async function evaluateReliabilityBatch(
       attempts,
       resolutionDecisions,
       outcomeResults,
+      scenarioVersions,
+      scenarios,
     } = schemaFor(tx)
 
     const now = await clockNow(tx)
@@ -251,6 +254,14 @@ export async function evaluateReliabilityBatch(
 
     const runRows = await tx.select().from(runs).where(inArray(runs.id, runIds))
     const runMap = new Map(runRows.map((r) => [r.id, r]))
+    // 试跑（含调试）、模块用例、修复验证、地图作业的耗时不进耗时基线；其余可靠性信号照常产生。
+    const comparabilityRows = await tx
+      .select({ id: runs.id, versionKind: scenarioVersions.kind, purpose: scenarios.purpose })
+      .from(runs)
+      .leftJoin(scenarioVersions, eq(scenarioVersions.id, runs.scenarioVersionId))
+      .leftJoin(scenarios, eq(scenarios.id, runs.scenarioId))
+      .where(inArray(runs.id, runIds))
+    const comparableRuns = new Set(comparabilityRows.filter((row) => isComparableRun(row)).map((row) => row.id))
 
     const authEvents = await tx
       .select()
@@ -612,7 +623,7 @@ export async function evaluateReliabilityBatch(
           durationMs = hasValidAttempts ? totalAttemptMs : sr.finishedAt.getTime() - sr.startedAt.getTime()
         }
 
-        const isComparable = sr.status === 'SUCCEEDED' && durationMs !== undefined && durationMs >= 0
+        const isComparable = comparableRuns.has(run.id) && sr.status === 'SUCCEEDED' && durationMs !== undefined && durationMs >= 0
         const basisDigest = computeBasisDigest(sr.name ?? 'action', sr.implementationKey)
 
         const existingScope = executedStepScopes.get(scopeDigest)
@@ -946,7 +957,7 @@ export async function evaluateReliabilityBatch(
         evaluationOrdinal: receiptOrdinal,
         executionConclusion: run.status,
         signals: [],
-        isComparable: run.status === 'SUCCEEDED' || run.status === 'FAILED',
+        isComparable: comparableRuns.has(run.id) && (run.status === 'SUCCEEDED' || run.status === 'FAILED'),
         durationMs: run.startedAt && run.finishedAt ? run.finishedAt.getTime() - run.startedAt.getTime() : null,
         sourceRef: { runId: run.id },
         assetKind: 'scenario',

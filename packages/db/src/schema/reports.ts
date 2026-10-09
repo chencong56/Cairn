@@ -1,6 +1,8 @@
 import { index, integer, jsonb, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import type {
   ArtifactKind,
+  DurationPeriodKind,
+  DurationTriggerFilter,
   ExportJobKind,
   ExportJobStatus,
   JsonValue,
@@ -19,7 +21,7 @@ import { cairnSchema, consoleAccounts } from './console.js'
 import { evidences, runs, scenarios } from './execution.js'
 import { storedObjects } from './objects.js'
 import { serviceCallers } from './service-access.js'
-import { suiteRuns } from './suites.js'
+import { scenarioSuites, suiteRuns } from './suites.js'
 import { targets } from './targets.js'
 
 export const runReportContexts = cairnSchema.table('run_report_contexts', {
@@ -106,6 +108,12 @@ export const reports = cairnSchema.table(
     subjectKind: text('subject_kind').notNull().$type<ReportSubjectKind>(),
     runId: uuid('run_id').references(() => runs.id, { onDelete: 'restrict' }),
     suiteRunId: uuid('suite_run_id').references(() => suiteRuns.id, { onDelete: 'restrict' }),
+    /** 周期耗时报告（DURATION_PERIOD）的主体：可选场景集 + 自然周 / 月 + 时区 + 发起方过滤。 */
+    suiteId: uuid('suite_id').references(() => scenarioSuites.id, { onDelete: 'restrict' }),
+    periodKind: text('period_kind').$type<DurationPeriodKind>(),
+    periodStart: text('period_start'),
+    periodTimeZone: text('period_time_zone'),
+    triggerFilter: text('trigger_filter').$type<DurationTriggerFilter>(),
     idempotencyKey: text('idempotency_key'),
     requestDigest: text('request_digest'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -120,6 +128,7 @@ export const reports = cairnSchema.table(
     index('reports_target_idx').on(t.targetId, t.createdAt),
     uniqueIndex('reports_idempotency_idx').on(t.createdByConsoleAccountId, t.idempotencyKey),
     uniqueIndex('reports_idempotency_service_idx').on(t.serviceCallerId, t.idempotencyKey),
+    index('reports_period_idx').on(t.targetId, t.periodKind, t.periodStart),
   ],
 )
 

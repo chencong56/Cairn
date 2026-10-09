@@ -6,6 +6,7 @@ import { deriveRunOutputStatus, runFindingSchema } from './run-output.js'
 import { suiteVerdictSchema } from './suite-verdict.js'
 import { entityIdSchema, jsonValueSchema, utcInstantSchema, type JsonValue } from './wire.js'
 import { REPORT_TITLE_CATALOG, reportTitleSources, type ReportTitleSource } from './report-title-template.js'
+import { DURATION_TRIGGER_FILTERS, durationPeriodKindSchema, localDateSchema } from './duration-period.js'
 export { REPORT_TITLE_CATALOG, parseReportTitle, reportTitleSources, renderReportTitleV2, type ReportTitleSource, type ReportTitleSegment } from './report-title-template.js'
 
 export const EXPORT_ARTIFACTS_PROTOCOL = 'export-artifacts@2' as const
@@ -27,10 +28,11 @@ export const REPORT_LIMITS = Object.freeze({
   bundleRetentionHours: 24,
 })
 
-export const REPORT_SUBJECTS = ['RUN', 'SUITE_RUN'] as const
+/** DURATION_PERIOD：某目标系统（可限定场景集）在一个自然周 / 月的耗时报告。 */
+export const REPORT_SUBJECTS = ['RUN', 'SUITE_RUN', 'DURATION_PERIOD'] as const
 export type ReportSubjectKind = (typeof REPORT_SUBJECTS)[number]
 
-export const REPORT_SCOPES = ['run', 'suite_summary', 'suite_bundle'] as const
+export const REPORT_SCOPES = ['run', 'suite_summary', 'suite_bundle', 'duration_period'] as const
 export type ReportScope = (typeof REPORT_SCOPES)[number]
 export const reportScopeSchema = z.enum(REPORT_SCOPES)
 
@@ -391,9 +393,22 @@ export function computeSuiteHealthScore(counts: {
   return { healthScore, healthGrade }
 }
 
+export const durationPeriodReportSubjectSchema = z.strictObject({
+  kind: z.literal('DURATION_PERIOD'),
+  targetId: entityIdSchema,
+  suiteId: entityIdSchema.optional(),
+  period: durationPeriodKindSchema,
+  /** 周期起点（本地日期）：周一或每月 1 日，且周期已结束。 */
+  periodStart: localDateSchema,
+  timeZone: z.string().trim().min(1).max(64),
+  trigger: z.enum(DURATION_TRIGGER_FILTERS),
+})
+export type DurationPeriodReportSubject = z.infer<typeof durationPeriodReportSubjectSchema>
+
 export const reportSubjectSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('RUN'), runId: entityIdSchema }),
   z.strictObject({ kind: z.literal('SUITE_RUN'), suiteRunId: entityIdSchema }),
+  durationPeriodReportSubjectSchema,
 ])
 export type ReportSubject = z.infer<typeof reportSubjectSchema>
 
@@ -457,6 +472,7 @@ export const reportListQuerySchema = z.object({
   runId: entityIdSchema.optional(),
   suiteRunId: entityIdSchema.optional(),
   scope: reportScopeSchema.optional(),
+  subjectKind: z.enum(REPORT_SUBJECTS).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().min(1).optional(),
 })

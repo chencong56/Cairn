@@ -4,7 +4,6 @@ import {
   count,
   desc,
   eq,
-  gt,
   gte,
   inArray,
   isNotNull,
@@ -18,9 +17,7 @@ import {
 import { z } from 'zod'
 import {
   DEFAULT_SERVICE_WEBHOOK_MAX_ATTEMPTS,
-  MAP_SCHEDULER_PROTOCOL,
   SERVICE_WEBHOOK_DELIVERY_PROTOCOL,
-  SUITE_SCHEDULER_PROTOCOL,
   servicePlaygroundRunBodySchema,
   serviceWebhookDeliveryListSchema,
   serviceWebhookDeliveryQuerySchema,
@@ -99,37 +96,6 @@ async function callerRow(db: Db, callerId: string) {
   )
   if (!caller) throw notFound('SERVICE_NOT_FOUND', '服务调用方不存在')
   return caller
-}
-
-/** Reject enabling callbacks while an old, live maintenance/executor Worker could ignore them. */
-export async function assertServiceWebhookWriterRollout(tx: Db) {
-  const { workers } = schemaFor(tx)
-  const now = await clockNow(tx)
-  const live = await tx
-    .select({ protocols: workers.protocolCapabilities })
-    .from(workers)
-    .where(
-      and(
-        inArray(workers.status, ['READY', 'DRAINING']),
-        or(isNull(workers.heartbeatExpiresAt), gt(workers.heartbeatExpiresAt, now)),
-      ),
-    )
-  const schedulerOnly = (protocols: string[]) =>
-    protocols.length > 0 &&
-    protocols.every((protocol) =>
-      [MAP_SCHEDULER_PROTOCOL, SUITE_SCHEDULER_PROTOCOL].includes(protocol as typeof MAP_SCHEDULER_PROTOCOL),
-    )
-  if (
-    live.some(
-      (worker) =>
-        !worker.protocols.includes(SERVICE_WEBHOOK_DELIVERY_PROTOCOL) &&
-        !schedulerOnly(worker.protocols),
-    )
-  )
-    throw conflict(
-      'SERVICE_WEBHOOK_ROLLOUT_REQUIRED',
-      '仍有旧版 Worker 在线，请完成停写升级后启用 Webhook',
-    )
 }
 
 function assertCallerWritable(caller: { archivedAt: Date | null }) {
@@ -237,7 +203,6 @@ export async function saveServiceWebhook(
         'WEBHOOK_SECRET_ROTATED',
         'Webhook 签名密钥已被其他管理员更新，请刷新后重试',
       )
-    if (value.enabled) await assertServiceWebhookWriterRollout(tx)
     if (sealedSecret) await upsertStandaloneSecret(tx, sealedSecret)
     const now = await clockNow(tx)
     const status: 'active' | 'disabled' = value.enabled ? 'active' : 'disabled'

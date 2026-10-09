@@ -32,7 +32,6 @@ import {
 import {
   DEV_CREDENTIAL_KEY,
   LOCAL_SECRET_PROVIDER,
-  OUTCOME_MANIFEST_PROTOCOL,
   stepRunFor,
   type Step,
 } from '@cairn/shared'
@@ -181,7 +180,7 @@ describe('ExecutionEngine × 真浏览器 Outcome 结果轴联调', { timeout: 1
       instanceId: workerInstanceId,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS, OUTCOME_MANIFEST_PROTOCOL],
+      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
     })
     manager = new BrowserSessionManager(
       handle,

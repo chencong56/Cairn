@@ -139,6 +139,18 @@ export function AppBreadcrumb({ className }: { className?: string }) {
       ]
     }
 
+    // 3.5b 场景耗时分析（需先于「场景详情」匹配）
+    const durationScenarioMatch = pathname.match(/^\/duration-analysis\/scenarios\/([^/]+)/)
+    if (durationScenarioMatch) {
+      const id = durationScenarioMatch[1]
+      const title = entities[id]?.title || '场景耗时'
+      return [
+        { label: '运行' },
+        { label: '耗时分析', href: '/duration-analysis' },
+        { label: title, isCurrent: true },
+      ]
+    }
+
     // 3.6 场景详情
     const scenarioMatch = pathname.match(/^\/scenarios\/([^/]+)/)
     if (scenarioMatch) {

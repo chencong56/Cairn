@@ -5,18 +5,6 @@ import { updateRows, updateRowsCount } from '../native.js'
 import { and, asc, eq, gt, inArray, isNull, ne, not, or, sql } from 'drizzle-orm'
 import {
   DEFAULT_BROWSER_MAX_SESSIONS,
-  AI_ATOMIC_ACTIONS_PROTOCOL,
-  LIST_OUTPUT_PROTOCOL,
-  AI_TASK_EVIDENCE_PROTOCOL,
-  IMPORTED_OUTCOME_PROTOCOL,
-  MAP_CONSUMPTION_PROTOCOL,
-  MAP_JOBS_PROTOCOL,
-  OUTCOME_MANIFEST_PROTOCOL,
-  SUITE_ADMISSION_PROTOCOL,
-  RUNTIME_INVARIANT_MANIFEST_PROTOCOL,
-  LOCATOR_RESOLUTION_PROTOCOL,
-  CONTROL_FLOW_PROTOCOL,
-  CONTROL_FLOW_PROTOCOL_V2,
   SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   registrationRequiresOccupancy,
@@ -34,7 +22,7 @@ import { conflict, isUniqueViolation, notFound } from '../runs/errors.js'
 import type { Db, DbHandle } from '../client.js'
 import { newId } from '../id.js'
 import { runs } from '../schema/execution.js'
-import { locked, databaseNow, afterSeconds, clockNow, driverOf, insertRows, jsonHasKey, jsonText, jsonTextEquals } from '../native.js'
+import { locked, databaseNow, afterSeconds, clockNow, driverOf, insertRows, jsonHasKey, jsonText } from '../native.js'
 import type { IsolatedLostRow } from '../sessions/lost-disposition.js'
 import { evaluateRunSessionEligibility } from '../sessions/occupancy-placement.js'
 import { readSessionScheduling } from '../sessions/occupancy-read.js'
@@ -771,64 +759,7 @@ function claimEligiblePredicate(
     isNull(runs.cancelRequestedAt),
     or(isNull(runs.deadlineAt), sql`${runs.deadlineAt} > ${databaseNow(tx)}`),
     inArray(runs.id, candidateIds),
-    worker.protocolCapabilities?.includes('snapshot.moduleManifest@1')
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'moduleManifest')),
-    worker.protocolCapabilities?.includes('snapshot.candidateGroups@1')
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'candidateGroups')),
-    worker.protocolCapabilities?.includes(MAP_JOBS_PROTOCOL)
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'mapJob')),
-    // 冻结了「启用」的地图消费的 Run，只能交给声明 map-consumption@1 的 Worker：
-    // 不认识该协议的旧 Worker 会按「无地图」悄悄执行，违背快照里的承诺。
-    // 不能像上面那些协议一样只判键存在：freezeMapConsumptionTx 在消费关闭时
-    // 也会写 { mode: 'off' }，键几乎总是存在，按键拦会把旧 Worker 挡在所有 Run 之外。
-    // 所以看值：缺键（旧快照）或 mode = 'off' 都不需要该协议。
-    worker.protocolCapabilities?.includes(MAP_CONSUMPTION_PROTOCOL)
-      ? undefined
-      : or(
-          isNull(jsonText(tx, runs.snapshot, ['mapConsumption', 'mode'])),
-          jsonTextEquals(tx, runs.snapshot, ['mapConsumption', 'mode'], 'off'),
-        ),
-    worker.protocolCapabilities?.includes(OUTCOME_MANIFEST_PROTOCOL)
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'outcomeManifest')),
-    worker.protocolCapabilities?.includes(AI_ATOMIC_ACTIONS_PROTOCOL)
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'aiAtomicActionsProtocol')),
-    worker.protocolCapabilities?.includes(LIST_OUTPUT_PROTOCOL)
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'listOutputProtocol')),
-    worker.protocolCapabilities?.includes(AI_TASK_EVIDENCE_PROTOCOL)
-      ? undefined
-      : or(
-          isNull(jsonText(tx, runs.snapshot, ['aiTaskEvidence', 'actionEdge'])),
-          jsonTextEquals(tx, runs.snapshot, ['aiTaskEvidence', 'actionEdge'], 'off'),
-        ),
-    worker.protocolCapabilities?.includes(IMPORTED_OUTCOME_PROTOCOL)
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'importedOutcomeProtocol')),
-    worker.protocolCapabilities?.includes(RUNTIME_INVARIANT_MANIFEST_PROTOCOL)
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'runtimeInvariantManifest')),
-    worker.protocolCapabilities?.includes(SUITE_ADMISSION_PROTOCOL)
-      ? undefined
-      : not(jsonHasKey(tx, runs.snapshot, 'suiteAdmission')),
-    worker.protocolCapabilities?.includes(LOCATOR_RESOLUTION_PROTOCOL)
-      ? undefined
-      : or(
-          isNull(jsonText(tx, runs.snapshot, ['resolution', 'protocol'])),
-          not(jsonTextEquals(tx, runs.snapshot, ['resolution', 'protocol'], LOCATOR_RESOLUTION_PROTOCOL)),
-        ),
-    worker.protocolCapabilities?.includes(CONTROL_FLOW_PROTOCOL_V2)
-      ? undefined
-      : worker.protocolCapabilities?.includes(CONTROL_FLOW_PROTOCOL)
-        ? or(
-            isNull(jsonText(tx, runs.snapshot, ['controlFlow', 'protocol'])),
-            jsonTextEquals(tx, runs.snapshot, ['controlFlow', 'protocol'], CONTROL_FLOW_PROTOCOL),
-          )
-        : not(jsonHasKey(tx, runs.snapshot, 'controlFlow')),
+    // 锁步部署：不按快照特性筛 Worker（不为新旧 Worker 混跑做兼容），只按会话占用与角色领取。
     suiteAdmissionPredicate(tx),
     not(scheduledStartDeadlineExpired(tx, new Date(nowIso))!),
     sql`NOT EXISTS (SELECT 1 FROM ${runLeases} l WHERE l.run_id = ${runs.id} AND l.status = 'ACTIVE')`,

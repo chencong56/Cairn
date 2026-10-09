@@ -41,11 +41,14 @@ function newIdempotencyKey() {
   return `report-${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
 }
 
+/** 运行 / 场景集运行的报告面板；周期耗时报告走 DurationReportActions。 */
+type RunReportSubject = Exclude<ReportSubject, { kind: 'DURATION_PERIOD' }>
+
 export function ReportPanel({
   subject,
   initialReport,
 }: {
-  subject: ReportSubject
+  subject: RunReportSubject
   initialReport?: ReportDto
 }) {
   const sourceKey = subject.kind === 'RUN' ? subject.runId : subject.suiteRunId
@@ -62,7 +65,7 @@ function ReportPanelContent({
   subject,
   initialReport,
 }: {
-  subject: ReportSubject
+  subject: RunReportSubject
   initialReport?: ReportDto
 }) {
   const canRead = useCan('report:read')

@@ -25,13 +25,19 @@ import {
   OUTBOUND_PROTOCOL,
   alertNoticeSchema,
   alertWebhookSecretPayloadSchema,
+  buildAlertImCard,
   buildDingTalkCard,
+  buildDurationReportImCard,
   buildFeishuCard,
   buildWechatWorkCard,
+  describeAlertReading,
+  describeAlertScope,
+  imCardProviderOfHost,
   isBlockedAlertWebhookHost,
   isBlockedAlertWebhookUrl,
   outboundChannelSecretSchema,
   outboundSmtpSecretSchema,
+  type OutboundPayload,
 } from '@cairn/shared'
 
 type Result = {
@@ -85,12 +91,47 @@ export async function resolveOutboundDestination(
   return addresses
 }
 
+type AlertPayload = NonNullable<OutboundPayload['alert']>
+
+/** 告警的要点：状态与级别、作用对象（如哪个目标系统）、指标读数。邮件与 IM 卡片共用。 */
+function alertLines(alert: AlertPayload): string[] {
+  const state = { firing: '触发', resolved: '恢复', interrupted: '判断依据中断' }[alert.kind]
+  return [
+    `告警：${alert.ruleName}（${state} / ${alert.severity === 'critical' ? '严重' : '警告'}）`,
+    describeAlertScope(alert),
+    describeAlertReading(alert),
+  ].filter((line): line is string => Boolean(line))
+}
+
 export function outboundWebhookBody(job: OutboundJob): string {
   const payload = job.event.payload!
   const p = payload as Record<string, any>
   if (job.delivery.binding.channel.format === 'legacy_alert@1' && payload.alert) {
-    const { occurredAt, ...alert } = payload.alert
+    // 旧告警格式是严格白名单，不带后加的 scopeName
+    const { occurredAt, scopeName: _scopeName, ...alert } = payload.alert
     return JSON.stringify(alertNoticeSchema.parse({ ...alert, at: occurredAt }))
+  }
+  // 告警与周期耗时报告推到企业微信 / 飞书 / 钉钉机器人时用卡片，其它地址仍是 cairn.outbound@1
+  const imProvider = payload.report || payload.alert ? imCardProviderOfHost(job.delivery.binding.channel.host) : null
+  if (payload.alert && imProvider) {
+    return JSON.stringify(
+      buildAlertImCard(imProvider, {
+        title: payload.title ?? payload.alert.ruleName,
+        severity: payload.alert.severity,
+        lines: alertLines(payload.alert),
+        viewUrl: job.event.consoleUrl,
+      }),
+    )
+  }
+  if (payload.report && imProvider) {
+    return JSON.stringify(
+      buildDurationReportImCard(imProvider, {
+        title: payload.report.title,
+        periodLabel: payload.report.periodLabel,
+        highlights: payload.report.highlights,
+        viewUrl: job.event.consoleUrl,
+      }),
+    )
   }
   if (p.suiteCard && typeof p.suiteCard === 'object') {
     const card = p.suiteCard as {
@@ -145,8 +186,11 @@ export function outboundEmailText(
     p.summaryStage === 'evidence_pending' && '证据仍在收集中，本摘要不会因补齐而重新发送。',
     p.finishedAt && `结束时间：${p.finishedAt}`,
     p.durationMs != null && `执行耗时：${(p.durationMs / 1000).toFixed(1)} 秒`,
-    p.alert &&
-      `告警：${p.alert.ruleName}（${{ firing: '触发', resolved: '恢复', interrupted: '判断依据中断' }[p.alert.kind]} / ${p.alert.severity === 'critical' ? '严重' : '警告'}）`,
+    ...(p.alert ? alertLines(p.alert) : []),
+    p.report && `目标系统：${p.report.targetName}`,
+    p.report && `周期：${p.report.periodLabel}`,
+    ...(p.report?.highlights.map((line) => `· ${line}`) ?? []),
+    p.report && !job.event.consoleUrl && `在控制台打开：${p.report.consolePath}`,
     p.takeover && `人工接管请求：${p.takeover.targetName}（${p.takeover.accountDisplayName}）`,
     p.takeover && `接管原因：${p.takeover.reason}`,
     p.takeover && `接管链接：${p.takeover.takeoverUrl}`,
@@ -155,7 +199,7 @@ export function outboundEmailText(
     job.event.consoleUrl,
     `推送编号：${job.deliveryId}`,
     options?.hasAttachment
-      ? '附件：已包含运行报告 HTML，可直接下载或在浏览器中打开查看。'
+      ? `附件：已包含${p.report ? '耗时' : '运行'}报告 HTML，可直接下载或在浏览器中打开查看。`
       : null,
   ]
     .filter(Boolean)
@@ -416,25 +460,18 @@ export async function deliverOutbound(input: OutboundDeliveryDeps): Promise<numb
           let attachments: OutboundEmailAttachment[] | undefined
           const runId = job.event.runId
           const suiteRunId = (job.event.payload as Record<string, any> | undefined)?.suiteRunId
-          if (input.store && (runId || suiteRunId)) {
+          const reportId = job.event.payload?.report?.reportId
+          const source = { runId: runId ?? undefined, suiteRunId: suiteRunId ?? undefined, reportId }
+          if (input.store && (runId || suiteRunId || reportId)) {
             try {
-              let htmlArtifact = await getLatestHtmlReportArtifact(input.db, {
-                runId: runId ?? undefined,
-                suiteRunId: suiteRunId ?? undefined,
-              })
+              let htmlArtifact = await getLatestHtmlReportArtifact(input.db, source)
               if (!htmlArtifact) {
-                const isPending = await isReportGenerationPending(input.db, {
-                  runId: runId ?? undefined,
-                  suiteRunId: suiteRunId ?? undefined,
-                })
+                const isPending = await isReportGenerationPending(input.db, source)
                 if (isPending) {
                   const waitStart = Date.now()
                   while (Date.now() - waitStart < 6000 && !signal.aborted) {
                     await new Promise((r) => setTimeout(r, 500))
-                    htmlArtifact = await getLatestHtmlReportArtifact(input.db, {
-                      runId: runId ?? undefined,
-                      suiteRunId: suiteRunId ?? undefined,
-                    })
+                    htmlArtifact = await getLatestHtmlReportArtifact(input.db, source)
                     if (htmlArtifact) break
                   }
                 }

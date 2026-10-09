@@ -89,6 +89,14 @@ export const MENU_CATALOG: readonly MenuItemDefinition[] = [
     description: '执行记录、单步状态、Attempt 详情与实时过程。',
   },
   {
+    id: 'menu.duration-analysis',
+    route: '/duration-analysis',
+    permission: 'run:read',
+    title: '耗时分析',
+    group: 'execution-observation',
+    description: '按目标系统查看各场景与步骤的耗时走势、环比同比、单次对比与隐藏问题。',
+  },
+  {
     id: 'menu.evidence',
     route: '/evidence',
     permission: 'run:read',

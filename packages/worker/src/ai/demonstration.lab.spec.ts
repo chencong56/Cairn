@@ -35,10 +35,8 @@ import {
   adjustPlatformConfig,
 } from '@cairn/db/testing'
 import {
-  AI_ATOMIC_ACTIONS_PROTOCOL,
   DEMONSTRATION_PROTOCOL,
   DEV_CREDENTIAL_KEY,
-  IMPORTED_OUTCOME_PROTOCOL,
   targetAuthProfileDefinitionSchema,
   type DemonstrationProfile,
   type ApplyDemonstrationBody,
@@ -292,11 +290,7 @@ describe('demonstration sources × real Engine / Chromium', { timeout: 240_000 }
       instanceId,
       capacity: 1,
       lostAfterSeconds: 3600,
-      protocolCapabilities: [
-        ...WORKER_TEST_PROTOCOLS,
-        AI_ATOMIC_ACTIONS_PROTOCOL,
-        IMPORTED_OUTCOME_PROTOCOL,
-      ],
+      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
     })
     objectRoot = mkdtempSync(join(tmpdir(), 'cairn-di-objects-'))
     profileRoot = mkdtempSync(join(tmpdir(), 'cairn-di-browser-'))

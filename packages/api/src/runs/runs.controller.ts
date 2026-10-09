@@ -1,6 +1,8 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, NotFoundException, Param, Post, Query, Req, Res } from '@nestjs/common'
 import type { Request, Response } from 'express'
 import {
+  runDurationQuerySchema,
+  type RunDurationQueryParsed,
   acquireAuthControlBodySchema,
   authControlInputBodySchema,
   authControlTokenBodySchema,
@@ -155,6 +157,16 @@ export class RunsController {
     @CurrentAccount() actor: RequestAccount,
   ) {
     return this.runs.createSolidificationDraft(runId, attemptId, actor)
+  }
+
+  @Get(':runId/duration')
+  @RequirePermissions('run:read')
+  duration(
+    @Param('runId') runId: string,
+    @Query(new ZodValidationPipe(runDurationQuerySchema)) query: RunDurationQueryParsed,
+    @CurrentAccount() account: RequestAccount,
+  ) {
+    return this.runs.duration(runId, query, account.id)
   }
 
   @Get(':runId/iterations')

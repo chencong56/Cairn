@@ -560,14 +560,14 @@ describe.each(DRIVERS)('%s 地图运行消费', { timeout: 60_000 }, (driver) =>
     expect((await getRun(handle.db, created.detail.id)).snapshot).toEqual(created.detail.snapshot)
   })
 
-  it('不声明消费协议的 Worker 不能领取已启用消费的 Run', async () => {
+  it('锁步部署：没有声明消费协议的执行节点也能领取已启用消费的 Run', async () => {
     const { created } = await enabledRun()
-    const worker = await readyWorker(`legacy-${newId()}`, [])
+    const worker = await readyWorker(`plain-${newId()}`, [])
     const { runs } = schemaFor(handle.db)
     const all = await handle.db.select({ id: runs.id }).from(runs)
     const grant = await claimRun(handle, { ...worker, leaseTtlSeconds: 120,
       excludeRunIds: all.filter(row => row.id !== created.detail.id).map(row => row.id) })
-    expect(grant).toBeNull()
+    expect(grant?.runId).toBe(created.detail.id)
   })
 
 })

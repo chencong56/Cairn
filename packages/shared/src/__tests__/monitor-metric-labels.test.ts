@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ALERTABLE_METRIC_KEYS, FACTORY_ALERT_RULES, type AlertRule } from '@cairn/shared'
-import { describeAlertRule, METRIC_GROUP_ORDER, METRIC_LABELS, metricLabel, metricOptionGroups, metricUnitLabel } from './metric-labels'
+import { ALERTABLE_METRIC_KEYS, FACTORY_ALERT_RULES, type AlertRule } from '../alerting.js'
+import { describeAlertRule, describeAlertReading, describeAlertScope, METRIC_GROUP_ORDER, METRIC_LABELS, metricLabel, metricOptionGroups, metricUnitLabel } from '../monitor-metric-labels.js'
 
 describe('监控指标中文名', () => {
   it('每个可告警指标都有中文名与分组（新增指标必须补，不能只显示英文键）', () => {
@@ -45,5 +45,33 @@ describe('告警规则的人话描述与指标分组', () => {
     const flat = groups.flatMap((group) => group.keys)
     expect(new Set(flat).size).toBe(flat.length)
     expect(groups.find((group) => group.group === '目标系统')?.keys).toEqual(['target.apiSlowCount', 'target.apiErrorCount', 'target.pageHealthRunRate'])
+  })
+})
+
+describe('告警推送的读数与作用对象', () => {
+  it('阈值类给指标中文名、当前值与规则；带单位、小数收两位', () => {
+    expect(
+      describeAlertReading({ metricKey: 'queue.oldestWaitMs', source: null, value: 45000, threshold: 30000, comparator: 'gte' }),
+    ).toBe('最久的排队等待时长，当前 45000 毫秒，规则 大于等于 30000 毫秒')
+    expect(
+      describeAlertReading({ metricKey: 'target.pageHealthRunRate', source: null, value: 33.33333, threshold: 20, comparator: 'gt' }),
+    ).toBe('目标系统页面健康违规运行占比（近 1 小时），当前 33.33 %，规则 大于 20 %')
+    expect(describeAlertReading({ metricKey: 'worker.status.lost', source: null, value: null, threshold: null, comparator: null })).toBe(
+      '失联的执行节点数',
+    )
+  })
+
+  it('陈旧类说明哪个判断依据没更新；认不出的不硬译', () => {
+    expect(describeAlertReading({ metricKey: null, source: 'object_store_probe', value: null, threshold: null, comparator: null })).toBe(
+      '「对象存储探测」长时间没有更新',
+    )
+    expect(describeAlertReading({ metricKey: null, source: 'unknown', value: null, threshold: null, comparator: null })).toBeNull()
+  })
+
+  it('作用对象：目标系统用名称，没有名称退回编号，平台级没有对象', () => {
+    expect(describeAlertScope({ scope: 'target', scopeId: 't1', scopeName: '订单中心' })).toBe('目标系统：订单中心')
+    expect(describeAlertScope({ scope: 'target', scopeId: 't1', scopeName: null })).toBe('目标系统：t1')
+    expect(describeAlertScope({ scope: 'worker', scopeId: 'worker-a' })).toBe('执行节点：worker-a')
+    expect(describeAlertScope({ scope: 'platform', scopeId: 'platform' })).toBeNull()
   })
 })

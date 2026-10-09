@@ -1,4 +1,7 @@
 import {
+  attributeDurationDifference,
+  summarizeDurationDifference,
+  type DurationAttribution,
   type AssistantCitationKey,
   type AssistantFact,
   type AssistantHypothesis,
@@ -20,7 +23,7 @@ import {
   pageHealthCountsText,
   pageHealthFactFromResult,
 } from '@cairn/shared'
-import { DomainError, loadRunObservation, type DbHandle } from '@cairn/db'
+import { DomainError, loadRunObservation, readRunDurationFacts, type DbHandle } from '@cairn/db'
 
 export type ScenarioStep = ScenarioDocument['steps'][number]
 
@@ -495,6 +498,13 @@ export async function assembleRunCompareContext(
 
   const baseSteps = stepRunMapByStep(baseObservation.run.stepRuns)
   const targetSteps = stepRunMapByStep(targetObservation.run.stepRuns)
+  // 耗时口径与页面「与上次对比」一致：取两次运行的耗时事实做差异归因；取不到时退回步骤起止差
+  const attribution = comparable ? await durationAttributionOf(db, baseRunId, targetRunId) : null
+  const nodeDeltas = new Map(
+    (attribution?.nodes ?? [])
+      .filter((node) => node.nodeKey.startsWith('step:'))
+      .map((node) => [node.nodeKey.slice(5), node]),
+  )
 
   const allStepIds = Array.from(new Set([...baseSteps.keys(), ...targetSteps.keys()]))
   const differences: RunCompareFactPack['differences'] = []
@@ -568,14 +578,17 @@ export async function assembleRunCompareContext(
       const baseStatus = baseStep?.status
       const targetStatus = targetStep?.status
 
+      const nodeDelta = nodeDeltas.get(stepId)
       const baseDuration =
-        baseStep?.startedAt && baseStep?.finishedAt
+        nodeDelta?.baseMs ??
+        (baseStep?.startedAt && baseStep?.finishedAt
           ? Date.parse(baseStep.finishedAt) - Date.parse(baseStep.startedAt)
-          : undefined
+          : undefined)
       const targetDuration =
-        targetStep?.startedAt && targetStep?.finishedAt
+        nodeDelta?.targetMs ??
+        (targetStep?.startedAt && targetStep?.finishedAt
           ? Date.parse(targetStep.finishedAt) - Date.parse(targetStep.startedAt)
-          : undefined
+          : undefined)
 
       const durationDiffMs =
         baseDuration !== undefined && targetDuration !== undefined
@@ -642,9 +655,13 @@ export async function assembleRunCompareContext(
   if (totalTimingSummary) {
     facts.push({ id: 'total-duration', text: totalTimingSummary, citations: [baseCite, targetCite] })
   }
+  const attributionSummary = attribution ? `耗时归因：${summarizeDurationDifference(attribution, { target: '对比运行', base: '基准运行' })}。` : ''
+  if (attributionSummary) {
+    facts.push({ id: 'duration-attribution', text: attributionSummary, citations: [baseCite, targetCite] })
+  }
   const statusSummary = `基准运行（${comparisonTime(baseObservation.run.createdAt)}）${COMPARE_RUN_STATUS_LABELS[baseObservation.run.status] ?? baseObservation.run.status}、${COMPARE_OUTCOME_LABELS[baseObservation.run.outcomeStatus ?? 'NOT_EVALUATED']}；对比运行（${comparisonTime(targetObservation.run.createdAt)}）${COMPARE_RUN_STATUS_LABELS[targetObservation.run.status] ?? targetObservation.run.status}、${COMPARE_OUTCOME_LABELS[targetObservation.run.outcomeStatus ?? 'NOT_EVALUATED']}`
   const summary = comparable
-    ? `${statusSummary}。${differences.length > 0 ? `检测到 ${differences.length} 处业务结果、步骤或配置变化。` : '业务结果、步骤状态、错误码与配置没有变化；单步耗时变化均未超过 1 秒。'}${totalTimingSummary}${timingSummary}`
+    ? `${statusSummary}。${differences.length > 0 ? `检测到 ${differences.length} 处业务结果、步骤或配置变化。` : '业务结果、步骤状态、错误码与配置没有变化；单步耗时变化均未超过 1 秒。'}${totalTimingSummary}${attributionSummary}${timingSummary}`
     : `${statusSummary}。两次运行来自不同场景或目标系统，不能可靠地逐步对比或归因。`
 
   const missingInformation: string[] = []
@@ -682,6 +699,17 @@ export async function assembleRunCompareContext(
       missingInformation: missingInformation.length > 0 ? missingInformation : undefined,
       nextActions,
     },
+  }
+}
+
+/** 两次运行的耗时差异归因（执行 / 等待各项 / 逐节点）；任一侧取不到事实时返回 null。 */
+async function durationAttributionOf(db: DbHandle, baseRunId: string, targetRunId: string): Promise<DurationAttribution | null> {
+  try {
+    const [base, target] = await Promise.all([readRunDurationFacts(db, baseRunId), readRunDurationFacts(db, targetRunId)])
+    if (!base || !target) return null
+    return attributeDurationDifference({ facts: base.facts, nodes: base.nodes }, { facts: target.facts, nodes: target.nodes })
+  } catch {
+    return null
   }
 }
 

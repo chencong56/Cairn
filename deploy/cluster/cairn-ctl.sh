@@ -18,7 +18,10 @@ shift || true
 case "$cmd" in
   up)      $COMPOSE up -d ;;
   down)    $COMPOSE down ;;
-  restart) $COMPOSE restart "${@:-}" ;;
+  # 无参不得透传空串（compose 会当成服务名报 no such service:）
+  restart)
+    if [ $# -gt 0 ]; then $COMPOSE restart "$@"; else $COMPOSE restart; fi
+    ;;
   ps)      $COMPOSE ps ;;
   status)
     echo "═══ Cairn 集群 [$ROLE] @ $(hostname) ═══"
@@ -32,7 +35,10 @@ case "$cmd" in
       printf "%-28s %-12s %s\n" "$name" "$state" "${health:-n/a}"
     done
     ;;
-  logs)    $COMPOSE logs --tail "${2:-100}" "${1:-}" ;;
+  logs)
+    # logs [service] [lines]：service 省略时看全部，不得透传空串服务名
+    if [ $# -gt 0 ]; then $COMPOSE logs --tail "${2:-100}" "$1"; else $COMPOSE logs --tail 100; fi
+    ;;
   migrate)
     # 仅 ah3：重跑迁移一次性任务（幂等，已应用的跳过）
     $COMPOSE up --abort-on-container-exit cairn-migrate || true

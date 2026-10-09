@@ -6,6 +6,7 @@ import type {
   ScheduleSkipReason,
   ScheduleTimeRule,
   ScheduleWeekday,
+  ResourceDeletedBy,
 } from '@cairn/shared'
 import { newId } from '../id.js'
 import { cairnSchema } from './console.js'
@@ -31,6 +32,8 @@ export const schedules = cairnSchema.table(
     currentVersionId: uuid('current_version_id').notNull(),
     nextDueAt: timestamp('next_due_at', { withTimezone: true }),
     createdBy: uuid('created_by').notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: jsonb('deleted_by').$type<ResourceDeletedBy>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -39,6 +42,7 @@ export const schedules = cairnSchema.table(
     index('schedules_due_idx').on(t.enabled, t.nextDueAt),
     index('schedules_target_idx').on(t.targetId, t.createdAt),
     index('schedules_consumer_idx').on(t.consumerKey, t.enabled),
+    index('schedules_deleted_at_idx').on(t.deletedAt),
   ],
 )
 

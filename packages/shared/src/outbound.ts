@@ -148,6 +148,8 @@ export const outboundPayloadSchema = z.strictObject({
       ruleName: z.string().max(128),
       scope: z.enum(['platform', 'worker', 'api', 'target']),
       scopeId: z.string().max(256),
+      /** 作用对象的名称（目前只有目标系统），写事件时冻结；旧事件没有。 */
+      scopeName: z.string().max(128).nullable().optional(),
       severity: z.enum(['warning', 'critical']),
       metricKey: z.string().max(128).nullable(),
       source: z.string().max(64).nullable(),
@@ -156,6 +158,17 @@ export const outboundPayloadSchema = z.strictObject({
       comparator: z.string().max(16).nullable(),
       occurredAt: utcInstantSchema,
       consolePath: z.literal('/monitoring'),
+    })
+    .optional(),
+  // 周期耗时报告：只放标题、周期、要点与控制台路径，不含报告原始数据
+  report: z
+    .strictObject({
+      reportId: entityIdSchema,
+      title: z.string().max(256),
+      periodLabel: z.string().max(64),
+      targetName: z.string().max(128),
+      highlights: z.array(z.string().max(256)).max(5),
+      consolePath: z.string().max(512),
     })
     .optional(),
   takeover: z
@@ -272,7 +285,7 @@ export const outboundChannelStateSchema = z
   .refine((v) => v.enabled !== undefined || v.revokeVersion !== undefined, '请选择操作')
 export const outboundListQuerySchema = z.object({
   search: z.string().trim().max(128).optional(),
-  type: z.enum(['run', 'alert', 'test']).optional(),
+  type: z.enum(['run', 'alert', 'test', 'report']).optional(),
   status: outboundStatusSchema.optional(),
   targetId: entityIdSchema.optional(),
   scenarioId: entityIdSchema.optional(),
@@ -495,6 +508,84 @@ export function buildDingTalkCard(options: {
       text: lines.join('\n\n'),
       singleTitle: '👉 查阅完整巡检总报告',
       singleURL: viewUrl ?? '',
+    },
+  }
+}
+
+/** 周期耗时报告的推送事件类型。 */
+export const DURATION_REPORT_OUTBOUND_TYPE = 'report.duration_period' as const
+
+export type ImCardProvider = 'wechat_work' | 'feishu' | 'dingtalk'
+
+/** 按 webhook 主机识别常见 IM 机器人；其它地址走通用 cairn.outbound@1 JSON。 */
+export function imCardProviderOfHost(host: string): ImCardProvider | null {
+  const h = host.toLowerCase()
+  if (h === 'qyapi.weixin.qq.com') return 'wechat_work'
+  if (h === 'open.feishu.cn' || h.endsWith('.feishu.cn') || h === 'open.larksuite.com' || h.endsWith('.larksuite.com')) return 'feishu'
+  if (h === 'oapi.dingtalk.com') return 'dingtalk'
+  return null
+}
+
+/** 告警的 IM 卡片：标题 + 读数要点 + 去监控页链接；严重告警用红色。 */
+export function buildAlertImCard(
+  provider: ImCardProvider,
+  alert: { title: string; severity: 'warning' | 'critical'; lines: readonly string[]; viewUrl?: string | null },
+): Record<string, unknown> {
+  const icon = alert.severity === 'critical' ? '🔴' : '🟠'
+  const lines = alert.lines.slice(0, 6)
+  if (provider === 'wechat_work') {
+    const content = [`### ${icon} ${alert.title}`, ...lines.map((line) => `> ${line}`)]
+    if (alert.viewUrl) content.push('', `[去监控页查看](${alert.viewUrl})`)
+    return { msgtype: 'markdown', markdown: { content: content.join('\n') } }
+  }
+  if (provider === 'feishu') {
+    const elements: unknown[] = [{ tag: 'div', text: { tag: 'lark_md', content: lines.join('\n') } }]
+    if (alert.viewUrl) {
+      elements.push({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '去监控页查看' }, type: 'primary', url: alert.viewUrl }] })
+    }
+    return {
+      msg_type: 'interactive',
+      card: { header: { title: { tag: 'plain_text', content: `${icon} ${alert.title}` }, template: alert.severity === 'critical' ? 'red' : 'orange' }, elements },
+    }
+  }
+  return {
+    msgtype: 'actionCard',
+    actionCard: {
+      title: alert.title,
+      text: [`### ${icon} ${alert.title}`, ...lines.map((line) => `- ${line}`)].join('\n\n'),
+      singleTitle: '去监控页查看',
+      singleURL: alert.viewUrl ?? '',
+    },
+  }
+}
+
+/** 周期耗时报告的 IM 卡片：标题 + 周期 + 要点 + 查看报告链接。 */
+export function buildDurationReportImCard(
+  provider: ImCardProvider,
+  report: { title: string; periodLabel: string; highlights: readonly string[]; viewUrl?: string | null },
+): Record<string, unknown> {
+  const highlights = report.highlights.slice(0, 5)
+  if (provider === 'wechat_work') {
+    const lines = [`### 📊 ${report.title}`, `> 周期：${report.periodLabel}`, '', ...highlights.map((line) => `- ${line}`)]
+    if (report.viewUrl) lines.push('', `[查看完整报告](${report.viewUrl})`)
+    return { msgtype: 'markdown', markdown: { content: lines.join('\n') } }
+  }
+  if (provider === 'feishu') {
+    const elements: unknown[] = [
+      { tag: 'div', text: { tag: 'lark_md', content: [`**周期**：${report.periodLabel}`, ...highlights.map((line) => `• ${line}`)].join('\n') } },
+    ]
+    if (report.viewUrl) {
+      elements.push({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '查看完整报告' }, type: 'primary', url: report.viewUrl }] })
+    }
+    return { msg_type: 'interactive', card: { header: { title: { tag: 'plain_text', content: `📊 ${report.title}` }, template: 'blue' }, elements } }
+  }
+  return {
+    msgtype: 'actionCard',
+    actionCard: {
+      title: report.title,
+      text: [`### 📊 ${report.title}`, `- 周期：${report.periodLabel}`, ...highlights.map((line) => `- ${line}`)].join('\n\n'),
+      singleTitle: '查看完整报告',
+      singleURL: report.viewUrl ?? '',
     },
   }
 }

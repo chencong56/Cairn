@@ -75,6 +75,53 @@ function frozenUpdateIssues(file, content) {
 }
 
 /**
+ * 找出改写 runs.status 却不追加 run.status_changed 的函数。
+ * 耗时事实从运行事件重建状态时间线，任何状态变化都必须同事务留下事件；
+ * 以最外层函数为单位判断（事件常在事务回调外层追加）。
+ */
+function runStatusWriteIssues(file, content) {
+  const source = parse(file, content)
+  const issues = []
+  const writesStatus = (values) => values && ts.isObjectLiteralExpression(values)
+    && values.properties.some((prop) => prop.name && ts.isIdentifier(prop.name) && prop.name.text === 'status')
+  const outermostFunction = (node) => {
+    let found
+    for (let current = node.parent; current; current = current.parent) {
+      if (ts.isFunctionDeclaration(current) || ts.isFunctionExpression(current) || ts.isArrowFunction(current) || ts.isMethodDeclaration(current)) {
+        found = current
+      }
+    }
+    return found
+  }
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      let values
+      if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'set'
+        && ts.isCallExpression(callee.expression)
+        && propertyName(callee.expression.expression) === 'update') {
+        const table = callee.expression.arguments[0]
+        if (table && ts.isIdentifier(table) && table.text === 'runs') values = node.arguments[0]
+      }
+      const name = propertyName(callee)
+      if (name === 'updateRows' || name === 'updateRowsCount') {
+        const table = node.arguments[1]
+        if (table && ts.isIdentifier(table) && table.text === 'runs') values = node.arguments[2]
+      }
+      if (writesStatus(values)) {
+        const fn = outermostFunction(node)
+        if (!fn || !fn.getText(source).includes('run.status_changed')) {
+          issues.push(`第 ${lineOf(source, node)} 行改写了 runs.status，但所在函数没有追加 run.status_changed 事件`)
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  return issues
+}
+
+/**
  * 声明式规则定义列表
  */
 export const INVARIANT_RULES = [
@@ -382,6 +429,15 @@ export const INVARIANT_RULES = [
         ? ['Worker 业务代码不得直接调用 newPage()，请改用 browser/runtime.ts 的 openInternalPage(context)']
         : []
     },
+  },
+  {
+    id: 'INV020_RUN_STATUS_CHANGE_EMITS_EVENT',
+    articles: ['可观测性', '证据与保留策略'],
+    title: '改写运行状态必须同时追加 run.status_changed 事件',
+    rationale: '耗时事实（执行 / 认证等待 / 重新排队 / 待核查）从运行事件重建状态时间线；少一次状态事件就会把等待算成执行或判事实不完整',
+    targetDir: 'packages/db/src',
+    excludeTests: true,
+    check: (file, rel, content) => runStatusWriteIssues(file, content),
   },
   {
     id: 'INV018_API_RUN_READ_ACTOR_SCOPE',

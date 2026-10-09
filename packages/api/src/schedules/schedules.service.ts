@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common'
 import type { Request, Response } from 'express'
 import {
+  deleteSchedule,
   getSchedule,
   listScheduleEvents,
   listScheduleEventsAfter,
@@ -15,6 +16,7 @@ import {
   type DbHandle,
 } from '@cairn/db'
 import type {
+  ScheduleDeleteBody,
   ScheduleEnabledBody,
   ScheduleEventListQuery,
   ScheduleListQuery,
@@ -59,6 +61,10 @@ export class SchedulesService {
 
   enabled(scheduleId: string, body: ScheduleEnabledBody, account: RequestAccount) {
     return setScheduleEnabled(this.database, scheduleId, body, this.actor(account)).catch(rethrowDomain)
+  }
+
+  delete(scheduleId: string, body: ScheduleDeleteBody, account: RequestAccount) {
+    return deleteSchedule(this.database, scheduleId, this.actor(account), body).catch(rethrowDomain)
   }
 
   trigger(scheduleId: string, body: ScheduleTriggerBody, account: RequestAccount) {

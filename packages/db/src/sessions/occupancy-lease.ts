@@ -505,13 +505,15 @@ export async function transitionSessionUse(
         eq(browserSessions.id, input.sessionId),
       )
       if (input.owner.kind === 'RUN') {
-        await updateRows(
+        const moved = await updateRows(
           tx,
           runs,
           { status: 'RECOVERING', updatedAt: now },
           and(eq(runs.id, input.owner.runId), eq(runs.status, 'WAITING_FOR_AUTH')),
+          { id: runs.id },
         )
         await appendRunEvents(tx, input.owner.runId, [
+          ...(moved.length > 0 ? [{ type: 'run.status_changed' as const, payload: { status: 'RECOVERING', reason: 'auth_resumed' } }] : []),
           { type: 'run.auth_resumed', payload: { status: 'RECOVERING' } },
         ])
       }
@@ -549,14 +551,16 @@ export async function transitionSessionUse(
         eq(browserSessions.id, input.sessionId),
       )
       if (input.owner.kind === 'RUN' && input.runGrant) {
-        await updateRows(
+        const moved = await updateRows(
           tx,
           runs,
           { status: 'WAITING_FOR_AUTH', updatedAt: now },
           and(eq(runs.id, input.owner.runId), eq(runs.status, 'RUNNING')),
+          { id: runs.id },
         )
         await releaseRunLeaseTx(tx, input.runGrant, 'waiting_for_auth')
         await appendRunEvents(tx, input.owner.runId, [
+          ...(moved.length > 0 ? [{ type: 'run.status_changed' as const, payload: { status: 'WAITING_FOR_AUTH' } }] : []),
           { type: 'run.auth_wait', payload: { status: 'WAITING_FOR_AUTH' } },
         ])
       }

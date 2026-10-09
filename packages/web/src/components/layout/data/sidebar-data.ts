@@ -8,6 +8,7 @@ import {
   ListChecks,
   Monitor,
   Play,
+  Timer,
   CalendarClock,
   ScrollText,
   Server,
@@ -79,6 +80,7 @@ export const sidebarData: SidebarData = {
       items: [
         navItem('schedules', CalendarClock),
         navItem('runs', Play),
+        navItem('duration-analysis', Timer),
         navItem('maintenance', Wrench),
       ],
     },

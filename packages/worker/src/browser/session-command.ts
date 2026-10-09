@@ -29,7 +29,7 @@ import {
 } from './runtime'
 import { executeOnPage } from './surface'
 import { handoffMessage } from './managed-helpers'
-import { PageHealthCollector } from './page-health-collector.js'
+import { PageHealthCollector, pageHealthKnownOrigins } from './page-health-collector.js'
 import { createManagedPage, pageRefFor, pickPopupHandoff, type ManagedPageEntry } from './page-identity'
 import { type LiveHandle, type SessionManagerContext } from './session-live.js'
 import {
@@ -470,8 +470,7 @@ export function startPageHealthForLease(this: SessionManagerContext, leaseId: st
     const live = this.lives.get(sessionId)
     const context = live?.handle.context
     if (!context || typeof context.on !== 'function') return
-    const knownOrigins = [...(run.allowedOrigins ?? []), ...(run.loginOrigin ? [run.loginOrigin] : [])]
-    const collector = new PageHealthCollector(context as never, { invariants, knownOrigins, watchRules })
+    const collector = new PageHealthCollector(context as never, { invariants, knownOrigins: pageHealthKnownOrigins(run), watchRules })
     collector.attach()
     this.pageHealthByLease.set(leaseId, collector)
   }

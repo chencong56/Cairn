@@ -201,6 +201,7 @@ describe('能力地图', () => {
     expect(operator.menus['execution-observation']).toEqual([
       '定时任务',
       '运行记录',
+      '耗时分析',
       '自动化维护',
     ])
     expect(operator.menus.resources).toEqual(['目标系统', '账号会话'])
@@ -213,7 +214,7 @@ describe('能力地图', () => {
 
     const author = previewCapabilities(SYSTEM_ROLE_DEFINITIONS.author.permissions)
     expect(author.menus.workbench).toEqual(['场景编排', '场景集', '批量任务', '动作库', '录制草稿'])
-    expect(author.menus['execution-observation']).toEqual(['运行记录', '自动化维护'])
+    expect(author.menus['execution-observation']).toEqual(['运行记录', '耗时分析', '自动化维护'])
     expect(author.menus.resources).toEqual(['数据集', '目标系统', '账号会话'])
     expect(author.menus.operations).toEqual(['执行节点', '消息推送'])
     expect(author.menus.governance).toEqual([])
@@ -223,7 +224,7 @@ describe('能力地图', () => {
 
     const viewer = previewCapabilities(SYSTEM_ROLE_DEFINITIONS.viewer.permissions)
     expect(viewer.menus.workbench).toEqual(['场景编排', '场景集', '批量任务'])
-    expect(viewer.menus['execution-observation']).toEqual(['运行记录', '自动化维护'])
+    expect(viewer.menus['execution-observation']).toEqual(['运行记录', '耗时分析', '自动化维护'])
     expect(viewer.menus.resources).toEqual(['数据集', '目标系统'])
     expect(viewer.menus.operations).toEqual(['消息推送'])
     expect(viewer.actions).toEqual(['使用平台助手', '查看运行报告'])
@@ -232,6 +233,7 @@ describe('能力地图', () => {
     expect(admin.menus['execution-observation']).toEqual([
       '定时任务',
       '运行记录',
+      '耗时分析',
       '自动化维护',
     ])
     expect(admin.menus.governance).toEqual(['用户管理', '角色权限', 'API 接入', '平台配置', '审计日志'])

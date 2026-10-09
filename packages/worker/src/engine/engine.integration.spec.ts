@@ -908,7 +908,7 @@ describe('ExecutionEngine（集成）', { timeout: 30_000 }, () => {
     expect(after.stepRuns[0]?.attempts.map((attempt) => attempt.status)).toEqual(['CANCELLED', 'SUCCEEDED'])
   })
 
-  it('AMB-09：含 moduleManifest 的 Run 只给声明协议的 Worker，展开后由现有引擎执行', async () => {
+  it('AMB-09：含 moduleManifest 的 Run 展开后由现有引擎执行（锁步部署，不按协议筛 Worker）', async () => {
     const echoStepId = newId()
     const moduleContent: ModuleContent = {
       contract: {
@@ -1008,24 +1008,7 @@ describe('ExecutionEngine（集成）', { timeout: 30_000 }, () => {
     expect(created.detail.snapshot.steps[0]?.effectType).toBe('READ_ONLY')
     expect(created.detail.snapshot.steps[1]?.type).toBe('verify_context')
 
-    const oldWorkerId = `eng-old-${SCHEMA.slice(-8)}`
-    const oldInstanceId = newId()
-    await registerWorker(handle.db, {
-      workerId: oldWorkerId,
-      instanceId: oldInstanceId,
-      capacity: 2,
-      lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
-    })
     await cancelOtherClaimable(created.detail.id)
-    expect(
-      await claimRun(handle, {
-        workerId: oldWorkerId,
-        instanceId: oldInstanceId,
-        leaseTtlSeconds: 30,
-      }),
-    ).toBeNull()
-
     const grant = await claimThis(created.detail.id)
     await engine.execute(created.detail.id, { grant })
     const detail = await getRun(handle.db, created.detail.id)
@@ -1376,7 +1359,7 @@ describe('ExecutionEngine（集成）', { timeout: 30_000 }, () => {
     expect(stepRunFor(detail.stepRuns, second.id)?.status).toBe('SKIPPED')
   })
 
-  it('AMF-10 未声明候选组协议的 Worker 不领取', async () => {
+  it('AMF-10 锁步部署：只声明会话占用的 Worker 也能领取候选组 Run', async () => {
     const first = {
       id: newId(),
       name: '首选',
@@ -1399,25 +1382,22 @@ describe('ExecutionEngine（集成）', { timeout: 30_000 }, () => {
       input: { value: 'c' },
     }
     const { runId } = await insertCandidateRun({ name: '协议闸门', first, leftover, second })
-    const oldWorkerId = `old-cg-${SCHEMA.slice(-8)}`
+    const oldWorkerId = `plain-cg-${SCHEMA.slice(-8)}`
     const oldInstanceId = newId()
     await registerWorker(handle.db, {
       workerId: oldWorkerId,
       instanceId: oldInstanceId,
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, 'snapshot.moduleManifest@1'],
+      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
     })
     await cancelOtherClaimable(runId)
-    expect(
-      await claimRun(handle, {
-        workerId: oldWorkerId,
-        instanceId: oldInstanceId,
-        leaseTtlSeconds: 30,
-      }),
-    ).toBeNull()
-    const grant = await claimThis(runId)
-    expect(grant.runId).toBe(runId)
+    const grant = await claimRun(handle, {
+      workerId: oldWorkerId,
+      instanceId: oldInstanceId,
+      leaseTtlSeconds: 30,
+    })
+    expect(grant?.runId).toBe(runId)
   })
 
   it('disabled: true 的步骤自动 SKIPPED，不生成 Attempt 并继续推进后续步骤', async () => {

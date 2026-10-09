@@ -6,6 +6,7 @@ import {
 } from '@cairn/shared'
 import {
   deriveOutcomeManifest,
+  deriveRuntimeInvariantManifest,
   deterministicStepId,
   expandAuthoringDocument,
   resolveOutcomeWriteback,
@@ -367,6 +368,31 @@ describe('OC-A: 编写展开与契约派生 (expand-outcome)', () => {
     expect(resolveOutcomeWriteback(expanded.outcomeManifest, 'not-a-step')).toBeUndefined()
   })
 
+  it('已停用的 navigation_boundary 不进快照，只给警告不阻断发布', () => {
+    const retired = {
+      id: '20000000-0000-4000-8000-000000000012',
+      meaning: '不得离开允许的访问范围',
+      kind: 'navigation_boundary' as const,
+      severity: 'MUST' as const,
+      onViolation: 'halt' as const,
+      evaluateAt: 'step_boundary' as const,
+    }
+    const doc: ScenarioAuthoringDocumentV2 = {
+      authoringSchemaVersion: 2,
+      schemaVersion: 1,
+      inputs: [],
+      nodes: [{ kind: 'step', step: clickStep }],
+      runtimeInvariants: [retired],
+    }
+    const expanded = expandAuthoringDocument(doc, makeContext())
+    expect(expanded.ok).toBe(true)
+    expect(expanded.runtimeInvariantManifest).toBeUndefined()
+    expect(expanded.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'RUNTIME_INVARIANT_RETIRED', severity: 'warning', fieldPath: ['runtimeInvariants', '0'] }),
+    )
+    expect(deriveRuntimeInvariantManifest(doc)).toBeUndefined()
+  })
+
   it('展开冻结 runtimeInvariantManifest，非法 evaluateAt 记编译错误', () => {
     const doc: ScenarioAuthoringDocumentV2 = {
       authoringSchemaVersion: 2,
@@ -376,8 +402,8 @@ describe('OC-A: 编写展开与契约派生 (expand-outcome)', () => {
       runtimeInvariants: [
         {
           id: '20000000-0000-4000-8000-000000000010',
-          meaning: '不得离开目标系统',
-          kind: 'navigation_boundary',
+          meaning: '运行期间登录保持有效',
+          kind: 'auth_validity',
           severity: 'MUST',
           onViolation: 'halt',
           evaluateAt: 'step_boundary',

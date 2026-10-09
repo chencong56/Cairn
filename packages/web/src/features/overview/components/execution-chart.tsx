@@ -41,6 +41,10 @@ const chartConfig: ChartConfig = {
     label: '成功率 (%)',
     color: 'var(--status-success)',
   },
+  p95Seconds: {
+    label: '总耗时 P95（秒）',
+    color: 'var(--chart-5)',
+  },
 }
 
 export function ExecutionChart({
@@ -72,6 +76,8 @@ export function ExecutionChart({
         ...pt,
         displayTime: timeLabel,
         ratePercent: Math.round(pt.successRate * 100),
+        // 总耗时（含等待，含试跑等全部运行）；按场景看执行耗时请到「耗时分析」
+        p95Seconds: pt.p95DurationMs === null ? null : Math.round(pt.p95DurationMs / 100) / 10,
       }
     })
   }, [timeline, range])
@@ -147,6 +153,7 @@ export function ExecutionChart({
                 domain={[0, 100]}
                 hide
               />
+              <YAxis yAxisId="duration" orientation="right" hide />
               <ChartTooltip
                 content={
                   <ChartTooltipContent
@@ -181,6 +188,16 @@ export function ExecutionChart({
                 strokeWidth={2}
                 dot={false}
                 strokeDasharray="4 4"
+              />
+              <Line
+                yAxisId="duration"
+                type="monotone"
+                dataKey="p95Seconds"
+                name="总耗时 P95（秒）"
+                stroke="var(--chart-5)"
+                strokeWidth={1.5}
+                dot={false}
+                connectNulls
               />
               <ChartLegend content={<ChartLegendContent />} />
             </ComposedChart>

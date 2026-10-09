@@ -17,6 +17,7 @@ import {
   resolveScheduleWindow,
   scheduleDefinitionSchema,
   scheduleDtoSchema,
+  scheduleDeleteBodySchema,
   scheduleEnabledBodySchema,
   scheduleEventDtoSchema,
   scheduleIdentityGuard,
@@ -40,6 +41,8 @@ import {
   type ScheduleConsumer,
   type ScheduleConsumerType,
   type ScheduleDefinition,
+  type ScheduleDeleteBody,
+  type ScheduleDeleteResponse,
   type ScheduleDto,
   type ScheduleEventDto,
   type ScheduleListQuery,
@@ -61,7 +64,7 @@ import { sha256Hex } from '../runs/digest.js'
 import { cancelMapJob, createMapIngestJob, getMapJob, getMapJobPolicy } from '../map/jobs.js'
 import { requireMapCapableAccount } from '../console/account-usage.js'
 import { getOrCreatePlatformConfig } from '../platform-config/store.js'
-import { liveTargetExists } from '../lifecycle.js'
+import { liveTargetExists, snapshotDeletedBy } from '../lifecycle.js'
 import { assertTargetPermission, lockConsoleAuthorization, scopedTargetFilter } from '../console/target-authorization.js'
 import { requireLiveTarget } from '../map/view.js'
 import { publishChangeHint } from '../observe/hint.js'
@@ -191,7 +194,7 @@ async function lastOccurrence(db: Db, scheduleId: string): Promise<ScheduleOccur
 async function scheduleToDto(db: Db, scheduleId: string): Promise<ScheduleDto> {
   const { schedules, scheduleVersions } = schemaFor(db)
   const [schedule] = await db.select().from(schedules).where(eq(schedules.id, scheduleId)).limit(1)
-  if (!schedule) throw notFound('SCHEDULE_NOT_FOUND', '调度计划不存在')
+  if (!schedule || schedule.deletedAt) throw notFound('SCHEDULE_NOT_FOUND', '调度计划不存在')
   const [version] = await db
     .select()
     .from(scheduleVersions)
@@ -540,6 +543,7 @@ export async function listSchedules(db: Db, query: ScheduleListQuery, actorId?: 
     .from(schedules)
     .where(
       and(
+        isNull(schedules.deletedAt),
         query.targetId ? eq(schedules.targetId, query.targetId) : undefined,
         liveTargetExists(db, schedules.targetId),
         await scopedTargetFilter(db, actorId, schedules.targetId, 'schedule:read'),
@@ -927,6 +931,77 @@ export async function setScheduleEnabled(
     const result = await scheduleToDto(tx, scheduleId)
     await insertRows(tx, scheduleCommands, { id: newId(), commandKey, payload, result: { schedule: result } })
     return result
+  })
+}
+
+export async function deleteSchedule(
+  db: Db,
+  scheduleId: string,
+  actor: ExecutionActor,
+  body: ScheduleDeleteBody = { cancelAdmittedJobs: false },
+): Promise<ScheduleDeleteResponse> {
+  const parsed = scheduleDeleteBodySchema.parse(body)
+  return atomic(db, async (tx) => {
+    await lockConsoleAuthorization(tx, actor.id)
+    const { schedules, scheduleOccurrences, scheduleVersions } = schemaFor(tx)
+    const [current] = await locked(tx, tx.select().from(schedules).where(eq(schedules.id, scheduleId)))
+    if (!current) throw notFound('SCHEDULE_NOT_FOUND', '调度计划不存在')
+    if (current.deletedAt) {
+      return { scheduleId, deleted: true }
+    }
+    const [version] = await tx
+      .select()
+      .from(scheduleVersions)
+      .where(eq(scheduleVersions.id, current.currentVersionId))
+      .limit(1)
+    if (version) {
+      const def = definitionFromVersion(version)
+      await assertScheduleWritePermission(tx, actor.id, def.consumer)
+    }
+    const now = await clockNow(tx)
+    const deletedBy = await snapshotDeletedBy(tx as unknown as Db, actor)
+    await tx
+      .update(schedules)
+      .set({
+        deletedAt: now,
+        deletedBy,
+        enabled: 0,
+        enabledGuard: null,
+        identityGuard: null,
+        nextDueAt: null,
+        updatedAt: now,
+      })
+      .where(eq(schedules.id, scheduleId))
+
+    await tx
+      .update(scheduleOccurrences)
+      .set({ admissionStatus: 'SKIPPED', reason: 'SCHEDULE_DISABLED' })
+      .where(and(eq(scheduleOccurrences.scheduleId, scheduleId), eq(scheduleOccurrences.admissionStatus, 'PENDING'), eq(scheduleOccurrences.source, 'scheduled')))
+
+    if (parsed.cancelAdmittedJobs) {
+      if (current.consumerKey === 'scenario_run' || current.consumerKey === 'suite_run') {
+        await assertTargetPermission(tx, actor.id, current.targetId, 'run:cancel')
+      }
+      const admitted = await tx
+        .select()
+        .from(scheduleOccurrences)
+        .where(and(eq(scheduleOccurrences.scheduleId, scheduleId), eq(scheduleOccurrences.admissionStatus, 'ADMITTED')))
+      for (const row of admitted) {
+        if (row.runId) await requestRunCancel(tx, row.runId, actor)
+        if (row.suiteRunId) await cancelSuiteRun(tx, row.suiteRunId, actor)
+        if (row.jobId) {
+          const job = await getMapJob(tx, row.jobId)
+          if (['queued', 'running'].includes(job.jobStatus)) await cancelMapJob(tx, row.jobId, actor)
+        }
+        if (row.analysisJobId) {
+          await cancelAnalysisJob(tx, row.analysisJobId, actor, `cancel-delete:${scheduleId}:${row.id}`)
+        }
+      }
+    }
+
+    await appendEvent(tx, scheduleId, 'deleted', { cancelAdmittedJobs: parsed.cancelAdmittedJobs }, now)
+    await recordAudit(tx, actor, 'schedule.delete', 'target', current.targetId, `删除调度计划 ${current.name ?? scheduleId}`)
+    return { scheduleId, deleted: true }
   })
 }
 
@@ -1413,6 +1488,7 @@ export async function admitScheduleOccurrence(
           input: definition.consumer.input,
           actor,
           idempotencyKey: scheduledRunCommandKey(occurrence.id),
+          triggerSource: occurrence.source === 'manual' ? 'manual' : 'schedule',
         })
         await tx
           .update(scheduleOccurrences)
@@ -1440,6 +1516,7 @@ export async function admitScheduleOccurrence(
           },
           actor,
           Object.fromEntries(definition.consumer.members.filter(member => member.accountResolved).map(member => [member.memberId, member.targetAccountId ?? null])),
+          { triggerSource: occurrence.source === 'manual' ? 'manual' : 'schedule' },
         )
         await tx
           .update(scheduleOccurrences)

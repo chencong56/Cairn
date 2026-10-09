@@ -24,6 +24,7 @@ import {
 } from '@cairn/db/testing'
 import {
   createRuntimeInvariant,
+  isRetiredRuntimeInvariantKind,
   stepRunFor,
   targetAuthProfileDefinitionSchema,
   type AuthoringNode,
@@ -236,7 +237,7 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
   let authAccountId: string
   let workerId: string
   let workerInstanceId: string
-  let browserBehavior: 'pass' | 'fail_assertion' | 'fail_infra' | 'fail_navigate_scope' | 'auth_gate_closed' = 'pass'
+  let browserBehavior: 'pass' | 'fail_assertion' | 'fail_infra' | 'auth_gate_closed' = 'pass'
   let executeCalls = 0
   let surfaceMatches: { role: string; text: string }[] = []
 
@@ -327,19 +328,8 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
     async probeErrorSurface() {
       return surfaceMatches
     },
-    async execute(_grant, command): Promise<BrowserCommandResult> {
+    async execute(_grant, _command): Promise<BrowserCommandResult> {
       executeCalls += 1
-      if (browserBehavior === 'fail_navigate_scope' && command.type === 'navigate') {
-        return {
-          ok: false,
-          error: {
-            code: 'NAVIGATE_OUT_OF_SCOPE',
-            category: 'EXECUTOR',
-            retryable: false,
-            safeMessage: '导航超出目标源允许范围',
-          },
-        }
-      }
       if (browserBehavior === 'fail_assertion') {
         return {
           ok: false,
@@ -901,66 +891,25 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
       actor: { id: actorId },
     })
     expect(created.detail.snapshot.runtimeInvariantManifest?.entries.length ?? 0).toBe(
-      input.runtimeInvariants?.length ?? 0,
+      input.runtimeInvariants?.filter((item) => !isRetiredRuntimeInvariantKind(item.kind)).length ?? 0,
     )
     const grant = await claimThis(created.detail.id)
     await engine.execute(created.detail.id, { grant })
     return loadRunDetail(handle.db, created.detail.id)
   }
 
-  it('OCC-02：navigation_boundary 越界记 FAIL 且 actual 带 errorCode；范围内记 PASS', async () => {
-    browserBehavior = 'fail_navigate_scope'
-    const denyId = newId()
-    const denied = await executeNodes({
-      name: 'occ-02-deny',
-      nodes: [{ kind: 'step', step: navigateStep(newId()) }],
-      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', denyId)],
-    })
-    expect(denied?.status).toBe('FAILED')
-    expect(denied?.stepRuns[0]?.attempts[0]?.error?.code).toBe('NAVIGATE_OUT_OF_SCOPE')
-    expect(denied?.outcomeStatus).toBe('FAIL')
-    expect(invariantRowOf(denied, denyId)).toMatchObject({
-      provenance: 'runtime_invariant',
-      verdict: 'FAIL',
-      actual: { errorCode: 'NAVIGATE_OUT_OF_SCOPE' },
-    })
-
+  // 越界拦截随目标访问范围于 2026-10-06 移除；旧快照里 navigation_boundary 的判定由 shared runtime-invariant 单测覆盖
+  it('OCC-02：已停用的 navigation_boundary 不进快照、不写约束行', async () => {
     browserBehavior = 'pass'
-    const passId = newId()
+    const retiredId = newId()
     const passed = await executeNodes({
-      name: 'occ-02-pass',
+      name: 'occ-02-retired',
       nodes: [{ kind: 'step', step: navigateStep(newId()) }],
-      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', passId)],
+      runtimeInvariants: [createRuntimeInvariant('navigation_boundary', retiredId)],
     })
     expect(passed?.status).toBe('SUCCEEDED')
-    expect(passed?.outcomeStatus).toBe('PASS')
-    expect(invariantRowOf(passed, passId)).toMatchObject({
-      provenance: 'runtime_invariant',
-      verdict: 'PASS',
-    })
-  })
-
-  it('OCC-07：已收编守卫 continue 不能取消越界拦截', async () => {
-    browserBehavior = 'fail_navigate_scope'
-    const continueId = newId()
-    const afterId = newId()
-    const detail = await executeNodes({
-      name: 'occ-07-nav-continue',
-      nodes: [
-        { kind: 'step', step: navigateStep(newId()) },
-        { kind: 'step', step: echoStep(afterId, 'skip') },
-      ],
-      runtimeInvariants: [
-        {
-          ...createRuntimeInvariant('navigation_boundary', continueId),
-          onViolation: 'continue',
-        },
-      ],
-    })
-    expect(detail?.status).toBe('FAILED')
-    expect(detail?.stepRuns[0]?.attempts[0]?.error?.code).toBe('NAVIGATE_OUT_OF_SCOPE')
-    expect(stepRunFor(detail?.stepRuns ?? [], afterId)?.attempts ?? []).toHaveLength(0)
-    expect(invariantRowOf(detail, continueId)?.verdict).toBe('FAIL')
+    expect(passed?.snapshot.runtimeInvariantManifest).toBeUndefined()
+    expect(invariantRowOf(passed, retiredId)).toBeUndefined()
   })
 
   it('OCC-03：开跑前登录失败进入 WAITING_FOR_AUTH，补窗口并记 SHOULD FAIL / WARN', async () => {

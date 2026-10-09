@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { ArrowLeft, Play, Save } from 'lucide-react'
+import { ArrowLeft, Play, Save, Timer } from 'lucide-react'
 import type { SuiteDetailDto } from '@cairn/shared'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
@@ -60,6 +60,14 @@ export function SuiteHeader({
           {isDirty ? (
             <StatusBadge tone='warning'>草稿有更改</StatusBadge>
           ) : null}
+          <Can permission='run:read'>
+            <Button variant='outline' asChild>
+              <Link to='/duration-analysis' search={{ targetId: suite.targetId, suiteId: suite.id }}>
+                <Timer className='mr-1.5 size-4' />
+                耗时分析
+              </Link>
+            </Button>
+          </Can>
           <Can permission='suite:write'>
             <Button variant='outline' disabled={busy} onClick={onSave}>
               <Save className='mr-1.5 size-4' />

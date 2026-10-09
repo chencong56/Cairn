@@ -5,6 +5,7 @@ import {
   matchesScriptIgnore,
   mergePageHealthSamples,
   normalizePageUrl,
+  originsFromTargetUrls,
   redactPageHealthText,
   resolveNetworkHealthConfig,
   resolveScriptErrorsConfig,
@@ -18,6 +19,7 @@ import {
   type ResolvedNetworkHealthConfig,
   type ResolvedScriptErrorsConfig,
   type RuntimeInvariant,
+  type RunSnapshot,
 } from '@cairn/shared'
 
 /** 步骤结束后这么久内发起的请求仍算「第 N 步之后」；超过的（调试挂起、等待认证、人工接管）一律不计。 */
@@ -48,6 +50,18 @@ type PendingEvent = {
   /** document 请求一律计入，不走系统地址判定。 */
   isDocument: boolean
   network: boolean
+}
+
+/**
+ * 一开始就算「系统地址」的源：目标入口与登录页。
+ * 不能只等页面加载后再学：复用会话时本次运行可能一次整页跳转都没有，入口系统的接口错误会被漏掉。
+ * allowedOrigins 是访问范围移除（迁移 0147）前的旧快照字段，新快照不再写。
+ */
+export function pageHealthKnownOrigins(run: Pick<RunSnapshot, 'targetAuth' | 'allowedOrigins' | 'loginOrigin'>): string[] {
+  const origins = new Set<string>(run.allowedOrigins ?? [])
+  if (run.targetAuth) for (const origin of originsFromTargetUrls(run.targetAuth.entryUrl, run.targetAuth.loginUrl)) origins.add(origin)
+  if (run.loginOrigin) origins.add(run.loginOrigin)
+  return [...origins]
 }
 
 export function registrableDomainOf(host: string): string | null {

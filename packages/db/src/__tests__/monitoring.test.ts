@@ -3,9 +3,10 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
-  MODULE_MANIFEST_PROTOCOL,
   OBJECT_MISSING_REASONS,
   SESSION_OCCUPANCY_PROTOCOL,
+  parseWorkerRoles,
+  protocolCapabilitiesForRoles,
   knownMetric,
   unknownMetric,
   type MonitorMetricNumber,
@@ -434,28 +435,31 @@ describe.each(DRIVERS)('%s 监控只读聚合', { timeout: 60_000 }, (driver) =>
       idempotencyDigest: `gated-${newId()}`,
     })
 
-    const workerId = `gate-${newId().slice(0, 8)}`
-    await registerWorker(handle.db, {
-      workerId,
-      instanceId: newId(),
-      capacity: 2,
-      lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
-    })
-    const afterGate = await summarizeQueues(handle.db)
-    expect(known(afterGate.data.claimableRuns)).toBe(known(before.data.claimableRuns) + 2)
-    expect(known(afterGate.data.unclaimableRuns)).toBeGreaterThanOrEqual(1)
+    const afterInsert = await summarizeQueues(handle.db)
+    expect(known(afterInsert.data.claimableRuns)).toBe(known(before.data.claimableRuns) + 2)
 
+    // 只声明调度角色的节点不领运行，不能把「无人可领」消掉
     await registerWorker(handle.db, {
-      workerId: `cover-${newId().slice(0, 8)}`,
+      workerId: `sched-${newId().slice(0, 8)}`,
       instanceId: newId(),
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, MODULE_MANIFEST_PROTOCOL],
+      protocolCapabilities: protocolCapabilitiesForRoles(parseWorkerRoles('scheduler')),
     })
-    const afterCover = await summarizeQueues(handle.db)
-    expect(known(afterCover.data.claimableRuns)).toBe(known(afterGate.data.claimableRuns))
-    expect(known(afterCover.data.unclaimableRuns)).toBe(known(afterGate.data.unclaimableRuns) - 1)
+    const afterScheduler = await summarizeQueues(handle.db)
+    expect(known(afterScheduler.data.unclaimableRuns)).toBe(known(afterInsert.data.unclaimableRuns))
+
+    // 锁步部署：任一在线执行节点都能领任何快照（含 moduleManifest），不再按快照特性算「无人可领」
+    await registerWorker(handle.db, {
+      workerId: `exec-${newId().slice(0, 8)}`,
+      instanceId: newId(),
+      capacity: 2,
+      lostAfterSeconds: 60,
+      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+    })
+    const afterExecutor = await summarizeQueues(handle.db)
+    expect(known(afterExecutor.data.claimableRuns)).toBe(known(afterInsert.data.claimableRuns))
+    expect(known(afterExecutor.data.unclaimableRuns)).toBe(0)
     expect(expired.detail.id).toBeTruthy()
     expect(live.detail.id).toBeTruthy()
   })

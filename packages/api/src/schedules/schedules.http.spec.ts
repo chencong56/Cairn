@@ -73,6 +73,7 @@ function mockService() {
     get: vi.fn(async () => schedule),
     create: vi.fn(async () => ({ schedule, created: true })),
     update: vi.fn(async () => ({ schedule, created: false })),
+    delete: vi.fn(async () => ({ scheduleId, deleted: true })),
     enabled: vi.fn(async () => ({ ...schedule, enabled: true, revision: 2 })),
     preview: vi.fn(async () => ({
       asOf: '2026-09-16T00:00:00.000Z',
@@ -228,5 +229,20 @@ describe('Schedules HTTP', () => {
       .send({ idempotencyKey: 'manual-01' })
       .expect(200)
     expect(service.trigger).toHaveBeenCalledWith(scheduleId, expect.objectContaining({ idempotencyKey: 'manual-01' }), admin)
+
+    await request(viewerApp.getHttpServer())
+      .post(`/schedules/${scheduleId}/delete`)
+      .send({ cancelAdmittedJobs: true })
+      .expect(403)
+
+    await request(adminApp.getHttpServer())
+      .post(`/schedules/${scheduleId}/delete`)
+      .send({ cancelAdmittedJobs: true })
+      .expect(200)
+    expect(service.delete).toHaveBeenCalledWith(
+      scheduleId,
+      { cancelAdmittedJobs: true },
+      admin,
+    )
   })
 })

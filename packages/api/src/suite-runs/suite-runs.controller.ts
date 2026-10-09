@@ -47,6 +47,12 @@ export class SuiteRunsController {
     return this.suiteRuns.observation(suiteRunId, account.id)
   }
 
+  @Get(':suiteRunId/duration')
+  @RequirePermissions('suite:read', 'run:read')
+  duration(@Param('suiteRunId') suiteRunId: string, @CurrentAccount() account: RequestAccount) {
+    return this.suiteRuns.duration(suiteRunId, account.id)
+  }
+
   @Get(':suiteRunId/events')
   @RequirePermissions('suite:read')
   events(

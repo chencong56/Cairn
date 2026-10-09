@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common'
 import type { Request, Response } from 'express'
 import {
+  authorizeTargetRequest,
+  readSuiteRunDuration,
   cancelSuiteRun,
   createSuiteRun,
   deleteSuiteRun,
@@ -43,6 +45,16 @@ export class SuiteRunsService {
 
   observation(suiteRunId: string, actorId: string) {
     return getSuiteRunObservation(this.database, suiteRunId, actorId).catch(rethrowDomain)
+  }
+
+  /** 场景集运行与上一次完成的同一场景集运行对比：墙钟、关键路径、成员排队。 */
+  async duration(suiteRunId: string, actorId: string) {
+    try {
+      await authorizeTargetRequest(this.database, actorId, { suiteRunId, permissions: ['suite:read', 'run:read'] })
+      return await readSuiteRunDuration(this.database, suiteRunId)
+    } catch (error) {
+      rethrowDomain(error)
+    }
   }
 
   cancel(suiteRunId: string, account: RequestAccount) {

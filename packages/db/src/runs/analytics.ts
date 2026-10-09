@@ -45,8 +45,7 @@ export async function readOverviewAnalytics(
             status: runs.status,
             outcomeStatus: runs.outcomeStatus,
             executionOrigin: runs.executionOrigin,
-            serviceCallerId: runs.serviceCallerId,
-            createdByConsoleAccountId: runs.createdByConsoleAccountId,
+            triggerSource: runs.triggerSource,
             createdAt: runs.createdAt,
             startedAt: runs.startedAt,
             finishedAt: runs.finishedAt,
@@ -208,16 +207,11 @@ export async function readOverviewAnalytics(
         break
     }
 
-    // 触发渠道归集
-    if (row.serviceCallerId) {
-      triggers.serviceApi++
-    } else if (row.executionOrigin === 'suite_member') {
-      triggers.suiteMember++
-    } else if (row.createdByConsoleAccountId) {
-      triggers.manual++
-    } else {
-      triggers.schedule++
-    }
+    // 发起方归集（三类互斥，合计等于总数）；场景集成员是容器维度，单独计数、与发起方重叠
+    if (row.triggerSource === 'service') triggers.serviceApi++
+    else if (row.triggerSource === 'schedule') triggers.schedule++
+    else triggers.manual++
+    if (row.executionOrigin === 'suite_member') triggers.suiteMember++
 
     // 场景排行统计
     if (row.scenarioId) {

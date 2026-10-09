@@ -39,6 +39,7 @@ import {
   type SuiteRunObservation,
   type SuiteRunPreviewResponse,
   type SuiteRunStatus,
+  type SuiteRunTriggerSource,
   type SuiteValidationIssue,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
@@ -59,7 +60,6 @@ import { assertExpectedCounts, assertResourceIdle, liveTargetExists, pendingWrit
 import { revokeReportTrees } from '../reports/cleanup.js'
 import { validateSuiteDocument } from './validate.js'
 import { lockReportDefaults, resolveReportProfile } from '../reports/profiles.js'
-import { assertReportDeploymentReady } from '../reports/protocol.js'
 
 const OPEN_SUITE_STATUSES: SuiteRunStatus[] = ['QUEUED', 'RUNNING', 'WAITING', 'NEEDS_REVIEW']
 const CHILD_TERMINAL = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
@@ -364,7 +364,14 @@ export async function previewSuiteRun(
   }
 }
 
-export async function createSuiteRun(db: Db, body: CreateSuiteRunBody, actor: ExecutionActor, frozenAccounts?: Record<string, string | null>) {
+export async function createSuiteRun(
+  db: Db,
+  body: CreateSuiteRunBody,
+  actor: ExecutionActor,
+  frozenAccounts?: Record<string, string | null>,
+  options: { triggerSource?: SuiteRunTriggerSource } = {},
+) {
+  const triggerSource = options.triggerSource ?? 'manual'
   const input = createSuiteRunBodySchema.parse(body)
   if (actor.kind === 'service') throw badRequest('SUITE_SERVICE_FORBIDDEN', '开放服务不能创建集合运行')
   return atomic(db, async (tx) => {
@@ -381,12 +388,18 @@ export async function createSuiteRun(db: Db, body: CreateSuiteRunBody, actor: Ex
       if (existing.idempotencyDigest !== digest) throw conflict('SUITE_RUN_IDEMPOTENCY_CONFLICT', '相同幂等键对应不同的集合运行输入')
       return { observation: await getSuiteRunObservation(tx, existing.id), created: false }
     }
-    return createSuiteRunTx(tx, input, actor, digest, frozenAccounts)
+    return createSuiteRunTx(tx, input, actor, digest, triggerSource, frozenAccounts)
   })
 }
 
-async function createSuiteRunTx(db: Db, input: CreateSuiteRunBody, actor: ExecutionActor, digest: string, frozenAccounts?: Record<string, string | null>) {
-  await assertReportDeploymentReady(db, true)
+async function createSuiteRunTx(
+  db: Db,
+  input: CreateSuiteRunBody,
+  actor: ExecutionActor,
+  digest: string,
+  triggerSource: SuiteRunTriggerSource,
+  frozenAccounts?: Record<string, string | null>,
+) {
   const preview = await previewSuiteRun(db, input, actor.id, frozenAccounts)
   if (preview.issues.some((item) => item.severity === 'error')) {
     throw badRequest('SUITE_VALIDATION_FAILED', '场景集运行预览未通过', preview.issues)
@@ -457,6 +470,7 @@ async function createSuiteRunTx(db: Db, input: CreateSuiteRunBody, actor: Execut
         failurePolicy: document.failurePolicy,
         executionMode,
         maxConcurrency,
+        triggerSource,
         deadlineAt,
         snapshot,
         snapshotDigest: sha256Hex(snapshot),
@@ -504,6 +518,7 @@ async function createSuiteRunTx(db: Db, input: CreateSuiteRunBody, actor: Execut
             actor,
             deadlineAt,
             executionOrigin: 'suite_member',
+            triggerSource,
             suiteRunId,
             suiteMemberId: member.memberId,
             reportDefaults: { profileId: memberDef?.reportProfileId, displayName: member.displayName, suppressMemberReport: suppressMember },
@@ -775,6 +790,7 @@ export async function advanceSuiteRunTx(tx: Db, suiteRunId: string): Promise<voi
           actor,
           deadlineAt: parent.deadlineAt,
           executionOrigin: 'suite_member',
+          triggerSource: parent.triggerSource,
           suiteRunId,
           suiteMemberId: r.item.memberId,
           reportDefaults: { profileId: memberDef.reportProfileId, displayName: r.item.displayName, suppressMemberReport: suppressMember },
@@ -987,6 +1003,8 @@ export async function rerunSuiteItem(
       actor,
       deadlineAt: parent.deadlineAt ?? deadlineAt,
       executionOrigin: 'suite_member',
+      // 重跑是人点的，不论原场景集运行由谁发起
+      triggerSource: 'manual',
       suiteRunId: input.suiteRunId,
       suiteMemberId: item.memberId,
       reportDefaults: { profileId: memberDef.reportProfileId, displayName: item.displayName, suppressMemberReport: suppressMember },
