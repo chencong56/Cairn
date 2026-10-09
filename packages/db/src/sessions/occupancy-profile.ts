@@ -130,6 +130,42 @@ export async function invalidateSessionProfile(
   })
 }
 
+/**
+ * Profile 亲和：要新建实例而登录数据在另一台 READY 节点上时，从 since 起
+ * waitSeconds 内只等原节点领取（wait）；原节点不在线或等满后由领取方接手（fallback）。
+ */
+export type ProfileAffinity =
+  | { kind: 'none' }
+  | { kind: 'wait'; targetWorkerId: string; until: Date }
+  | { kind: 'fallback' }
+
+export async function evaluateProfileAffinity(
+  db: Db,
+  input: { key: SessionProfileKey; workerId: string; since: Date; waitSeconds: number },
+): Promise<ProfileAffinity> {
+  const profile = await getSessionProfile(db, input.key)
+  if (
+    !profile ||
+    profile.state !== 'PRESENT' ||
+    !profile.locationWorkerId ||
+    profile.locationWorkerId === input.workerId
+  ) {
+    return { kind: 'none' }
+  }
+  const { workers } = schemaFor(db)
+  const [origin] = await db
+    .select({ status: workers.status })
+    .from(workers)
+    .where(eq(workers.id, profile.locationWorkerId))
+    .limit(1)
+  if (origin?.status !== 'READY') return { kind: 'fallback' }
+  const until = new Date(input.since.getTime() + input.waitSeconds * 1000)
+  if ((await clockNow(db)).getTime() < until.getTime()) {
+    return { kind: 'wait', targetWorkerId: profile.locationWorkerId, until }
+  }
+  return { kind: 'fallback' }
+}
+
 export async function transferProfileLocation(
   tx: Db,
   key: SessionKey | SessionProfileKey,

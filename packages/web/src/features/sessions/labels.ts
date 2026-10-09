@@ -187,6 +187,12 @@ export function describeOperationWait(
       const worker = str('workerId')
       return worker ? `会话在节点 ${worker} 上，等待该节点领取` : '会话在其他节点上，等待该节点领取'
     }
+    case 'PROFILE_AFFINITY_WAIT': {
+      const worker = str('workerId')
+      return worker
+        ? `登录数据在节点 ${worker} 上，等待该节点领取以免重新登录`
+        : '登录数据在其他节点上，等待该节点领取以免重新登录'
+    }
     default:
       return '等待执行节点领取（通常几秒）'
   }

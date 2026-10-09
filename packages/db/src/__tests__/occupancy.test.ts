@@ -4,6 +4,7 @@ import {
   MAP_JOBS_PROTOCOL,
   MAP_SCHEDULER_PROTOCOL,
   PLATFORM_CONFIG_SINGLETON_ID,
+  SESSION_MAINTENANCE_PROTOCOL,
   SESSION_OCCUPANCY_PROTOCOL,
   type Step,
   LOCATOR_RESOLUTION_PROTOCOL,
@@ -32,6 +33,7 @@ import {
   markWorkerDraining,
   reapSessionLeases,
   registerWorker,
+  requestMaintenanceOperation,
   requestSessionOperation,
   resumeRunAfterAuth,
   setSessionStatus,
@@ -417,6 +419,62 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
       expect(profile?.revision).toBe(2)
       await closeSession(handed.session.id, other.workerId)
     }
+  })
+
+  it('SM32 会话操作同样先等原节点：其他 Worker 不新建实例，原节点领取沿用 Profile；等满后才转移', async () => {
+    async function maintenanceWorker(prefix: string) {
+      const worker = { workerId: `${prefix}-${newId().slice(0, 8)}`, instanceId: newId() }
+      await registerWorker(handle.db, {
+        ...worker,
+        capacity: 8,
+        lostAfterSeconds: 60,
+        protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      })
+      return worker
+    }
+    const origin = await maintenanceWorker('sm32po')
+    const other = await maintenanceWorker('sm32px')
+    const { sessionOperations } = schemaFor(handle.db)
+    async function prepareWithProfileAt(label: string) {
+      const accountId = await makeAccount(label)
+      const key = { targetId, targetAccountId: accountId }
+      await upsertSessionProfile(handle.db, { key, workerId: origin.workerId, revision: 1, state: 'PRESENT' })
+      const requested = await requestMaintenanceOperation(handle.db, {
+        key,
+        body: { kind: 'PREPARE', idempotencyKey: `prep-${newId().slice(0, 12)}` },
+        actor: { id: actorId },
+      })
+      return { key, opId: requested.operation!.id }
+    }
+
+    const held = await prepareWithProfileAt('sm32op')
+    expect(await claimSessionOperation(handle.db, { ...other, leaseTtlSeconds: 30 })).toBeNull()
+    const waiting = await getSessionOperation(handle.db, held.opId)
+    expect(waiting).toMatchObject({ status: 'QUEUED', waitReason: 'PROFILE_AFFINITY_WAIT' })
+    expect(waiting?.waitDetail).toMatchObject({ workerId: origin.workerId })
+    expect(await findLiveSession(handle.db, held.key)).toBeNull()
+    const byOrigin = await claimSessionOperation(handle.db, { ...origin, leaseTtlSeconds: 30 })
+    expect(byOrigin?.operation.id).toBe(held.opId)
+    expect(byOrigin?.acquire).toMatchObject({ reason: 'created', profileFallback: false })
+    expect(await getSessionProfile(handle.db, held.key)).toMatchObject({
+      locationWorkerId: origin.workerId,
+      revision: 1,
+    })
+    await closeSession(byOrigin!.session!.id, origin.workerId)
+
+    const expired = await prepareWithProfileAt('sm32op-late')
+    await handle.db
+      .update(sessionOperations)
+      .set({ createdAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(sessionOperations.id, expired.opId))
+    const byOther = await claimSessionOperation(handle.db, { ...other, leaseTtlSeconds: 30 })
+    expect(byOther?.operation.id).toBe(expired.opId)
+    expect(byOther?.acquire).toMatchObject({ reason: 'created', profileFallback: true })
+    expect(await getSessionProfile(handle.db, expired.key)).toMatchObject({
+      locationWorkerId: other.workerId,
+      revision: 2,
+    })
+    await closeSession(byOther!.session!.id, other.workerId)
   })
 
   it('SM44A 修改亲和等待立即生效；已排队操作期限冻结', async () => {

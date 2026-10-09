@@ -635,6 +635,25 @@ try {
       }
     },
   )
+
+  await check(
+    'N10 PREPARE after CLOSE returns to the Worker holding the saved profile: no second login',
+    async () => {
+      const a = await account('profile-affinity')
+      const logins = () => lab.state.logins.filter((l) => l.user === a.username).length
+      await operation(a, 'PREPARE')
+      const owner = (await view(a)).session.ownerWorkerId
+      const baseline = logins()
+      assert.ok(baseline >= 1, 'first PREPARE logs in')
+      for (let round = 0; round < 4; round += 1) {
+        await operation(a, 'CLOSE')
+        const prepared = await operation(a, 'PREPARE')
+        assert.equal((await view(a)).session.ownerWorkerId, owner, JSON.stringify(prepared))
+      }
+      assert.equal(logins(), baseline, 'saved profile must be reused instead of logging in again')
+      await operation(a, 'CLOSE')
+    },
+  )
 } catch (error) {
   console.error(error.stack)
   process.exitCode = 1

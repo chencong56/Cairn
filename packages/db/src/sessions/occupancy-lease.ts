@@ -44,7 +44,12 @@ import {
 import { lockOperationRow, lockSession, lockWorkerRow, toGrant } from './occupancy-tx.js'
 import { manualControlLive, resolveClaimerActorId, revokeManualControl } from './manual-control.js'
 import { findActiveLeaseRow, readSessionScheduling } from './occupancy-read.js'
-import { getSessionProfile, transferProfileLocation, upsertSessionProfile } from './occupancy-profile.js'
+import {
+  evaluateProfileAffinity,
+  getSessionProfile,
+  transferProfileLocation,
+  upsertSessionProfile,
+} from './occupancy-profile.js'
 import { applyPendingRetentionIntent } from './session-retention-intent.js'
 
 export type OccupancyOwner =
@@ -202,6 +207,7 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
           .where(eq(targetAccounts.id, input.key.targetAccountId)),
       )
       const reserved = await findDestructiveReservation(tx, input.key)
+      let operationCreatedAt: Date | null = null
       if (input.owner.kind === 'RUN') {
         const run = await lockRunRow(tx, input.owner.runId)
         if (!run) return { ok: false as const, code: 'SESSION_NOT_CLAIMABLE' as const }
@@ -210,9 +216,10 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
         if (!operation || operation.status !== 'RUNNING') {
           return { ok: false as const, code: 'SESSION_NOT_CLAIMABLE' as const }
         }
+        operationCreatedAt = operation.createdAt
       }
 
-      const { revision } = await readSessionScheduling(tx)
+      const { scheduling, revision } = await readSessionScheduling(tx)
       const { lives, leases } = await loadLiveAccountSessions(tx, input.key)
       const claimerActorId = await resolveClaimerActorId(tx, input.owner)
       for (const existing of lives) {
@@ -341,6 +348,27 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
           acquireReason: 'reused' as const,
           profileFallback: false,
           schedulingRevision: revision,
+        }
+      }
+
+      if (operationCreatedAt && input.isolation !== 'SHARED') {
+        // Run 的亲和在 claimRun 预判；会话操作只走这里，新建实例前同样先等原节点，免得丢掉已登录的 Profile。
+        const affinity = await evaluateProfileAffinity(tx, {
+          key: profileKeyFrom(input.key, decision.accountSlot),
+          workerId: input.holderWorkerId,
+          since: operationCreatedAt,
+          waitSeconds: scheduling.profileAffinityWaitSeconds,
+        })
+        if (affinity.kind === 'wait') {
+          return {
+            ok: false as const,
+            code: 'SESSION_NOT_CLAIMABLE' as const,
+            message: `登录数据在节点 ${affinity.targetWorkerId} 上，等待该节点领取`,
+            operationWait: {
+              reason: 'PROFILE_AFFINITY_WAIT' as const,
+              detail: { workerId: affinity.targetWorkerId, until: affinity.until.toISOString() },
+            },
+          }
         }
       }
 

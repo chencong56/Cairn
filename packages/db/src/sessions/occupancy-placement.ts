@@ -12,7 +12,7 @@ import {
 } from './account-session-concurrency.js'
 import { countUnclosedForWorker as countWorkerSessions } from './occupancy-lease.js'
 import { leaseWaitFacts, readSessionScheduling, type PlacementFacts } from './occupancy-read.js'
-import { getSessionProfile } from './occupancy-profile.js'
+import { evaluateProfileAffinity, getSessionProfile } from './occupancy-profile.js'
 
 export async function evaluateRunSessionEligibility(
   db: Db,
@@ -116,33 +116,25 @@ export async function evaluateRunSessionEligibility(
     return { eligible: true, fallback: false, facts: empty }
   }
 
-  const profile = await getSessionProfile(db, profileKeyFrom(key, decision.accountSlot))
-  if (!profile || profile.state !== 'PRESENT' || !profile.locationWorkerId) {
-    return { eligible: true, fallback: false, facts: empty }
-  }
-  if (profile.locationWorkerId === input.workerId) {
-    return { eligible: true, fallback: false, facts: empty }
-  }
-  const [origin] = await db.select().from(workers).where(eq(workers.id, profile.locationWorkerId)).limit(1)
-  const originReady = origin?.status === 'READY'
-  if (!origin || !originReady) {
-    return { eligible: true, fallback: true, facts: empty }
-  }
-  const until = new Date(input.run.createdAt.getTime() + input.scheduling.profileAffinityWaitSeconds * 1000)
-  const now = await clockNow(db)
-  if (now.getTime() < until.getTime()) {
+  const affinity = await evaluateProfileAffinity(db, {
+    key: profileKeyFrom(key, decision.accountSlot),
+    workerId: input.workerId,
+    since: input.run.createdAt,
+    waitSeconds: input.scheduling.profileAffinityWaitSeconds,
+  })
+  if (affinity.kind === 'wait') {
     return {
       eligible: false,
       fallback: false,
       facts: {
         ...empty,
         waitReason: 'PROFILE_AFFINITY_WAIT',
-        targetWorkerId: profile.locationWorkerId,
-        profileAffinityUntil: until.toISOString(),
+        targetWorkerId: affinity.targetWorkerId,
+        profileAffinityUntil: affinity.until.toISOString(),
       },
     }
   }
-  return { eligible: true, fallback: true, facts: empty }
+  return { eligible: true, fallback: affinity.kind === 'fallback', facts: empty }
 }
 
 export async function computeOccupancyPlacement(
