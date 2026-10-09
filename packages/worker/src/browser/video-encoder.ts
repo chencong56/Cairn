@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, mkdtemp, open, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +12,8 @@ export type EncodeJpegFilesToWebmInput = {
 
 export type EncodeJpegDirectoryToWebmInput = {
   dir: string
+  /** 覆盖默认编码总时限，仅测试使用。 */
+  timeoutMs?: number
   fps?: number
   maxBytes: number
   timeline?: {
@@ -41,11 +43,54 @@ type EncoderMeta = {
   timingMode: 'concat' | 'grid' | 'cfr'
 }
 
-function spawnEncoder(dir: string, outPath: string, fps: number, maxBytes: number): Promise<EncoderMeta> {
+/** 单次编码总时限；子进程自带的 120s 计时器在 WASM 占住事件循环时不会触发，必须由父进程兜底 kill。 */
+export const ENCODER_TIMEOUT_MS = 10 * 60_000
+const ENCODER_MAX_OLD_SPACE_MB = 1536
+
+export class EncoderTimeoutError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EncoderTimeoutError'
+  }
+}
+
+const inFlight = new Set<ChildProcess>()
+
+/** Worker 停机时调用：不留孤儿编码进程。 */
+export function killInFlightEncoders(): number {
+  const count = inFlight.size
+  for (const child of inFlight) child.kill('SIGKILL')
+  inFlight.clear()
+  return count
+}
+
+/** 同一时刻只跑一个编码，避免多个运行同时收尾时内存叠加。 */
+let encodeQueue: Promise<unknown> = Promise.resolve()
+function serialize<T>(work: () => Promise<T>): Promise<T> {
+  const next = encodeQueue.then(work, work)
+  encodeQueue = next.catch(() => undefined)
+  return next
+}
+
+function spawnEncoder(
+  dir: string,
+  outPath: string,
+  fps: number,
+  maxBytes: number,
+  timeoutMs = ENCODER_TIMEOUT_MS,
+): Promise<EncoderMeta> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [childScript(), dir, outPath, String(fps), String(maxBytes)], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    const child = spawn(
+      process.execPath,
+      [`--max-old-space-size=${ENCODER_MAX_OLD_SPACE_MB}`, '--expose-gc', childScript(), dir, outPath, String(fps), String(maxBytes)],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+    inFlight.add(child)
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      inFlight.delete(child)
+      reject(new EncoderTimeoutError(`VP8 编码超时（${Math.round(timeoutMs / 1000)}s），已终止子进程`))
+    }, timeoutMs)
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     child.stdout.on('data', (chunk) => {
@@ -54,8 +99,14 @@ function spawnEncoder(dir: string, outPath: string, fps: number, maxBytes: numbe
     child.stderr.on('data', (chunk) => {
       stderr.push(Buffer.from(chunk))
     })
-    child.on('error', reject)
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      inFlight.delete(child)
+      reject(error)
+    })
     child.on('exit', (code) => {
+      clearTimeout(timer)
+      inFlight.delete(child)
       if (code !== 0) {
         const detail = Buffer.concat(stderr).toString('utf8').trim()
         reject(new Error(detail || `VP8 编码失败（退出码 ${code ?? 'null'}）`))
@@ -101,7 +152,7 @@ async function encodeDirectoryOnce(
     await writeFile(join(input.dir, 'timeline.json'), JSON.stringify(input.timeline))
   }
   const outPath = join(input.dir, 'out.webm')
-  const meta = await spawnEncoder(input.dir, outPath, fps, input.maxBytes)
+  const meta = await spawnEncoder(input.dir, outPath, fps, input.maxBytes, input.timeoutMs)
   if (!(await isPlayableWebmFile(outPath))) {
     throw new Error('编码结果不是可播 WebM')
   }
@@ -118,18 +169,22 @@ async function encodeDirectoryOnce(
   }
 }
 
-export async function encodeJpegDirectoryToWebm(
+export function encodeJpegDirectoryToWebm(
   input: EncodeJpegDirectoryToWebmInput,
 ): Promise<EncodeJpegFilesToWebmResult> {
-  try {
-    return await encodeDirectoryOnce(input)
-  } catch (first) {
+  return serialize(async () => {
     try {
       return await encodeDirectoryOnce(input)
-    } catch {
-      throw first
+    } catch (first) {
+      // 超时说明输入本身过重，重试只会再占一轮内存与时间。
+      if (first instanceof EncoderTimeoutError) throw first
+      try {
+        return await encodeDirectoryOnce(input)
+      } catch {
+        throw first
+      }
     }
-  }
+  })
 }
 
 export async function encodeJpegFilesToWebm(

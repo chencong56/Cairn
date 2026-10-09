@@ -8,7 +8,8 @@ import {
   workerInternalPath,
   workerRunsInternalPath,
 } from '@cairn/shared'
-import { startManagedBrowserHttp } from './http-server'
+import { Logger } from '@nestjs/common'
+import { startManagedBrowserHttp, writeError } from './http-server'
 
 const actorId = '00000000-0000-4000-8000-000000000031'
 const runId = '00000000-0000-4000-8000-000000000032'
@@ -322,5 +323,58 @@ describe('内部 HTTP', () => {
     })
     const rejected = await fetch(`http://127.0.0.1:${addr.port}${WORKER_NODE_HEALTH_PATH}`, { headers: wrong })
     expect(rejected.status).toBe(401)
+  })
+})
+
+describe('writeError 兜底分支', () => {
+  function fakeRes() {
+    const res = {
+      headersSent: false,
+      writableEnded: false,
+      statusCode: 0,
+      body: '',
+      setHeader: vi.fn(),
+      writeHead(code: number) {
+        res.statusCode = code
+        return res
+      },
+      end(chunk?: string) {
+        res.body = chunk ?? ''
+        res.writableEnded = true
+      },
+    }
+    return res
+  }
+
+  it('未归类异常返回 500 并记录路径、请求号与堆栈，响应体不含堆栈', () => {
+    const logSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+    const res = fakeRes()
+    const error = new Error('browser exploded')
+    writeError(res as never, error, {
+      method: 'POST',
+      url: '/internal/managed-browser/x/auth-control/acquire?token=secret',
+      headers: { 'x-cairn-request-id': 'req-1' },
+    })
+    expect(res.statusCode).toBe(500)
+    expect(res.body).toContain('内部处理失败')
+    expect(res.body).not.toContain('browser exploded')
+    expect(logSpy).toHaveBeenCalledTimes(1)
+    const [meta, stack] = logSpy.mock.calls[0] as [Record<string, unknown>, string]
+    expect(meta).toEqual({
+      method: 'POST',
+      path: '/internal/managed-browser/x/auth-control/acquire',
+      requestId: 'req-1',
+    })
+    expect(stack).toContain('browser exploded')
+    logSpy.mockRestore()
+  })
+
+  it('请求不合法不当作内部错误记录', () => {
+    const logSpy = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+    const res = fakeRes()
+    writeError(res as never, new SyntaxError('bad json'), { method: 'POST', url: '/x', headers: {} })
+    expect(res.statusCode).toBe(400)
+    expect(logSpy).not.toHaveBeenCalled()
+    logSpy.mockRestore()
   })
 })

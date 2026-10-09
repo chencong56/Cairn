@@ -54,6 +54,9 @@ vi.mock("@cairn/db", async (importOriginal) => {
     })),
     listPendingScheduleAdmits: vi.fn(async () => []),
     claimAnalysisJob: vi.fn(async () => []),
+    syncRunDurationFacts: vi.fn(async () => ({ written: 0, recomputed: 0, kept: 0, failed: 0, catchUpNext: null })),
+    processDurationReportSubscriptions: vi.fn(async () => ({ planned: 0, generated: 0, delivered: 0, skipped: 0, failed: 0 })),
+    processDurationRollups: vi.fn(async () => ({ recomputed: 0, backfilled: 0, failed: 0, ready: true, reset: false })),
     executeAnalysisJob: vi.fn(async () => undefined),
     admitScheduleOccurrence: vi.fn(async () => undefined),
     expireClosedScheduleWindows: vi.fn(async () => 0),
@@ -204,6 +207,7 @@ function stubSessions() {
     applyPlatformConfig: vi.fn(),
     stopHeartbeat: vi.fn(),
     shutdown: vi.fn(async () => {}),
+    sweepStaleVideoDirs: vi.fn(async () => 0),
     reap: vi.fn(async () => ({ leasesExpired: 0, sessionsClosed: 0 })),
     stopAllLocal: vi.fn(async () => []),
     liveHandleCount: vi.fn(() => 0),
@@ -1315,7 +1319,7 @@ describe("LifecycleService", () => {
     expect(vi.mocked(registerWorker).mock.calls.at(-1)?.[1]).toEqual(
       expect.objectContaining({
         protocolCapabilities: expect.arrayContaining([
-          "map-jobs@1",
+          "session-occupancy@2",
           "map-scheduler@1",
         ]),
       }),
@@ -1526,6 +1530,52 @@ describe("LifecycleService", () => {
     );
     expect(expireRunDeadlines).toHaveBeenCalled();
     expect(expireMapJobClaimWindows).toHaveBeenCalled();
+  });
+
+  it("仅 executor 角色每个周期也执行本进程会话回收（不进槽位）", async () => {
+    const { claimDuePeriodicSlots } = await import('@cairn/db');
+    const svc = await buildLifecycle();
+    const reap = app!.get(BrowserSessionManager).reap as unknown as ReturnType<typeof vi.fn>;
+    reap.mockClear();
+    // 槽位没领到（被别的节点领走）时，本进程回收仍要跑。
+    vi.mocked(claimDuePeriodicSlots).mockClear();
+    await (svc as unknown as { runExecutorRecovery: () => Promise<void> }).runExecutorRecovery();
+    expect(reap).toHaveBeenCalledTimes(1);
+    expect(reap).toHaveBeenCalledWith({ includeGlobalLeases: false });
+  });
+
+  it("executor 会话回收抛错：只记错误，恢复槽位照常执行，下一周期仍会回收", async () => {
+    const { expireRunDeadlines } = await import('@cairn/db');
+    const svc = await buildLifecycle();
+    const reap = app!.get(BrowserSessionManager).reap as unknown as ReturnType<typeof vi.fn>;
+    reap.mockReset();
+    reap.mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(expireRunDeadlines).mockClear();
+    const run = () =>
+      (svc as unknown as { runExecutorRecovery: () => Promise<void> }).runExecutorRecovery();
+    await run();
+    expect(expireRunDeadlines).toHaveBeenCalled();
+    reap.mockResolvedValue({ leasesExpired: 0, sessionsClosed: 0 });
+    await run();
+    expect(reap).toHaveBeenCalledTimes(2);
+  });
+
+  it("executor 回收未返回时再次触发不会并发进入 reap（单飞）", async () => {
+    const svc = await buildLifecycle();
+    const reap = app!.get(BrowserSessionManager).reap as unknown as ReturnType<typeof vi.fn>;
+    reap.mockReset();
+    let release!: () => void;
+    reap.mockImplementationOnce(
+      () => new Promise((resolve) => { release = () => resolve({ leasesExpired: 0, sessionsClosed: 0 }); }),
+    );
+    const run = () =>
+      (svc as unknown as { runExecutorRecovery: () => Promise<void> }).runExecutorRecovery();
+    const first = run();
+    await vi.waitFor(() => expect(reap).toHaveBeenCalledTimes(1));
+    await run();
+    expect(reap).toHaveBeenCalledTimes(1);
+    release();
+    await first;
   });
 
   it("PS09 executor 不领平台槽位，仍写本节点样本", async () => {

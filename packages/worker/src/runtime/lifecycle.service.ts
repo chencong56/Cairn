@@ -8,6 +8,7 @@ import {
   type OnApplicationBootstrap,
   type OnApplicationShutdown,
 } from "@nestjs/common";
+import { killInFlightEncoders } from "../browser/video-encoder.js";
 import {
   claimRunWithCursor,
   expireMapJobClaimWindows,
@@ -78,6 +79,10 @@ import {
   type InsertCoverageSnapshotItem,
   type ExpandWithLoaderPrecomputed,
   expandWithLoader,
+  processDurationReportSubscriptions,
+  processDurationRollups,
+  syncRunDurationFacts,
+  type DurationFactsCursor,
 } from "@cairn/db";
 import {
   SCHEDULE_TICK_INTERVAL_MS,
@@ -195,6 +200,15 @@ export class LifecycleService
   private analysisTask: Promise<void> | undefined;
   private reliabilityTick: NodeJS.Timeout | undefined;
   private reliabilityTask: Promise<void> | undefined;
+  private durationFactsTick: NodeJS.Timeout | undefined;
+  private durationFactsTask: Promise<void> | undefined;
+  /** 全量回扫游标：null 表示从最新的完结运行开始；一轮走完后隔一段时间再起新一轮。 */
+  private durationFactsCursor: DurationFactsCursor | null = null;
+  private durationFactsNextCatchUpAt = 0;
+  private durationReportTick: NodeJS.Timeout | undefined;
+  private durationReportTask: Promise<void> | undefined;
+  private durationRollupTick: NodeJS.Timeout | undefined;
+  private durationRollupTask: Promise<void> | undefined;
   private heartbeatTick: NodeJS.Timeout | undefined;
   private cleanupTick: NodeJS.Timeout | undefined;
   private workspaceCleanupTick: NodeJS.Timeout | undefined;
@@ -295,6 +309,9 @@ export class LifecycleService
       if (roles.analyst) {
         this.startAnalysis();
         this.startReliability();
+        this.startDurationFacts();
+        this.startDurationRollups();
+        this.startDurationReports();
       }
       // 先确认本代心跳写得进去，再领取。启动后立刻 claim 会撞上：
       // 心跳被堵住 → 判 lost → 换代，在途 PREPARE 的占用 ALS/grant 作废，操作被写成永久失败。
@@ -459,8 +476,10 @@ export class LifecycleService
     if (this.stopped) return Promise.resolve();
     if (this.workspaceCleanupTask) return this.workspaceCleanupTask;
     const task = cleanupRunFileWorkspaces()
-      .then((removed) => {
+      .then(async (removed) => {
         if (removed > 0) this.logger.log({ removed }, "已清理过期 Run 临时目录");
+        const removedVideoDirs = await this.sessions.sweepStaleVideoDirs();
+        if (removedVideoDirs > 0) this.logger.log({ removed: removedVideoDirs }, "已清理遗留录屏采集目录");
       })
       .catch((error) => {
         this.logger.warn(
@@ -593,6 +612,113 @@ export class LifecycleService
     }
   }
 
+  /**
+   * 耗时事实作业：近期完结的运行优先，再按页回扫全部历史（含规则版本落后的运行）。
+   * 运行事件有保留期，作业积压会让超期运行只剩总耗时，因此失败与积压都要记日志。
+   */
+  private startDurationFacts(): void {
+    if (this.durationFactsTick || this.shutdownCalled) return;
+    const run = () => {
+      if (!this.durationFactsTask) {
+        this.durationFactsTask = this.runDurationFactsTick().finally(() => {
+          this.durationFactsTask = undefined;
+        });
+      }
+    };
+    this.durationFactsTick = setInterval(run, timerJitter(10_000));
+    run();
+  }
+
+  private async runDurationFactsTick(): Promise<void> {
+    if (this.stopped) return;
+    const catchUpDue = Date.now() >= this.durationFactsNextCatchUpAt;
+    try {
+      const result = await syncRunDurationFacts(this.handle, {
+        catchUp: catchUpDue ? { before: this.durationFactsCursor } : null,
+      });
+      if (catchUpDue) {
+        this.durationFactsCursor = result.catchUpNext;
+        if (!result.catchUpNext) this.durationFactsNextCatchUpAt = Date.now() + 60 * 60 * 1000;
+      }
+      if (result.failed > 0) {
+        this.logger.warn(
+          { failed: result.failed, lastError: result.lastError },
+          "耗时事实计算有失败的运行",
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        error instanceof Error ? error.message : String(error),
+        "耗时事实作业执行异常",
+      );
+    }
+  }
+
+  /**
+   * 耗时分析按天汇总：消费事实写入 / 运行删除登记的脏键，按（场景、统计日）重算；
+   * 统计时区或汇总口径变了会整体重建，重建完成前页面退回现读明细。
+   */
+  private startDurationRollups(): void {
+    if (this.durationRollupTick || this.shutdownCalled) return;
+    const run = () => {
+      if (!this.durationRollupTask) {
+        this.durationRollupTask = this.runDurationRollupTick().finally(() => {
+          this.durationRollupTask = undefined;
+        });
+      }
+    };
+    this.durationRollupTick = setInterval(run, timerJitter(10_000));
+    run();
+  }
+
+  private async runDurationRollupTick(): Promise<void> {
+    if (this.stopped) return;
+    try {
+      const result = await processDurationRollups(this.handle);
+      if (result.reset) this.logger.log({ ...result }, "耗时汇总开始整体重建");
+      if (result.failed > 0) {
+        this.logger.warn({ failed: result.failed, lastError: result.lastError }, "耗时汇总有重算失败的天");
+      }
+    } catch (error) {
+      this.logger.warn(
+        error instanceof Error ? error.message : String(error),
+        "耗时汇总作业执行异常",
+      );
+    }
+  }
+
+  /** 周期耗时报告订阅：到点为最近一期生成报告、渲染 HTML 后推送；只有启用的订阅才会被处理。 */
+  private startDurationReports(): void {
+    if (this.durationReportTick || this.shutdownCalled) return;
+    const run = () => {
+      if (!this.durationReportTask) {
+        this.durationReportTask = this.runDurationReportTick().finally(() => {
+          this.durationReportTask = undefined;
+        });
+      }
+    };
+    this.durationReportTick = setInterval(run, timerJitter(60_000));
+    run();
+  }
+
+  private async runDurationReportTick(): Promise<void> {
+    if (this.stopped) return;
+    try {
+      const result = await processDurationReportSubscriptions(this.handle);
+      if (result.planned || result.generated || result.delivered || result.failed) {
+        this.logger.log({ ...result }, "周期耗时报告订阅处理");
+      }
+      if (result.lastError) {
+        this.logger.warn({ lastError: result.lastError }, "周期耗时报告订阅有失败的一期");
+      }
+    } catch (error) {
+      this.logger.warn(
+        error instanceof Error ? error.message : String(error),
+        "周期耗时报告订阅作业执行异常",
+      );
+    }
+  }
+
   private async runScheduleTick(): Promise<void> {
     if (this.stopped) return;
     try {
@@ -650,6 +776,18 @@ export class LifecycleService
     if (this.reliabilityTick) {
       clearInterval(this.reliabilityTick);
       this.reliabilityTick = undefined;
+    }
+    if (this.durationFactsTick) {
+      clearInterval(this.durationFactsTick);
+      this.durationFactsTick = undefined;
+    }
+    if (this.durationReportTick) {
+      clearInterval(this.durationReportTick);
+      this.durationReportTick = undefined;
+    }
+    if (this.durationRollupTick) {
+      clearInterval(this.durationRollupTick);
+      this.durationRollupTick = undefined;
     }
     if (this.outboundTick) {
       clearInterval(this.outboundTick);
@@ -729,6 +867,9 @@ export class LifecycleService
       this.scheduleTask,
       this.analysisTask,
       this.reliabilityTask,
+      this.durationFactsTask,
+      this.durationRollupTask,
+      this.durationReportTask,
       this.videoMediaTask,
       this.outboundTask,
       this.serviceWebhookTask,
@@ -754,6 +895,8 @@ export class LifecycleService
     await this.internalHttp?.close().catch(() => undefined);
     this.internalHttp = undefined;
     await this.sessions.shutdown();
+    const killedEncoders = killInFlightEncoders();
+    if (killedEncoders > 0) this.logger.warn({ killedEncoders }, "停机时终止在途录屏编码子进程");
     this.logger.log(`收到 ${signal ?? "停机"} 信号，已停止领取任务`);
   }
 
@@ -841,11 +984,29 @@ export class LifecycleService
   private async runExecutorRecovery(): Promise<void> {
     if (this.stopped || this.reaperInFlight) return;
     const task = (async () => {
-      const request = this.reaperSlotRequests().find((slot) => slot.name === 'reaper.recovery');
-      if (!request) return;
-      const { claimed } = await claimWorkerPeriodicSlots(this.handle, [request]);
-      const slot = claimed.find((item) => item.name === 'reaper.recovery');
-      if (slot) await this.runClaimedSlot(slot, () => this.runRecoverySlot());
+      let recoveryFailure: { error: unknown } | undefined;
+      try {
+        const request = this.reaperSlotRequests().find((slot) => slot.name === 'reaper.recovery');
+        if (request) {
+          const { claimed } = await claimWorkerPeriodicSlots(this.handle, [request]);
+          const slot = claimed.find((item) => item.name === 'reaper.recovery');
+          if (slot) await this.runClaimedSlot(slot, () => this.runRecoverySlot());
+        }
+      } catch (error) {
+        recoveryFailure = { error };
+      }
+      // 本进程句柄的会话回收不在槽位内：浏览器句柄只有持有进程能关，每个 executor 都必须自己跑，
+      // 否则 IDLE TTL、最长寿命、排空与不健康探测在纯 executor 容器上都不会触发。
+      // 它抛错不能吞掉上面的恢复结果，反之亦然。
+      try {
+        await this.sessions.reap({ includeGlobalLeases: false });
+      } catch (error) {
+        this.logger.error(
+          error instanceof Error ? error.message : error,
+          '本进程会话回收失败',
+        );
+      }
+      if (recoveryFailure) throw recoveryFailure.error;
     })();
     this.reaperInFlight = task.then(
       () => ({ leasesExpired: 0, sessionsClosed: 0 }),

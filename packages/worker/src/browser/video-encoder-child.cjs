@@ -1,8 +1,11 @@
 'use strict'
 
 // @ffmpeg/core 0.11 是 GPL/nonfree WASM，只在一次性编码子进程里加载，不进 shared / web / api。
-const { readFileSync, writeFileSync, readdirSync, existsSync } = require('node:fs')
+const { readFileSync, writeFileSync, readdirSync, existsSync, statSync } = require('node:fs')
+
+const WHOLE_SET_FALLBACK_MAX_BYTES = 192 * 1024 * 1024
 const { join } = require('node:path')
+const { spawnSync } = require('node:child_process')
 
 const dir = process.argv[2]
 const outPath = process.argv[3]
@@ -106,6 +109,26 @@ async function runFfmpeg(args, files, collectErr = false) {
   return { core, logs: logs.join('\n') }
 }
 
+/** 每个 WASM 实例自带 pthread 线程池和独立堆；不释放，分段越多线程与内存越多（线上曾累积到 501 线程 / 5.9GB）。 */
+function disposeCore(core) {
+  try {
+    core.PThread?.terminateAllThreads?.()
+  } catch {}
+  try {
+    core.exit?.(0)
+  } catch {}
+  // 每个实例初始堆 1GB，等 V8 自己回收会同时存活好几份；父进程以 --expose-gc 启动时主动收一次。
+  if (typeof global.gc === 'function') global.gc()
+}
+
+function readAndDispose(core, name) {
+  try {
+    return Buffer.from(core.FS.readFile(name))
+  } finally {
+    disposeCore(core)
+  }
+}
+
 function isWebm(bytes) {
   return (
     bytes instanceof Uint8Array &&
@@ -121,13 +144,13 @@ const encodeArgs = ['-c:v', 'libvpx', '-pix_fmt', 'yuv420p', '-b:v', '600k', '-d
 
 async function encodeCfr(files, rate) {
   const { core } = await runFfmpeg(['-framerate', String(rate), '-i', 'frame_%05d.jpg', ...encodeArgs], files)
-  return core.FS.readFile('out.webm')
+  return readAndDispose(core, 'out.webm')
 }
 
 async function encodeConcat(files, concatText) {
   const withList = [...files, ['timeline.concat', Buffer.from(concatText)]]
   const { core } = await runFfmpeg(['-f', 'concat', '-safe', '0', '-i', 'timeline.concat', '-vsync', 'vfr', ...encodeArgs], withList)
-  return core.FS.readFile('out.webm')
+  return readAndDispose(core, 'out.webm')
 }
 
 async function encodeCopyConcat(files, concatText) {
@@ -136,7 +159,7 @@ async function encodeCopyConcat(files, concatText) {
     ['-f', 'concat', '-safe', '0', '-i', 'segments.concat', '-c', 'copy', '-fs', String(maxBytes), 'out.webm'],
     withList,
   )
-  return core.FS.readFile('out.webm')
+  return readAndDispose(core, 'out.webm')
 }
 
 function partitionSegments(frames, sealedTMs, segmentMs = 8000) {
@@ -192,8 +215,53 @@ async function encodeSegment(seg, index) {
   return { name: hostName, bytes, timingMode }
 }
 
+/**
+ * 分段交给独立子进程编码：同一进程里反复创建/销毁 WASM 实例，堆不会还给系统
+ * （实测 38 段仍涨到 2.9GB，改前整进程 OOM），进程退出才是可靠的释放。
+ */
+function encodeSegmentInChild(seg, index) {
+  const hostName = segmentHostName(index)
+  const hostPath = join(dir, hostName)
+  const metaPath = `${hostPath}.json`
+  const cached = existsSync(hostPath) && isWebm(readFileSync(hostPath))
+  if (!cached) {
+    const result = spawnSync(
+      process.execPath,
+      ['--max-old-space-size=1536', __filename, dir, outPath, String(fps), String(maxBytes)],
+      {
+        env: { ...process.env, CAIRN_ENCODER_SEGMENT_INDEX: String(index) },
+        encoding: 'utf8',
+        timeout: 120_000,
+        killSignal: 'SIGKILL',
+        stdio: ['ignore', 'ignore', 'pipe'],
+      },
+    )
+    if (result.status !== 0) {
+      throw new Error(`分段 ${index} 编码失败：${(result.stderr || result.error?.message || '').trim() || result.status}`)
+    }
+  }
+  const bytes = readFileSync(hostPath)
+  if (!isWebm(bytes)) throw new Error('分段编码结果不是可播 WebM')
+  let timingMode = 'concat'
+  try {
+    timingMode = JSON.parse(readFileSync(metaPath, 'utf8')).timingMode === 'cfr' ? 'cfr' : 'concat'
+  } catch {}
+  return { name: hostName, bytes, timingMode }
+}
+
+async function runSegmentOnly(index) {
+  const timeline = JSON.parse(readFileSync(join(dir, 'timeline.json'), 'utf8'))
+  const frames = Array.isArray(timeline.frames) ? timeline.frames : []
+  const windows = partitionSegments(frames, Number(timeline.sealedTMs))
+  const seg = windows[index]
+  if (!seg) throw new Error(`分段 ${index} 不存在`)
+  const result = await encodeSegment(seg, index)
+  writeFileSync(`${join(dir, segmentHostName(index))}.json`, JSON.stringify({ timingMode: result.timingMode }))
+}
+
 async function decodeWebm(bytes) {
-  const { logs } = await runFfmpeg(['-i', 'in.webm', '-f', 'null', '-'], [['in.webm', bytes]], true)
+  const { core, logs } = await runFfmpeg(['-i', 'in.webm', '-f', 'null', '-'], [['in.webm', bytes]], true)
+  disposeCore(core)
   return parseDecodeLog(logs)
 }
 
@@ -219,7 +287,7 @@ async function main() {
       const segments = []
       let anyCfr = false
       for (let i = 0; i < windows.length; i += 1) {
-        const seg = await encodeSegment(windows[i], i)
+        const seg = encodeSegmentInChild(windows[i], i)
         segments.push(seg)
         if (seg.timingMode === 'cfr') anyCfr = true
       }
@@ -236,6 +304,9 @@ async function main() {
         timingMode = anyCfr ? 'cfr' : 'concat'
       }
     } catch {
+      // 整批回退要把全部帧载入同一个 WASM 堆，超过预算就放弃，宁可视频缺失也不拖垮执行节点。
+      const total = names.reduce((sum, name) => sum + statSync(join(dir, name)).size, 0)
+      if (total > WHOLE_SET_FALLBACK_MAX_BYTES) throw new Error('录像过大，整批回退编码已放弃')
       const jpegFiles = names.map((name) => [name, readFileSync(join(dir, name))])
       try {
         bytes = await encodeConcat(jpegFiles, buildConcat(frames, sealedTMs))
@@ -271,7 +342,8 @@ async function main() {
   }))
 }
 
-main()
+const segmentIndex = process.env.CAIRN_ENCODER_SEGMENT_INDEX
+;(segmentIndex === undefined ? main() : runSegmentOnly(Number(segmentIndex)))
   .then(() => process.exit(0))
   .catch((error) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

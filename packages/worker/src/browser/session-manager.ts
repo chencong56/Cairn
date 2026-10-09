@@ -82,6 +82,8 @@ import {
   rebindVideoForLease,
   retargetVideoForLease,
   sealVideoForLease,
+  settleStoppedVideo,
+  sweepStaleVideoDirs,
   startVideoForLease,
   stopVideoForLease,
   type RunVideoRecorder,
@@ -867,6 +869,14 @@ export class BrowserSessionManager {
 
   async sealVideoForLease(leaseId: string): Promise<SealedRunVideo | null> {
     return sealVideoForLease.call(this, leaseId)
+  }
+
+  async settleStoppedVideo(leaseId: string): Promise<void> {
+    return settleStoppedVideo.call(this, leaseId)
+  }
+
+  async sweepStaleVideoDirs(): Promise<number> {
+    return sweepStaleVideoDirs.call(this)
   }
 
   async finalizeSealedVideo(sealed: SealedRunVideo | null): Promise<void> {

@@ -102,6 +102,8 @@ export async function renew(this: SessionManagerContext, leaseId: string, leaseT
       this.guard.revoke(leaseId)
       this.leaseTtls.delete(leaseId)
       this.logger.warn({ leaseId, workerId: this.options.workerId }, 'lease.renew_failed')
+      // 租约已失效：录屏器不能继续写帧，等会话关闭时再一次性编码。
+      void this.settleStoppedVideo(leaseId).catch(() => undefined)
       return 'lost'
     }
     this.guard.refresh(occupancyGrantFromLease(row))
@@ -293,10 +295,18 @@ export async function reap(
       }
     }
 
-    this.logger.log(
-      { leasesExpired, sessionsClosed, disposedDropped, workerId: this.options.workerId },
-      'reap.cycle',
-    )
+    // executor 每个周期都会跑回收：无动作时不打 info，避免淹没日志。
+    const screencasts = [...this.lives.values()].reduce((sum, live) => sum + live.screencasts.size, 0)
+    const cycle = {
+      leasesExpired,
+      sessionsClosed,
+      disposedDropped,
+      liveSessions: this.lives.size,
+      screencasts,
+      workerId: this.options.workerId,
+    }
+    if (leasesExpired + sessionsClosed + disposedDropped > 0) this.logger.log(cycle, 'reap.cycle')
+    else this.logger.debug?.(cycle, 'reap.cycle')
     return { leasesExpired, sessionsClosed }
   }
 

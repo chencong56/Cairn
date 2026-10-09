@@ -87,6 +87,7 @@ export const MISSING_REASON_LABELS: Record<string, string> = {
   upload_incomplete: '上传未完成',
   trace_too_large: '操作轨迹超过体积上限，未上传',
   capture_failed: '采集失败，没有留下可用字节',
+  run_cancelled: '运行已取消，未保留录像',
   video_too_large: '录像超过体积上限，且没有可播前缀',
   coverage_partial: '录像覆盖不完整',
   coverage_budget: '录像因体积上限被截断',

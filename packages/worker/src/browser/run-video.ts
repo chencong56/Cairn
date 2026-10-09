@@ -1,8 +1,9 @@
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import {
+  getRunSessionOwner,
   markEvidenceMissing,
   reserveObjectEvidence,
 } from '@cairn/db'
@@ -26,6 +27,8 @@ import type { SessionManagerContext } from './session-live.js'
 import {
   VIDEO_FIRST_FRAME_WAIT_MS,
   VIDEO_HEARTBEAT_INTERVAL_MS,
+  VIDEO_MAX_DURATION_MS,
+  VIDEO_MAX_FRAMES,
   capturedSpanMs,
   presentationMs,
   type TimedJpegFrame,
@@ -70,6 +73,10 @@ export type RunVideoRecorder = {
   sealedMonoMs?: number
   localSeq: number
   sensitiveSelectors: string[]
+  /** 租约是否仍被本进程持有；心跳据此在租约失效后自停，不能指望每条收尾路径都记得封存。 */
+  isLeaseHeld?: () => boolean
+  /** 心跳发现租约失效、或达到采集上限后的收尾回调。 */
+  onCaptureStopped?: () => void
 }
 
 export type SealedRunVideo = {
@@ -219,6 +226,15 @@ async function writeCapturedFrameSerialized(
     recorder.framesDropped.rateLimited += 1
     return
   }
+  if (
+    recorder.frameIndex >= VIDEO_MAX_FRAMES ||
+    performance.now() - recorder.startedMonoMs > VIDEO_MAX_DURATION_MS
+  ) {
+    recorder.truncated = true
+    recorder.framesDropped.budget += 1
+    stopCapture(recorder)
+    return
+  }
   if (recorder.jpegBytes + frame.jpeg.byteLength > recorder.jpegBudget) {
     recorder.truncated = true
     recorder.framesDropped.budget += 1
@@ -275,6 +291,12 @@ export async function releaseScreencastIfIdle(
   const cast = live.screencasts.get(pageId)
   live.screencasts.delete(pageId)
   await cast?.stop().catch(() => undefined)
+  if (cast) {
+    this.logger.log(
+      { sessionId: live.sessionId, pageId, by: 'recorder', screencasts: live.screencasts.size },
+      'screencast.stopped',
+    )
+  }
 }
 
 function nextLocalFrame(
@@ -325,6 +347,10 @@ function startHeartbeat(
   recorder.heartbeat = setInterval(() => {
     void enqueueRecorderWrite(recorder, async () => {
       if (!recorder.accepting || page.isClosed?.()) return
+      if (recorder.isLeaseHeld && !recorder.isLeaseHeld()) {
+        stopCapture(recorder)
+        return
+      }
       try {
         const shot = await capturePageJpeg(page)
         if (!shot) return
@@ -335,6 +361,16 @@ function startHeartbeat(
       }
     })
   }, VIDEO_HEARTBEAT_INTERVAL_MS + Math.floor(Math.random() * 200))
+}
+
+/** 停止采集但不封存：封存/编码/丢弃仍由租约释放、会话回收或租约失效处理走既有路径。 */
+function stopCapture(recorder: RunVideoRecorder): void {
+  if (!recorder.accepting) return
+  recorder.accepting = false
+  stopHeartbeat(recorder)
+  recorder.unsubscribe?.()
+  recorder.unsubscribe = undefined
+  recorder.onCaptureStopped?.()
 }
 
 function stopHeartbeat(recorder: RunVideoRecorder): void {
@@ -357,6 +393,10 @@ async function attachRecorder(
   if (!cast) {
     cast = await startScreencast(entry.page, getPageRef)
     live.screencasts.set(pageId, cast)
+    this.logger.log(
+      { sessionId: live.sessionId, pageId, by: 'recorder', screencasts: live.screencasts.size },
+      'screencast.started',
+    )
   }
   recorder.pageId = pageId
   recorder.captureEpoch = cast.captureEpoch ?? recorder.captureEpoch
@@ -466,6 +506,17 @@ export async function startVideoForLease(
     localSeq: 0,
     sensitiveSelectors: run.targetAuth?.sensitiveSelectors ?? [],
   }
+  recorder.isLeaseHeld = () => {
+    try {
+      this.guard.assertHeld(recorder.leaseId)
+      return true
+    } catch {
+      return false
+    }
+  }
+  recorder.onCaptureStopped = () => {
+    void settleStoppedVideo.call(this, recorder.leaseId)
+  }
   await mkdir(recorder.dir, { recursive: true })
   recordersOf(this).set(leaseId, recorder)
   const pageId =
@@ -555,6 +606,32 @@ export async function sealVideoForLease(this: SessionManagerContext, leaseId: st
   return { recorder, leaseId }
 }
 
+/** 运行已取消则录像不留。读不到运行状态时按未取消处理，仍走既有收尾。 */
+async function runWasCancelled(manager: SessionManagerContext, runId: string): Promise<boolean> {
+  try {
+    return (await getRunSessionOwner(manager.dbHandle, runId)).status === 'CANCELLED'
+  } catch {
+    return false
+  }
+}
+
+async function markVideoMissing(
+  manager: SessionManagerContext,
+  recorder: RunVideoRecorder,
+  reason: (typeof OBJECT_MISSING_REASONS)[keyof typeof OBJECT_MISSING_REASONS],
+): Promise<void> {
+  const reserved = await reserveObjectEvidence(manager.dbHandle, {
+    runId: recorder.runId,
+    type: 'video',
+    artifactKey: writeEvidenceArtifactKey({ type: 'video' }),
+    retainUntil: new Date(Date.now() + 14 * 86_400_000),
+  })
+  if (reserved.status === 'pending') {
+    await markEvidenceMissing(manager.dbHandle, { id: reserved.id, reason })
+  }
+  await rm(recorder.dir, { recursive: true, force: true }).catch(() => undefined)
+}
+
 export async function finalizeSealedVideo(
   this: SessionManagerContext,
   sealed: SealedRunVideo | null,
@@ -562,21 +639,13 @@ export async function finalizeSealedVideo(
   if (!sealed) return
   const { recorder, leaseId } = sealed
   try {
+    if (await runWasCancelled(this, recorder.runId)) {
+      await markVideoMissing(this, recorder, OBJECT_MISSING_REASONS.runCancelled)
+      return
+    }
     const names = (await readdir(recorder.dir).catch(() => [])).filter((name) => name.endsWith('.jpg')).sort()
     if (names.length === 0 || !this.objects) {
-      const reserved = await reserveObjectEvidence(this.dbHandle, {
-        runId: recorder.runId,
-        type: 'video',
-        artifactKey: writeEvidenceArtifactKey({ type: 'video' }),
-        retainUntil: new Date(Date.now() + 14 * 86_400_000),
-      })
-      if (reserved.status === 'pending') {
-        await markEvidenceMissing(this.dbHandle, {
-          id: reserved.id,
-          reason: OBJECT_MISSING_REASONS.captureFailed,
-        })
-      }
-      await rm(recorder.dir, { recursive: true, force: true }).catch(() => undefined)
+      await markVideoMissing(this, recorder, OBJECT_MISSING_REASONS.captureFailed)
       return
     }
     try {
@@ -591,6 +660,41 @@ export async function finalizeSealedVideo(
   } finally {
     recordersOf(this).delete(leaseId)
   }
+}
+
+/**
+ * 租约失效或采集达到上限后：停止采集并封存。
+ * 运行已取消的录像直接丢弃；其余留给租约释放/会话回收走正常收尾，避免与运行终态收尾抢跑。
+ */
+export async function settleStoppedVideo(this: SessionManagerContext, leaseId: string): Promise<void> {
+  const sealed = await sealVideoForLease.call(this, leaseId)
+  if (!sealed) return
+  if (await runWasCancelled(this, sealed.recorder.runId)) {
+    recordersOf(this).delete(leaseId)
+    await markVideoMissing(this, sealed.recorder, OBJECT_MISSING_REASONS.runCancelled)
+  }
+}
+
+const STALE_VIDEO_DIR_MAX_AGE_MS = 24 * 3_600_000
+
+/** 回收无活跃录屏器、且超过保留期的遗留采集目录（进程异常退出、旧版本泄漏留下的）。 */
+export async function sweepStaleVideoDirs(
+  this: SessionManagerContext,
+  root = tmpdir(),
+  now = Date.now(),
+): Promise<number> {
+  const active = new Set([...recordersOf(this).values()].map((item) => item.dir))
+  let removed = 0
+  for (const name of await readdir(root).catch(() => [] as string[])) {
+    if (!name.startsWith('cairn-video-')) continue
+    const dir = join(root, name)
+    if (active.has(dir)) continue
+    const info = await stat(dir).catch(() => undefined)
+    if (!info?.isDirectory() || now - info.mtimeMs < STALE_VIDEO_DIR_MAX_AGE_MS) continue
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+    removed += 1
+  }
+  return removed
 }
 
 export async function discardSealedVideo(

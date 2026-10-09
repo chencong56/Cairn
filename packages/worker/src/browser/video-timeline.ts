@@ -1,6 +1,9 @@
 export const VIDEO_HEARTBEAT_INTERVAL_MS = 2000
 export const VIDEO_FIRST_FRAME_WAIT_MS = 2000
 export const VIDEO_MIN_FRAME_DURATION_MS = 1
+/** 单个录屏器的采集上限：长期存活的会话（如认证等待）不能无限写帧，否则收尾一次性编码会拖垮执行节点。 */
+export const VIDEO_MAX_DURATION_MS = 30 * 60_000
+export const VIDEO_MAX_FRAMES = 1000
 
 export type TimedJpegFrame = {
   file: string

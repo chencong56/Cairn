@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { DomainError } from '@cairn/db'
 import {
@@ -30,6 +31,7 @@ import type { BrowserSessionManager } from '../browser/session-manager'
 import type { ExecutionEngine } from '../engine/engine'
 
 const MAX_BODY = 65_536
+const logger = new Logger('WorkerInternalHttp')
 const PREFIX = '/internal/managed-browser'
 
 export type ManagedBrowserHttp = {
@@ -56,7 +58,7 @@ export async function startManagedBrowserHttp(input: {
       sessions: input.sessions,
       engine: input.engine,
       nodeHealth: input.nodeHealth,
-    }).catch((error) => writeError(res, error))
+    }).catch((error) => writeError(res, error, req))
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
@@ -319,7 +321,7 @@ function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
-function writeError(res: ServerResponse, error: unknown): void {
+export function writeError(res: ServerResponse, error: unknown, req?: Pick<IncomingMessage, 'method' | 'url' | 'headers'>): void {
   if (res.headersSent) {
     if (!res.writableEnded) res.end()
     return
@@ -345,6 +347,16 @@ function writeError(res: ServerResponse, error: unknown): void {
     writeJson(res, status, { code: error.code, message: error.message })
     return
   }
+  // 未归类异常此前不留痕，线上只看到「内部处理失败」无从定位；响应体不外泄堆栈。
+  const requestId = req?.headers?.['x-cairn-request-id']
+  logger.error(
+    {
+      method: req?.method,
+      path: req?.url?.split('?')[0],
+      requestId: Array.isArray(requestId) ? requestId[0] : requestId,
+    },
+    error instanceof Error ? (error.stack ?? error.message) : String(error),
+  )
   writeJson(res, 500, { code: 'INTERNAL', message: '内部处理失败' })
 }
 
