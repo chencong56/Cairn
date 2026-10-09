@@ -37,7 +37,6 @@ import {
   type SessionGrant,
   type Step,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { ExecutionEngine } from './engine.js'
 import { collectAttemptOutcomeResults } from './outcome-collector.js'
 import type { ExecutorOutcome } from './engine-types.js'
@@ -465,7 +464,7 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
       // 领取受 worker 会话总数预算约束，给足余量避免用例间互相挤占。
       maxSessions: 32,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
   })
 

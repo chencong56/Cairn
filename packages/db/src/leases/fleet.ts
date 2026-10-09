@@ -13,6 +13,7 @@ import {
   type WorkerSessionListQuery,
   type WorkerSlotCounts,
   type WorkerSummary,
+  workerReleaseMismatch,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { clockNow, schemaFor } from '../native.js'
@@ -22,6 +23,7 @@ import { authWaitLeaseLive } from '../sessions/occupancy-read.js'
 import { findLiveSessions, getSessionById, toSessionDto, type SessionRecord } from '../sessions/sessions.js'
 import { notFound } from '../runs/errors.js'
 import { getWorkerById, type WorkerRecord } from './leases.js'
+import { liveApiReleases } from './release.js'
 
 export type WorkerRouteResolution = {
   asOf: Date
@@ -106,6 +108,8 @@ export function summarizeWorker(input: {
   counts: WorkerSlotCounts
   envEndpoint?: string
   canSeeEndpoint: boolean
+  /** 在线控制台实例的发布号：用来标出版本不一致的节点。 */
+  apiReleases?: readonly (string | null)[]
 }): WorkerSummary {
   const fresh = heartbeatFresh({ heartbeatExpiresAt: input.worker.heartbeatExpiresAt, asOf: input.asOf })
   const route = evaluateWorkerRegistration({
@@ -159,6 +163,9 @@ export function summarizeWorker(input: {
     listenHost: input.worker.listenHost ?? null,
     listenPort: input.worker.listenPort ?? null,
     hostname: input.worker.hostname ?? null,
+    roles: input.worker.roles,
+    release: input.worker.release,
+    releaseMismatch: workerReleaseMismatch(input.worker.release, input.apiReleases ?? []),
   }
 }
 
@@ -293,6 +300,7 @@ export async function listWorkers(
     .orderBy(asc(workers.id))
     .limit(parsed.limit + 1)
   const page = rows.slice(0, parsed.limit)
+  const apiReleases = await liveApiReleases(db)
   const counts = await countForWorkers(
     db,
     page.map((row) => row.id),
@@ -314,7 +322,8 @@ export async function listWorkers(
         sampledSlotCount: row.sampledSlotCount,
         handleMismatchStreak: row.handleMismatchStreak,
         handleSampledAt: row.liveHandleCount === null && row.sampledSlotCount === null ? null : row.heartbeatAt,
-        protocolCapabilities: row.protocolCapabilities ?? [],
+        roles: row.roles ?? [],
+        release: row.release ?? null,
         listenHost: row.listenHost ?? null,
         listenPort: row.listenPort ?? null,
         hostname: row.hostname ?? null,
@@ -323,6 +332,7 @@ export async function listWorkers(
       counts: counts.get(row.id) ?? emptyCounts(),
       envEndpoint: options.envEndpoints?.[row.id],
       canSeeEndpoint: options.canSeeEndpoint,
+      apiReleases,
     }),
   )
   return workerListResponseSchema.parse({
@@ -405,6 +415,7 @@ export async function getWorkerDetail(
       counts: counts.get(workerId) ?? emptyCounts(),
       envEndpoint: options.envEndpoints?.[workerId],
       canSeeEndpoint: options.canSeeEndpoint,
+      apiReleases: await liveApiReleases(db),
     }),
     sessions: {
       items: page.map((row) => ({

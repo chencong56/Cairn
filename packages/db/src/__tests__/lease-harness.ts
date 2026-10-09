@@ -9,8 +9,7 @@ import {
   type NativeHandle as DbHandle,
 } from '../test-entry.js'
 import { newId } from '../id.js'
-import { runGrantSchema, SESSION_OCCUPANCY_PROTOCOL, type RunGrant,
-  LOCATOR_RESOLUTION_PROTOCOL,
+import { runGrantSchema, type RunGrant,
 } from '@cairn/shared'
 
 export type SeededWorker = { workerId: string; instanceId: string }
@@ -24,7 +23,7 @@ export async function seedWorker(
     workerId,
     instanceId,
     capacity: 8,
-    protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+    roles: ['executor'],
     lostAfterSeconds: 60,
   })
   return { workerId, instanceId }

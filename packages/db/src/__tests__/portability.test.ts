@@ -15,7 +15,6 @@ import {
   type Step,
 } from '@cairn/shared'
 import * as api from '../index.js'
-import { LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL } from '@cairn/shared'
 import { expose } from '../database.js'
 import { createDb as openNative, type DbHandle } from '../client.js'
 import { schemaFor, afterSeconds } from '../native.js'
@@ -105,7 +104,7 @@ async function finish(f: Awaited<ReturnType<typeof fixture>>) {
     actor: f.actor,
   })
   const worker = { workerId: api.newId(), instanceId: api.newId() }
-  await api.registerWorker(f.db, { ...worker, capacity: 2, lostAfterSeconds: 60, protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL] })
+  await api.registerWorker(f.db, { ...worker, capacity: 2, lostAfterSeconds: 60, roles: ['executor'] })
   const grant = (await api.claimRun(f.db, { ...worker, leaseTtlSeconds: 60 }))!
   const attempt = (await api.startAttempt(f.db, {
     runId: grant.runId,
@@ -369,7 +368,7 @@ describe.each(DRIVERS)('%s public persistence contract', (driver) => {
       { workerId: 'worker-two', instanceId: api.newId() },
     ]
     for (const w of workers)
-      await api.registerWorker(f.db, { ...w, capacity: 6, lostAfterSeconds: 60, protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL] })
+      await api.registerWorker(f.db, { ...w, capacity: 6, lostAfterSeconds: 60, roles: ['executor'] })
     const grants = (
       await Promise.all(workers.flatMap((w) => [childClaims(f.h.env, w), childClaims(f.h.env, w)]))
     ).flat()

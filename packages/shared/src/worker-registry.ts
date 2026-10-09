@@ -3,6 +3,7 @@ import { nextCursorSchema } from './rbac.js'
 import { workerStatusSchema } from './run-lease.js'
 import { sessionDtoSchema, sessionStatusSchema } from './session.js'
 import { utcInstantSchema } from './wire.js'
+import { workerRoleNameSchema } from './worker-roles.js'
 
 export const WORKER_ENDPOINT_SOURCES = ['database', 'environment', 'none'] as const
 export type WorkerEndpointSource = (typeof WORKER_ENDPOINT_SOURCES)[number]
@@ -209,6 +210,12 @@ export const workerSummarySchema = z.object({
   listenHost: z.string().nullable().default(null),
   listenPort: z.number().int().min(1).max(65535).nullable().default(null),
   hostname: z.string().nullable().default(null),
+  /** 登记的角色（executor / scheduler / maintenance / analyst）。 */
+  roles: z.array(workerRoleNameSchema).default([]),
+  /** 发布号（CAIRN_BUILD_VERSION）；本机开发为空。 */
+  release: z.string().nullable().default(null),
+  /** 与在线控制台发布号不一致：该节点不领新运行。 */
+  releaseMismatch: z.boolean().default(false),
 })
 export type WorkerSummary = z.infer<typeof workerSummarySchema>
 

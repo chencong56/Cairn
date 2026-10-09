@@ -1,11 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
-  SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
-  SESSION_MAINTENANCE_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   type Step,
-  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb, grantAdminScope } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
@@ -106,12 +102,7 @@ describe.each(DRIVERS)('%s 同账号多独立会话', { timeout: 60_000 }, (driv
       capacity: 8,
       maxSessions: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL,
-      
-        SESSION_OCCUPANCY_PROTOCOL,
-        SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
-        SESSION_MAINTENANCE_PROTOCOL,
-      ],
+      roles: ['executor'],
     })
     return { workerId, instanceId }
   }
@@ -365,27 +356,23 @@ describe.each(DRIVERS)('%s 同账号多独立会话', { timeout: 60_000 }, (driv
     expect(otherRun.claimed.ok).toBe(true)
   })
 
-  it('AC14 未声明并发协议时 cap>1 不领，cap=1 仍领', async () => {
+  it('AC14 执行节点按账号上限领取：cap>1 与 cap=1 的账号都能领（不再按协议区分新旧 Worker）', async () => {
     await enableConcurrent()
     const multi = await makeAccount('ac14-multi', 3)
     const single = await makeAccount('ac14-single', 1)
-    const old = await seedWorker(handle, `ac14-old-${newId().slice(0, 8)}`)
+    const executor = await seedWorker(handle, `ac14-exec-${newId().slice(-12)}`)
     const queuedMulti = await queueRun(multi)
-    expect(
-      await claimRun(handle, {
-        workerId: old.workerId,
-        instanceId: old.instanceId,
-        leaseTtlSeconds: 30,
-      }),
-    ).toBeNull()
     const queuedSingle = await queueRun(single)
-    const grant = await claimRun(handle, {
-      workerId: old.workerId,
-      instanceId: old.instanceId,
-      leaseTtlSeconds: 30,
-    })
-    expect(grant?.runId).toBe(queuedSingle.detail.id)
-    expect(grant?.runId).not.toBe(queuedMulti.detail.id)
+    const claimed = new Set<string>()
+    for (let round = 0; round < 2; round += 1) {
+      const grant = await claimRun(handle, {
+        workerId: executor.workerId,
+        instanceId: executor.instanceId,
+        leaseTtlSeconds: 30,
+      })
+      if (grant) claimed.add(grant.runId)
+    }
+    expect(claimed).toEqual(new Set([queuedMulti.detail.id, queuedSingle.detail.id]))
   })
 
   it('AC17 详情以 instances[] 为事实，生产读取不再假设单行', async () => {

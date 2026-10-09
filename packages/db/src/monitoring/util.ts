@@ -1,7 +1,4 @@
 import { and, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
-import {
-  SESSION_OCCUPANCY_PROTOCOL,
-} from '@cairn/shared'
 import type { Db } from '../client.js'
 import { clockNow, jsonArrayIncludes, jsonHasKey, schemaFor } from '../native.js'
 
@@ -36,10 +33,10 @@ export function claimableRunCondition(db: Db, asOf: Date): SQL {
   )!
 }
 
-/** 能领取运行的执行节点：声明了会话占用（调度 / 分析 / 维护节点不声明）。锁步部署下不再按快照特性区分。 */
+/** 能领取运行的执行节点：登记了 executor 角色（调度 / 分析 / 维护节点没有）。 */
 export function workerExecutesRuns(db: Db): SQL {
   const { workers } = schemaFor(db)
-  return jsonArrayIncludes(db, workers.protocolCapabilities, SESSION_OCCUPANCY_PROTOCOL)
+  return jsonArrayIncludes(db, workers.roles, 'executor')
 }
 
 export function onlineClaimerCondition(db: Db, asOf: Date): SQL {

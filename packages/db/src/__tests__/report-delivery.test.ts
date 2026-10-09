@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { EXPORT_ARTIFACTS_PROTOCOL } from '@cairn/shared'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -44,7 +43,7 @@ describe.each(DRIVERS)('%s 报告交付与恢复', (driver) => {
   const body = (runId: string, key = newId()) => ({ subject: { kind: 'RUN' as const, runId }, stage: 'final' as const, scope: 'run' as const, config: { screenshotScope: 'none' as const }, idempotencyKey: key })
   async function worker() {
     const identity = { workerId: `report-${newId()}`, instanceId: newId() }
-    await registerWorker(handle.db, { ...identity, capacity: 1, maxSessions: 1, lostAfterSeconds: 60, protocolCapabilities: [EXPORT_ARTIFACTS_PROTOCOL] })
+    await registerWorker(handle.db, { ...identity, capacity: 1, maxSessions: 1, lostAfterSeconds: 60, roles: ['maintenance'] })
     return identity
   }
   async function job() {

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { SESSION_MAINTENANCE_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL } from '@cairn/shared'
+import type { WorkerRoleName } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
 import { newId } from '../id.js'
@@ -68,7 +68,7 @@ describe.each(DRIVERS)('%s 会话操作排队可解释性', { timeout: 60_000 },
     return id
   }
 
-  async function onlineWorker(input: { maxSessions?: number; protocols?: string[] } = {}) {
+  async function onlineWorker(input: { maxSessions?: number; roles?: WorkerRoleName[] } = {}) {
     const workerId = `opq-${newId()}`
     const instanceId = newId()
     await registerWorker(handle.db, {
@@ -77,7 +77,7 @@ describe.each(DRIVERS)('%s 会话操作排队可解释性', { timeout: 60_000 },
       capacity: 4,
       maxSessions: input.maxSessions ?? 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: input.protocols ?? [SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      roles: input.roles ?? ['executor'],
     })
     return { workerId, instanceId }
   }
@@ -106,7 +106,7 @@ describe.each(DRIVERS)('%s 会话操作排队可解释性', { timeout: 60_000 },
     return events.filter((event) => event.operationId === operationId)
   }
 
-  it('没有在线节点时受理并记 NO_ELIGIBLE_WORKER，协议不符记 WORKER_PROTOCOL_MISSING', async () => {
+  it('没有在线节点时受理并记 NO_ELIGIBLE_WORKER，只有非执行节点在线记 WORKER_PROTOCOL_MISSING', async () => {
     const none = await makeAccount('no-worker')
     const accepted = await prepare(none)
     expect(accepted.eligibleWorkers).toBe(0)
@@ -115,7 +115,7 @@ describe.each(DRIVERS)('%s 会话操作排队可解释性', { timeout: 60_000 },
     expect(waiting.map((e) => e.payload.waitReason)).toEqual(['NO_ELIGIBLE_WORKER'])
     expect((await getSessionOperationView(handle.db, accepted.operation!.id))?.waitReason).toBe('NO_ELIGIBLE_WORKER')
 
-    await onlineWorker({ protocols: [SESSION_OCCUPANCY_PROTOCOL] })
+    await onlineWorker({ roles: ['maintenance'] })
     const legacy = await makeAccount('legacy-worker')
     const onLegacy = await prepare(legacy)
     expect(onLegacy.eligibleWorkers).toBe(0)

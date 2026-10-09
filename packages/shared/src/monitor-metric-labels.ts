@@ -14,6 +14,7 @@ export const METRIC_LABELS: Partial<Record<MonitorMetricKey, { label: string; gr
   'worker.status.draining': { label: '排空中的执行节点数', group: '执行节点' },
   'worker.status.stopped': { label: '已停止的执行节点数', group: '执行节点' },
   'worker.status.lost': { label: '失联的执行节点数', group: '执行节点' },
+  'worker.release.mismatch': { label: '版本与控制台不一致的执行节点数', group: '执行节点' },
   'worker.heartbeat.fresh': { label: '心跳正常的执行节点数', group: '执行节点' },
   'worker.heartbeat.stale': { label: '心跳过期的执行节点数', group: '执行节点' },
   'worker.capacity.total': { label: '执行容量总数', group: '执行节点' },

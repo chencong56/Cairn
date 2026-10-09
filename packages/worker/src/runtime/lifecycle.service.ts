@@ -95,7 +95,8 @@ import {
   deriveAuthCapability,
   platformConfigDocumentSchema,
   parseWorkerRoles,
-  protocolCapabilitiesForRoles,
+  resolveBuildVersion,
+  workerRoleNames,
   isHaltedRunStatus,
   isAuthoringDocumentV2,
   toAuthoringDocumentV2,
@@ -440,7 +441,8 @@ export class LifecycleService
       maxSessions: config.CAIRN_BROWSER_MAX_SESSIONS,
       lostAfterSeconds: config.CAIRN_WORKER_LOST_AFTER_SECONDS,
       internalBaseUrl: this.advertiseUrl(),
-      protocolCapabilities: protocolCapabilitiesForRoles(this.roles()),
+      roles: workerRoleNames(this.roles()),
+      release: resolveBuildVersion(config.CAIRN_BUILD_VERSION),
       listenHost: net.listenHost,
       listenPort: net.listenPort,
       hostname: net.hostname,
@@ -1771,6 +1773,7 @@ export class LifecycleService
       status: loopAlive && !claimStalled && !this.shutdownCalled ? "ok" : "degraded",
       service: "cairn-worker",
       uptimeSeconds: this.uptimeSeconds(),
+      version: resolveBuildVersion(config.CAIRN_BUILD_VERSION),
       checks: {
         database: await this.pingDatabase(),
         changeHint: this.engine.controlHints?.enabled

@@ -147,6 +147,7 @@ export async function collectAlertReadings(
   putMetric(readings, 'worker.status.draining', 'platform', PLATFORM_SCOPE_ID, workers.draining)
   putMetric(readings, 'worker.status.stopped', 'platform', PLATFORM_SCOPE_ID, workers.stopped)
   putMetric(readings, 'worker.status.lost', 'platform', PLATFORM_SCOPE_ID, workers.lost)
+  putMetric(readings, 'worker.release.mismatch', 'platform', PLATFORM_SCOPE_ID, workers.releaseMismatch)
   putMetric(readings, 'worker.heartbeat.fresh', 'platform', PLATFORM_SCOPE_ID, workers.heartbeatFresh)
   putMetric(readings, 'worker.heartbeat.stale', 'platform', PLATFORM_SCOPE_ID, knownMetric(fleet.liveHeartbeatStale))
   putMetric(readings, 'worker.capacity.total', 'platform', PLATFORM_SCOPE_ID, fleet.data.capacity.total)
@@ -374,7 +375,8 @@ export async function evaluateAlerts(
   const asOf = options?.asOf ?? (await clockNow(db))
   const config = await getOrCreatePlatformConfig(db)
   const alerting = config.document.alerting ?? FACTORY_ALERTING
-  const enabled = alerting.rules.filter((rule) => rule.enabled)
+  // 升级后新增的出厂规则按出厂默认参与求值（如默认开启的「版本不一致」），不必等管理员重新保存
+  const enabled = mergeFactoryAlertRules(alerting.rules).filter((rule) => rule.enabled)
   if (enabled.length === 0) return { evaluated: 0, fired: 0, resolved: 0, interrupted: 0 }
 
   const readings = await collectAlertReadings(db, asOf, {
@@ -963,7 +965,7 @@ export async function listMonitorAlertRules(db: Db): Promise<MonitorAlertRulesRe
   const alerting = resolveAlerting(current.document)
   return monitorAlertRulesResponseSchema.parse({
     revision: current.revision,
-    // 存量平台升级后补上新增的出厂建议规则（默认关闭）；用户保存时一并落库
+    // 存量平台升级后补上新增的出厂规则（按出厂默认开关）；用户保存时一并落库
     rules: mergeFactoryAlertRules(alerting.rules),
     channels: alerting.channels,
   })

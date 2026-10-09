@@ -66,6 +66,9 @@ function summary(canSeeEndpoint: boolean) {
     listenHost: null,
     listenPort: null,
     hostname: null,
+    roles: ['executor' as const],
+    release: null,
+    releaseMismatch: false,
     internalEndpoint: canSeeEndpoint
       ? { baseUrl: 'http://127.0.0.1:8091', host: '127.0.0.1', port: 8091, protocol: 'http' as const }
       : null,

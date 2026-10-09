@@ -96,6 +96,7 @@ const emptyCapacity = {
     lost: knownMetric(0),
     heartbeatFresh: knownMetric(0),
     heartbeatStale: knownMetric(0),
+    releaseMismatch: knownMetric(0),
   },
   capacity: { total: knownMetric(0), used: knownMetric(0) },
   sessions: { total: knownMetric(0), used: knownMetric(0) },
@@ -582,7 +583,7 @@ describe('Monitoring HTTP', () => {
 
   it('RMD09 告警权限：可读、可静默、可改规则／渠道', async () => {
     const rules = await request(reader.getHttpServer()).get('/monitoring/alert-rules').expect(200)
-    expect(rules.body.rules.every((rule: { enabled: boolean }) => rule.enabled === false)).toBe(true)
+    expect(rules.body.rules.filter((rule: { enabled: boolean }) => rule.enabled).map((rule: { id: string }) => rule.id)).toEqual(['factory.worker.release_mismatch'])
     expect(JSON.stringify(rules.body)).not.toMatch(/https?:\/\/|token/i)
     await request(reader.getHttpServer()).get('/monitoring/alerts').expect(200)
     await request(author.getHttpServer()).get('/monitoring/alerts').expect(403)

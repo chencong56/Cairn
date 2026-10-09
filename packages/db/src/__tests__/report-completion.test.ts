@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { DEFAULT_REPORT_CONFIG, EXPORT_ARTIFACTS_PROTOCOL, type ReportConfig } from '@cairn/shared'
+import { DEFAULT_REPORT_CONFIG, type ReportConfig } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
 import { newId } from '../id.js'
@@ -38,7 +38,7 @@ describe.each(DRIVERS)('%s 报告完整交付', { timeout: 60_000 }, (driver) =>
     return made.detail.id
   }
   async function report(runId: string, config: Partial<ReportConfig> = {}) { return createReport(handle.db, { subject: { kind: 'RUN', runId }, scope: 'run', stage: 'final', config, idempotencyKey: newId() }, actor()) }
-  async function worker() { const identity = { workerId: `report-${newId()}`, instanceId: newId() }; await registerWorker(handle.db, { ...identity, capacity: 1, maxSessions: 1, lostAfterSeconds: 120, protocolCapabilities: [EXPORT_ARTIFACTS_PROTOCOL] }); return identity }
+  async function worker() { const identity = { workerId: `report-${newId()}`, instanceId: newId() }; await registerWorker(handle.db, { ...identity, capacity: 1, maxSessions: 1, lostAfterSeconds: 120, roles: ['maintenance'] }); return identity }
   async function claim(identity: Awaited<ReturnType<typeof worker>>) { const [job] = await claimExportJobs(handle.db, identity); expect(job).toBeTruthy(); return { jobId: job!.id, ...identity, claimEpoch: job!.claimEpoch } }
   async function screenshot(runId: string) { const t = schemaFor(handle.db), objectId = newId(), id = newId(); await handle.db.insert(t.storedObjects).values({ id: objectId, runId, ownerKind: 'run', objectKey: `${runId}/${objectId}`, status: 'available', contentType: 'image/png', byteSize: 12, digest: 'sha256:source', retainUntil: new Date(Date.now() + 86400_000) }); await handle.db.insert(t.evidences).values({ id, runId, type: 'screenshot', status: 'available', objectId, digest: 'sha256:source', byteSize: 12 }); return { id, objectId } }
   async function suite(auto = false, profileId?: string) {
@@ -176,7 +176,7 @@ describe.each(DRIVERS)('%s 报告完整交付', { timeout: 60_000 }, (driver) =>
 
   it('锁步部署：有旧协议节点在线也照常写入新产物', async () => {
     const id = await run(), identity = await worker(), t = schemaFor(handle.db)
-    await handle.db.update(t.workers).set({ protocolCapabilities: ['export-artifacts@1'] }).where(eq(t.workers.id, identity.workerId))
+    await handle.db.update(t.workers).set({ roles: ['maintenance'] }).where(eq(t.workers.id, identity.workerId))
     expect((await report(id)).id).toBeTruthy()
   })
 

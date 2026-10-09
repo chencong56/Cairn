@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   LOCATOR_RESOLUTION_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   createRuntimeInvariant,
   FACTORY_ALERT_RULES,
   type AlertRule,
@@ -36,7 +35,6 @@ import { collectAlertReadings, evaluateAlerts, listMonitorAlertRules, listMonito
 import { getOrCreatePlatformConfig, updatePlatformConfig } from '../platform-config/store.js'
 
 void LOCATOR_RESOLUTION_PROTOCOL
-void SESSION_OCCUPANCY_PROTOCOL
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_monph`
 

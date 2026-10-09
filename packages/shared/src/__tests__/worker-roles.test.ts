@@ -1,59 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { OUTBOUND_WORKER_PROTOCOL } from '../outbound.js'
-import { EXPORT_ARTIFACTS_PROTOCOL } from '../reports.js'
-import { KNOWLEDGE_ANALYSIS_PROTOCOL } from '../analysis-jobs.js'
-import { MAP_SCHEDULER_PROTOCOL, UNIFIED_SCHEDULER_PROTOCOL } from '../schedules.js'
-import { SERVICE_WEBHOOK_DELIVERY_PROTOCOL } from '../service-webhooks.js'
-import { SUITE_SCHEDULER_PROTOCOL } from '../suites.js'
-import { SESSION_OCCUPANCY_PROTOCOL } from '../session-occupancy.js'
-import {
-  advertisesRunExecution,
-  parseWorkerRoles,
-  protocolCapabilitiesForRoles,
-  registrationRequiresOccupancy,
-} from '../worker-roles.js'
+import { parseWorkerRoles, workerHasRole, workerReleaseMismatch, workerRoleNames } from '../worker-roles.js'
 
 describe('Worker 角色', () => {
-  it('缺省 all，协议按角色三分，导出与集合推进不要求占用', () => {
+  it('缺省 all；角色名按固定顺序登记；all 不能与其他角色组合', () => {
     const all = parseWorkerRoles(undefined)
     expect(all).toEqual({ executor: true, scheduler: true, maintenance: true, analyst: true })
-    const caps = protocolCapabilitiesForRoles(all)
-    expect(caps).toContain(SESSION_OCCUPANCY_PROTOCOL)
-    // 锁步部署：快照特性不再有协议门禁，能力清单只表达角色与会话占用
-    expect(caps.filter((item) => item.startsWith('snapshot.'))).toEqual([])
-    expect(protocolCapabilitiesForRoles(parseWorkerRoles('executor'))).toContain(SESSION_OCCUPANCY_PROTOCOL)
+    expect(workerRoleNames(all)).toEqual(['executor', 'scheduler', 'maintenance', 'analyst'])
     expect(() => parseWorkerRoles('all,executor')).toThrow(/不能再组合/)
-    expect(parseWorkerRoles('scheduler')).toEqual({
-      executor: false,
-      scheduler: true,
-      maintenance: false,
-      analyst: false,
-    })
-    expect(protocolCapabilitiesForRoles(parseWorkerRoles('scheduler'))).toEqual([
-      MAP_SCHEDULER_PROTOCOL,
-      UNIFIED_SCHEDULER_PROTOCOL,
-      SUITE_SCHEDULER_PROTOCOL,
-    ])
-    expect(protocolCapabilitiesForRoles(parseWorkerRoles('maintenance'))).toEqual([
-      OUTBOUND_WORKER_PROTOCOL,
-      SERVICE_WEBHOOK_DELIVERY_PROTOCOL,
-      EXPORT_ARTIFACTS_PROTOCOL,
-    ])
-    expect(registrationRequiresOccupancy([])).toBe(false)
-    expect(registrationRequiresOccupancy([MAP_SCHEDULER_PROTOCOL])).toBe(false)
-    expect(registrationRequiresOccupancy([SUITE_SCHEDULER_PROTOCOL])).toBe(false)
-    expect(registrationRequiresOccupancy([SERVICE_WEBHOOK_DELIVERY_PROTOCOL])).toBe(false)
-    expect(registrationRequiresOccupancy([EXPORT_ARTIFACTS_PROTOCOL])).toBe(false)
-    expect(protocolCapabilitiesForRoles(parseWorkerRoles('analyst'))).toEqual([KNOWLEDGE_ANALYSIS_PROTOCOL])
-    expect(registrationRequiresOccupancy([KNOWLEDGE_ANALYSIS_PROTOCOL])).toBe(false)
-    expect(registrationRequiresOccupancy(['map-jobs@1'])).toBe(true)
+    expect(() => parseWorkerRoles('executor,unknown')).toThrow(/只能是/)
+    expect(workerRoleNames(parseWorkerRoles('scheduler'))).toEqual(['scheduler'])
+    expect(workerRoleNames(parseWorkerRoles('maintenance,executor'))).toEqual(['executor', 'maintenance'])
   })
 
-  it('only executor-capable registrations count as run claimers', () => {
-    for (const role of ['scheduler', 'analyst', 'maintenance'] as const)
-      expect(advertisesRunExecution(protocolCapabilitiesForRoles(parseWorkerRoles(role)))).toBe(false)
-    expect(advertisesRunExecution(protocolCapabilitiesForRoles(parseWorkerRoles('executor')))).toBe(true)
-    expect(advertisesRunExecution(protocolCapabilitiesForRoles(parseWorkerRoles('all')))).toBe(true)
-    expect(advertisesRunExecution([])).toBe(true)
+  it('按登记的角色判断能力；没有角色的登记什么都不领', () => {
+    expect(workerHasRole(['executor', 'analyst'], 'executor')).toBe(true)
+    expect(workerHasRole(['maintenance'], 'executor')).toBe(false)
+    expect(workerHasRole([], 'executor')).toBe(false)
+    expect(workerHasRole(null, 'executor')).toBe(false)
+  })
+
+  it('发布号守卫：控制台一致且与 Worker 不同才判不一致；开发环境与控制台滚动升级中不判', () => {
+    expect(workerReleaseMismatch('20261008-a', ['20261009-b', '20261009-b'])).toBe(true)
+    expect(workerReleaseMismatch('20261009-b', ['20261009-b'])).toBe(false)
+    expect(workerReleaseMismatch(null, ['20261009-b'])).toBe(false)
+    expect(workerReleaseMismatch('20261008-a', [])).toBe(false)
+    expect(workerReleaseMismatch('20261008-a', [null])).toBe(false)
+    expect(workerReleaseMismatch('20261008-a', ['20261008-a', '20261009-b'])).toBe(false)
   })
 })

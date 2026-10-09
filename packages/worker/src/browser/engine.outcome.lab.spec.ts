@@ -35,7 +35,6 @@ import {
   stepRunFor,
   type Step,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { createBrowserPort } from './port.js'
 import { BrowserSessionManager } from './session-manager.js'
@@ -180,7 +179,7 @@ describe('ExecutionEngine × 真浏览器 Outcome 结果轴联调', { timeout: 1
       instanceId: workerInstanceId,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     manager = new BrowserSessionManager(
       handle,

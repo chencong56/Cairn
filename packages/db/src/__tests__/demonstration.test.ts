@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { parseDemonstrationFile } from '@cairn/authoring'
 import {
-  SESSION_OCCUPANCY_PROTOCOL,
   DEMONSTRATION_PROTOCOL,
   normalizeAuthoringDocument,
   stepRunFor,
@@ -453,7 +452,7 @@ describe.each(DRIVERS)(
         instanceId: newId(),
         capacity: 1,
         lostAfterSeconds: 60,
-        protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+        roles: ['executor'],
       }
       await registerWorker(handle.db, executor)
       const grant = await claimRun(handle, { ...executor, leaseTtlSeconds: 60 })

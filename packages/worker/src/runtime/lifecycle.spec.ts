@@ -8,7 +8,7 @@ import { clearPlacementYields, yieldPlacement } from "./placement-backoff";
 import { ExecutionEngine } from "../engine/engine";
 import { EvidenceSettleService } from "../evidence/settle.service";
 import { ObjectService } from "../objects/object.service";
-import { parseWorkerRoles, protocolCapabilitiesForRoles } from "@cairn/shared";
+import { parseWorkerRoles, workerRoleNames } from "@cairn/shared";
 import { config, resolveWorkerEnv } from "../config/env";
 import { LifecycleService } from "./lifecycle.service";
 
@@ -424,7 +424,7 @@ describe("LifecycleService", () => {
     );
     expect(vi.mocked(registerWorker).mock.calls.at(-1)?.[1]).toEqual(
       expect.objectContaining({
-        protocolCapabilities: protocolCapabilitiesForRoles(
+        roles: workerRoleNames(
           parseWorkerRoles(undefined),
         ),
       }),
@@ -1318,10 +1318,7 @@ describe("LifecycleService", () => {
     const { registerWorker } = await import("@cairn/db");
     expect(vi.mocked(registerWorker).mock.calls.at(-1)?.[1]).toEqual(
       expect.objectContaining({
-        protocolCapabilities: expect.arrayContaining([
-          "session-occupancy@2",
-          "map-scheduler@1",
-        ]),
+        roles: expect.arrayContaining(["executor", "scheduler"]),
       }),
     );
   });
@@ -1386,7 +1383,7 @@ describe("LifecycleService", () => {
     ).not.toHaveBeenCalled();
     expect(vi.mocked(registerWorker).mock.calls.at(-1)?.[1]).toEqual(
       expect.objectContaining({
-        protocolCapabilities: protocolCapabilitiesForRoles({
+        roles: workerRoleNames({
           executor: false,
           scheduler: true,
           maintenance: false,

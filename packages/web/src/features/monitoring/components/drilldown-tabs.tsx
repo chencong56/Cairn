@@ -278,7 +278,7 @@ function WorkersTab({
       monolithic: [],
     }
     for (const w of workers) {
-      const role = classifyWorkerRole(w.workerId)
+      const role = classifyWorkerRole(w)
       groups[role].push(w)
     }
     return groups
@@ -633,7 +633,7 @@ function WorkersTab({
             </TableHeader>
             <TableBody>
               {filteredWorkers.map((item) => {
-                const role = classifyWorkerRole(item.workerId)
+                const role = classifyWorkerRole(item)
                 const roleMeta = WORKER_ROLE_METAS[role]
                 const isExecutorLike = role === 'executor' || role === 'monolithic'
 

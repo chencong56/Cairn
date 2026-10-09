@@ -35,7 +35,6 @@ import {
   type Step,
 } from '@cairn/shared'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
-import { WORKER_TEST_PROTOCOLS } from '../../__tests__/worker-protocols.js'
 import { BrowserSessionManager } from '../../browser/session-manager.js'
 import { executeOnPage as executeOnPageRaw } from '../../browser/surface.js'
 import { withTestOccupancy } from '../../browser/test-occupancy.js'
@@ -221,7 +220,7 @@ describe('S06 适配层 × 受管 Page（离线）', { timeout: 180_000 }, () =>
       // 每个用例领取一条 Run 且不结束，容量要覆盖本文件的领取次数，否则 claimRun 领不到。
       capacity: 32,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     profileRoot = mkdtempSync(join(tmpdir(), 'cairn-s06-'))
     manager = new BrowserSessionManager(

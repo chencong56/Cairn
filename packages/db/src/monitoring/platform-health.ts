@@ -1,5 +1,5 @@
 import { and, eq, gt } from 'drizzle-orm'
-import { registrationRequiresOccupancy, SESSION_OCCUPANCY_PROTOCOL } from '@cairn/shared'
+import { workerHasRole } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { clockNow, schemaFor } from '../native.js'
 
@@ -25,9 +25,7 @@ export async function readPlatformWorkerHealthSummary(
   let expiredInServiceNodes = 0
 
   for (const w of allWorkers) {
-    const isExecutor =
-      registrationRequiresOccupancy(w.protocolCapabilities) ||
-      Boolean(w.protocolCapabilities?.includes(SESSION_OCCUPANCY_PROTOCOL))
+    const isExecutor = workerHasRole(w.roles, 'executor')
 
     if (!isExecutor) continue
 

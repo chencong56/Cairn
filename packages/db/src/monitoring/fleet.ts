@@ -1,8 +1,9 @@
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm'
-import { knownMetric, unknownMetric, type MonitorCapacityCard, type MonitorWorkerSampleItem } from '@cairn/shared'
+import { knownMetric, unknownMetric, workerHasRole, workerReleaseMismatch, type MonitorCapacityCard, type MonitorWorkerSampleItem } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { clockNow, schemaFor } from '../native.js'
 import { asCount, occupancyStatuses } from './util.js'
+import { liveApiReleases } from '../leases/release.js'
 
 export async function summarizeFleet(
   db: Db,
@@ -113,6 +114,14 @@ export async function summarizeFleet(
     .from(runLeases)
     .where(and(eq(runLeases.status, 'ACTIVE'), sql`${runLeases.expiresAt} > ${resolved}`))
 
+  // 锁步部署：在线执行节点里发布号与在线控制台不一致的（这些节点不领新运行）
+  const apiReleases = await liveApiReleases(db)
+  const liveExecutors = await db
+    .select({ roles: workers.roles, release: workers.release })
+    .from(workers)
+    .where(and(inArray(workers.status, ['READY', 'DRAINING']), sql`${workers.heartbeatExpiresAt} > ${resolved}`))
+  const releaseMismatch = liveExecutors.filter((w) => workerHasRole(w.roles, 'executor') && workerReleaseMismatch(w.release, apiReleases)).length
+
   const data: MonitorCapacityCard = {
     workers: {
       ready: knownMetric(asCount(workerRow?.ready)),
@@ -121,6 +130,7 @@ export async function summarizeFleet(
       lost: knownMetric(asCount(workerRow?.lost)),
       heartbeatFresh: knownMetric(asCount(workerRow?.heartbeatFresh)),
       heartbeatStale: knownMetric(asCount(workerRow?.heartbeatStale)),
+      releaseMismatch: knownMetric(releaseMismatch),
     },
     capacity: {
       total: knownMetric(asCount(workerRow?.capacityTotal)),

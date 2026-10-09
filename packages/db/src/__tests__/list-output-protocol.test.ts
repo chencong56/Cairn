@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { SESSION_OCCUPANCY_PROTOCOL, type Step } from '@cairn/shared'
+import { type Step } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import type { DbHandle } from '../client.js'
 import { newId } from '../id.js'
@@ -71,7 +71,7 @@ describe.each(DRIVERS)('CFA-14: 列表输出不设 Worker 领取门控 (%s)', (d
       instanceId: newId(),
       capacity: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     }
     await registerWorker(handle.db, worker)
     const grant = await claimRun(handle, { ...worker, leaseTtlSeconds: 60 })

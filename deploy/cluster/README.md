@@ -56,6 +56,7 @@ ssh root@shsnc-ah3
 ```
 
 顺序纪律：迁移 → Worker → API → Web；含破坏性协议变更（`session-occupancy@2` 类）先排空活租约再整组替换，禁止新旧混跑。
+锁步部署：API 与 Worker 整组同版本，不做混跑兼容。发布号守卫按 `CAIRN_BUILD_VERSION` 比对；本集群该值取自 `ship.sh` 写入的底座镜像 tag、三台共用，日常 `build-apps.sh` / `sync-apps.sh` 发布应用产物时不会更新，守卫在本集群因此不会触发（也拦不住漏升的主机）。
 数据库迁移：ah3 上 `cairn-ctl.sh migrate`（幂等）。
 
 ## 首次部署（底座镜像，仅记录用）

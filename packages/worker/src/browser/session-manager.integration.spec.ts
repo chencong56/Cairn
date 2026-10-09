@@ -45,12 +45,10 @@ import {
 import {
   DEFAULT_SESSION_POLICY,
   DEV_CREDENTIAL_KEY,
-  SESSION_MAINTENANCE_PROTOCOL,
   type RunGrant,
   type RunSnapshot,
   type SessionPolicy,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { BrowserRuntimeError, currentOccupancyGrant, type BrowserHandle } from './runtime'
 import { clearPlacementYields, placementYieldExcludes, yieldPlacement } from '../runtime/placement-backoff'
@@ -255,7 +253,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       capacity: 32,
       maxSessions: 32,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     await manager.reconcileOwn()
   })
@@ -420,7 +418,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       capacity: 8,
       maxSessions: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     const limited = new BrowserSessionManager(
       handle,
@@ -490,7 +488,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       capacity: 32,
       maxSessions: 32,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     const fresh = new BrowserSessionManager(
       handle,
@@ -516,7 +514,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       capacity: 32,
       maxSessions: 32,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
   })
 
@@ -775,7 +773,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       instanceId: evictInstance,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     const evictor = new BrowserSessionManager(
       handle,
@@ -865,7 +863,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       instanceId: fullInstance,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     const full = new BrowserSessionManager(
       handle,
@@ -1000,7 +998,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       instanceId: healInstance,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     const isolator = new BrowserSessionManager(
       handle,
@@ -1295,7 +1293,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       instanceId: maintInstance,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     await requestMaintenanceOperation(handle.db, {
       key: { targetId, targetAccountId: account },
@@ -1335,7 +1333,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       capacity: 8,
       maxSessions: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     const sl11 = new BrowserSessionManager(
       handle,
@@ -1505,7 +1503,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       capacity: 32,
       maxSessions: 32,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     const fresh = new BrowserSessionManager(
       handle,
@@ -1536,7 +1534,7 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
       capacity: 32,
       maxSessions: 32,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     manager.setWorkerInstance(WORKER_INSTANCE)
   })

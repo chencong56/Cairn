@@ -1,8 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
-  SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   deriveAccountSessionStatus,
+  workerHasRole,
   effectiveAccountSessionCap,
   type AccountSessionStatus,
   type RunWaitReason,
@@ -46,16 +45,9 @@ export async function readAccountSessionCap(db: Db, key: SessionKey): Promise<Ac
   }
 }
 
-export function concurrencyProtocolRequired(effectiveCap: number, liveCount: number): boolean {
-  return effectiveCap > 1 || liveCount > 1
-}
-
-export function workerHasConcurrencyProtocol(protocols: readonly string[] | null | undefined): boolean {
-  return Boolean(protocols?.includes(SESSION_ACCOUNT_CONCURRENCY_PROTOCOL))
-}
-
-export function workerHasOccupancyProtocol(protocols: readonly string[] | null | undefined): boolean {
-  return Boolean(protocols?.includes(SESSION_OCCUPANCY_PROTOCOL))
+/** 执行节点才持有浏览器会话（含账号并发与会话维护）；锁步部署下不再按协议版本区分。 */
+export function workerIsExecutor(roles: readonly string[] | null | undefined): boolean {
+  return workerHasRole(roles, 'executor')
 }
 
 export function assignMinFreeSlot(lives: readonly SessionRecord[], effectiveCap: number): number | null {
@@ -146,7 +138,6 @@ export async function workerEligibleToOwnIdle(
   input: {
     ownerWorkerId: string
     ownerWorkerInstanceId: string | null
-    requireConcurrencyProtocol: boolean
     checkRunCapacity: boolean
   },
 ): Promise<boolean> {
@@ -154,10 +145,7 @@ export async function workerEligibleToOwnIdle(
   const [owner] = await db.select().from(workers).where(eq(workers.id, input.ownerWorkerId)).limit(1)
   if (!owner || owner.status !== 'READY') return false
   if (owner.instanceId !== input.ownerWorkerInstanceId) return false
-  if (!workerHasOccupancyProtocol(owner.protocolCapabilities)) return false
-  if (input.requireConcurrencyProtocol && !workerHasConcurrencyProtocol(owner.protocolCapabilities)) {
-    return false
-  }
+  if (!workerIsExecutor(owner.roles)) return false
   if (!input.checkRunCapacity) return true
   const [held] = await db
     .select({ n: sql<number>`count(*)` })
@@ -179,7 +167,6 @@ export async function findEligibleForeignIdle(
     leases: Map<string, SessionLeaseRow>
     holderWorkerId: string
     holderInstanceId: string
-    requireConcurrencyProtocol: boolean
     checkRunCapacity: boolean
   },
 ): Promise<SessionRecord | null> {
@@ -196,7 +183,6 @@ export async function findEligibleForeignIdle(
       await workerEligibleToOwnIdle(db, {
         ownerWorkerId: session.ownerWorkerId,
         ownerWorkerInstanceId: session.ownerWorkerInstanceId,
-        requireConcurrencyProtocol: input.requireConcurrencyProtocol,
         checkRunCapacity: input.checkRunCapacity,
       })
     ) {
@@ -316,7 +302,7 @@ export async function decideAccountSessionClaim(
     holderInstanceId: string
     holderMaxSessions: number
     holderOccupied: number
-    holderProtocols: readonly string[] | null | undefined
+    holderRoles: readonly string[] | null | undefined
     purpose: 'EXECUTION' | 'MAINTENANCE'
     expectedSessionId?: string | null
     pickIdle: 'oldest' | 'worst'
@@ -329,9 +315,8 @@ export async function decideAccountSessionClaim(
   const now = new Date()
   const blockedByControl = (session: SessionRecord) => manualControlHeldByOther(session, input.claimerActorId, now)
   const cap = await readAccountSessionCap(db, input.key)
-  const requireConcurrency = concurrencyProtocolRequired(cap.effectiveCap, input.lives.length)
-  if (requireConcurrency && !workerHasConcurrencyProtocol(input.holderProtocols)) {
-    return { action: 'reject', code: 'SESSION_NOT_CLAIMABLE', message: 'Worker 未声明账号并发协议' }
+  if (!workerIsExecutor(input.holderRoles)) {
+    return { action: 'reject', code: 'SESSION_NOT_CLAIMABLE', message: '只有执行节点能持有浏览器会话' }
   }
 
   if (input.lives.length > cap.effectiveCap) {
@@ -428,7 +413,6 @@ export async function decideAccountSessionClaim(
     leases: input.leases,
     holderWorkerId: input.holderWorkerId,
     holderInstanceId: input.holderInstanceId,
-    requireConcurrencyProtocol: requireConcurrency,
     checkRunCapacity: input.purpose === 'EXECUTION',
   })
   if (foreign) {

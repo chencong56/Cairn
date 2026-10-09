@@ -1,7 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { SESSION_MAINTENANCE_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, type Step,
-  LOCATOR_RESOLUTION_PROTOCOL,
+import { type Step,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
@@ -85,7 +84,7 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
     const { transitionSessionUse, markSessionOperationWaitingForAuth, acquireAuthControl, findAuthWaitLeaseForOperation, finishSessionOperation, reapSessionLeases, getSessionOperation, getSessionById } = await import('../test-entry.js')
     const accountId = await makeAccount(`race-${field}`)
     const workerId = `race-${newId()}`, instanceId = newId()
-    await registerWorker(handle.db, { workerId, instanceId, capacity: 4, lostAfterSeconds: 60, protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL] })
+    await registerWorker(handle.db, { workerId, instanceId, capacity: 4, lostAfterSeconds: 60, roles: ['executor'] })
     const op = await requestMaintenanceOperation(handle.db, { key: { targetId, targetAccountId: accountId }, body: { kind: 'PREPARE', idempotencyKey: newId() }, actor: { id: actorId } })
     const operation = op.operation
     if (!operation) throw new Error('maintenance operation was not created')
@@ -120,7 +119,7 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     const label = `ovw-${newId().slice(0, 8)}`
     const unprepared = await makeAccount(`${label}-unprepared`)
@@ -246,7 +245,7 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     const session = await requireCreatedSession(handle.db, {
       key: { targetId, targetAccountId: localReady },
@@ -404,7 +403,7 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
       capacity: 8,
       maxSessions: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     await requestMaintenanceOperation(handle.db, {
       key: { targetId, targetAccountId: accountId },
@@ -445,9 +444,10 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
     expect(await findEvictableSession(handle.db, worker.workerId, worker.instanceId)).toBeNull()
   })
 
-  it('旧 Worker 不领取维护 kind', async () => {
+  it('非执行节点不领取维护 kind', async () => {
     const accountId = await makeAccount('old-worker')
-    const worker = await seedWorker(handle)
+    const worker = { workerId: `mnt-only-${newId().slice(-12)}`, instanceId: newId() }
+    await registerWorker(handle.db, { ...worker, capacity: 4, lostAfterSeconds: 60, roles: ['maintenance', 'scheduler'] })
     const queued = await requestMaintenanceOperation(handle.db, {
       key: { targetId, targetAccountId: accountId },
       body: { kind: 'PREPARE', idempotencyKey: `prep-${accountId}-xxxxxxxx` },
@@ -473,7 +473,7 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     // 绕过 API 入口校验，直接入账两类只能在领取时判失败的操作。
     const { operation: verify } = await requestSessionOperation(handle.db, {
@@ -668,7 +668,7 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
       capacity: 8,
       maxSessions: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     await requestMaintenanceOperation(handle.db, {
       key: { targetId, targetAccountId: accountId },
@@ -737,7 +737,7 @@ describe.each(DRIVERS)('%s 会话维护账本', { timeout: 60_000 }, (driver) =>
       maxSessions: 5,
       lostAfterSeconds: 60,
       hostname: 'worker-node-alpha',
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     const accountId = await makeAccount('bucket-test')
     const key = { targetId, targetAccountId: accountId }

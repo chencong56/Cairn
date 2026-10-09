@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
-  SESSION_OCCUPANCY_PROTOCOL,
   MAP_ASSETS_PROTOCOL,
   MAP_CONSUMPTION_PROTOCOL,
   MAP_IDENTITY_RULE_VERSION,
@@ -9,7 +8,6 @@ import {
   type MapConditionSnapshot,
   type MapProjectionPlan,
   type Step,
-  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { newId } from '../id.js'
 import { eq } from 'drizzle-orm'
@@ -202,7 +200,7 @@ describe.each(DRIVERS)('%s 地图运行消费', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 2,
       lostAfterSeconds: 3600,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, ...capabilities],
+      roles: ['executor'],
     })
     return { workerId, instanceId }
   }

@@ -39,7 +39,6 @@ import {
   type RunFileHandle,
   type Step,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { createBrowserPort } from './port.js'
 import { BrowserSessionManager } from './session-manager.js'
@@ -191,7 +190,7 @@ describe('浏览器文件上传/下载与Target夹具全链路业务系统演示
       instanceId: workerInstanceId,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
 
     manager = new BrowserSessionManager(

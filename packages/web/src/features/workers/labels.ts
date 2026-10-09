@@ -1,10 +1,12 @@
 import type { StatusTone } from '@/components/status-badge'
-import type {
-  SessionStatus,
-  WorkerHandleMismatchState,
-  WorkerRouteReason,
-  WorkerStatus,
-  WorkerSummary,
+import {
+  WORKER_ROLE_NAMES,
+  type SessionStatus,
+  type WorkerHandleMismatchState,
+  type WorkerRouteReason,
+  type WorkerStatus,
+  type WorkerRoleName,
+  type WorkerSummary,
 } from '@cairn/shared'
 
 export function workerLifecycle(worker: Pick<WorkerSummary, 'status' | 'heartbeatFresh'>): {
@@ -60,6 +62,14 @@ export const MISMATCH_LABELS: Record<WorkerHandleMismatchState, string> = {
   none: '采样一致',
   pending: '采样差异，待复核',
   persistent: '持续采样差异',
+}
+
+/** 登记角色的中文名（节点详情里列出该节点登记了哪些角色）。 */
+export const WORKER_ROLE_LABELS: Record<WorkerRoleName, string> = {
+  executor: '执行',
+  scheduler: '调度',
+  maintenance: '维护',
+  analyst: '分析',
 }
 
 export type WorkerRoleCategory = 'executor' | 'scheduler' | 'analyst' | 'maintenance' | 'monolithic'
@@ -122,8 +132,16 @@ export const WORKER_ROLE_METAS: Record<WorkerRoleCategory, WorkerRoleMeta> = {
   },
 }
 
-export function classifyWorkerRole(workerId: string): WorkerRoleCategory {
-  const lower = workerId.toLowerCase()
+/**
+ * 节点归到哪个角色集群：按 Worker 登记的角色（四个角色齐全 = 单机全功能；带执行角色的按执行器算）；
+ * 没有登记角色的旧记录才退回按 Worker ID 命名猜。
+ */
+export function classifyWorkerRole(worker: Pick<WorkerSummary, 'workerId' | 'roles'>): WorkerRoleCategory {
+  const roles = worker.roles ?? []
+  if (roles.length === WORKER_ROLE_NAMES.length) return 'monolithic'
+  if (roles.includes('executor')) return 'executor'
+  if (roles.length > 0) return roles[0]!
+  const lower = worker.workerId.toLowerCase()
   if (lower.includes('executor')) return 'executor'
   if (lower.includes('scheduler')) return 'scheduler'
   if (lower.includes('analyst')) return 'analyst'

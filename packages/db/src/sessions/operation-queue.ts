@@ -1,21 +1,14 @@
 import { and, desc, eq, gt, lt, lte, or, sql } from 'drizzle-orm'
 import {
-  SESSION_MAINTENANCE_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
-  isSessionMaintenanceKind,
   type SessionOperationKind,
   type SessionOperationWaitReason,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { databaseNow, locked, schemaFor, updateRows } from '../native.js'
 import type { SessionOperationRow } from '../records.js'
-import {
-  concurrencyProtocolRequired,
-  readAccountSessionCap,
-  workerHasConcurrencyProtocol,
-} from './account-session-concurrency.js'
+import { workerIsExecutor } from './account-session-concurrency.js'
 import { appendSessionEvent } from './session-events.js'
-import { findLiveSessions, type SessionKey } from './sessions.js'
+import type { SessionKey } from './sessions.js'
 import { getSessionOperation, toSessionOperationDto } from './occupancy-read.js'
 
 /** 同一原因只按此间隔刷新评估时间，避免每个领取周期都回写候选行。 */
@@ -84,14 +77,17 @@ export type MaintenanceWorkerAvailability = {
   eligible: number
 }
 
-/** 与领取同口径判断「有没有节点能领这个操作」，只读。 */
+/**
+ * 与领取同口径判断「有没有节点能领这个操作」，只读。
+ * 锁步部署：任何在线执行节点都能领会话操作（含维护、账号并发），不再按协议版本区分。
+ */
 export async function countEligibleMaintenanceWorkers(
   db: Db,
-  input: { key: SessionKey; kind: SessionOperationKind },
+  _input: { key: SessionKey; kind: SessionOperationKind },
 ): Promise<MaintenanceWorkerAvailability> {
   const { workers } = schemaFor(db)
   const rows = await db
-    .select({ protocols: workers.protocolCapabilities })
+    .select({ roles: workers.roles })
     .from(workers)
     .where(
       and(
@@ -100,17 +96,7 @@ export async function countEligibleMaintenanceWorkers(
       ),
     )
   if (!rows.length) return { online: 0, eligible: 0 }
-  const needsMaintenance = isSessionMaintenanceKind(input.kind)
-  const cap = await readAccountSessionCap(db, input.key)
-  const lives = await findLiveSessions(db, input.key)
-  const needsConcurrency = concurrencyProtocolRequired(cap.effectiveCap, lives.length)
-  const eligible = rows.filter(({ protocols }) => {
-    if (!protocols?.includes(SESSION_OCCUPANCY_PROTOCOL)) return false
-    if (needsMaintenance && !protocols.includes(SESSION_MAINTENANCE_PROTOCOL)) return false
-    if (needsConcurrency && !workerHasConcurrencyProtocol(protocols)) return false
-    return true
-  }).length
-  return { online: rows.length, eligible }
+  return { online: rows.length, eligible: rows.filter(({ roles }) => workerIsExecutor(roles)).length }
 }
 
 export function availabilityWaitReason(

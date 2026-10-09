@@ -28,7 +28,6 @@ import {
   type Step,
   type RunGrant,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { isChromiumAvailableCached } from '../testing/chromium-probe.js'
 import { createBrowserPort } from './port.js'
 import { BrowserSessionManager } from './session-manager.js'
@@ -182,7 +181,7 @@ describe('P4: 单 Worker 浏览器屏障重叠执行与容量边界验收 (A10 /
       capacity: 8,
       maxSessions: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
 
     const profileRoot = mkdtempSync(join(tmpdir(), 'cairn-p4b-prof-'))

@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   LOCAL_SECRET_PROVIDER,
-  OUTBOUND_WORKER_PROTOCOL,
   durationReportSendAt,
   lastCompleteDurationPeriodStart,
   shiftDurationPeriod,
@@ -77,7 +76,7 @@ describe.each(DRIVERS)('%s 周期报告订阅', { timeout: 120_000 }, (driver) =
     const [admin] = await handle.db.select().from(consoleRoles).where(eq(consoleRoles.key, 'admin'))
     for (const permission of ['outbound:read', 'report:read', 'report:export']) await insertIgnoreRows(handle.db, consoleRolePermissions, { consoleRoleId: admin!.id, permission })
     seeder = durationSeeder(handle.db, actorId)
-    await registerWorker(handle.db, { workerId: `w-${newId().slice(-12)}`, instanceId: newId(), capacity: 1, lostAfterSeconds: 3600, protocolCapabilities: [OUTBOUND_WORKER_PROTOCOL] })
+    await registerWorker(handle.db, { workerId: `w-${newId().slice(-12)}`, instanceId: newId(), capacity: 1, lostAfterSeconds: 3600, roles: ['maintenance'] })
     channel = {
       id: newId(),
       name: '管理群',

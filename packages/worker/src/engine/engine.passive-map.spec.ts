@@ -30,7 +30,6 @@ import {
   type SessionGrant,
   type Step,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { ExecutionEngine } from './engine.js'
 import type { BrowserPort, PassiveMapObservationPort } from './ports.js'
 
@@ -91,7 +90,7 @@ describe('ExecutionEngine 被动地图采集', { timeout: 60_000 }, () => {
       capacity: 8,
       maxSessions: 16,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
   })
 

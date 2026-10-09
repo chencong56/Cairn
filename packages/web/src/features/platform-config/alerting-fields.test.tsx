@@ -25,8 +25,11 @@ function Harness({ rules, channels, onGoChannels }: { rules: AlertRule[]; channe
   )
 }
 
+/** 出厂规则全部关掉，只看被测那一条（出厂默认开启的「版本不一致」不干扰提示断言）。 */
+const allOff = (): AlertRule[] => FACTORY_ALERT_RULES.map((rule) => ({ ...rule, enabled: false }) as AlertRule)
+
 const withRule = (id: string, patch: Record<string, unknown>) =>
-  FACTORY_ALERT_RULES.map((rule) => (rule.id === id ? ({ ...rule, ...patch } as AlertRule) : rule))
+  allOff().map((rule) => (rule.id === id ? ({ ...rule, ...patch } as AlertRule) : rule))
 
 const customRule = (over: Record<string, unknown> = {}): AlertRule =>
   ({ kind: 'threshold', id: 'custom.abc', name: '自定义阈值', metricKey: 'queue.oldestWaitMs', scope: 'platform', comparator: 'gte', threshold: 1000, forSeconds: 60, severity: 'warning', channelIds: [], enabled: false, ...over }) as AlertRule
@@ -35,7 +38,7 @@ describe('告警规则编辑器（面向普通用户）', () => {
   it('默认只展示建议规则，每条带一句中文描述；自定义规则折叠，没有时标明一般不用配', async () => {
     const screen = await render(<Harness rules={[...FACTORY_ALERT_RULES]} channels={[]} />)
     const text = screen.container.textContent ?? ''
-    expect(text).toContain('下面是系统建议的告警情况，默认都关闭')
+    expect(text).toContain('下面是系统建议的告警情况，除「执行节点与控制台版本不一致」外默认都关闭')
     expect(text).toContain('接口耗时频繁超阈')
     expect(text).toContain('目标系统接口耗时超阈次数（近 1 小时） 大于等于 10')
     expect(text).toMatch(/自定义规则高级 · 一般不用配/)
@@ -62,7 +65,7 @@ describe('告警规则编辑器（面向普通用户）', () => {
   })
 
   it('有渠道但没勾选：提示去勾选；勾选后提示消失；关闭的规则不提示', async () => {
-    const off = await render(<Harness rules={[...FACTORY_ALERT_RULES]} channels={[channel()]} />)
+    const off = await render(<Harness rules={allOff()} channels={[channel()]} />)
     expect(off.container.querySelector('[role="alert"]')).toBeNull()
 
     const screen = await render(<Harness rules={withRule('factory.target.api_slow', { enabled: true })} channels={[channel()]} />)

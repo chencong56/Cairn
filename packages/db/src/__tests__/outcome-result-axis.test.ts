@@ -1,8 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  LOCATOR_RESOLUTION_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   computeContextVersion,
   createRuntimeInvariant,
   type AuthCheckpoint,
@@ -49,11 +47,7 @@ const SCHEMA = `cairn_test_${Date.now().toString(36)}_outcome`
 const registerWorkerWith = (db: any, input: any) =>
   registerWorkerRaw(db, {
     ...input,
-    protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL,
-      
-      SESSION_OCCUPANCY_PROTOCOL,
-      ...(input.protocolCapabilities ?? []),
-    ],
+    roles: ['executor'],
   })
 
 const step1Id = '00000000-0000-4000-8000-000000000091'
@@ -243,7 +237,7 @@ describe('Outcome 结果轴与契约底座（集成）', () => {
       workerId: workerOutcome.workerId,
       instanceId: workerOutcome.instanceId,
       capacity: 8,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
       lostAfterSeconds: 60,
     })
     const grantOutcome = await claimRun(handle, {

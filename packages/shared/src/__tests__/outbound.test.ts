@@ -8,22 +8,15 @@ import {
 } from '../outbound.js'
 import { FACTORY_PLATFORM_CONFIG, upgradePlatformConfigDocument } from '../platform-config.js'
 import { FACTORY_ALERTING } from '../alerting.js'
-import { protocolCapabilitiesForRoles, registrationRequiresOccupancy } from '../worker-roles.js'
+import { workerRoleNames } from '../worker-roles.js'
 
 const id = '11111111-1111-4111-8111-111111111111'
 
 describe('消息推送边界契约', () => {
-  it('出厂关闭；缺省策略不订阅；维护角色不需要浏览器占用', () => {
+  it('出厂关闭；缺省策略不订阅；只有维护角色的节点不是执行节点', () => {
     expect(FACTORY_OUTBOUND.enabled).toBe(false)
     expect(DEFAULT_OUTBOUND_POLICY.enabled).toBe(false)
-    const capabilities = protocolCapabilitiesForRoles({
-      executor: false,
-      scheduler: false,
-      analyst: false,
-      maintenance: true,
-    })
-    expect(capabilities).toContain('outbound-delivery@1')
-    expect(registrationRequiresOccupancy(capabilities)).toBe(false)
+    expect(workerRoleNames({ executor: false, scheduler: false, analyst: false, maintenance: true })).toEqual(['maintenance'])
   })
 
   it.each([

@@ -5,9 +5,6 @@ import { authCapabilityTierSchema, authObservationSchema, authSignalSchema, page
 import { effectTypeSchema, type EffectType } from './step.js'
 import { entityIdSchema, utcInstantSchema } from './wire.js'
 
-/** Worker 声明能力；不作为 claimRun 闸门。旧 Worker 只记 B 的信号。 */
-export const SESSION_AUTH_RECOVERY_PROTOCOL = 'session-auth-recovery@1' as const
-
 export const AUTH_RECOVERY_ERROR_CODES = [
   'AUTH_GATE_CLOSED',
   'AUTH_CONTEXT_NOT_RECOVERABLE',

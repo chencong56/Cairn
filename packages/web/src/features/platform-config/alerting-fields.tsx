@@ -385,8 +385,8 @@ export function AlertingFields({
     <div className='space-y-6'>
       <p className='text-label text-muted-foreground'>
         {hideChannels
-          ? '下面是系统建议的告警情况，默认都关闭。打开某一条，并选好「通知发到哪里」，出问题时才会收到通知。'
-          : '出厂建议规则全部关闭。Webhook 地址只在登记时提交，不会写入配置文档或变更记录。'}
+          ? '下面是系统建议的告警情况，除「执行节点与控制台版本不一致」外默认都关闭。打开某一条，并选好「通知发到哪里」，出问题时才会收到通知。'
+          : '出厂建议规则除「执行节点与控制台版本不一致」外全部关闭。Webhook 地址只在登记时提交，不会写入配置文档或变更记录。'}
       </p>
       <div className='space-y-3'>
         {suggested.map(({ rule, index }) => renderRule(rule, index))}

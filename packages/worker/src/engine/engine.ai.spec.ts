@@ -19,7 +19,6 @@ import { FixtureStepExecutor } from './fixture-executor.js'
 import { AiStepExecutor } from './ai-executor.js'
 import type { AiPort, BrowserPort } from './ports.js'
 import { testAiExecution } from '../__tests__/harness.js'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_engai`
 
@@ -86,7 +85,7 @@ describe('ExecutionEngine × AI 边界', { timeout: 60_000 }, () => {
       instanceId,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     await adjustPlatformConfig(
       handle,

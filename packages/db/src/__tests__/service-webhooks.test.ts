@@ -1,13 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import {
-  SERVICE_WEBHOOK_DELIVERY_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   createAccountBodySchema,
   createTargetBodySchema,
   serviceCallerBodySchema,
   type Step,
-  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import * as api from '../index.js'
 import { expose } from '../database.js'
@@ -309,7 +306,7 @@ describe.each(DRIVERS)('%s service webhook facts', (driver) => {
       ...worker,
       capacity: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SERVICE_WEBHOOK_DELIVERY_PROTOCOL],
+      roles: ['maintenance'],
     })
     let last: Awaited<ReturnType<typeof api.finishServiceWebhookDelivery>> | null = null
     for (let attempt = 1; attempt <= 5; attempt += 1) {
@@ -361,7 +358,7 @@ describe.each(DRIVERS)('%s service webhook facts', (driver) => {
       ...legacy,
       capacity: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     await expect(
       api.saveServiceWebhook(

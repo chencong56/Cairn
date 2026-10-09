@@ -1,6 +1,5 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
-  SESSION_OCCUPANCY_PROTOCOL,
   type SessionAcquireReason,
   type SessionGrant,
   type SessionLeaseOwnerKind,
@@ -31,6 +30,7 @@ import {
   loadLiveAccountSessions,
   profileKeyFrom,
   reservationBlocksSession,
+  workerIsExecutor,
   type SessionClaimOperationWait,
 } from './account-session-concurrency.js'
 import {
@@ -191,11 +191,11 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
       if (!worker || worker.instanceId !== input.holderInstanceId || worker.status !== 'READY') {
         return { ok: false as const, code: 'SESSION_NOT_CLAIMABLE' as const, message: 'Worker 不可领取' }
       }
-      if (!worker.protocolCapabilities?.includes(SESSION_OCCUPANCY_PROTOCOL)) {
+      if (!workerIsExecutor(worker.roles)) {
         return {
           ok: false as const,
           code: 'SESSION_NOT_CLAIMABLE' as const,
-          message: 'Worker 未声明占用协议',
+          message: '只有执行节点能持有浏览器会话',
         }
       }
       const { targetAccounts } = schemaFor(tx)
@@ -256,7 +256,7 @@ export async function claimSessionUse(db: Db, input: ClaimSessionUseInput): Prom
         holderInstanceId: input.holderInstanceId,
         holderMaxSessions: worker.maxSessions,
         holderOccupied: occupied,
-        holderProtocols: worker.protocolCapabilities,
+        holderRoles: worker.roles,
         purpose: input.purpose,
         expectedSessionId: input.sessionId,
         pickIdle: input.pickIdle ?? (input.purpose === 'MAINTENANCE' ? 'worst' : 'oldest'),

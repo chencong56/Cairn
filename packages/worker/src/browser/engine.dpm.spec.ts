@@ -23,7 +23,6 @@ import {
 } from '@cairn/db/testing'
 import { ensureTargetAccountCredential } from '@cairn/db'
 import { DEV_CREDENTIAL_KEY, LOCAL_SECRET_PROVIDER, type Step } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { createBrowserPort } from './port.js'
 import { BrowserSessionManager } from './session-manager.js'
@@ -201,7 +200,7 @@ describe.skipIf(!ENABLED)('ExecutionEngine × SNC DPM（L3 只读）', { timeout
       instanceId: workerInstanceId,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     manager = new BrowserSessionManager(
       handle,

@@ -17,6 +17,8 @@ export const healthResponseSchema = z.object({
     database: z.enum(['up', 'down']),
     changeHint: z.enum(['up', 'down', 'unused']).default('unused'),
   }),
+  /** 发布号（CAIRN_BUILD_VERSION）；本机开发为空。check:stack 据此判断控制台与 Worker 是否同版本。 */
+  version: z.string().nullable().optional(),
 })
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>

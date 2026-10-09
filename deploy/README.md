@@ -99,6 +99,12 @@ pnpm --filter @cairn/worker build
 
 排查：治理页「执行节点」看登记是否 READY、心跳是否新鲜、`routeAvailability`；库内入口无效或过期时 API 不会改去猜另一个地址。控制面入口只解决浏览器到 API，Worker 专用入口失败不要先改 CORS。
 
+## 升级注意：锁步部署与发布号守卫（`0156_worker_roles_release` 起）
+
+API 与 Worker 必须同版本整组升级，**不为新旧 Worker 混跑做兼容**：Worker 不再声明协议能力（`workers.protocol_capabilities` 已删除），登记时只写显式角色 `roles`（`CAIRN_WORKER_ROLES` 解析结果）与发布号 `release`（`CAIRN_BUILD_VERSION`）。下文各节里「Worker 须声明某协议 / 未声明不领取」的说法只适用于当时的旧版本。
+
+发布号守卫：在线控制台实例的 `CAIRN_BUILD_VERSION` 都是 R、而某个 Worker 的不是 R 时，该 Worker 跑完手头运行后不再领新运行，治理页「执行节点」标出「版本不一致」，出厂告警「执行节点与控制台版本不一致」（默认开启）持续 5 分钟后触发，`pnpm check:stack` 判 `STACK_UNHEALTHY`。控制台之间版本本身不一致（控制台滚动升级中）时不拦；`CAIRN_BUILD_VERSION` 为空（本机开发）时守卫不生效。推荐顺序：迁移 → API → Worker → Web；先升 Worker 也不会失败，只是新 Worker 在控制台升级完成前暂不领取。守卫只在 API 与 Worker 的 `CAIRN_BUILD_VERSION` 随代码发布更新时才有效。
+
 ## 升级注意：会话占用协议 `session-occupancy@2`
 
 含 `0032_session_occupancy`（MySQL 为 `0016_session_occupancy`）的版本把认证等待占用迁入 `session_leases` 用途租约，并要求 Worker 声明协议能力 `session-occupancy@2`。这是会话管理中唯一的破坏性迁移，**不能新旧二进制混跑**。

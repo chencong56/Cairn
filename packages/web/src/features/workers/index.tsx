@@ -324,11 +324,19 @@ export function WorkersPage() {
                                   ) : null}
                                   <span>· 容量 {item.capacity}</span>
                                   <span>· 槽位 {item.counts.occupiedSlots}</span>
+                                  {item.release ? <span className='font-mono'>· 版本 {item.release}</span> : null}
                                 </p>
                               </div>
                             </TableCell>
                             <TableCell>
-                              <StatusBadge tone={life.tone}>{life.label}</StatusBadge>
+                              <div className='flex flex-wrap items-center gap-1.5'>
+                                <StatusBadge tone={life.tone}>{life.label}</StatusBadge>
+                                {item.releaseMismatch ? (
+                                  <StatusBadge tone='warning' title='发布号与控制台不一致：该节点跑完手头的运行后不再领新运行，请升级'>
+                                    版本不一致
+                                  </StatusBadge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className='tabular-nums'>
                               <div className='flex items-center gap-1.5 font-mono text-label'>

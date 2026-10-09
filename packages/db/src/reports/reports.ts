@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm'
 import {
   DEFAULT_REPORT_CONFIG,
-  EXPORT_ARTIFACTS_PROTOCOL,
+  workerHasRole,
   MAX_PAGE_HEALTH_SAMPLES,
   isPageHealthResult,
   pageHealthFactFromResult,
@@ -1195,7 +1195,7 @@ async function claimExportJobsTx(db: Db, input: { workerId: string; instanceId: 
   // A stable registry row serializes admission, while rendering runs outside this transaction.
   await locked(db, db.select({ id: workers.id }).from(workers).orderBy(asc(workers.id)).limit(1))
   const [worker] = await db.select().from(workers).where(and(eq(workers.id, input.workerId), eq(workers.instanceId, input.instanceId))).limit(1)
-  if (!worker || worker.status !== 'READY' || !worker.protocolCapabilities.includes(EXPORT_ARTIFACTS_PROTOCOL) || (worker.heartbeatExpiresAt && worker.heartbeatExpiresAt <= now)) return []
+  if (!worker || worker.status !== 'READY' || !workerHasRole(worker.roles, 'maintenance') || (worker.heartbeatExpiresAt && worker.heartbeatExpiresAt <= now)) return []
   const active = await db.select({ workerId: exportJobs.holderWorkerId }).from(exportJobs).where(and(eq(exportJobs.status, 'running'), sql`${exportJobs.leaseUntil} > ${now}`))
   if (active.length >= 4 || active.some((job) => job.workerId === input.workerId)) return []
   const leaseUntil = new Date(now.getTime() + (input.leaseMs ?? 60_000))
@@ -1263,7 +1263,7 @@ export async function guardExportJob(db: Db, grant: ExportGrant, lock = false) {
   const [job] = lock ? await locked(db, query) : await query.limit(1)
   if (!job?.reportId) throw conflict('EXPORT_CLAIM_LOST', '导出任务已取消、超时或执行权已失效')
   const [worker] = await db.select().from(workers).where(and(eq(workers.id, grant.workerId), eq(workers.instanceId, grant.instanceId), eq(workers.status, 'READY'))).limit(1)
-  if (!worker || !worker.protocolCapabilities.includes(EXPORT_ARTIFACTS_PROTOCOL) || (worker.heartbeatExpiresAt && worker.heartbeatExpiresAt <= new Date())) throw conflict('EXPORT_CLAIM_LOST', '导出节点已失效')
+  if (!worker || !workerHasRole(worker.roles, 'maintenance') || (worker.heartbeatExpiresAt && worker.heartbeatExpiresAt <= new Date())) throw conflict('EXPORT_CLAIM_LOST', '导出节点已失效')
   const report = await getReport(db, job.reportId, job.createdByConsoleAccountId ?? undefined)
   if (job.createdByConsoleAccountId) {
     await assertTargetPermission(db, job.createdByConsoleAccountId, report.targetId, 'report:export')

@@ -17,7 +17,7 @@ import {
 import { z } from 'zod'
 import {
   DEFAULT_SERVICE_WEBHOOK_MAX_ATTEMPTS,
-  SERVICE_WEBHOOK_DELIVERY_PROTOCOL,
+  workerHasRole,
   servicePlaygroundRunBodySchema,
   serviceWebhookDeliveryListSchema,
   serviceWebhookDeliveryQuerySchema,
@@ -675,7 +675,7 @@ async function liveWebhookWorker(db: Db, workerId: string, instanceId: string, n
     worker &&
       worker.status === 'READY' &&
       (!worker.heartbeatExpiresAt || worker.heartbeatExpiresAt > now) &&
-      worker.protocolCapabilities?.includes(SERVICE_WEBHOOK_DELIVERY_PROTOCOL),
+      workerHasRole(worker.roles, 'maintenance'),
   )
 }
 

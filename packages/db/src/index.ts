@@ -457,8 +457,6 @@ export type { ClaimedSessionOperation } from "./sessions/index.js";
 export { occupancyGrantFromLease } from "./sessions/index.js";
 export { contentDigestFor } from "./sessions/index.js";
 export {
-  workerHasOccupancyProtocol,
-  workerHasMaintenanceProtocol,
   toSessionOperationDto,
 } from "./sessions/index.js";
 export const findActiveLeaseRow = operation(impl2.findActiveLeaseRow);

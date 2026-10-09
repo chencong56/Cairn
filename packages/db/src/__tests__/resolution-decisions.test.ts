@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
-import { LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, type ResolutionDecision, type Step } from '@cairn/shared'
+import { type ResolutionDecision, type Step } from '@cairn/shared'
 import { newId } from '../id.js'
 import { expose } from '../database.js'
 import { schemaFor } from '../native.js'
@@ -57,7 +57,7 @@ describe.each(DRIVERS)('%s 解析决策事实', { timeout: 60_000 }, (driver) =>
       instanceId,
       capacity: 2,
       lostAfterSeconds: 3600,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, LOCATOR_RESOLUTION_PROTOCOL],
+      roles: ['executor'],
     })
     return { workerId, instanceId }
   }

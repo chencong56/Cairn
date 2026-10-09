@@ -1,5 +1,5 @@
 import { bigint, doublePrecision, index, integer, jsonb, text, timestamp, uuid } from 'drizzle-orm/pg-core'
-import type { PeriodicSlotMode, PeriodicSlotOutcome, RunLeaseStatus, WorkerStatus } from '@cairn/shared'
+import type { PeriodicSlotMode, PeriodicSlotOutcome, RunLeaseStatus, WorkerRoleName, WorkerStatus } from '@cairn/shared'
 import { newId } from '../id.js'
 import { cairnSchema } from './console.js'
 import { runs } from './execution.js'
@@ -24,7 +24,10 @@ export const workers = cairnSchema.table('workers', {
   liveHandleCount: integer('live_handle_count'),
   sampledSlotCount: integer('sampled_slot_count'),
   handleMismatchStreak: integer('handle_mismatch_streak').notNull().default(0),
-  protocolCapabilities: jsonb('protocol_capabilities').$type<string[]>().notNull().default([]),
+  /** 登记的角色（executor / scheduler / maintenance / analyst）。锁步部署：不再声明协议能力。 */
+  roles: jsonb('roles').$type<WorkerRoleName[]>().notNull().default([]),
+  /** 发布号（CAIRN_BUILD_VERSION）；本机开发为空。 */
+  release: text('release'),
   sampledRssBytes: bigint('sampled_rss_bytes', { mode: 'number' }),
   sampledEventLoopDelayMs: doublePrecision('sampled_event_loop_delay_ms'),
   sampledCpuPercent: integer('sampled_cpu_percent'),

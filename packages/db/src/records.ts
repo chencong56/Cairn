@@ -1,5 +1,6 @@
 // Logical persistence records. Native schema parity and contract tests guard this shape.
 import type {
+  WorkerRoleName,
   AttemptStatus,
   EvidenceStatus,
   EvidenceType,
@@ -721,7 +722,8 @@ export type WorkerRow = {
   liveHandleCount: number | null
   sampledSlotCount: number | null
   handleMismatchStreak: number
-  protocolCapabilities: string[]
+  roles: WorkerRoleName[]
+  release: string | null
   listenHost: string | null
   listenPort: number | null
   hostname: string | null

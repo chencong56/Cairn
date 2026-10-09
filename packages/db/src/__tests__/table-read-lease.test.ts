@@ -1,8 +1,6 @@
 import { eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
-  LOCATOR_RESOLUTION_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   type Step,
 } from '@cairn/shared'
 import { newId } from '../id.js'
@@ -73,7 +71,7 @@ describe.each(DRIVERS)('%s table.read@2 不再有独立的能力门禁', { timeo
       capacity: 4,
       lostAfterSeconds: 60,
       // 不声明任何表格相关能力：表格读取 / 验收不再有能力门禁
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     const grant = await claimRun(handle, { workerId, instanceId, leaseTtlSeconds: 30 })
     expect(grant?.runId).toBe(created.detail.id)

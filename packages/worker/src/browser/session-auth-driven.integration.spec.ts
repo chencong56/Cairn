@@ -33,14 +33,12 @@ import {
 } from '@cairn/db/testing'
 import {
   DEV_CREDENTIAL_KEY,
-  SESSION_MAINTENANCE_PROTOCOL,
   evaluateAuthVerify,
   targetAuthProfileDefinitionSchema,
   type Step,
 } from '@cairn/shared'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import type { BrowserHandle } from './runtime'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { BrowserSessionManager } from './session-manager'
 
 const echoStep: Step = {
@@ -317,7 +315,7 @@ describe('认证驱动保活全链路', { timeout: 120_000 }, () => {
       capacity: 16,
       maxSessions: 16,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS, SESSION_MAINTENANCE_PROTOCOL],
+      roles: ['executor'],
     })
     await manager.reconcileOwn()
     manager.resolveAccountSecrets = async () => ({ username: 'alice', password: 'x' })

@@ -28,8 +28,6 @@ import {
   DEV_CREDENTIAL_KEY,
   FACTORY_ALERT_RULES,
   LOCAL_SECRET_PROVIDER,
-  OUTBOUND_WORKER_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
 } from '@cairn/shared'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { deliverOutbound } from './outbound-delivery.js'
@@ -166,7 +164,7 @@ describe('告警投递闭环（集成）', { timeout: 60_000 }, () => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 3600,
-      protocolCapabilities: [OUTBOUND_WORKER_PROTOCOL],
+      roles: ['maintenance'],
     })
     const deliver = () =>
       deliverOutbound({
@@ -183,7 +181,7 @@ describe('告警投递闭环（集成）', { timeout: 60_000 }, () => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, OUTBOUND_WORKER_PROTOCOL],
+      roles: ['executor', 'maintenance'],
     })
     await handle.db.update(workers).set({ heartbeatExpiresAt: new Date(Date.now() - 1_000) }).where(eq(workers.id, workerId))
     expect(await markLostWorkers(handle.db)).toContain(workerId)
@@ -199,7 +197,7 @@ describe('告警投递闭环（集成）', { timeout: 60_000 }, () => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, OUTBOUND_WORKER_PROTOCOL],
+      roles: ['executor', 'maintenance'],
     })
     expect((await evaluateAlerts(handle.db)).resolved).toBe(1)
     await deliver()

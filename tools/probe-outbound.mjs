@@ -23,7 +23,6 @@ const { LocalSecretProvider, credentialKeyFromEnv } = apiRequire(
 )
 const db = apiRequire('@cairn/db')
 const fixture = apiRequire('@cairn/db/testing')
-const { OUTBOUND_WORKER_PROTOCOL } = apiRequire('@cairn/shared')
 const { deliverOutbound } = workerRequire('./dist/runtime/outbound-delivery.js')
 const { chromium } = workerRequire('playwright')
 const { SMTPServer } = workerRequire('smtp-server')
@@ -184,7 +183,7 @@ try {
     ...worker,
     capacity: 1,
     lostAfterSeconds: 3600,
-    protocolCapabilities: [OUTBOUND_WORKER_PROTOCOL],
+    roles: ['maintenance'],
   })
   const dispatch = () =>
     deliverOutbound({

@@ -49,7 +49,6 @@ import {
 } from '@cairn/shared'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { ExecutionEngine } from './engine.js'
 import type { BrowserPort } from './ports.js'
 import { clearPlacementYields, placementYieldExcludes } from '../runtime/placement-backoff.js'
@@ -126,7 +125,7 @@ describe('ExecutionEngine × BrowserPort（L1）', { timeout: 60_000 }, () => {
       capacity: 8,
       maxSessions: 32,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
   })
 

@@ -34,7 +34,6 @@ import {
 import {
   DEFAULT_EXECUTOR_VERSIONS,
   DEFAULT_SESSION_POLICY,
-  SESSION_OCCUPANCY_PROTOCOL,
   runGrantSchema,
   runSnapshotSchema,
   stepRunFor,
@@ -42,7 +41,6 @@ import {
   type ScenarioAuthoringDocumentV2,
   type Step,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import type { RunControlHintService } from '../observe/run-control-hint.service.js'
 import { ExecutionEngine } from './engine.js'
 
@@ -96,7 +94,7 @@ describe('ExecutionEngine（集成）', { timeout: 30_000 }, () => {
       instanceId: workerInstanceId,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
   })
 
@@ -1389,7 +1387,7 @@ describe('ExecutionEngine（集成）', { timeout: 30_000 }, () => {
       instanceId: oldInstanceId,
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     await cancelOtherClaimable(runId)
     const grant = await claimRun(handle, {

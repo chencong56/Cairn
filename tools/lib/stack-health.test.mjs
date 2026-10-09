@@ -76,6 +76,22 @@ describe('decideVerdict', () => {
     assert.equal(isFailure('STACK_OK'), false)
   })
 
+  it('锁步部署：控制台与 Worker 都带发布号且不一致是 STACK_UNHEALTHY；任一侧没有发布号（本机开发）不判', () => {
+    const withVersions = (api, workerVersions) => ({
+      ...healthy,
+      apiHealth: { ok: true, value: { ...okHealth, version: api } },
+      workerHealth: { ok: true, value: { ...healthy.workerHealth.value, versions: workerVersions } },
+    })
+    const stale = decideVerdict(withVersions('20261009-b', ['20261008-a']))
+    assert.equal(stale.result, 'STACK_UNHEALTHY')
+    assert.match(stale.fail, /20261008-a.*20261009-b/)
+    assert.equal(decideVerdict(withVersions('20261009-b', ['20261009-b'])).result, 'STACK_OK')
+    assert.equal(decideVerdict(withVersions(null, ['20261008-a'])).result, 'STACK_OK')
+    assert.equal(decideVerdict(withVersions('20261009-b', [])).result, 'STACK_OK')
+    const parsed = parseHealthBody(JSON.stringify({ status: 'ok', service: 'cairn-api', uptimeSeconds: 1, checks: { database: 'up' }, version: '20261009-b' }))
+    assert.equal(parsed.value.version, '20261009-b')
+  })
+
   it('对象存储不可达是 STACK_UNHEALTHY，未配置（不传）则跳过', () => {
     const verdict = decideVerdict({
       ...healthy,

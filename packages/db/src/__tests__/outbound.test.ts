@@ -3,7 +3,6 @@ import { and, eq } from 'drizzle-orm'
 import {
   DEFAULT_OUTBOUND_POLICY,
   LOCAL_SECRET_PROVIDER,
-  OUTBOUND_WORKER_PROTOCOL,
   type OutboundChannel,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -123,7 +122,7 @@ describe.each(DRIVERS)('%s 消息推送持久化与故障恢复', { timeout: 60_
       ...worker,
       capacity: 1,
       lostAfterSeconds: 3600,
-      protocolCapabilities: [OUTBOUND_WORKER_PROTOCOL],
+      roles: ['maintenance'],
     })
     await getOrCreatePlatformConfig(h.db)
   })
@@ -746,7 +745,7 @@ describe.each(DRIVERS)('%s 消息推送持久化与故障恢复', { timeout: 60_
       ...other,
       capacity: 1,
       lostAfterSeconds: 3600,
-      protocolCapabilities: [],
+      roles: [],
     })
     try {
       await write({ settings: { enabled: true, consoleBaseUrl: 'https://console.example.com' } })

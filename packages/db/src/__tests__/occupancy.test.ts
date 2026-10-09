@@ -1,13 +1,8 @@
 import { eq, inArray } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
-  MAP_JOBS_PROTOCOL,
-  MAP_SCHEDULER_PROTOCOL,
   PLATFORM_CONFIG_SINGLETON_ID,
-  SESSION_MAINTENANCE_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   type Step,
-  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb, grantAdminScope } from './contract-fixture.js'
 import { afterSeconds, schemaFor } from '../native.js'
@@ -147,29 +142,38 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
     if (!rejected.ok) expect(rejected.code).toBe('SESSION_NOT_CLAIMABLE')
   })
 
-  it('SM28 声明执行协议但未声明 session-occupancy@2 的 Worker 不能 READY', async () => {
+  it('SM28 登记写入显式角色与发布号，未知角色拒绝登记', async () => {
+    const registered = await registerWorker(handle.db, {
+      workerId: `roles-${newId().slice(0, 8)}`,
+      instanceId: newId(),
+      capacity: 2,
+      lostAfterSeconds: 60,
+      roles: ['executor', 'analyst'],
+      release: 'r-sm28',
+    })
+    expect(registered.worker.status).toBe('READY')
+    const { workers } = schemaFor(handle.db)
+    const [row] = await handle.db.select().from(workers).where(eq(workers.id, registered.worker.id))
+    expect(row?.roles).toEqual(['executor', 'analyst'])
+    expect(row?.release).toBe('r-sm28')
     await expect(
       registerWorker(handle.db, {
-        workerId: `old-${newId().slice(0, 8)}`,
+        workerId: `bad-${newId().slice(0, 8)}`,
         instanceId: newId(),
         capacity: 2,
         lostAfterSeconds: 60,
-        protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, MAP_JOBS_PROTOCOL],
+        roles: ['session-occupancy@2'],
       }),
-    ).rejects.toMatchObject({ code: 'WORKER_PROTOCOL_UNSUPPORTED' })
-    const ready = await seedWorker(handle, `ready-${newId().slice(0, 8)}`)
-    const { workers } = schemaFor(handle.db)
-    const [row] = await handle.db.select().from(workers).where(eq(workers.id, ready.workerId))
-    expect(row?.protocolCapabilities).toContain(SESSION_OCCUPANCY_PROTOCOL)
+    ).rejects.toThrow()
   })
 
-  it('A2 调度与维护角色可以不声明占用协议就登记', async () => {
+  it('A2 调度与维护角色可以登记（不持有浏览器会话）', async () => {
     const scheduler = await registerWorker(handle.db, {
       workerId: `sched-${newId().slice(0, 8)}`,
       instanceId: newId(),
       capacity: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [MAP_SCHEDULER_PROTOCOL],
+      roles: ['scheduler'],
     })
     expect(scheduler.worker.status).toBe('READY')
     const maintenance = await registerWorker(handle.db, {
@@ -177,7 +181,7 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
       instanceId: newId(),
       capacity: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [],
+      roles: ['maintenance'],
     })
     expect(maintenance.worker.status).toBe('READY')
   })
@@ -422,18 +426,8 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
   })
 
   it('SM32 会话操作同样先等原节点：其他 Worker 不新建实例，原节点领取沿用 Profile；等满后才转移', async () => {
-    async function maintenanceWorker(prefix: string) {
-      const worker = { workerId: `${prefix}-${newId().slice(0, 8)}`, instanceId: newId() }
-      await registerWorker(handle.db, {
-        ...worker,
-        capacity: 8,
-        lostAfterSeconds: 60,
-        protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_MAINTENANCE_PROTOCOL],
-      })
-      return worker
-    }
-    const origin = await maintenanceWorker('sm32po')
-    const other = await maintenanceWorker('sm32px')
+    const origin = await seedWorker(handle, `sm32po-${newId().slice(0, 8)}`)
+    const other = await seedWorker(handle, `sm32px-${newId().slice(0, 8)}`)
     const { sessionOperations } = schemaFor(handle.db)
     async function prepareWithProfileAt(label: string) {
       const accountId = await makeAccount(label)
@@ -622,7 +616,7 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
       capacity: 2,
       maxSessions: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     const tinyRun = await queueRun(other)
     const tinyGrant = await forceGrantForRun(handle, tinyRun.detail.id, tinyId)
@@ -746,7 +740,7 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
     })
   })
 
-  it('未声明 session-maintenance@1 的 Worker 不能领取 C kind', async () => {
+  it('非执行节点不能领取会话操作', async () => {
     const accountId = await makeAccount('no-maint')
     const workerId = `nomaint-${newId().slice(0, 8)}`
     const instanceId = newId()
@@ -755,7 +749,7 @@ describe.each(DRIVERS)('%s 会话占用与调度', { timeout: 60_000 }, (driver)
       instanceId,
       capacity: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['maintenance', 'scheduler'],
     })
     const queued = await requestSessionOperation(handle.db, {
       key: { targetId, targetAccountId: accountId },

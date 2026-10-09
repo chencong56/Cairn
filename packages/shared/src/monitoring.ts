@@ -74,6 +74,7 @@ export const MONITOR_METRIC_KEYS = [
   'worker.status.draining',
   'worker.status.stopped',
   'worker.status.lost',
+  'worker.release.mismatch',
   'worker.heartbeat.fresh',
   'worker.heartbeat.stale',
   'worker.capacity.total',
@@ -299,6 +300,7 @@ export const MONITOR_METRIC_CATALOG: { readonly [K in MonitorMetricKey]: Monitor
   'worker.status.draining': { layer: 'L2', unit: 'count', unknownWhen: L2_REGISTRY },
   'worker.status.stopped': { layer: 'L2', unit: 'count', unknownWhen: L2_REGISTRY },
   'worker.status.lost': { layer: 'L2', unit: 'count', unknownWhen: L2_REGISTRY },
+  'worker.release.mismatch': { layer: 'L2', unit: 'count', unknownWhen: L2_REGISTRY },
   'worker.heartbeat.fresh': { layer: 'L2', unit: 'count', unknownWhen: L2_REGISTRY },
   'worker.heartbeat.stale': { layer: 'L2', unit: 'count', unknownWhen: L2_REGISTRY },
   'worker.capacity.total': { layer: 'L2', unit: 'count', unknownWhen: L2_REGISTRY },
@@ -516,6 +518,8 @@ export const monitorCapacityCardSchema = z.object({
     lost: monitorMetricNumberSchema,
     heartbeatFresh: monitorMetricNumberSchema,
     heartbeatStale: monitorMetricNumberSchema,
+    /** 在线执行节点里发布号与控制台不一致的数量（锁步部署：这些节点不领新运行）。 */
+    releaseMismatch: monitorMetricNumberSchema.default(unknownMetric('not_collected')),
   }),
   capacity: z.object({
     total: monitorMetricNumberSchema,

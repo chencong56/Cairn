@@ -27,17 +27,23 @@ describe('workerLifecycle', () => {
 })
 
 describe('classifyWorkerRole', () => {
-  it('按 workerId 正确识别 4 角色与单机全能兜底', () => {
-    expect(classifyWorkerRole('local-worker-executor')).toBe('executor')
-    expect(classifyWorkerRole('cairn-worker-executor-0')).toBe('executor')
-    expect(classifyWorkerRole('local-worker-scheduler')).toBe('scheduler')
-    expect(classifyWorkerRole('cairn-worker-scheduler-1')).toBe('scheduler')
-    expect(classifyWorkerRole('local-worker-analyst')).toBe('analyst')
-    expect(classifyWorkerRole('cairn-worker-analyst-2')).toBe('analyst')
-    expect(classifyWorkerRole('local-worker-maintenance')).toBe('maintenance')
-    expect(classifyWorkerRole('cairn-worker-maintenance-0')).toBe('maintenance')
-    expect(classifyWorkerRole('local-worker')).toBe('monolithic')
-    expect(classifyWorkerRole('worker-1')).toBe('monolithic')
+  it('按登记的角色归类：四个角色齐全为全功能，带执行角色按执行器，其余取所登记的角色', () => {
+    expect(classifyWorkerRole({ workerId: 'node-a', roles: ['executor', 'scheduler', 'maintenance', 'analyst'] })).toBe('monolithic')
+    expect(classifyWorkerRole({ workerId: 'node-b', roles: ['executor', 'maintenance'] })).toBe('executor')
+    expect(classifyWorkerRole({ workerId: 'cairn-worker-executor-0', roles: ['scheduler'] })).toBe('scheduler')
+  })
+
+  it('没有登记角色的旧记录按 workerId 识别 4 角色与单机全能兜底', () => {
+    expect(classifyWorkerRole({ workerId: 'local-worker-executor', roles: [] })).toBe('executor')
+    expect(classifyWorkerRole({ workerId: 'cairn-worker-executor-0', roles: [] })).toBe('executor')
+    expect(classifyWorkerRole({ workerId: 'local-worker-scheduler', roles: [] })).toBe('scheduler')
+    expect(classifyWorkerRole({ workerId: 'cairn-worker-scheduler-1', roles: [] })).toBe('scheduler')
+    expect(classifyWorkerRole({ workerId: 'local-worker-analyst', roles: [] })).toBe('analyst')
+    expect(classifyWorkerRole({ workerId: 'cairn-worker-analyst-2', roles: [] })).toBe('analyst')
+    expect(classifyWorkerRole({ workerId: 'local-worker-maintenance', roles: [] })).toBe('maintenance')
+    expect(classifyWorkerRole({ workerId: 'cairn-worker-maintenance-0', roles: [] })).toBe('maintenance')
+    expect(classifyWorkerRole({ workerId: 'local-worker', roles: [] })).toBe('monolithic')
+    expect(classifyWorkerRole({ workerId: 'worker-1', roles: [] })).toBe('monolithic')
   })
 })
 

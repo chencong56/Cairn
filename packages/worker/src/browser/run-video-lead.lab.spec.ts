@@ -37,7 +37,6 @@ import {
   readRunVideoPayload,
   type Step,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { createBrowserPort } from './port.js'
 import { BrowserSessionManager } from './session-manager.js'
@@ -160,7 +159,7 @@ describe('运行录像前置空白治理验证（方案 B 真实浏览器场景�
       instanceId: workerInstanceId,
       capacity: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
 
     manager = new BrowserSessionManager(

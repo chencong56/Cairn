@@ -5,9 +5,9 @@ import { updateRows, updateRowsCount } from '../native.js'
 import { and, asc, eq, gt, inArray, isNull, ne, not, or, sql } from 'drizzle-orm'
 import {
   DEFAULT_BROWSER_MAX_SESSIONS,
-  SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
-  registrationRequiresOccupancy,
+  workerHasRole,
+  workerRoleNameSchema,
+  type WorkerRoleName,
   isFinishedRunStatus,
   nextHandleMismatchStreak,
   runGrantSchema,
@@ -27,6 +27,7 @@ import type { IsolatedLostRow } from '../sessions/lost-disposition.js'
 import { evaluateRunSessionEligibility } from '../sessions/occupancy-placement.js'
 import { readSessionScheduling } from '../sessions/occupancy-read.js'
 import { runLeases, workers } from '../schema/worker.js'
+import { workerReleaseBlocked } from './release.js'
 
 /** 用共享枚举标注，让"抛出的码"与"对外声明的码"由类型接住，而不是各写一遍字面量。 */
 export const WORKER_ID_CONFLICT: RunLeaseErrorCode = 'WORKER_ID_CONFLICT'
@@ -45,7 +46,8 @@ export type WorkerRecord = {
   sampledSlotCount: number | null
   handleMismatchStreak: number
   handleSampledAt: Date | null
-  protocolCapabilities: string[]
+  roles: WorkerRoleName[]
+  release: string | null
   listenHost: string | null
   listenPort: number | null
   hostname: string | null
@@ -71,7 +73,8 @@ function toWorker(row: WorkerRow): WorkerRecord {
     sampledSlotCount: row.sampledSlotCount,
     handleMismatchStreak: row.handleMismatchStreak,
     handleSampledAt: row.liveHandleCount === null && row.sampledSlotCount === null ? null : row.heartbeatAt,
-    protocolCapabilities: row.protocolCapabilities ?? [],
+    roles: row.roles ?? [],
+    release: row.release ?? null,
     listenHost: row.listenHost ?? null,
     listenPort: row.listenPort ?? null,
     hostname: row.hostname ?? null,
@@ -83,7 +86,8 @@ function registrationValues(input: {
   capacity: number
   maxSessions?: number
   lostAfterSeconds: number
-  protocolCapabilities?: string[]
+  roles?: readonly string[]
+  release?: string | null
   internalBaseUrl?: string | null
   listenHost?: string | null
   listenPort?: number | null
@@ -106,7 +110,9 @@ function registrationValues(input: {
     liveHandleCount: null,
     sampledSlotCount: null,
     handleMismatchStreak: 0,
-    protocolCapabilities: input.protocolCapabilities ?? [],
+    // 不传角色按执行节点登记（与历史「空协议视作执行节点」一致）；未知角色直接拒绝
+    roles: workerRoleNameSchema.array().parse(input.roles ?? ['executor']) as WorkerRoleName[],
+    release: input.release ?? null,
     sampledRssBytes: null,
     sampledEventLoopDelayMs: null,
     sampledCpuPercent: null,
@@ -241,7 +247,8 @@ export async function registerWorker(
     capacity: number
     maxSessions?: number
     lostAfterSeconds: number
-    protocolCapabilities?: string[]
+    roles?: readonly string[]
+    release?: string | null
     internalBaseUrl?: string | null
     listenHost?: string | null
     listenPort?: number | null
@@ -257,13 +264,6 @@ export async function registerWorker(
       )
       const now = await clockNow(tx as unknown as Db)
       const values = registrationValues({ ...input, now })
-
-      if (
-        registrationRequiresOccupancy(input.protocolCapabilities) &&
-        !input.protocolCapabilities?.includes(SESSION_OCCUPANCY_PROTOCOL)
-      ) {
-        throw conflict('WORKER_PROTOCOL_UNSUPPORTED', 'Worker 未声明 session-occupancy@2')
-      }
 
       if (existing && existing.instanceId === input.instanceId) {
         const [row] = await tx.select().from(workers).where(eq(workers.id, input.workerId)).limit(1)
@@ -751,7 +751,7 @@ function claimEligiblePredicate(
   candidateIds: string[],
   nowIso: string,
 ) {
-  const { browserSessions, runLeases, runs } = schemaFor(tx)
+  const { browserSessions, runLeases, runs, targetAccounts } = schemaFor(tx)
   const startBefore = mapJobStartBefore(tx)
   return and(
     eq(runs.status, status),
@@ -778,14 +778,16 @@ function claimEligiblePredicate(
            WHERE s.owner_worker_id = ${input.workerId}
  AND s.status IN ('CREATING', 'OPEN', 'CLOSING')
         ) < ${worker.maxSessions}`,
-        worker.protocolCapabilities?.includes(SESSION_ACCOUNT_CONCURRENCY_PROTOCOL)
-          ? undefined
-          : sql`NOT EXISTS (
-          SELECT 1 FROM ${browserSessions} s
+        // 账号活会话已达账号上限（实际上限 ≤ max(1, max_concurrent_sessions)）的键在 SQL 里先滤掉，
+        // 免得同键队头逐条进应用层判定；未达上限的仍由 evaluateRunSessionEligibility 按策略细判。
+        sql`(
+          SELECT COUNT(*) FROM ${browserSessions} s
            WHERE s.target_id = ${runs.targetId} AND s.target_account_id = ${runs.targetAccountId}
  AND s.status IN ('CREATING', 'OPEN', 'CLOSING', 'LOST')
- AND NOT (s.status = 'OPEN' AND s.owner_worker_id = ${input.workerId})
-        )`,
+        ) < COALESCE((
+          SELECT CASE WHEN ta.max_concurrent_sessions > 1 THEN ta.max_concurrent_sessions ELSE 1 END
+            FROM ${targetAccounts} ta WHERE ta.id = ${runs.targetAccountId}
+        ), 1)`,
       ),
     ),
     sql`(
@@ -881,6 +883,9 @@ export async function claimRunWithCursor(
     eq(workers.id, input.workerId), eq(workers.instanceId, input.instanceId), eq(workers.status, 'READY'),
   )).limit(1)
   if (!worker) return result(null, 'unavailable')
+  // 锁步部署：只有执行节点领运行；发布号与在线控制台不一致时不领新运行（跑完手头的）
+  if (!workerHasRole(worker.roles, 'executor')) return result(null, 'unavailable')
+  if (await workerReleaseBlocked(db, worker)) return result(null, 'unavailable')
   let scheduling: Awaited<ReturnType<typeof readSessionScheduling>>['scheduling'] | undefined
   const excluded = (input.excludeRunIds ?? []).slice(0, CLAIM_EXCLUDE_LIMIT)
   diagnostics.excluded = excluded.length
@@ -983,7 +988,7 @@ export async function claimRunWithCursor(
           const eligibility = await evaluateRunSessionEligibility(tx, {
             run, workerId: input.workerId, instanceId: input.instanceId,
             maxSessions: currentWorker.maxSessions, scheduling: currentScheduling,
-            protocolCapabilities: currentWorker.protocolCapabilities,
+            roles: currentWorker.roles,
           })
           if (!eligibility.eligible) return { grant: null, unavailable: false }
           await tx.update(runs).set({

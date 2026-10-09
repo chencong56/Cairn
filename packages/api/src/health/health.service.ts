@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common'
 import type { ChangeHintBus, DbHandle } from '@cairn/db'
-import { healthResponseSchema, type HealthResponse } from '@cairn/shared'
+import { healthResponseSchema, resolveBuildVersion, type HealthResponse } from '@cairn/shared'
+import { config } from '../config/env'
 import { DB_HANDLE } from '../db/db.module'
 import { CHANGE_HINT } from '../observe/change-hint.module'
 
@@ -61,6 +62,7 @@ export class HealthService {
       service: inspect.service,
       uptimeSeconds: inspect.uptimeSeconds,
       checks: { database: inspect.database, changeHint: inspect.changeHint },
+      version: resolveBuildVersion(config.CAIRN_BUILD_VERSION),
     })
   }
 }

@@ -391,8 +391,6 @@ export {
   type SessionSnapshotSummaryDto,
 } from './session.js'
 export {
-  SESSION_OCCUPANCY_PROTOCOL,
-  SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
   SESSION_LEASE_PURPOSES,
   sessionLeasePurposeSchema,
   SESSION_LEASE_OWNER_KINDS,
@@ -439,7 +437,6 @@ export {
   type SessionOperationDto,
 } from './session-occupancy.js'
 export {
-  SESSION_MAINTENANCE_PROTOCOL,
   SESSION_LEASE_CLAIM_KINDS,
   SESSION_IDLE_ONLY_KINDS,
   ACCOUNT_SESSION_STATUSES,
@@ -632,7 +629,6 @@ export {
 } from './session-auth.js'
 export { BUILTIN_CAPTCHA_FINGERPRINTS } from './captcha-fingerprints.js'
 export {
-  SESSION_AUTH_RECOVERY_PROTOCOL,
   AUTH_RECOVERY_ERROR_CODES,
   authRecoveryErrorCodeSchema,
   AUTH_CHECKPOINT_STATUSES,
@@ -2642,13 +2638,16 @@ export {
 } from './account-usage.js'
 export {
   WORKER_ROLES,
+  WORKER_ROLE_NAMES,
   DEFAULT_WORKER_ROLES,
   ALL_WORKER_ROLES,
   parseWorkerRoles,
-  protocolCapabilitiesForRoles,
-  advertisesRunExecution,
-  registrationRequiresOccupancy,
+  workerRoleNames,
+  workerHasRole,
+  workerReleaseMismatch,
+  workerRoleNameSchema,
   type WorkerRole,
+  type WorkerRoleName,
   type WorkerRoleSet,
 } from './worker-roles.js'
 export {

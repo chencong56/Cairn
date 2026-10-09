@@ -20,7 +20,7 @@ import {
   sealAndPublishMapRelease, grantMapConsumptionEligibility, upsertMapScenarioBinding,
 } from '@cairn/db'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
-import { DEV_CREDENTIAL_KEY, SESSION_OCCUPANCY_PROTOCOL, MAP_ASSETS_PROTOCOL, MAP_IDENTITY_RULE_VERSION, MAP_CONSUMPTION_PROTOCOL,
+import { DEV_CREDENTIAL_KEY, MAP_ASSETS_PROTOCOL, MAP_IDENTITY_RULE_VERSION,
   PERMISSIONS, mapListQuerySchema, type MapProjectionPlan, type MapConditionSnapshot,
   type Step, type TargetDescriptor,
 } from '@cairn/shared'
@@ -97,7 +97,7 @@ describe('OM-F HTTP × Worker × Chromium end to end', { timeout: 60_000 }, () =
     if (!addr || typeof addr === 'string') throw new Error('port')
     baseUrl = `http://127.0.0.1:${addr.port}`
     await registerWorker(handle.db, { workerId, instanceId: workerInstanceId, capacity: 10, maxSessions: 16,
-      lostAfterSeconds: 3600, protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL, MAP_CONSUMPTION_PROTOCOL] })
+      lostAfterSeconds: 3600, roles: ['executor'] })
     profileRoot = mkdtempSync(join(tmpdir(), 'cairn-omf-e2e-'))
     manager = new BrowserSessionManager(handle, { workerId, workerInstanceId, profileRoot, headless: true,
       maxSessions: 16, defaultLeaseTtlSeconds: 120, defaultAuthWaitSeconds: 60, heartbeatMs: 5000 }, secretProvider)

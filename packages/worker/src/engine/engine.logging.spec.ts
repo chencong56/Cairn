@@ -15,7 +15,6 @@ import {
   type DbHandle,
 } from '@cairn/db/testing'
 import { PROCESS_LOG_EVENTS, type Step } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { ExecutionEngine } from './engine.js'
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_englog`
@@ -76,7 +75,7 @@ describe('ExecutionEngine 进程日志', { timeout: 30_000 }, () => {
       instanceId: workerInstanceId,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
   })
 

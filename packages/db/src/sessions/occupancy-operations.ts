@@ -1,8 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import {
-  SESSION_MAINTENANCE_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   canonicalJson,
   isSessionIdleOnlyKind,
   isSessionLeaseClaimKind,
@@ -23,11 +21,9 @@ import { sha256Hex } from '../runs/digest.js'
 import { lockRunRow } from '../leases/leases.js'
 import type { SessionOperationRow } from '../records.js'
 import {
-  concurrencyProtocolRequired,
   loadLiveAccountSessions,
   profileKeyFrom,
-  readAccountSessionCap,
-  workerHasConcurrencyProtocol,
+  workerIsExecutor,
   type SessionClaimOperationWait,
 } from './account-session-concurrency.js'
 import { expireQueuedSessionOperations, recordOperationWait } from './operation-queue.js'
@@ -265,8 +261,8 @@ export async function claimSessionOperation(
   return atomic(db, async (tx) => {
     const worker = await lockWorkerRow(tx, input.workerId)
     if (!worker || worker.instanceId !== input.instanceId || worker.status !== 'READY') return null
-    if (!worker.protocolCapabilities?.includes(SESSION_OCCUPANCY_PROTOCOL)) return null
-    const hasMaintenance = Boolean(worker.protocolCapabilities?.includes(SESSION_MAINTENANCE_PROTOCOL))
+    // 锁步部署：会话操作（含维护）只给执行节点，不再按协议版本区分
+    if (!workerIsExecutor(worker.roles)) return null
     const { sessionOperations, runs } = schemaFor(tx)
     const now = await clockNow(tx)
     await expireQueuedSessionOperations(tx, { now })
@@ -277,7 +273,6 @@ export async function claimSessionOperation(
       .orderBy(asc(sessionOperations.createdAt), asc(sessionOperations.id))
       .limit(20)
     for (const snapshot of candidates) {
-      if (isSessionMaintenanceKind(snapshot.kind) && !hasMaintenance) continue
       const { targetAccounts } = schemaFor(tx)
       await locked(
         tx,
@@ -310,13 +305,6 @@ export async function claimSessionOperation(
 
       const keyPreview = { targetId: candidate.targetId, targetAccountId: candidate.targetAccountId }
       const livePreview = await findLiveSessions(tx, keyPreview)
-      const capPreview = await readAccountSessionCap(tx, keyPreview)
-      if (
-        concurrencyProtocolRequired(capPreview.effectiveCap, livePreview.length) &&
-        !workerHasConcurrencyProtocol(worker.protocolCapabilities)
-      ) {
-        continue
-      }
       if (candidate.origin === 'BACKGROUND') {
         const targetSessionId = candidate.expectedSessionId ?? (livePreview.length === 1 ? livePreview[0]?.id : null)
         const busy = targetSessionId ? await findActiveLeaseRow(tx, targetSessionId) : null

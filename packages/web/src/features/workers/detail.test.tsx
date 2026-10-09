@@ -96,6 +96,9 @@ it('详情展示内部入口与可处置占用，页头不用会话', async () =
       routeAvailability: 'unavailable',
       routeReason: 'worker_not_ready',
       endpointSource: 'none',
+      roles: ['executor', 'maintenance'],
+      release: 'r-old',
+      releaseMismatch: true,
       internalEndpoint: {
         baseUrl: 'http://127.0.0.1:8091',
         host: '127.0.0.1',
@@ -143,6 +146,8 @@ it('详情展示内部入口与可处置占用，页头不用会话', async () =
   await expect.element(screen.getByRole('heading', { name: 'worker-a' })).toBeInTheDocument()
   await expect.element(screen.getByText('已停止')).toBeInTheDocument()
   await expect.element(screen.getByText('http://127.0.0.1:8091')).toBeInTheDocument()
+  await expect.element(screen.getByText('执行、维护')).toBeInTheDocument()
+  await expect.element(screen.getByText('与控制台不一致，不领新运行')).toBeInTheDocument()
   await expect.element(screen.getByText('测试系统 · 管理员账号')).toBeInTheDocument()
   await expect.element(screen.getByText('槽位 #1 · 会话失联 · 代次 #1')).toBeInTheDocument()
   await expect.element(screen.getByRole('button', { name: '处置' })).toBeInTheDocument()

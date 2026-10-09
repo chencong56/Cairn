@@ -85,6 +85,8 @@ export function parseHealthBody(text) {
       service: json.service,
       uptimeSeconds: json.uptimeSeconds,
       checks: { database: checks.database, changeHint },
+      // 发布号：本机开发为空；控制台与 Worker 都有且不同即判不健康（锁步部署）
+      version: typeof json.version === 'string' && json.version ? json.version : null,
     },
   }
 }
@@ -144,6 +146,7 @@ export function parseWorkerNodeHealth(text) {
       service: parsed.value.service,
       loopAlive: node.loopAlive,
       database: parsed.value.checks.database,
+      version: parsed.value.version,
     },
   }
 }
@@ -164,6 +167,7 @@ export function aggregateWorkerNodeHealth(healths) {
       loopAlive: true,
       database: 'up',
       status: healths.some(({ value }) => value.status === 'degraded') ? 'degraded' : 'ok',
+      versions: [...new Set(healths.map(({ value }) => value.version).filter(Boolean))],
     },
   }
 }
@@ -223,6 +227,13 @@ export function decideVerdict(input) {
     }
     if (input.workerHealth.value.database !== 'up') {
       return { result: 'STACK_UNHEALTHY', fail: 'worker 数据库不可用' }
+    }
+    // 锁步部署：控制台与 Worker 都带发布号且不一致时，Worker 不领新运行
+    const apiVersion = input.apiHealth?.value?.version ?? null
+    const workerVersions = input.workerHealth.value.versions ?? (input.workerHealth.value.version ? [input.workerHealth.value.version] : [])
+    const stale = apiVersion ? workerVersions.filter((version) => version !== apiVersion) : []
+    if (stale.length > 0) {
+      return { result: 'STACK_UNHEALTHY', fail: `Worker 发布号 ${stale.join('、')} 与控制台 ${apiVersion} 不一致` }
     }
   }
   if (input.requireWeb) {

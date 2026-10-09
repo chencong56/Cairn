@@ -1,7 +1,6 @@
 import { and, asc, eq, inArray, lt, lte, or } from 'drizzle-orm'
 import {
-  OUTBOUND_WORKER_PROTOCOL,
-  NOTIFICATION_WORKER_PROTOCOL,
+  workerHasRole,
   type OutboundStatus,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
@@ -34,9 +33,7 @@ async function liveWorker(db: Db, workerId: string, instanceId: string, now: Dat
     w &&
     w.status === 'READY' &&
     (!w.heartbeatExpiresAt || w.heartbeatExpiresAt > now) &&
-    w.protocolCapabilities?.some(
-      (p) => p === OUTBOUND_WORKER_PROTOCOL || p === NOTIFICATION_WORKER_PROTOCOL,
-    ),
+    workerHasRole(w.roles, 'maintenance'),
   )
 }
 

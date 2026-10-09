@@ -29,7 +29,6 @@ import {
   type Step,
 } from '@cairn/shared'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
-import { WORKER_TEST_PROTOCOLS } from './worker-protocols.js'
 import { ExecutionEngine } from '../engine/engine.js'
 import { systemClock, type EngineClock } from '../engine/clock.js'
 import {
@@ -231,7 +230,7 @@ export class CairnTestHarness {
       capacity: 10,
       maxSessions: 10,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
 
     const rawKey = options?.secretKey ?? process.env.CAIRN_CREDENTIAL_KEY ?? DEV_CREDENTIAL_KEY

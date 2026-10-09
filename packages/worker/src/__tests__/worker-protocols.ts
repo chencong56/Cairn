@@ -1,4 +1,0 @@
-import { SESSION_ACCOUNT_CONCURRENCY_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL } from '@cairn/shared'
-
-/** 测试 Worker 登记：占用协议是硬门槛；锁步部署后快照特性不再有协议门禁。 */
-export const WORKER_TEST_PROTOCOLS = [SESSION_OCCUPANCY_PROTOCOL, SESSION_ACCOUNT_CONCURRENCY_PROTOCOL] as const

@@ -43,7 +43,6 @@ import {
 } from '@cairn/shared'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { LocalObjectStore } from '@cairn/storage'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { testAiExecution } from '../__tests__/harness.js'
 import { BrowserSessionManager } from '../browser/session-manager.js'
 import { createBrowserPort } from '../browser/port.js'
@@ -290,7 +289,7 @@ describe('demonstration sources × real Engine / Chromium', { timeout: 240_000 }
       instanceId,
       capacity: 1,
       lostAfterSeconds: 3600,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     objectRoot = mkdtempSync(join(tmpdir(), 'cairn-di-objects-'))
     profileRoot = mkdtempSync(join(tmpdir(), 'cairn-di-browser-'))

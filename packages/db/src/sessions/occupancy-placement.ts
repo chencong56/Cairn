@@ -29,7 +29,7 @@ export async function evaluateRunSessionEligibility(
     instanceId: string
     maxSessions: number
     scheduling: PlatformSessionScheduling
-    protocolCapabilities?: readonly string[] | null
+    roles?: readonly string[] | null
   },
 ): Promise<{ eligible: boolean; fallback: boolean; facts: PlacementFacts }> {
   const empty: PlacementFacts = {
@@ -44,9 +44,9 @@ export async function evaluateRunSessionEligibility(
   const { lives, leases } = await loadLiveAccountSessions(db, key)
   const occupied = await countWorkerSessions(db, input.workerId)
   const { workers } = schemaFor(db)
-  const [worker] = input.protocolCapabilities
-    ? [{ protocolCapabilities: input.protocolCapabilities }]
-    : await db.select({ protocolCapabilities: workers.protocolCapabilities }).from(workers).where(eq(workers.id, input.workerId)).limit(1)
+  const [worker] = input.roles
+    ? [{ roles: input.roles }]
+    : await db.select({ roles: workers.roles }).from(workers).where(eq(workers.id, input.workerId)).limit(1)
   const decision = await decideAccountSessionClaim(db, {
     key,
     lives,
@@ -55,7 +55,7 @@ export async function evaluateRunSessionEligibility(
     holderInstanceId: input.instanceId,
     holderMaxSessions: input.maxSessions,
     holderOccupied: occupied,
-    holderProtocols: worker?.protocolCapabilities,
+    holderRoles: worker?.roles,
     purpose: 'EXECUTION',
     pickIdle: 'oldest',
   })

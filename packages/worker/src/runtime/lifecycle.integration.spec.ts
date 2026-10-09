@@ -12,7 +12,6 @@ import {
   type DbHandle,
 } from '@cairn/db/testing'
 import type { Step } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { ExecutionEngine } from '../engine/engine.js'
 import { LifecycleService } from './lifecycle.service'
 
@@ -136,7 +135,7 @@ describe('LifecycleService（集成）', { timeout: 60_000 }, () => {
         instanceId: peerInstance,
         capacity: 1,
         lostAfterSeconds: 60,
-        protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+        roles: ['executor'],
       })
       const taken = await claimRun(handle, {
         workerId: peerId,

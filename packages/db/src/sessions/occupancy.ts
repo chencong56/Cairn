@@ -19,8 +19,6 @@ export {
   authWaitLeaseLive,
   authHoldFromLease,
   leaseWaitFacts,
-  workerHasOccupancyProtocol,
-  workerHasMaintenanceProtocol,
   toSessionOperationDto,
   hasQueuedSessionCreateOperation,
   listQueuedRunsForAccount,

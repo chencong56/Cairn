@@ -1,15 +1,12 @@
 import { and, asc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import {
   FACTORY_PLATFORM_CONFIG,
-  SESSION_MAINTENANCE_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   platformConfigDocumentSchema,
   type PlatformSessionScheduling,
   type RunPlacement,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { getPlatformConfig } from '../platform-config/store.js'
-import type { WorkerRecord } from '../leases/leases.js'
 import type { SessionLeaseRow, SessionOperationRow } from '../records.js'
 import { databaseNow, schemaFor } from '../native.js'
 
@@ -135,18 +132,6 @@ export async function getSessionOperation(db: Db, operationId: string): Promise<
     .where(eq(sessionOperations.id, operationId))
     .limit(1)
   return row ?? null
-}
-
-export function workerHasOccupancyProtocol(
-  worker: Pick<WorkerRecord, 'id'> & { protocolCapabilities?: string[] },
-): boolean {
-  return Boolean(worker.protocolCapabilities?.includes(SESSION_OCCUPANCY_PROTOCOL))
-}
-
-export function workerHasMaintenanceProtocol(
-  worker: Pick<WorkerRecord, 'id'> & { protocolCapabilities?: string[] },
-): boolean {
-  return Boolean(worker.protocolCapabilities?.includes(SESSION_MAINTENANCE_PROTOCOL))
 }
 
 export function toSessionOperationDto(row: SessionOperationRow) {

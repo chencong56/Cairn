@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm'
 import {
   DEFAULT_OUTBOUND_POLICY,
   LOCAL_SECRET_PROVIDER,
-  OUTBOUND_WORKER_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
 import { expose } from '../database.js'
@@ -124,7 +123,7 @@ describe.skipIf(!DRIVERS.includes('mysql'))('消息推送跨库转储与恢复',
           ...worker,
           capacity: 1,
           lostAfterSeconds: 3600,
-          protocolCapabilities: [OUTBOUND_WORKER_PROTOCOL],
+          roles: ['maintenance'],
         })
         const [job] = await claimOutboundDeliveries(source.db, worker)
         await beginOutboundSubmission(source.db, job!)

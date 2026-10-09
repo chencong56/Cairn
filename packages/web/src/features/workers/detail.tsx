@@ -51,6 +51,7 @@ import {
   SESSION_AUTH_STATE_LABELS,
   SESSION_HEALTH_LABELS,
   SESSION_STATUS_LABELS,
+  WORKER_ROLE_LABELS,
   workerLifecycle,
 } from './labels'
 
@@ -240,6 +241,17 @@ export function WorkerDetailPage() {
                     <dd className='mt-1 font-mono text-muted-foreground'>{worker.hostname}</dd>
                   </div>
                 ) : null}
+                <div>
+                  <dt className='text-label text-muted-foreground'>角色</dt>
+                  <dd className='mt-1'>{worker.roles.length ? worker.roles.map((role) => WORKER_ROLE_LABELS[role]).join('、') : '未登记'}</dd>
+                </div>
+                <div>
+                  <dt className='text-label text-muted-foreground'>发布号</dt>
+                  <dd className='mt-1 font-mono'>
+                    {worker.release ?? '未设置（本机开发）'}
+                    {worker.releaseMismatch ? <span className='ml-2 font-sans text-status-warning'>与控制台不一致，不领新运行</span> : null}
+                  </dd>
+                </div>
                 <div>
                   <dt className='text-label text-muted-foreground'>心跳时间</dt>
                   <dd className='mt-1'>{formatAsOf(worker.heartbeatAt)}</dd>

@@ -153,6 +153,7 @@ function overview(overrides: Partial<MonitoringOverviewResponse['partitions']> =
             lost: knownMetric(1),
             heartbeatFresh: knownMetric(1),
             heartbeatStale: knownMetric(1),
+            releaseMismatch: knownMetric(0),
           },
           capacity: { total: knownMetric(4), used: knownMetric(1) },
           sessions: { total: knownMetric(4), used: knownMetric(1) },
@@ -281,6 +282,9 @@ function worker(workerId: string, status: WorkerStatus, heartbeatFresh: boolean)
     listenHost: '192.168.1.100',
     listenPort: 8091,
     hostname: 'worker-host-1',
+    roles: ['executor'],
+    release: null,
+    releaseMismatch: false,
   }
 }
 

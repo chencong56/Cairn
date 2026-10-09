@@ -1,10 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
-  SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
-  SESSION_MAINTENANCE_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
-  LOCATOR_RESOLUTION_PROTOCOL,
   type Step,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb, grantAdminScope } from './contract-fixture.js'
@@ -114,12 +110,7 @@ describe.each(DRIVERS)('%s 受管会话共享观看与手动操作互斥（P0）
       capacity: 8,
       maxSessions: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [
-        LOCATOR_RESOLUTION_PROTOCOL,
-        SESSION_OCCUPANCY_PROTOCOL,
-        SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
-        SESSION_MAINTENANCE_PROTOCOL,
-      ],
+      roles: ['executor'],
     })
     return { workerId, instanceId }
   }

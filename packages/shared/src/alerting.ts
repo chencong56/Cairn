@@ -380,6 +380,20 @@ export type PlatformAlerting = z.infer<typeof platformAlertingSchema>
 
 export const FACTORY_ALERT_RULES: AlertRule[] = alertRuleSchema.array().parse([
   {
+    // 锁步部署：漏升的执行节点不再领新运行，默认开启提醒；留 5 分钟给正常的滚动重启
+    kind: 'threshold',
+    id: 'factory.worker.release_mismatch',
+    name: '执行节点与控制台版本不一致',
+    metricKey: 'worker.release.mismatch',
+    scope: 'platform',
+    comparator: 'gte',
+    threshold: 1,
+    forSeconds: 300,
+    severity: 'warning',
+    channelIds: [],
+    enabled: true,
+  },
+  {
     kind: 'threshold',
     id: 'factory.worker.lost',
     name: '执行节点失联',
@@ -523,8 +537,8 @@ export const FACTORY_ALERT_RULES: AlertRule[] = alertRuleSchema.array().parse([
 ])
 
 /**
- * 把配置里缺少的出厂建议规则补上（默认关闭、不带渠道）。
- * 存量平台的配置文档是按修订保存的，升级后新增的出厂规则不会自动出现；展示（和用户保存）时按规则 id 补齐。
+ * 把配置里缺少的出厂建议规则按出厂默认补上（不带渠道）。
+ * 存量平台的配置文档是按修订保存的，升级后新增的出厂规则不会自动出现；展示、求值（和用户保存）时按规则 id 补齐。
  * 出厂规则不能被用户删除，所以补齐不会让已删除的规则「复活」。
  */
 export function mergeFactoryAlertRules(rules: readonly AlertRule[]): AlertRule[] {

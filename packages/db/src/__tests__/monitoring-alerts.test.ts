@@ -5,11 +5,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   FACTORY_ALERT_RULES,
   LOCAL_SECRET_PROVIDER,
-  SESSION_OCCUPANCY_PROTOCOL,
   alertOpenKey,
   type AlertRule,
   type PlatformConfigDocument,
-  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { eq } from 'drizzle-orm'
 import { DRIVERS, openContractDb } from './contract-fixture.js'
@@ -105,7 +103,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     const { workers } = schemaFor(handle.db)
     await handle.db.update(workers).set({ heartbeatExpiresAt: new Date(Date.now() - 1_000) }).where(eq(workers.id, workerId))
@@ -113,12 +111,13 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
     return workerId
   }
 
-  it('RMD01 出厂关闭不产生通知', async () => {
+  it('RMD01 出厂只默认开启版本不一致；其余出厂规则关闭，不产生通知', async () => {
     await resetAlerts()
     await setRules(FACTORY_ALERT_RULES)
+    expect(FACTORY_ALERT_RULES.filter((rule) => rule.enabled).map((rule) => rule.id)).toEqual(['factory.worker.release_mismatch'])
     await lostWorker()
     const result = await evaluateAlerts(handle.db)
-    expect(result).toEqual({ evaluated: 0, fired: 0, resolved: 0, interrupted: 0 })
+    expect(result).toEqual({ evaluated: 1, fired: 0, resolved: 0, interrupted: 0 })
     const active = await listMonitorAlerts(handle.db, { view: 'active', limit: 20 })
     expect(active.items).toEqual([])
     expect(await claimDueAlertDeliveries(handle.db)).toEqual([])
@@ -304,7 +303,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     const { workers } = schemaFor(handle.db)
     await handle.db
@@ -343,7 +342,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     expect((await evaluateAlerts(handle.db)).resolved).toBe(1)
     const history = await listMonitorAlerts(handle.db, { view: 'history', limit: 20 })
@@ -384,7 +383,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     const { workers } = schemaFor(handle.db)
     await handle.db
@@ -401,7 +400,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     await handle.db
       .update(workers)
@@ -418,7 +417,7 @@ describe.each(DRIVERS)('%s 告警评估', { timeout: 60_000 }, (driver) => {
       capacity: 1,
       maxSessions: 2,
       lostAfterSeconds: 45,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     await handle.db
       .update(workers)

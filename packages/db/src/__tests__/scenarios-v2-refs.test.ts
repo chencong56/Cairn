@@ -4,13 +4,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { and, eq, isNull } from 'drizzle-orm'
 import {
   LOCATOR_RESOLUTION_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   ALL_WORKER_ROLES,
-  protocolCapabilitiesForRoles,
   authoringSteps,
   walkAuthoringNodes,
   type ModuleContent,
   type ScenarioAuthoringDocumentV2,
+  workerRoleNames,
 } from '@cairn/shared'
 import {
   createActionModule,
@@ -378,7 +377,7 @@ describe.each(DRIVERS)('%s 场景 V2 动作模块引用与展开（集成）', {
       capacity: 2,
       maxSessions: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [SESSION_OCCUPANCY_PROTOCOL],
+      roles: ['executor'],
     })
     const claim = await claimRun(handle, {
       workerId,
@@ -415,7 +414,7 @@ describe.each(DRIVERS)('%s 场景 V2 动作模块引用与展开（集成）', {
       capacity: 1,
       maxSessions: 1,
       lostAfterSeconds: 60,
-      protocolCapabilities: protocolCapabilitiesForRoles(ALL_WORKER_ROLES),
+      roles: workerRoleNames(ALL_WORKER_ROLES),
     })
     expect((await claimRun(handle, {
       workerId,

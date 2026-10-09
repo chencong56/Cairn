@@ -11,9 +11,6 @@ export { SESSION_MAINTENANCE_KINDS } from './session-occupancy.js'
 import { entityIdSchema, utcInstantSchema } from './wire.js'
 import { nextCursorSchema } from './rbac.js'
 
-/** Worker 领取 C 的维护 kind 必须声明；与 occupancy@2 并存。 */
-export const SESSION_MAINTENANCE_PROTOCOL = 'session-maintenance@1' as const
-
 export type SessionMaintenanceKind = (typeof SESSION_MAINTENANCE_KINDS)[number]
 
 export const SESSION_LEASE_CLAIM_KINDS = [

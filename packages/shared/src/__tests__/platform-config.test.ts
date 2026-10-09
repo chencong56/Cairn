@@ -492,11 +492,11 @@ describe('平台配置契约', () => {
     expect('runtimeInvariants' in legacy).toBe(false)
   })
 
-  it('旧修订没有 alerting 时补出厂全关建议规则', () => {
+  it('旧修订没有 alerting 时补出厂规则（仅版本不一致默认开启）', () => {
     const { alerting: _ignored, ...legacy } = FACTORY_PLATFORM_CONFIG
     const parsed = platformConfigDocumentSchema.parse(legacy)
     expect(parsed.alerting).toEqual(FACTORY_PLATFORM_CONFIG.alerting)
-    expect(parsed.alerting.rules.every((rule) => rule.enabled === false)).toBe(true)
+    expect(parsed.alerting.rules.filter((rule) => rule.enabled).map((rule) => rule.id)).toEqual(['factory.worker.release_mismatch'])
     expect(parsed.outbound.channels).toEqual([])
     expect('alerting' in legacy).toBe(false)
   })

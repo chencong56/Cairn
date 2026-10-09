@@ -38,7 +38,6 @@ import {
   type RuntimeInvariant,
   type Step,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { createBrowserPort } from './port.js'
 import { BrowserSessionManager } from './session-manager.js'
@@ -336,7 +335,7 @@ describe('ExecutionEngine × 真浏览器 OC-C 运行期约束', { timeout: 240_
       capacity: 8,
       maxSessions: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     manager = new BrowserSessionManager(
       handle,

@@ -27,7 +27,6 @@ import {
   grantAdminScope,
 } from '@cairn/db/testing'
 import { DEV_CREDENTIAL_KEY, LOCAL_SECRET_PROVIDER, PROCESS_LOG_EVENTS, type Step } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { saveServiceCaller, issueServiceCredential, authenticateService, createServiceRun, getServiceRun, listScenarioVersions, releaseServiceEvidence, ensureTargetAccountCredential } from '@cairn/db'
 import { serviceCallerBodySchema } from '@cairn/shared'
@@ -226,7 +225,7 @@ describe('ExecutionEngine × 真浏览器（垂直切片）', { timeout: 180_000
       instanceId: workerInstanceId,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     manager = new BrowserSessionManager(
       handle,

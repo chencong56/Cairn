@@ -77,8 +77,6 @@ export {
   occupancyGrantFromLease,
   hasQueuedSessionCreateOperation,
   contentDigestFor,
-  workerHasOccupancyProtocol,
-  workerHasMaintenanceProtocol,
   toSessionOperationDto,
   listQueuedRunsForAccount,
   type OccupancyOwner,

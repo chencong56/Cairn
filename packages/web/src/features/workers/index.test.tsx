@@ -103,6 +103,9 @@ function summary(workerId: string, status: WorkerStatus, heartbeatFresh: boolean
     listenHost: '192.168.1.100',
     listenPort: 8091,
     hostname: 'worker-host-1',
+    roles: ['executor'],
+    release: null,
+    releaseMismatch: false,
   }
 }
 

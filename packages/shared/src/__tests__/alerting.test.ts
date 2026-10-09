@@ -14,12 +14,12 @@ import {
 } from '../alerting.js'
 
 describe('告警契约', () => {
-  it('出厂建议规则全部关闭且只挂 L2/L3', () => {
+  it('出厂规则只默认开启「版本不一致」，其余建议规则关闭；只挂 L2/L3', () => {
     expect(FACTORY_ALERT_RULES.length).toBeGreaterThan(0)
     expect(FACTORY_ALERTING.rules).toEqual(FACTORY_ALERT_RULES)
     expect(FACTORY_ALERTING.channels).toEqual([])
     for (const rule of FACTORY_ALERT_RULES) {
-      expect(rule.enabled).toBe(false)
+      expect(rule.enabled).toBe(rule.id === 'factory.worker.release_mismatch')
       if (rule.kind === 'threshold') {
         expect(isAlertableMetricKey(rule.metricKey)).toBe(true)
         expect(requiredAlertMetricScope(rule.metricKey)).toBe(rule.scope)

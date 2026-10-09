@@ -22,7 +22,6 @@ import {
   type DbHandle,
 } from '@cairn/db/testing'
 import { DEV_CREDENTIAL_KEY, type Step } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { credentialKeyFromEnv, LocalSecretProvider } from '@cairn/secret'
 import { createFakeChatClient } from '../ai/midscene/model-client.js'
 import { ActionGate } from '../ai/midscene/action-gate.js'
@@ -181,7 +180,7 @@ describe.skipIf(!enabled)('S-LIVE 受管浏览器探针', { timeout: 180_000 }, 
       instanceId: workerInstanceId,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
     profileRoot = mkdtempSync(join(tmpdir(), 'cairn-slive-'))
     manager = new BrowserSessionManager(

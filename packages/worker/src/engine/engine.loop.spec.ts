@@ -26,7 +26,6 @@ import {
   type ScenarioAuthoringDocumentV2,
   type Step,
 } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { ExecutionEngine } from './engine.js'
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_loop`
@@ -73,7 +72,7 @@ describe('ExecutionEngine Control Flow C 循环执行与迭代（集成）', { t
       instanceId: workerInstanceId,
       capacity: 8,
       lostAfterSeconds: 60,
-      protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+      roles: ['executor'],
     })
   })
 

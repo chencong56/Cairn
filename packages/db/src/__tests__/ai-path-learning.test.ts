@@ -2,13 +2,13 @@ import { DRIVERS, openContractDb } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
-  protocolCapabilitiesForRoles,
   ALL_WORKER_ROLES,
   type AiElementBinding,
   type AiPageObservation,
   type AiValueProvenance,
   type Step,
   BROWSER_AI_SDK_VERSION,
+  workerRoleNames,
 } from '@cairn/shared'
 import {
   adjustPlatformConfig,
@@ -279,7 +279,7 @@ describe.each(DRIVERS)('%s AI 动作事实与路径度量', { timeout: 30_000 },
       workerId: `ap0-capable-${newId()}`,
       instanceId: newId(),
       capacity: 4,
-      protocolCapabilities: protocolCapabilitiesForRoles(ALL_WORKER_ROLES),
+      roles: workerRoleNames(ALL_WORKER_ROLES),
       lostAfterSeconds: 60,
     })
     const scenario = await createScenarioWithVersion(handle.db, {

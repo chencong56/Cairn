@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { writeFileSync } from 'node:fs'
-import { protocolCapabilitiesForRoles, type Step } from '@cairn/shared'
+import { type Step, workerRoleNames } from '@cairn/shared'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import {
@@ -22,7 +22,7 @@ const echo: Step = {
 describe('PG Run 领取积压基准', { timeout: 120_000 }, () => {
   let handle: Awaited<ReturnType<typeof openContractDb>>
   let seedId: string
-  const capabilities = protocolCapabilitiesForRoles({
+  const capabilities = workerRoleNames({
     executor: true, scheduler: false, maintenance: false, analyst: false,
   })
 
@@ -76,7 +76,7 @@ describe('PG Run 领取积压基准', { timeout: 120_000 }, () => {
     const instanceId = newId()
     await registerWorker(handle.db, {
       workerId, instanceId, capacity, lostAfterSeconds: 120,
-      protocolCapabilities: capabilities,
+      roles: capabilities,
     })
     return { workerId, instanceId }
   }

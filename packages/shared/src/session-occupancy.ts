@@ -4,10 +4,6 @@ import type { AuthObservation, FrozenAuthVerification } from './session-auth.js'
 import { entityIdSchema, utcInstantSchema } from './wire.js'
 import { sessionGrantSchema, type SessionGrant } from './session.js'
 
-/** Worker 进入 READY 必须声明；新旧二进制不得混跑。 */
-export const SESSION_OCCUPANCY_PROTOCOL = 'session-occupancy@2' as const
-export const SESSION_ACCOUNT_CONCURRENCY_PROTOCOL = 'session-account-concurrency@1' as const
-
 export const SESSION_LEASE_PURPOSES = ['EXECUTION', 'MAINTENANCE', 'AUTH_WAIT'] as const
 export type SessionLeasePurpose = (typeof SESSION_LEASE_PURPOSES)[number]
 export const sessionLeasePurposeSchema = z.enum(SESSION_LEASE_PURPOSES)

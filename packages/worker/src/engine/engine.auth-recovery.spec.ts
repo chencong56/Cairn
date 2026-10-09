@@ -1,7 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { openIsolatedDb, schemaFor, newId, createScenarioWithVersion, createRunWithSnapshot, registerWorker, claimRun, startAttempt, getRun, eq } from '@cairn/db/testing'
 import { authGateClosedError, computeContextVersion, resolveEvidencePolicy, type AuthCheckpoint } from '@cairn/shared'
-import { WORKER_TEST_PROTOCOLS } from '../__tests__/worker-protocols.js'
 import { ExecutionEngine } from './engine'
 import { systemClock } from './clock'
 let db: Awaited<ReturnType<typeof openIsolatedDb>>, input: any, engine: any, recover: ReturnType<typeof vi.fn>
@@ -19,7 +18,7 @@ beforeEach(async () => {
     instanceId,
     capacity: 8,
     lostAfterSeconds: 60,
-    protocolCapabilities: [...WORKER_TEST_PROTOCOLS],
+    roles: ['executor'],
   })
   const grant = (await claimRun(db, { workerId, instanceId, leaseTtlSeconds: 60 }))!
   const stepRunId = created.detail.stepRuns[0]!.id

@@ -4,10 +4,7 @@ import {
   DEFAULT_ACCOUNT_SESSION_MODE,
   DEFAULT_BROWSER_ISOLATION,
   FACTORY_PLATFORM_CONFIG,
-  SESSION_ACCOUNT_CONCURRENCY_PROTOCOL,
-  SESSION_OCCUPANCY_PROTOCOL,
   type Step,
-  LOCATOR_RESOLUTION_PROTOCOL,
 } from '@cairn/shared'
 import { DRIVERS, openContractDb, grantAdminScope } from './contract-fixture.js'
 import { schemaFor } from '../native.js'
@@ -225,7 +222,7 @@ describe.each(DRIVERS)('%s P1: 配置一致性与排空收敛规范', { timeout:
       capacity: 4,
       maxSessions: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_ACCOUNT_CONCURRENCY_PROTOCOL],
+      roles: ['executor'],
     })
 
     // Create 2 live OPEN sessions
@@ -307,7 +304,7 @@ describe.each(DRIVERS)('%s P1: 配置一致性与排空收敛规范', { timeout:
       capacity: 2,
       maxSessions: 2,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_ACCOUNT_CONCURRENCY_PROTOCOL],
+      roles: ['executor'],
     })
     const created = await createSession(handle.db, {
       key: { targetId, targetAccountId: account.id },
@@ -395,7 +392,7 @@ describe.each(DRIVERS)('%s P1: 配置一致性与排空收敛规范', { timeout:
       capacity: 4,
       maxSessions: 4,
       lostAfterSeconds: 60,
-      protocolCapabilities: [LOCATOR_RESOLUTION_PROTOCOL, SESSION_OCCUPANCY_PROTOCOL, SESSION_ACCOUNT_CONCURRENCY_PROTOCOL],
+      roles: ['executor'],
     })
 
     // Create 2 open sessions: session 1 is in-use, session 2 is idle
