@@ -50,6 +50,21 @@ describe('table.read@2 × 真实老系统结构靶场', { timeout: 180_000 }, ()
     await page.close()
   })
 
+  it('EasyUI：选择器指向隐藏的原始空壳表（table.datagrid-f）时，改读它渲染出来的控件', async ({ skip }) => {
+    if (!available) skip()
+    const page = await open('easyui-edc.html')
+    const sample = await run(
+      page,
+      plan('#datagrid', [
+        { key: 'name', name: '报表名称', field: 'item1' },
+        { key: 'uses', name: '使用次数', field: 'item4', valueType: 'number', numericKind: 'integer' },
+      ]),
+    )
+    expect(sample.rows.map((r) => valueOf(r, 'name'))).toEqual(['本年累计4G订单统计表', '本年累计5G订单统计表', '历史累计5G订单统计表'])
+    expect(sample.rows.map((r) => valueOf(r, 'uses'))).toEqual([35, 668, 23])
+    await page.close()
+  })
+
   it('EasyUI：点选识别——序号 / 操作 / 隐藏列自动排除，数字列认出来', async ({ skip }) => {
     if (!available) skip()
     const page = await open('easyui-edc.html')

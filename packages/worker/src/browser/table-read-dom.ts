@@ -10,7 +10,11 @@
  * ExtJS 4–6、layui、Element UI el-table、FineReport 冻结表）；版本差异靠手工指定与页面结构反馈迭代。
  */
 
-export type TableShape = 'native' | 'aria' | 'easyui' | 'jqgrid' | 'extjs' | 'layui' | 'elementui' | 'finereport' | 'cards' | 'keyvalue' | 'listgrid'
+import type { AdapterHelpers, Model, ModelCol, ModelError, ModelRow, TableAdapter } from './table-adapters/types.js'
+import { makeHelpers } from './table-adapters/helpers.js'
+import { ADAPTER_FACTORIES } from './table-adapters/registry.js'
+
+export type TableShape = 'native' | 'aria' | 'easyui' | 'jqgrid' | 'extjs' | 'layui' | 'elementui' | 'finereport' | 'aggrid' | 'antd' | 'handsontable' | 'cards' | 'keyvalue' | 'listgrid'
 export type ReadKind = 'table' | 'cards' | 'keyvalue'
 
 export type DomColumnSpec = {
@@ -111,64 +115,31 @@ export type TableDomRequest =
   | { mode: 'detect'; detect: DetectArgs }
   | { mode: 'feedback' }
 
-/** 页面内入口。mode=read 在表根上执行；mode=detect / feedback 在被点到的元素上执行。 */
-export function tableDomEntry(el: any, req: TableDomRequest): any {
+/**
+ * 页面内核心逻辑：读取 / 识别 / 反馈。控件适配器（easyui、jqGrid…）不在这里，由注册表提供；
+ * 核心只通过 TableAdapter 描述认出控件、归一壳节点、取统一模型。原生表格 / ARIA / 卡片 / 键值 / 列表式作为兜底仍在核心里。
+ */
+export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, adapters: TableAdapter[]): any {
   // ---------------------------------------------------------------- 通用辅助
-  const clean = (t: any): string =>
-    String(t ?? '')
-      .replace(/\u00a0/g, ' ')
-      .replace(/\u3000/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-  const textOf = (node: any): string => clean(node ? node.innerText || node.textContent || '' : '')
-  const stripSort = (t: string): string => clean(t.replace(/[▲▼△▽↑↓⇅⇧⇩↕]+/g, ''))
-  const roleOf = (node: any): string => String(node?.getAttribute?.('role') || '').toLowerCase()
-  const doc: any = el.ownerDocument
-  const win: any = doc.defaultView
-  const isHidden = (node: any): boolean => {
-    if (!node) return true
-    const st = win.getComputedStyle(node)
-    return st.display === 'none' || st.visibility === 'hidden'
+  const { doc, win, clean, textOf, stripSort, roleOf, isHidden, attrSel, leafPath, PAGER_RE, EMPTY_RE, PAGER_SEL, pagerNear, TOTAL_RE, CHECKBOX_SEL } = h
+  void stripSort
+  const GRID_SEL = adapters.map((a) => a.gridSelector).join(',')
+  /**
+   * 控件初始化后原始 <table> 常被留作隐藏的空壳，真正渲染的结构在别处；控件内部的子表也不是完整表格。
+   * 选择器或点选落在这些节点上时，改读完整的控件根。
+   */
+  const resolveShell = (node: any): any => {
+    if (!node?.matches) return node
+    for (const a of adapters) {
+      const rendered = a.resolveShell?.(node)
+      if (rendered) return rendered
+      if (a.innerPartSelector && node.matches(a.innerPartSelector)) return node.closest(a.gridSelector) || node
+    }
+    return node
   }
-  const attrSel = (name: string, value: string): string => `[${name}="${String(value).replace(/["\\]/g, '\\$&')}"]`
-  const PAGER_RE =
-    /(上一页|下一页|首页|尾页|末页|每页\s*\d+|共\s*\d+\s*(条|页|行|个)|第\s*\d+\s*[/／]\s*\d+\s*页|previous|next\s*page)/i
-  const EMPTY_RE = /(暂无数据|没有数据|无数据|暂无记录|没有记录|无记录|no\s*(data|records|results)|empty)/i
-  const PAGER_SEL =
-    '.pagination,.pager,.pagenav,.datagrid-pager,.ui-jqgrid-pager,.x-paging-toolbar,.layui-table-page,[class*="pagination"],[class*="pager"],[class*="Pager"]'
-  /** 这张表自己的分页条：在表内，或紧挨着它的前 / 后一个兄弟（不能在整个父容器里找，否则同页别的表的分页条会被算到这张表头上）。 */
-  const pagerNear = (node: any): boolean => {
-    const hit = (n: any): boolean => Boolean(n && (n.matches?.(PAGER_SEL) || n.querySelector?.(PAGER_SEL)))
-    return hit(node) || hit(node.nextElementSibling) || hit(node.previousElementSibling)
-  }
-  const TOTAL_RE = /^(合计|总计|小计|汇总|合\s*计|总\s*计|total|sum|subtotal)\s*[:：]?$/i
-  const GRID_SEL = '.datagrid-wrap,.datagrid-view,.ui-jqgrid,.x-grid,.layui-table-view,.el-table,.frozen-table'
-  const CHECKBOX_SEL = 'input[type="checkbox"],input[type="radio"],.layui-form-checkbox,.x-grid-row-checker,.cbox,.datagrid-cell-check'
-
-  // ---------------------------------------------------------------- 统一模型
-  type ModelCol = { leaf: string; path: string; field?: string; hidden?: boolean; special?: 'checkbox' | 'index' }
-  type ModelRow = { el: any; cells: Array<any | null> }
-  type Model = {
-    shape: TableShape
-    cols: ModelCol[]
-    hasHeader: boolean
-    dataRows: ModelRow[]
-    summaryRows: ModelRow[]
-    excluded: { mergedRows: number; paginationRows: number; footerRows: number }
-    hasPagination: boolean
-    isBusy: boolean
-    emptyNote: boolean
-    renderedRowEls: any[]
-  }
-  type ModelError = { error: { code: string; message: string } }
 
   const shapeOf = (root: any): TableShape | null => {
-    if (root.matches?.('.datagrid-wrap,.datagrid-view,.datagrid')) return 'easyui'
-    if (root.matches?.('.ui-jqgrid,.ui-jqgrid-view')) return 'jqgrid'
-    if (root.matches?.('.x-grid,.x-grid-panel')) return 'extjs'
-    if (root.matches?.('.layui-table-view')) return 'layui'
-    if (root.matches?.('.el-table')) return 'elementui'
-    if (root.matches?.('.frozen-table') || root.matches?.('table.x-table')) return 'finereport'
+    for (const a of adapters) if (root.matches?.(a.claimSelector)) return a.shape
     const tag = String(root.tagName || '').toLowerCase()
     if (tag === 'table') return 'native'
     const r = roleOf(root)
@@ -176,7 +147,6 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
     return null
   }
 
-  const leafPath = (leaf: string, group?: string): string => (group && group !== leaf ? `${group} / ${leaf}` : leaf)
 
   /** 原生表格与 ARIA 网格：展开 rowspan / colspan 的格子矩阵，取叶子表头。 */
   const nativeModel = (
@@ -318,391 +288,6 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
     }
   }
 
-  /** easyui datagrid：view1 冻结列、view2 主列；表头与表体分离，单元格带 field 属性。 */
-  const easyuiModel = (root: any): Model | ModelError => {
-    const views = [root.querySelector('.datagrid-view1'), root.querySelector('.datagrid-view2')].filter(Boolean) as any[]
-    if (views.length === 0) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '没有找到 easyui 表格的主体区域' } }
-    const cols: Array<ModelCol & { view: number }> = []
-    views.forEach((v, vi) => {
-      const headerTable = v.querySelector('.datagrid-header table')
-      if (!headerTable) return
-      // 分组表头里 rowspan / colspan 会让叶子在 DOM 里的顺序和视觉列序不一致：按占位矩阵算出真实列位置再排序
-      const occupied: boolean[][] = []
-      const leaves: Array<{ pos: number; td: any }> = []
-      ;(Array.from(headerTable.querySelectorAll('tr')) as any[]).forEach((tr, r) => {
-        occupied[r] = occupied[r] || []
-        let c = 0
-        for (const td of Array.from(tr.children) as any[]) {
-          while (occupied[r]?.[c]) c++
-          const rs = Math.max(1, Number(td.rowSpan || 1))
-          const cs = Math.max(1, Number(td.colSpan || 1))
-          for (let i = 0; i < rs; i++) {
-            occupied[r + i] = occupied[r + i] || []
-            for (let j = 0; j < cs; j++) (occupied[r + i] as boolean[])[c + j] = true
-          }
-          if (td.getAttribute('field')) leaves.push({ pos: c, td })
-          c += cs
-        }
-      })
-      leaves.sort((a, b) => a.pos - b.pos)
-      for (const { td } of leaves) {
-        const field = td.getAttribute('field') as string
-        const leaf = stripSort(textOf(td))
-        cols.push({ leaf, path: leaf, field, hidden: isHidden(td), special: field === 'ck' ? 'checkbox' : undefined, view: vi })
-      }
-    })
-    const bodyRows = views.map((v) => Array.from(v.querySelectorAll('.datagrid-body tr.datagrid-row')) as any[])
-    const n = bodyRows.reduce((m, rs) => Math.max(m, rs.length), 0)
-    const cellOf = (view: number, rows: any[][], i: number, field: string): any | null => {
-      const tr = rows[view]?.[i]
-      return tr ? tr.querySelector(`td${attrSel('field', field)}`) : null
-    }
-    const dataRows: ModelRow[] = []
-    for (let i = 0; i < n; i++) {
-      const rowEl = (bodyRows[bodyRows.length - 1] as any[])[i] ?? (bodyRows[0] as any[])[i]
-      dataRows.push({ el: rowEl, cells: cols.map((c) => cellOf(c.view, bodyRows, i, c.field as string)) })
-    }
-    const footRows = views.map((v) => Array.from(v.querySelectorAll('.datagrid-footer tr')) as any[])
-    const fn = footRows.reduce((m, rs) => Math.max(m, rs.length), 0)
-    const summaryRows: ModelRow[] = []
-    for (let i = 0; i < fn; i++) {
-      summaryRows.push({
-        el: (footRows[footRows.length - 1] as any[])[i] ?? (footRows[0] as any[])[i],
-        cells: cols.map((c) => cellOf(c.view, footRows, i, c.field as string)),
-      })
-    }
-    return {
-      shape: 'easyui',
-      cols,
-      hasHeader: cols.length > 0,
-      dataRows,
-      summaryRows,
-      excluded: { mergedRows: root.querySelectorAll('.datagrid-group').length, paginationRows: 0, footerRows: summaryRows.length },
-      hasPagination: Boolean(root.querySelector('.datagrid-pager,.pagination')),
-      isBusy: Array.from(root.querySelectorAll('.datagrid-mask,.datagrid-mask-msg')).some((m: any) => !isHidden(m)),
-      emptyNote: dataRows.length === 0 && (Boolean(root.querySelector('.datagrid-empty')) || EMPTY_RE.test(textOf(root))),
-      renderedRowEls: dataRows.map((r) => r.el).filter(Boolean),
-    }
-  }
-
-  /** jqGrid：表头 .ui-jqgrid-htable、表体 table.ui-jqgrid-btable 的 tr.jqgrow；分组行 jqgroup 不计入。 */
-  const jqgridModel = (root: any): Model | ModelError => {
-    const headerTable = root.querySelector('table.ui-jqgrid-htable')
-    const bodyTable = root.querySelector('table.ui-jqgrid-btable')
-    if (!headerTable || !bodyTable) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '没有找到 jqGrid 的表头或表体' } }
-    const gridId = String(bodyTable.id || '').trim()
-    const labelRow = headerTable.querySelector('tr.ui-jqgrid-labels') || headerTable.querySelector('tr:last-child')
-    const ths = Array.from(labelRow.querySelectorAll('th')) as any[]
-    // 分组表头：第二行表头里带 colspan 的格子
-    const groupRow = headerTable.querySelector('tr.jqg-second-row-header')
-    const groupOfCol: string[] = []
-    if (groupRow) {
-      let c = 0
-      for (const th of Array.from(groupRow.querySelectorAll('th')) as any[]) {
-        const span = Math.max(1, Number(th.colSpan || 1))
-        const gt = stripSort(textOf(th))
-        for (let j = 0; j < span; j++) groupOfCol[c + j] = span > 1 ? gt : ''
-        c += span
-      }
-    }
-    const cols: ModelCol[] = ths.map((th, c) => {
-      const leaf = stripSort(textOf(th.querySelector('.ui-jqgrid-sortable') || th))
-      const idAttr = String(th.id || '')
-      const field = gridId && idAttr.startsWith(`${gridId}_`) ? idAttr.slice(gridId.length + 1) : idAttr || undefined
-      return {
-        leaf,
-        path: leafPath(leaf, groupOfCol[c]),
-        field,
-        hidden: th.style?.display === 'none' || isHidden(th),
-        special: field === 'cb' ? 'checkbox' : field === 'rn' ? 'index' : undefined,
-      }
-    })
-    const rowEls = Array.from(bodyTable.querySelectorAll('tr.jqgrow')) as any[]
-    const dataRows: ModelRow[] = rowEls.map((tr) => {
-      const tds = Array.from(tr.cells || []) as any[]
-      return { el: tr, cells: cols.map((_, c) => tds[c] ?? null) }
-    })
-    const footTable = root.querySelector('.ui-jqgrid-sdiv table')
-    const summaryRows: ModelRow[] = footTable
-      ? (Array.from(footTable.querySelectorAll('tr')) as any[]).map((tr) => {
-          const tds = Array.from(tr.cells || []) as any[]
-          return { el: tr, cells: cols.map((_, c) => tds[c] ?? null) }
-        })
-      : []
-    const info = textOf(root.querySelector('.ui-paging-info'))
-    return {
-      shape: 'jqgrid',
-      cols,
-      hasHeader: cols.length > 0,
-      dataRows,
-      summaryRows,
-      excluded: { mergedRows: bodyTable.querySelectorAll('tr.jqgroup').length, paginationRows: 0, footerRows: summaryRows.length },
-      hasPagination: Boolean(root.querySelector('.ui-jqgrid-pager,.ui-pg-table')),
-      isBusy: Array.from(root.querySelectorAll('div.loading')).some((m: any) => !isHidden(m)),
-      emptyNote: dataRows.length === 0 && (EMPTY_RE.test(info) || Boolean(root.querySelector('.ui-jqgrid-nodata'))),
-      renderedRowEls: rowEls,
-    }
-  }
-
-  /** ExtJS 4–6：.x-column-header 叶子表头；每个 grid view（锁定列 / 普通列）里的 tr.x-grid-row 按行序拼接。 */
-  const extjsModel = (root: any): Model | ModelError => {
-    const headers = (Array.from(root.querySelectorAll('.x-column-header')) as any[]).filter(
-      (h) => !h.querySelector('.x-column-header') && h.closest('.x-grid') === root,
-    )
-    const visibleHeaders = headers.filter((h) => !isHidden(h) && h.getClientRects().length > 0)
-    const cols: ModelCol[] = visibleHeaders.map((h) => {
-      const leaf = stripSort(textOf(h.querySelector('.x-column-header-text-inner,.x-column-header-text') || h))
-      const groupHeader = h.parentElement?.closest('.x-column-header')
-      const group = groupHeader ? stripSort(textOf(groupHeader.querySelector('.x-column-header-text-inner,.x-column-header-text'))) : ''
-      const cls = String(h.className || '')
-      return {
-        leaf,
-        path: leafPath(leaf, group),
-        field: h.getAttribute('data-columnid') || h.id || undefined,
-        special: /x-column-header-checkbox/.test(cls) ? 'checkbox' : /row-numberer/.test(cls) ? 'index' : undefined,
-      }
-    })
-    const views = (Array.from(root.querySelectorAll('.x-grid-view')) as any[]).filter((v) => v.closest('.x-grid') === root)
-    const rowsPerView = views.map((v) =>
-      (Array.from(v.querySelectorAll('tr.x-grid-row')) as any[]).filter((tr) => !tr.matches('.x-grid-row-summary')),
-    )
-    const n = rowsPerView.reduce((m, rs) => Math.max(m, rs.length), 0)
-    const cellsOf = (tr: any): any[] => (Array.from(tr.querySelectorAll('td.x-grid-cell')) as any[]).filter((td) => !isHidden(td))
-    const dataRows: ModelRow[] = []
-    for (let i = 0; i < n; i++) {
-      const parts = rowsPerView.map((rs) => rs[i]).filter(Boolean) as any[]
-      const cells = parts.flatMap((tr) => cellsOf(tr))
-      dataRows.push({ el: parts[parts.length - 1] ?? parts[0], cells: cols.map((_, c) => cells[c] ?? null) })
-    }
-    const summaryEls = Array.from(root.querySelectorAll('.x-grid-row-summary,.x-docked-summary tr')) as any[]
-    const summaryRows: ModelRow[] = summaryEls.map((tr) => {
-      const cells = cellsOf(tr)
-      return { el: tr, cells: cols.map((_, c) => cells[c] ?? null) }
-    })
-    return {
-      shape: 'extjs',
-      cols,
-      hasHeader: cols.length > 0,
-      dataRows,
-      summaryRows,
-      excluded: { mergedRows: root.querySelectorAll('.x-grid-group-hd').length, paginationRows: 0, footerRows: summaryRows.length },
-      hasPagination: Boolean(root.querySelector('.x-paging-toolbar')) || Boolean(root.parentElement?.querySelector('.x-paging-toolbar')),
-      isBusy: Array.from(root.querySelectorAll('.x-mask')).some((m: any) => !isHidden(m)),
-      emptyNote: dataRows.length === 0 && (Boolean(root.querySelector('.x-grid-empty')) || EMPTY_RE.test(textOf(root.querySelector('.x-grid-empty')))),
-      renderedRowEls: rowsPerView.flat(),
-    }
-  }
-
-  /** layui table：主表头 .layui-table-header、主表体 .layui-table-main，表头与单元格带 data-field。 */
-  const layuiModel = (root: any): Model | ModelError => {
-    const headerTable = root.querySelector('.layui-table-box > .layui-table-header table') || root.querySelector('.layui-table-header table')
-    const bodyTable =
-      root.querySelector('.layui-table-box > .layui-table-body table') || root.querySelector('.layui-table-main table') || root.querySelector('.layui-table-body table')
-    if (!headerTable) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '没有找到 layui 表格的表头' } }
-    const ths = (Array.from(headerTable.querySelectorAll('th[data-field]')) as any[]).filter((th) => !th.classList.contains('layui-hide'))
-    const cols: ModelCol[] = ths.map((th) => {
-      const field = th.getAttribute('data-field')
-      const special = th.classList.contains('layui-table-col-special')
-      const hasCheckbox = Boolean(th.querySelector('input[type="checkbox"],.layui-form-checkbox'))
-      return {
-        leaf: stripSort(textOf(th)),
-        path: stripSort(textOf(th)),
-        field: field || undefined,
-        hidden: isHidden(th),
-        special: special && hasCheckbox ? 'checkbox' : undefined,
-      }
-    })
-    const rowEls = bodyTable ? (Array.from(bodyTable.querySelectorAll('tbody tr[data-index]')) as any[]) : []
-    const fixedBodies = Array.from(root.querySelectorAll('.layui-table-fixed .layui-table-body tbody')) as any[]
-    const cellFor = (tr: any, field: string): any | null => {
-      const direct = tr.querySelector(`td${attrSel('data-field', field)}`)
-      if (direct && !direct.classList.contains('layui-hide')) return direct
-      const idx = tr.getAttribute('data-index')
-      for (const fb of fixedBodies) {
-        const ftr = fb.querySelector(`tr${attrSel('data-index', idx)}`)
-        const c = ftr ? ftr.querySelector(`td${attrSel('data-field', field)}`) : null
-        if (c) return c
-      }
-      return direct
-    }
-    const dataRows: ModelRow[] = rowEls.map((tr) => ({ el: tr, cells: cols.map((c) => cellFor(tr, c.field as string)) }))
-    const totalEls = Array.from(root.querySelectorAll('.layui-table-total tbody tr, .layui-table-total table tr')) as any[]
-    const summaryRows: ModelRow[] = totalEls.map((tr) => ({
-      el: tr,
-      cells: cols.map((c) => tr.querySelector(`td${attrSel('data-field', c.field as string)}`)),
-    }))
-    const none = root.querySelector('.layui-none')
-    return {
-      shape: 'layui',
-      cols,
-      hasHeader: cols.length > 0,
-      dataRows,
-      summaryRows,
-      excluded: { mergedRows: 0, paginationRows: 0, footerRows: summaryRows.length },
-      hasPagination: Boolean(root.querySelector('.layui-table-page')),
-      isBusy: Array.from(root.querySelectorAll('.layui-table-init')).some((m: any) => !isHidden(m)),
-      emptyNote: dataRows.length === 0 && Boolean(none) && !isHidden(none),
-      renderedRowEls: rowEls,
-    }
-  }
-
-
-  /**
-   * Element UI（Vue 2）el-table：表头和表体是两张分开的 table（header-wrapper / body-wrapper），
-   * 列靠 th / td 上相同的 `el-table_<表>_column_<列>` 类名对应；表头最右有一个空的 gutter 列；
-   * 合计行在 footer-wrapper；无数据时有 `.el-table__empty-text`，加载时有 `.el-loading-mask`。
-   */
-  const elementuiModel = (root: any): Model | ModelError => {
-    const headerTable = root.querySelector('.el-table__header-wrapper table')
-    const bodyTable = root.querySelector('.el-table__body-wrapper table')
-    if (!headerTable || !bodyTable) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '没有找到 el-table 的表头或表体' } }
-    const headRows = Array.from(headerTable.querySelectorAll('thead tr')) as any[]
-    if (headRows.length === 0) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '没有找到 el-table 的表头' } }
-    const keyOf = (node: any): string => {
-      const hit = (Array.from(node.classList || []) as string[]).find((c) => /^el-table_\d+_column_\d+$/.test(c))
-      return hit || ''
-    }
-    // 叶子列带 is-leaf；被 rowspan 的叶子出现在上面几行里，所以按占位矩阵算每个格子的真实列位置
-    type HeadCell = { th: any; r: number; pos: number; cs: number; leaf: boolean }
-    const headCells: HeadCell[] = []
-    const occupied: boolean[][] = []
-    headRows.forEach((tr, r) => {
-      occupied[r] = occupied[r] || []
-      let c = 0
-      for (const th of Array.from(tr.children) as any[]) {
-        if (th.classList.contains('gutter')) continue
-        while (occupied[r]?.[c]) c++
-        const rs = Math.max(1, Number(th.rowSpan || 1))
-        const cs = Math.max(1, Number(th.colSpan || 1))
-        for (let i = 0; i < rs; i++) {
-          occupied[r + i] = occupied[r + i] || []
-          for (let j = 0; j < cs; j++) (occupied[r + i] as boolean[])[c + j] = true
-        }
-        headCells.push({ th, r, pos: c, cs, leaf: th.classList.contains('is-leaf') || (headRows.length === 1) })
-        c += cs
-      }
-    })
-    const leafCells = headCells.filter((h) => h.leaf).sort((a, b) => a.pos - b.pos)
-    const leafThs = leafCells.map((h) => h.th)
-    const cols: ModelCol[] = leafCells.map((h) => {
-      const leaf = stripSort(textOf(h.th))
-      const groups = headCells
-        .filter((g) => !g.leaf && g.r < h.r + 1 && g.pos <= h.pos && h.pos < g.pos + g.cs)
-        .sort((x, y) => x.r - y.r)
-        .map((g) => stripSort(textOf(g.th)))
-        .filter((t) => t && t !== leaf)
-      const hasCheckbox = h.th.classList.contains('el-table-column--selection') || Boolean(h.th.querySelector('.el-checkbox'))
-      return { leaf, path: groups.length > 0 ? `${groups.join(' / ')} / ${leaf}` : leaf, hidden: isHidden(h.th), special: hasCheckbox ? ('checkbox' as const) : undefined }
-    })
-    const keys = leafThs.map((th) => keyOf(th))
-    const cellsOf = (tr: any): Array<any | null> => {
-      const tds = Array.from(tr.children) as any[]
-      const byKey: Record<string, any> = {}
-      for (const td of tds) {
-        const k = keyOf(td)
-        if (k) byKey[k] = td
-      }
-      return keys.map((k, i) => (k ? byKey[k] ?? null : tds[i] ?? null))
-    }
-    const rowEls = (Array.from(bodyTable.querySelectorAll('tbody > tr')) as any[]).filter(
-      (tr) => tr.classList.contains('el-table__row') && !isHidden(tr),
-    )
-    const dataRows: ModelRow[] = rowEls.map((tr) => ({ el: tr, cells: cellsOf(tr) }))
-    const footRows = (Array.from(root.querySelectorAll('.el-table__footer-wrapper tbody tr')) as any[]).map((tr) => ({ el: tr, cells: cellsOf(tr) }))
-    const emptyText = root.querySelector('.el-table__empty-text')
-    const loading = Array.from(root.querySelectorAll('.el-loading-mask')).some((m: any) => !isHidden(m))
-    return {
-      shape: 'elementui',
-      cols,
-      hasHeader: cols.length > 0,
-      dataRows,
-      summaryRows: footRows,
-      excluded: { mergedRows: 0, paginationRows: 0, footerRows: footRows.length },
-      hasPagination: pagerNear(root),
-      isBusy: loading,
-      emptyNote: dataRows.length === 0 && ((Boolean(emptyText) && !isHidden(emptyText)) || EMPTY_RE.test(textOf(root))),
-      renderedRowEls: rowEls,
-    }
-  }
-
-  /**
-   * FineReport（帆软）报表：冻结表由四块 `table.x-table` 拼成（角 / 顶部表头 / 左侧行头 / 中间数据），
-   * 每个单元格的 id 形如 `B3-0-2772`（Excel 式列字母 + 行号），靠它把四块对回同一张网格；
-   * 表头 = 角与顶部里的行，数据 = 左侧与中间里表头以下的行；rowspan 合并的行头向下补齐。
-   */
-  const finereportModel = (root: any): Model | ModelError => {
-    const tables = (String(root.tagName).toLowerCase() === 'table' && root.classList.contains('x-table')
-      ? [root]
-      : Array.from(root.querySelectorAll('table.x-table'))) as any[]
-    if (tables.length === 0) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '没有找到 FineReport 报表的数据区' } }
-    const letters = (s: string): number => s.split('').reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0) - 1
-    type FCell = { td: any; r: number; c: number; head: boolean; hidden: boolean; rs: number; cs: number }
-    const grid = new Map<number, Map<number, FCell>>()
-    const put = (cell: FCell, r: number, c: number): void => {
-      let row = grid.get(r)
-      if (!row) grid.set(r, (row = new Map()))
-      if (!row.has(c)) row.set(c, { ...cell, r, c })
-    }
-    let anyHead = false
-    for (const t of tables) {
-      const head = Boolean(t.closest('.frozen-corner,.frozen-north'))
-      if (head) anyHead = true
-      for (const td of Array.from(t.querySelectorAll('td')) as any[]) {
-        const m = /^([A-Z]+)(\d+)-/.exec(String(td.id || ''))
-        if (!m) continue
-        const c = letters(m[1] as string)
-        const r = Number(m[2])
-        const cell: FCell = { td, r, c, head, hidden: isHidden(td), rs: Math.max(1, Number(td.rowSpan || 1)), cs: Math.max(1, Number(td.colSpan || 1)) }
-        for (let i = 0; i < cell.rs; i++) for (let j = 0; j < cell.cs; j++) put(cell, r + i, c + j)
-      }
-    }
-    if (grid.size === 0) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '这张报表里没有可读取的单元格' } }
-    const rowNos = Array.from(grid.keys()).sort((a, b) => a - b)
-    const nonEmptyAt = (r: number): number =>
-      Array.from(grid.get(r)?.values() || []).filter((x) => !x.hidden && textOf(x.td)).length
-    // 表头行：冻结表里是角与顶部的行；不是冻结表时取第一行有内容的行
-    let headerRows: number[]
-    if (anyHead) headerRows = rowNos.filter((r) => Array.from(grid.get(r)?.values() || []).some((x) => x.head))
-    else {
-      const first = rowNos.find((r) => nonEmptyAt(r) >= 2)
-      headerRows = first === undefined ? [] : [first]
-    }
-    const textHeaderRows = headerRows.filter((r) => nonEmptyAt(r) > 0)
-    const lastHeader = headerRows.length > 0 ? Math.max(...headerRows) : -1
-    const colSet = new Set<number>()
-    for (const row of grid.values()) for (const c of row.keys()) colSet.add(c)
-    const colNos = Array.from(colSet).sort((a, b) => a - b)
-    const headText = (r: number, c: number): string => {
-      const x = grid.get(r)?.get(c)
-      return x && !x.hidden ? stripSort(textOf(x.td)) : ''
-    }
-    const cols: ModelCol[] = colNos.map((c) => {
-      const texts = textHeaderRows.map((r) => headText(r, c)).filter(Boolean)
-      const leaf = texts.length > 0 ? (texts[texts.length - 1] as string) : ''
-      const up = texts.slice(0, -1).filter((t, i, arr) => t !== leaf && arr.indexOf(t) === i)
-      const allHidden = Array.from(grid.values()).every((row) => !row.has(c) || (row.get(c) as FCell).hidden)
-      return { leaf, path: up.length > 0 ? `${up.join(' / ')} / ${leaf}` : leaf, hidden: allHidden }
-    })
-    const dataNos = rowNos.filter((r) => r > lastHeader && nonEmptyAt(r) > 0)
-    const dataRows: ModelRow[] = dataNos.map((r) => {
-      const row = grid.get(r) as Map<number, FCell>
-      const first = Array.from(row.values())[0]
-      return { el: first ? first.td.parentElement : null, cells: colNos.map((c) => row.get(c)?.td ?? null) }
-    })
-    const frozen = root.matches?.('.frozen-table') ? root : root.closest?.('.frozen-table')
-    return {
-      shape: 'finereport',
-      cols,
-      hasHeader: textHeaderRows.length > 0,
-      dataRows,
-      summaryRows: [],
-      excluded: { mergedRows: 0, paginationRows: 0, footerRows: 0 },
-      hasPagination: false,
-      isBusy: false,
-      emptyNote: dataRows.length === 0 && EMPTY_RE.test(textOf(frozen || root)),
-      renderedRowEls: dataRows.map((r) => r.el).filter(Boolean),
-    }
-  }
 
   // ---------------------------------------------------------------- 卡片 / 键值适配器
   // 老系统的详情页、看板指标卡没有统一控件：靠“名称 + 值”的成对结构识别。每个结果仍落到统一模型，
@@ -962,12 +547,8 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
       if (!('error' in asList)) return asList
     }
     if (!shape) return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '这个区域不是表格或常见的表格控件' } }
-    if (shape === 'easyui') return easyuiModel(root)
-    if (shape === 'jqgrid') return jqgridModel(root)
-    if (shape === 'extjs') return extjsModel(root)
-    if (shape === 'layui') return layuiModel(root)
-    if (shape === 'elementui') return elementuiModel(root)
-    if (shape === 'finereport') return finereportModel(root)
+    const adapter = adapters.find((a) => a.shape === shape)
+    if (adapter) return adapter.model(root)
     return nativeModel(root, shape as 'native' | 'aria', hint)
   }
 
@@ -1077,7 +658,8 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
   // ---------------------------------------------------------------- 模式：读取
   if (req.mode === 'read') {
     const args = req.read
-    const model = buildModel(el, { header: args.header, rowSelector: args.rowSelector, kind: args.kind })
+    const rootEl = resolveShell(el)
+    const model = buildModel(rootEl, { header: args.header, rowSelector: args.rowSelector, kind: args.kind })
     if ('error' in model) return { ok: false, code: model.error.code, message: model.error.message }
     const lower = (s: string): string => s.toLowerCase()
     const cols = model.cols
@@ -1218,18 +800,18 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
     const summaryRows = summary.slice(0, 5).map(readRow)
 
     let emptyVerified = model.emptyNote || Boolean(args.emptyMeansNone)
-    const parent = el.parentElement
+    const parent = rootEl.parentElement
     if (!emptyVerified && args.emptySelector) {
-      emptyVerified = Boolean(el.querySelector(args.emptySelector)) || Boolean(parent?.querySelector(args.emptySelector))
+      emptyVerified = Boolean(rootEl.querySelector(args.emptySelector)) || Boolean(parent?.querySelector(args.emptySelector))
     }
-    const busy = model.isBusy || Boolean(args.loadingSelector && el.querySelector(args.loadingSelector))
+    const busy = model.isBusy || Boolean(args.loadingSelector && rootEl.querySelector(args.loadingSelector))
     return {
       ok: true,
       shape: model.shape,
       isBusy: busy,
       emptyVerified,
       hasPagination: model.hasPagination,
-      virtualScroll: virtualScrollSuspected(el, model.renderedRowEls),
+      virtualScroll: Boolean(model.virtualHint) || virtualScrollSuspected(rootEl, model.renderedRowEls),
       headerDigest: cols.map((c) => c.leaf).join('|'),
       totalDataRows: dataRows.length,
       rows,
@@ -1248,7 +830,7 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
       return t === 'table' || r === 'grid' || r === 'table' || r === 'treegrid'
     }
     const normalizeGridRoot = (node: any): any => {
-      if (node.matches?.('.datagrid-view,.datagrid')) return node.closest('.datagrid-wrap') || node
+      for (const a of adapters) if (a.normalizeRoot && node.matches?.(a.claimSelector)) return a.normalizeRoot(node)
       return node
     }
     // 先看是不是已知的表格控件（含从内部元素点选）
@@ -1516,3 +1098,18 @@ export function tableDomEntry(el: any, req: TableDomRequest): any {
   }
   return { ok: true, feedback: String(clone.outerHTML || '').replace(/\s+/g, ' ').slice(0, 8000) }
 }
+
+const ENTRY_SOURCE = `(el, req) => {
+  const h = (${makeHelpers.toString()})(el.ownerDocument);
+  const adapters = [${ADAPTER_FACTORIES.map((f) => `(${f.toString()})(h)`).join(',')}];
+  return (${tableDomCore.toString()})(el, req, h, adapters);
+}`
+
+/**
+ * 页面内入口。辅助、各适配器和核心在这里用 Function.toString 拼成一个自包含的函数；
+ * Playwright 序列化函数时取其 toString()，所以页面里不需要 eval，也不受页面 CSP 影响。
+ * mode=read 在表根上执行；mode=detect / feedback 在被点到的元素上执行。
+ */
+export const tableDomEntry: (el: any, req: TableDomRequest) => any = Object.assign((_el: any, _req: TableDomRequest): any => undefined, {
+  toString: () => ENTRY_SOURCE,
+})

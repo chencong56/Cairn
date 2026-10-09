@@ -2,6 +2,7 @@
 import { createServer, type Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { AddressInfo } from 'node:net'
 import { expect } from 'vitest'
 import { chromium, type Browser, type Page } from 'playwright'
@@ -87,4 +88,31 @@ export async function centerOf(page: Page, selector: string): Promise<{ x: numbe
   const box = await page.locator(selector).first().boundingBox()
   if (!box) throw new Error(`没有 ${selector}`)
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+}
+
+export type PortalHarness = { base: string; newPage: () => Promise<Page>; close: () => Promise<void> }
+
+const PORTAL_DIR = join(__dirname, '..', '..', '..', '..', 'tests', 'target-popup-portal')
+
+/**
+ * 起目标系统 tests/target-popup-portal（/grids/ 表格控件靶场）并启动 chromium，页面已带登录态。
+ * 新三个控件（AG Grid / Ant Design Table / Handsontable）用真实库渲染，依赖装在门户目录里；
+ * 没装时明确失败（不静默跳过）：cd tests/target-popup-portal && pnpm install --ignore-workspace
+ */
+export async function startPortalHarness(): Promise<PortalHarness> {
+  const mod = (await import(pathToFileURL(join(PORTAL_DIR, 'server.mjs')).href)) as { createPortalServer: () => Server }
+  const server = mod.createPortalServer()
+  await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready))
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  const browser = await chromium.launch({ headless: true })
+  const context = await browser.newContext()
+  await context.addCookies([{ name: 'portal_session', value: 'demo', url: base }])
+  return {
+    base,
+    newPage: () => context.newPage(),
+    close: async () => {
+      await browser.close()
+      await new Promise<void>((done) => server.close(() => done()))
+    },
+  }
 }
