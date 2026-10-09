@@ -90,7 +90,35 @@ export async function centerOf(page: Page, selector: string): Promise<{ x: numbe
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
 }
 
-export type PortalHarness = { base: string; newPage: () => Promise<Page>; close: () => Promise<void> }
+export type PortalHarness = {
+  base: string
+  newPage: () => Promise<Page>
+  /** 靶场标准答案：/grids/truth?view=…&<与页面相同的参数>。 */
+  truth: <T = TruthRows>(view: string, query: string) => Promise<T>
+  close: () => Promise<void>
+}
+
+export type TruthRows = { rowCount: number; total: number; rows: Array<Record<string, string | number>>; summary?: Record<string, number> }
+
+/**
+ * 按真值逐行比对读取结果：mapping 为 读取列 key → 真值字段。数字列比 value，金额等小数列比 decimalValue（两位小数），其余比 value。
+ * 不一致时报出第几行哪一列，便于定位适配器问题。
+ */
+export function expectRowsMatchTruth(
+  rows: Array<Record<string, { value: unknown; decimalValue?: string }>>,
+  truthRows: TruthRows['rows'],
+  mapping: Record<string, { field: string; as?: 'value' | 'decimal2' }>,
+): void {
+  expect(rows.length, '行数与真值不一致').toBe(truthRows.length)
+  rows.forEach((row, i) => {
+    for (const [key, spec] of Object.entries(mapping)) {
+      const want = truthRows[i]![spec.field]
+      const got = spec.as === 'decimal2' ? row[key]?.decimalValue : row[key]?.value
+      const expected = spec.as === 'decimal2' ? Number(want).toFixed(2) : want
+      expect(got, `第 ${i + 1} 行「${key}」`).toEqual(expected)
+    }
+  })
+}
 
 const PORTAL_DIR = join(__dirname, '..', '..', '..', '..', 'tests', 'target-popup-portal')
 
@@ -110,6 +138,11 @@ export async function startPortalHarness(): Promise<PortalHarness> {
   return {
     base,
     newPage: () => context.newPage(),
+    truth: async <T,>(view: string, query: string) => {
+      const res = await context.request.get(`${base}/grids/truth?view=${view}&${query.replace(/^\?/, '')}`)
+      if (!res.ok()) throw new Error(`取真值失败：${res.status()}`)
+      return (await res.json()) as T
+    },
     close: async () => {
       await browser.close()
       await new Promise<void>((done) => server.close(() => done()))

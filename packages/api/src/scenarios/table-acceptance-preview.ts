@@ -4,6 +4,7 @@ import {
   authoringSteps,
   canonicalJson,
   evaluateTableExpectation,
+  isTablePreviewOnly,
   syncSha256,
   toAuthoringDocumentV2,
   validateTableExpectRuleAgainstPlan,
@@ -237,8 +238,12 @@ async function compileTableIntent(
 
   let hasFail = false
   let hasUnknown = false
+  if (isTablePreviewOnly(sample)) {
+    diagnostics.push(`只按预览的 ${sample.rows.length} 行试算；正式运行时按全量 ${sample.storage?.rowCount ?? sample.rowCount} 行检查`)
+  }
   for (const rule of rules) {
-    const outcome = evaluateTableExpectation(sample, rule)
+    // 编写期预览：外置记录集只有预览行，这里允许按预览算，结果由界面标注“保存后按全量计算”
+    const outcome = evaluateTableExpectation(sample, rule, { allowPreview: true })
     if (outcome.factsUnavailable) {
       hasUnknown = true
       diagnostics.push(outcome.reasonMessage ?? '数据事实不完整')

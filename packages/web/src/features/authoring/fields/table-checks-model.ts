@@ -1,5 +1,5 @@
 import { newUuid } from '@/lib/uuid'
-import { DEFAULT_TABLE_TIMEZONE, describeTablePredicate, type OutcomeContract, type TableCondition, type TableExpectRule, type TablePredicate } from '@cairn/shared'
+import { DEFAULT_TABLE_TIMEZONE, describeTablePredicate, expectedPageRows, type OutcomeContract, type TableCondition, type TableExpectRule, type TablePageInfo, type TablePredicate } from '@cairn/shared'
 
 export type { TableExpectRule }
 
@@ -36,6 +36,8 @@ export type CheckTemplate =
   | 'total_row_match'
   | 'column_unique'
   | 'row_lookup'
+  | 'page_total'
+  | 'page_consistency'
 
 export type TemplateOption = { value: CheckTemplate; label: string; example: string }
 
@@ -49,8 +51,25 @@ export const TEMPLATE_OPTIONS: TemplateOption[] = [
   { value: 'column_unique', label: '某列没有重复值', example: '例：报表名称不重复' },
 ]
 
-/** 该形态下可选的检查模板。键值信息只有一条记录：只给“某项满足条件”。 */
-export function templatesFor(kind: CheckKind): TemplateOption[] {
+/** 分页检查模板：只有预览里读到了相应的分页信息才出现。 */
+export const PAGE_TEMPLATE_OPTIONS: TemplateOption[] = [
+  { value: 'page_total', label: '总条数（分页显示）', example: '例：分页显示的总条数大于 0' },
+  { value: 'page_consistency', label: '本页条数与分页一致', example: '例：本页读到的行数与分页显示一致，发现漏行' },
+]
+
+/**
+ * 该形态下可选的检查模板。键值信息只有一条记录：只给“某项满足条件”。
+ * 分页检查只在表格、且预览里读到了总条数（或足以算出本页应有行数）时出现。
+ */
+export function templatesFor(kind: CheckKind, pageInfo?: TablePageInfo | null): TemplateOption[] {
+  const paging =
+    kind === 'table' && pageInfo
+      ? PAGE_TEMPLATE_OPTIONS.filter((t) => (t.value === 'page_total' ? pageInfo.totalRows !== undefined : expectedPageRows(pageInfo) !== null))
+      : []
+  return [...baseTemplatesFor(kind), ...paging]
+}
+
+function baseTemplatesFor(kind: CheckKind): TemplateOption[] {
   if (kind === 'keyvalue') return [{ value: 'all_rows', label: '某一项满足条件', example: '例：「状态」是“运行中”' }]
   if (kind === 'cards') {
     return TEMPLATE_OPTIONS.filter((t) => t.value !== 'total_row_match').map((t) =>
@@ -261,6 +280,10 @@ export function sentenceOf(rule: TableExpectRule, labelOf: (key: string) => stri
       const multi = rule.onMultiple === 'any' ? `；找到多${kind === 'cards' ? '张' : '行'}时只要有一${kind === 'cards' ? '张' : '行'}满足即可` : ''
       return `找到${conditionsSentence(rule.where, labelOf)}的${unit}，它的${conditionsSentence(rule.expect, labelOf)}${multi}；找不到这${kind === 'cards' ? '张卡片' : '一行'}${missing}`
     }
+    case 'page_total':
+      return `分页显示的总条数${COMPARE_LABEL[rule.op]} ${rule.value} 条`
+    case 'page_consistency':
+      return '本页读到的行数与分页显示一致'
     case 'row_expression':
       return rule.quantifier === 'all' ? `${kind === 'cards' ? '每张卡片' : '每一行'}都满足自定义条件（高级）` : `至少有${kind === 'cards' ? '一张卡片' : '一行'}满足自定义条件（高级）`
   }
@@ -285,6 +308,10 @@ export function defaultRule(template: CheckTemplate, columns: readonly CheckColu
       return firstNumber ? { rule: 'total_row_match', column: firstNumber.key, precision: 'display' } : null
     case 'column_unique':
       return first ? { rule: 'column_unique', column: first.key } : null
+    case 'page_total':
+      return { rule: 'page_total', op: 'gt', value: 0 }
+    case 'page_consistency':
+      return { rule: 'page_consistency' }
     case 'row_lookup': {
       if (!first) return null
       const usable = columns.filter((c) => !c.sensitive)

@@ -23,6 +23,7 @@ import { RunsService } from '../runs/runs.service'
 import { ObserveService } from '../runs/observe.service'
 import { BrowserService } from '../runs/browser.service'
 import { ScenariosController } from '../scenarios/scenarios.controller'
+import { TableFilePreviewService } from '../scenarios/table-file-preview.service'
 import { ScenariosService } from '../scenarios/scenarios.service'
 import { listenForSupertest } from '../__tests__/http-app'
 
@@ -109,6 +110,7 @@ async function buildApp(account: RequestAccount, services: ReturnType<typeof moc
       { provide: RecordingArtifactsService, useValue: {} },
       { provide: RunsService, useValue: services.runs },
       { provide: ScenariosService, useValue: services.scenarios },
+      { provide: TableFilePreviewService, useValue: {} },
       { provide: ObserveService, useValue: {} },
       { provide: BrowserService, useValue: {} },
       { provide: APP_GUARD, useValue: new StaticAuthGuard(account) },

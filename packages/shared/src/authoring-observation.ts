@@ -5,7 +5,15 @@ import { isSensitiveLocatorHay } from './sensitive-fill.js'
 import { stepSchema } from './step.js'
 import { targetDescriptorSchema } from './target-descriptor.js'
 import { entityIdSchema } from './wire.js'
-import { TABLE_DETECT_MAX_COLS, tableSampleSchema, tableReadPlanSchema, tableReadPlanV2Schema, type TableSample } from './table-acceptance.js'
+import {
+  TABLE_DETECT_MAX_COLS,
+  TABLE_FILE_MAX_BYTES,
+  tableFilePlanSchema,
+  tableSampleSchema,
+  tableReadPlanSchema,
+  tableReadPlanV2Schema,
+  type TableSample,
+} from './table-acceptance.js'
 
 export const TARGET_OBSERVATION_OUTCOMES = [
   'FOUND',
@@ -237,6 +245,61 @@ export const tableDetectedSchema = z.strictObject({
   notes: z.array(z.string()).max(16),
 })
 export type TableDetected = z.infer<typeof tableDetectedSchema>
+
+/**
+ * 文件来源的编写期预览：解析最近一次运行里该下载步骤产出的文件，或用户上传的样例（只用于预览，不保存）。
+ * 解析在 API 内存里完成，复用与 Worker 执行相同的 @cairn/table-file。
+ */
+export const tableFilePreviewRequestSchema = z.strictObject({
+  /** 本步的读取计划；没有时按识别结果给出建议计划。 */
+  plan: tableFilePlanSchema.optional(),
+  fromKey: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,127}$/),
+  /** 产出这个文件的下载步骤（用来在最近的运行里找文件）。 */
+  downloadStepId: entityIdSchema,
+  /** 识别时的提示：指定工作表、表头位置、编码、分隔符。 */
+  hints: z
+    .strictObject({
+      sheet: tableFilePlanSchema.shape.sheet,
+      header: tableFilePlanSchema.shape.header.optional(),
+      encoding: tableFilePlanSchema.shape.encoding.optional(),
+      delimiter: tableFilePlanSchema.shape.delimiter.optional(),
+    })
+    .optional(),
+  source: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('latest_run') }),
+    z.strictObject({
+      kind: z.literal('upload'),
+      name: z.string().min(1).max(255),
+      base64: z.string().min(1).max(Math.ceil((TABLE_FILE_MAX_BYTES * 4) / 3) + 16),
+    }),
+  ]),
+})
+export type TableFilePreviewRequest = z.infer<typeof tableFilePreviewRequestSchema>
+
+export const tableFilePreviewResponseSchema = z.strictObject({
+  source: z.strictObject({
+    kind: z.enum(['latest_run', 'upload']),
+    runId: entityIdSchema.optional(),
+    /** 文件产生的时间（运行文件）或预览时间（上传）。 */
+    at: z.string(),
+  }),
+  file: z.strictObject({
+    name: z.string(),
+    byteSize: z.number().int().nonnegative(),
+    format: z.enum(['csv', 'xlsx', 'html']),
+    sheet: z.string().optional(),
+    encoding: z.string().optional(),
+  }),
+  sheets: z.array(z.strictObject({ name: z.string(), rows: z.number().int().nonnegative() })).optional(),
+  /** 表头所在行（从 1 起）与占几行；数据行数。 */
+  headerRow: z.number().int().positive(),
+  headerRows: z.number().int().positive(),
+  dataRows: z.number().int().nonnegative(),
+  columns: z.array(tableDetectedColumnSchema).max(TABLE_DETECT_MAX_COLS),
+  plan: tableFilePlanSchema,
+  sample: tableSampleSchema,
+})
+export type TableFilePreviewResponse = z.infer<typeof tableFilePreviewResponseSchema>
 
 export const tableDetectObservationSchema = z.strictObject({
   outcome: targetObservationOutcomeSchema,

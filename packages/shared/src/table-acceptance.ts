@@ -196,6 +196,104 @@ export function isTablePlanUnconfigured(plan: Pick<TableReadPlan, 'columns'>): b
 
 export const TABLE_SAMPLE_PROTOCOL = 'table.sample@1' as const
 
+export const tableSampleSourceKindSchema = z.enum(['page', 'file', 'network'])
+export type TableSampleSourceKind = z.infer<typeof tableSampleSourceKindSchema>
+
+/** 外置记录集对象的格式：JSON 行，首行为头（协议、列 key、行数），之后每行一条记录；合计行在头里。 */
+export const TABLE_RECORDSET_PROTOCOL = 'table.recordset@1' as const
+export const TABLE_RECORDSET_CONTENT_TYPE = 'application/x-ndjson'
+/** 上下文里保留的预览行数上限；全量在外置对象里。 */
+export const TABLE_SAMPLE_PREVIEW_ROWS = 200
+/** 一个外置记录集至多多少行；超出截断并标为部分。 */
+export const TABLE_RECORDSET_MAX_ROWS = 50_000
+/** 外置对象正文上限（另受对象存储单对象上限约束，取两者较小值）。 */
+export const TABLE_RECORDSET_MAX_BYTES = 32 * 1024 * 1024
+/** 导出文件来源：单个文件上限。 */
+export const TABLE_FILE_MAX_BYTES = 20 * 1024 * 1024
+/** 接口来源：单个响应体上限。 */
+export const TABLE_NETWORK_RESPONSE_MAX_BYTES = 5 * 1024 * 1024
+
+export const tableRecordSetStorageSchema = z.strictObject({
+  protocol: z.literal(TABLE_RECORDSET_PROTOCOL),
+  objectKey: z.string().min(1).max(512),
+  digest: z.string().min(1).max(128),
+  /** 外置对象里的数据行数（= 全量行数）。 */
+  rowCount: z.number().int().nonnegative(),
+  byteSize: z.number().int().nonnegative(),
+  /** 对应的证据记录（type=file），运行复盘据此提供“下载全量数据”。 */
+  evidenceId: entityIdSchema.optional(),
+})
+export type TableRecordSetStorage = z.infer<typeof tableRecordSetStorageSchema>
+
+/**
+ * 页面元信息：分页条上直接显示的数字。读不到的字段就不给，不推算（例如不拿“总页数 × 每页条数”反推总条数）；
+ * 同一字段在分页条上出现互相矛盾的数字时也不给。rowRange 是分页条上显示的“第 from 到 to 条”。
+ */
+export const tablePageInfoSchema = z.strictObject({
+  totalRows: z.number().int().nonnegative().optional(),
+  currentPage: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().optional(),
+  totalPages: z.number().int().positive().optional(),
+  rowRange: z.strictObject({ from: z.number().int().nonnegative(), to: z.number().int().nonnegative() }).optional(),
+  /** 分页条原文（截断），便于复盘核对读数。 */
+  rawText: z.string().max(240),
+})
+export type TablePageInfo = z.infer<typeof tablePageInfoSchema>
+
+// ---------------------------------------------------------------------------
+// 文件来源：把下载步骤存下的文件（CSV / XLSX / HTML 伪 XLS）读成记录集
+// ---------------------------------------------------------------------------
+
+export const TABLE_FILE_PROTOCOL = 'table.file@1' as const
+export const TABLE_FILE_FORMATS = ['csv', 'xlsx', 'html'] as const
+export const tableFileFormatSchema = z.enum(['auto', ...TABLE_FILE_FORMATS])
+
+export const tableFilePlanSchema = z.strictObject({
+  protocol: z.literal(TABLE_FILE_PROTOCOL),
+  /** 下载步骤的输出名（上下文里的文件句柄）。 */
+  fromKey: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,127}$/, '须为下载步骤的输出名'),
+  /** 缺省按文件头识别；扩展名只作参考。 */
+  format: tableFileFormatSchema.default('auto'),
+  /** XLSX：按名称或序号（从 0 起）选工作表；缺省取第一个有数据的工作表。 */
+  sheet: z
+    .strictObject({
+      name: z.string().min(1).max(128).optional(),
+      index: z.number().int().min(0).max(255).optional(),
+    })
+    .optional(),
+  /** 表头在第几行（从 1 起）、占几行；auto 时跳过标题 / 说明行自动找。 */
+  header: z
+    .strictObject({
+      row: z.union([z.literal('auto'), z.number().int().min(1).max(10_000)]).default('auto'),
+      rows: z.union([z.literal('auto'), z.number().int().min(1).max(4)]).default('auto'),
+    })
+    .default({ row: 'auto', rows: 'auto' }),
+  /** 数据区：起止行（从 1 起，含）；缺省从表头下一行开始，遇到整行空白就停。 */
+  range: z
+    .strictObject({
+      startRow: z.number().int().min(1).optional(),
+      endRow: z.number().int().min(1).optional(),
+      stopAtBlankRow: z.boolean().default(true),
+    })
+    .default({ stopAtBlankRow: true }),
+  encoding: z.enum(['auto', 'utf-8', 'gb18030']).default('auto'),
+  delimiter: z.enum(['auto', 'comma', 'tab', 'semicolon']).default('auto'),
+  /** 合计行：缺省按“首列文字是 合计 / 总计 …”自动识别；可手工指定某列等于某文字的行。 */
+  totalRow: z
+    .strictObject({
+      columnKey: z.string().min(1).max(64),
+      equals: z.string().min(1).max(128),
+    })
+    .optional(),
+  columns: z.array(tableColumnSpecSchema).min(1).max(TABLE_READ_MAX_COLS),
+  limits: z
+    .strictObject({
+      maxRows: z.number().int().min(1).max(TABLE_RECORDSET_MAX_ROWS).default(TABLE_RECORDSET_MAX_ROWS),
+    })
+    .default({ maxRows: TABLE_RECORDSET_MAX_ROWS }),
+})
+export type TableFilePlan = z.infer<typeof tableFilePlanSchema>
+
 export const tableRowFieldSchema = z.strictObject({
   value: jsonValueSchema,
   rawText: z.string().optional(),
@@ -217,6 +315,17 @@ export type TableSampleCoverage = z.infer<typeof tableSampleCoverageSchema>
 export const tableSampleSchema = z.strictObject({
   protocol: z.literal(TABLE_SAMPLE_PROTOCOL).default(TABLE_SAMPLE_PROTOCOL),
   source: z.strictObject({
+    /** 数据从哪来：页面 DOM（缺省）、下载的文件、页面发出的接口响应。 */
+    kind: tableSampleSourceKindSchema.optional(),
+    /** 文件来源：读的是哪个文件、什么格式、哪个工作表。 */
+    file: z
+      .strictObject({
+        name: z.string().min(1).max(255),
+        format: z.enum(['csv', 'xlsx', 'html']),
+        sheet: z.string().max(128).optional(),
+        encoding: z.string().max(32).optional(),
+      })
+      .optional(),
     runId: entityIdSchema,
     stepRunId: entityIdSchema.optional(),
     attemptId: entityIdSchema.optional(),
@@ -239,10 +348,17 @@ export const tableSampleSchema = z.strictObject({
     .optional(),
   /** v2：合计 / 页脚行（tfoot、easyui 页脚、jqGrid 汇总、ExtJS summary、layui 合计行、自动或手工识别的合计行），用同样的列读出，不计入数据行；至多 5 行。 */
   summaryRows: z.array(z.record(z.string(), tableRowFieldSchema)).max(5).optional(),
+  /** 分页条上读到的分页信息（只有读到才有）。 */
+  pageInfo: tablePageInfoSchema.optional(),
   presentation: z.strictObject({
     omitted: z.boolean().default(false),
     previewCount: z.number().int().nonnegative().default(20),
   }),
+  /**
+   * 大记录集外置：完整行写成运行对象（见 TABLE_RECORDSET_PROTOCOL），这里的 rows 只是前若干行预览。
+   * 数据检查必须先按句柄加载全量；没加载就求值一律“无法确认”，不拿预览下结论。
+   */
+  storage: tableRecordSetStorageSchema.optional(),
 })
 export type TableSample = z.infer<typeof tableSampleSchema>
 
@@ -389,6 +505,16 @@ export const tableExpectRuleSchema = z.discriminatedUnion('rule', [
   z.strictObject({
     rule: z.literal('column_unique'),
     column: z.string().min(1).max(64),
+  }),
+  /** 分页条显示的总条数与给定数值比较（总条数读自分页条，不是本页行数）。 */
+  z.strictObject({
+    rule: z.literal('page_total'),
+    op: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte']),
+    value: z.number().int().nonnegative(),
+  }),
+  /** 本页读到的行数与分页条一致（显示的“第 x 到 y 条”，或按每页条数、总条数、当前页算出的本页应有条数）。 */
+  z.strictObject({
+    rule: z.literal('page_consistency'),
   }),
   /**
    * 找到某一行，再检查它：先按 where 找行（全部满足才算这一行），再要求找到的行满足 expect。
@@ -1175,10 +1301,19 @@ function evaluateRowLookup(
 export function evaluateTableExpectation(
   sample: TableSample,
   rule: TableExpectRule,
+  options: { allowPreview?: boolean } = {},
 ): TableEvaluationResult {
   const coverageComplete = sample.coverage.status === 'complete'
   const coverageDetails = coverageDetailsOf(sample)
   const colName = (key: string): string => sample.columns.find((c) => c.key === key)?.name ?? key
+
+  // 总条数读自分页条（或接口的总数字段），与行有没有读全无关：只在读取本身无法确认时不判
+  if (rule.rule === 'page_total') return evaluatePageTotal(sample, rule, coverageDetails)
+
+  // 外置记录集：rows 只是预览。只有编写期预览显式允许时才按预览算，正式检查必须先加载全量
+  if (isTablePreviewOnly(sample) && !options.allowPreview) {
+    return unknownResult(sample, 'TABLE_FULLSET_NOT_LOADED', '只有预览行，完整数据没有加载，无法确认全表事实')
+  }
 
   if (!coverageComplete) {
     return unknownResult(
@@ -1392,7 +1527,10 @@ export function evaluateTableExpectation(
     return evaluateColumnRule(sample, rule, coverageDetails)
   }
 
-  // 3c. 找到某一行，再检查它
+  // 3c. 本页行数与分页一致
+  if (rule.rule === 'page_consistency') return evaluatePageConsistency(sample, coverageDetails)
+
+  // 3d. 找到某一行，再检查它
   if (rule.rule === 'row_lookup') {
     return evaluateRowLookup(sample, rule, coverageDetails)
   }
@@ -1821,7 +1959,7 @@ export function validateTableExpectRuleAgainstPlan(
   rule: TableExpectRule,
   columns: TableColumnSpec[],
 ): { valid: true } | { valid: false; code: string; message: string } {
-  if (rule.rule === 'row_count') return { valid: true }
+  if (rule.rule === 'row_count' || rule.rule === 'page_total' || rule.rule === 'page_consistency') return { valid: true }
 
   if (rule.rule === 'column_stat' || rule.rule === 'total_row_match' || rule.rule === 'column_unique') {
     const col = columns.find((c) => c.key === rule.column)
@@ -1864,3 +2002,133 @@ export function validateTableExpectRulesAgainstPlan(
   return { valid: true }
 }
 
+
+
+// ---------------------------------------------------------------------------
+// 外置记录集（大记录集只在上下文里留预览，完整行写成运行对象）
+// ---------------------------------------------------------------------------
+
+/** 记录集是否只带了预览（完整行在外置对象里、尚未加载）。 */
+export function isTablePreviewOnly(sample: Pick<TableSample, 'rows' | 'storage'>): boolean {
+  return Boolean(sample.storage) && sample.rows.length < (sample.storage?.rowCount ?? 0)
+}
+
+const tableRecordSetHeaderSchema = z.strictObject({
+  protocol: z.literal(TABLE_RECORDSET_PROTOCOL),
+  columns: z.array(z.string()),
+  rowCount: z.number().int().nonnegative(),
+  summaryRows: z.array(z.record(z.string(), tableRowFieldSchema)).max(5).optional(),
+})
+
+/** 编码为 JSON 行：首行头，之后每行一条记录。 */
+export function encodeTableRecordSet(input: {
+  columns: readonly string[]
+  rows: ReadonlyArray<Record<string, TableRowField>>
+  summaryRows?: ReadonlyArray<Record<string, TableRowField>>
+}): string {
+  const header = {
+    protocol: TABLE_RECORDSET_PROTOCOL,
+    columns: [...input.columns],
+    rowCount: input.rows.length,
+    ...(input.summaryRows && input.summaryRows.length > 0 ? { summaryRows: input.summaryRows.slice(0, 5) } : {}),
+  }
+  const lines = [JSON.stringify(header)]
+  for (const row of input.rows) lines.push(JSON.stringify(row))
+  return `${lines.join('\n')}\n`
+}
+
+export type DecodedTableRecordSet = {
+  columns: string[]
+  rows: Array<Record<string, TableRowField>>
+  summaryRows: Array<Record<string, TableRowField>>
+}
+
+/** 解码外置记录集；格式不对或行数与头不符时抛错（调用方按“无法确认”处理）。 */
+export function decodeTableRecordSet(text: string): DecodedTableRecordSet {
+  const lines = text.split('\n').filter((line) => line.length > 0)
+  if (lines.length === 0) throw new Error('记录集为空')
+  const header = tableRecordSetHeaderSchema.parse(JSON.parse(lines[0] as string))
+  const rows = lines.slice(1).map((line) => z.record(z.string(), tableRowFieldSchema).parse(JSON.parse(line)))
+  if (rows.length !== header.rowCount) throw new Error(`记录集行数不符：头里写 ${header.rowCount} 行，实际 ${rows.length} 行`)
+  return { columns: header.columns, rows, summaryRows: header.summaryRows ?? [] }
+}
+
+
+// ---------------------------------------------------------------------------
+// 分页元信息检查
+// ---------------------------------------------------------------------------
+
+const COMPARE_TEXT = { eq: '等于', neq: '不等于', gt: '大于', gte: '大于等于', lt: '小于', lte: '小于等于' } as const
+
+function compareInt(actual: number, op: keyof typeof COMPARE_TEXT, value: number): boolean {
+  if (op === 'eq') return actual === value
+  if (op === 'neq') return actual !== value
+  if (op === 'gt') return actual > value
+  if (op === 'gte') return actual >= value
+  if (op === 'lt') return actual < value
+  return actual <= value
+}
+
+function pageDetails(coverage: TableOutcomeDetails['coverage'], checked: number): TableOutcomeDetails {
+  return {
+    protocol: TABLE_OUTCOME_PROTOCOL,
+    totalRowsChecked: checked,
+    matchedRows: null,
+    violatingRowsCount: null,
+    violatingRows: [],
+    presentation: { truncated: false, omittedViolatingRows: 0, truncatedFields: false },
+    coverage,
+  }
+}
+
+function evaluatePageTotal(
+  sample: TableSample,
+  rule: Extract<TableExpectRule, { rule: 'page_total' }>,
+  coverage: TableOutcomeDetails['coverage'],
+): TableEvaluationResult {
+  if (sample.coverage.status === 'unknown') {
+    return unknownResult(sample, 'TABLE_FACTS_UNAVAILABLE', '表格还没有就绪，分页信息不可信，无法确认总条数')
+  }
+  const total = sample.pageInfo?.totalRows
+  if (total === undefined) {
+    return unknownResult(sample, 'PAGE_INFO_UNAVAILABLE', '分页条上没有读到总条数，无法确认')
+  }
+  const passed = compareInt(total, rule.op, rule.value)
+  return {
+    passed,
+    reasonCode: passed ? undefined : 'PAGE_TOTAL_MISMATCH',
+    reasonMessage: passed ? undefined : `分页显示共 ${total} 条，不满足“${COMPARE_TEXT[rule.op]} ${rule.value}”`,
+    details: pageDetails(coverage, 0),
+  }
+}
+
+/** 本页应有多少行：优先用分页条显示的行区间；其次按每页条数、总条数、当前页算；再次“不是最后一页就应满页”。 */
+export function expectedPageRows(info: TablePageInfo | undefined): { rows: number; basis: string } | null {
+  if (!info) return null
+  if (info.rowRange && info.rowRange.to >= info.rowRange.from) {
+    return { rows: info.rowRange.to - info.rowRange.from + 1, basis: `分页显示第 ${info.rowRange.from}–${info.rowRange.to} 条` }
+  }
+  if (info.pageSize !== undefined && info.totalRows !== undefined && info.currentPage !== undefined) {
+    const rows = Math.max(0, Math.min(info.pageSize, info.totalRows - (info.currentPage - 1) * info.pageSize))
+    return { rows, basis: `共 ${info.totalRows} 条、每页 ${info.pageSize} 条、第 ${info.currentPage} 页` }
+  }
+  if (info.pageSize !== undefined && info.totalPages !== undefined && info.currentPage !== undefined && info.currentPage < info.totalPages) {
+    return { rows: info.pageSize, basis: `第 ${info.currentPage} / ${info.totalPages} 页不是最后一页，每页 ${info.pageSize} 条` }
+  }
+  return null
+}
+
+function evaluatePageConsistency(sample: TableSample, coverage: TableOutcomeDetails['coverage']): TableEvaluationResult {
+  const expected = expectedPageRows(sample.pageInfo)
+  if (!expected) {
+    return unknownResult(sample, 'PAGE_INFO_INSUFFICIENT', '分页条上读到的信息不够（需要显示的行区间，或每页条数 + 总条数 + 当前页），无法确认本页应有多少行')
+  }
+  const actual = sample.rows.length
+  const passed = actual === expected.rows
+  return {
+    passed,
+    reasonCode: passed ? undefined : 'PAGE_ROWS_MISMATCH',
+    reasonMessage: passed ? undefined : `本页读到 ${actual} 行，但${expected.basis}，应有 ${expected.rows} 行`,
+    details: pageDetails(coverage, actual),
+  }
+}

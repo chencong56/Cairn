@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Copy, Lock, LockOpen, MousePointerClick } from 'lucide-react'
+import { ChevronDown, ChevronRight, Copy, MousePointerClick } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   type ExtractInput,
@@ -22,44 +22,32 @@ import {
 } from '@/components/ui/select'
 import { copyToClipboard } from '@/lib/clipboard'
 import { useAuthoringObserve } from '../observe'
+import { TablePreviewGrid } from './table-preview-grid'
 import { setTableSample } from './table-sample-store'
 import {
   columnLabel,
   coverageSummary,
-  excludedReasonText,
   foundSummary,
   kindNoun,
   planKind,
   rootSelectorOf,
-  renameColumn,
   scopeAlternatives,
-  setColumnSensitive,
   setColumnSource,
   setColumnType,
   setEmptyMeansNone,
   setHeaderMode,
   setTotalRow,
   totalRowsSummary,
+  pageInfoSummary,
   setMaxRows,
   setRootSelector,
   tableInputFromDetected,
   tablePlanState,
-  toggleColumn,
 } from './table-plan-edit'
 
 type ExtractTableStep = Extract<Step, { type: 'extract' }>
-type TableInput = Extract<ExtractInput, { as: 'table' }>
-
-const PREVIEW_ROWS = 5
-
-function cellText(sample: TableSample | null, rowIndex: number, key: string): string {
-  const field = sample?.rows[rowIndex]?.[key]
-  if (!field) return ''
-  if (field.status === 'masked') return '••••'
-  if (field.status === 'missing') return '—'
-  if (field.status === 'error') return `${field.rawText ?? ''}（读不出）`
-  return String(field.rawText ?? field.value ?? '')
-}
+/** 页面来源的表格提取输入（文件来源见 table-file-fields）。 */
+type TableInput = Exclude<Extract<ExtractInput, { as: 'table' }>, { source: 'file' }>
 
 /** 「表格 / 列表数据」提取：点一下、看预览、确认。高级设置折叠在最下面。 */
 export function TableDataFields({
@@ -166,16 +154,6 @@ export function TableDataFields({
 
   const summary = coverageSummary(preview)
   const alternatives = detected ? scopeAlternatives(detected) : {}
-  const sampleColumns = preview?.columns ?? plan?.columns ?? []
-  // 列清单：识别过就列出全部列（含被自动排除的），否则只列计划里的列
-  const columnRows = detected
-    ? detected.columns.map((c) => ({
-        key: c.key,
-        name: c.name,
-        info: c,
-        checked: Boolean(plan?.columns.some((p) => p.key === c.key)),
-      }))
-    : (plan?.columns ?? []).map((c) => ({ key: c.key, name: c.name, info: null, checked: true }))
 
   return (
     <div className='space-y-3'>
@@ -269,72 +247,15 @@ export function TableDataFields({
           )}
 
           {totalRowsSummary(preview) ? <p className='text-xs text-muted-foreground'>{totalRowsSummary(preview)}</p> : null}
-          <div className='overflow-x-auto rounded-md border'>
-            <table className='w-full text-xs'>
-              <thead className='bg-muted/50'>
-                <tr>
-                  {columnRows.map((c) => {
-                    const planColumn = plan.columns.find((p) => p.key === c.key)
-                    return (
-                      <th key={c.key} className='min-w-28 border-b px-2 py-1.5 text-left align-top font-medium'>
-                        <div className='flex items-center gap-1'>
-                          <Checkbox
-                            aria-label={`读取「${c.name}」${planKind(plan) === 'table' ? '列' : '项'}`}
-                            checked={c.checked}
-                            disabled={disabled || (c.checked && plan.columns.length <= 1)}
-                            onCheckedChange={(checked) => commit(toggleColumn(plan, detected?.columns ?? [], c.key, checked === true))}
-                          />
-                          {planColumn ? (
-                            <Input
-                              key={`${c.key}:${c.name}:${columnLabel(planColumn)}`}
-                              aria-label={`「${c.name}」${planKind(plan) === 'table' ? '列' : '项'}的显示名`}
-                              className='h-6 px-1 text-xs'
-                              defaultValue={columnLabel(planColumn)}
-                              disabled={disabled}
-                              onBlur={(event) => commit(renameColumn(plan, c.key, event.target.value))}
-                            />
-                          ) : (
-                            <span className='text-muted-foreground'>{c.name}</span>
-                          )}
-                          {planColumn ? (
-                            <button
-                              type='button'
-                              className='text-muted-foreground hover:text-foreground'
-                              title={planColumn.sensitive ? '已标为敏感：输出与报告里会打码' : '标为敏感（打码）'}
-                              aria-label={`${planColumn.sensitive ? '取消' : '标为'}「${c.name}」列敏感`}
-                              disabled={disabled}
-                              onClick={() => commit(setColumnSensitive(plan, c.key, !planColumn.sensitive))}
-                            >
-                              {planColumn.sensitive ? <Lock className='size-3.5 text-amber-600' /> : <LockOpen className='size-3.5' />}
-                            </button>
-                          ) : null}
-                        </div>
-                        {c.info?.excludedReason ? (
-                          <span className='mt-0.5 block font-normal text-muted-foreground'>
-                            已排除：{excludedReasonText(c.info.excludedReason)}
-                          </span>
-                        ) : null}
-                      </th>
-                    )
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: Math.min(PREVIEW_ROWS, preview?.rows.length ?? 0) }).map((_, rowIndex) => (
-                  <tr key={rowIndex} className='border-t'>
-                    {columnRows.map((c) => (
-                      <td key={c.key} className='px-2 py-1 text-muted-foreground'>
-                        {c.checked && sampleColumns.some((s) => s.key === c.key) ? cellText(preview, rowIndex, c.key) : ''}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {preview && preview.rowCount > PREVIEW_ROWS ? (
-            <p className='text-xs text-muted-foreground'>只显示前 {PREVIEW_ROWS} 行，共 {preview.rowCount} 行。</p>
-          ) : null}
+          {pageInfoSummary(preview) ? <p className='text-xs text-muted-foreground' data-testid='table-page-info'>{pageInfoSummary(preview)}</p> : null}
+          <TablePreviewGrid
+            plan={plan}
+            columns={detected?.columns ?? null}
+            sample={preview}
+            unit={planKind(plan) === 'table' ? '列' : '项'}
+            disabled={disabled}
+            onChange={commit}
+          />
         </div>
       ) : null}
 

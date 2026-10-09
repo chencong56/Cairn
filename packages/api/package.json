@@ -16,6 +16,7 @@
     "@cairn/secret": "workspace:*",
     "@cairn/shared": "workspace:*",
     "@cairn/storage": "workspace:*",
+    "@cairn/table-file": "workspace:*",
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
     "@nestjs/jwt": "^12.0.1",

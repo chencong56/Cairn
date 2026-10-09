@@ -16,7 +16,7 @@ export const root = resolve(import.meta.dirname, '../..')
 // shared workspace. External installed dependencies remain read-only links.
 function freezeRuntime(artifacts) {
   const runtime = resolve(artifacts, 'runtime')
-  const packages = ['shared', 'authoring', 'db', 'map', 'secret', 'storage', 'api', 'worker']
+  const packages = ['shared', 'authoring', 'db', 'map', 'secret', 'storage', 'table-file', 'api', 'worker']
   for (const pkg of packages) {
     const source = resolve(root, 'packages', pkg)
     const destination = resolve(runtime, pkg)

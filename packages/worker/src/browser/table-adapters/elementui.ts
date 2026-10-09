@@ -83,6 +83,7 @@ export function elementuiAdapter(h: AdapterHelpers): TableAdapter {
   }
   return {
     shape: 'elementui',
+    pagerSelector: '.el-pagination',
     claimSelector: '.el-table',
     gridSelector: '.el-table',
     model,

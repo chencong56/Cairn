@@ -163,3 +163,24 @@ describe('日期列条件模型', () => {
     )
   })
 })
+
+describe('分页检查模板', () => {
+  const labelOf = (key: string) => key
+  it('预览里没有分页信息时不出现；读到总条数才有“总条数”，算得出本页应有行数才有“本页条数与分页一致”', () => {
+    const values = (info?: Parameters<typeof templatesFor>[1]) => templatesFor('table', info).map((t) => t.value)
+    expect(values()).not.toContain('page_total')
+    expect(values({ totalRows: 45, rawText: '共 45 条' })).toContain('page_total')
+    expect(values({ totalRows: 45, rawText: '共 45 条' })).not.toContain('page_consistency')
+    expect(values({ rowRange: { from: 1, to: 20 }, totalRows: 45, rawText: '' })).toEqual(expect.arrayContaining(['page_total', 'page_consistency']))
+    expect(templatesFor('cards', { totalRows: 45, rawText: '' }).map((t) => t.value)).not.toContain('page_total')
+  })
+  it('默认规则、句子与合约都合法', () => {
+    for (const template of ['page_total', 'page_consistency'] as const) {
+      const rule = defaultRule(template, [])!
+      expect(rule).toBeTruthy()
+      expect(() => outcomeContractSchema.parse(buildTableCheck('sites', rule, labelOf))).not.toThrow()
+    }
+    expect(sentenceOf({ rule: 'page_total', op: 'eq', value: 45 }, labelOf)).toBe('分页显示的总条数等于 45 条')
+    expect(sentenceOf({ rule: 'page_consistency' }, labelOf)).toBe('本页读到的行数与分页显示一致')
+  })
+})

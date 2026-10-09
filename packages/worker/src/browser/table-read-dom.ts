@@ -10,8 +10,10 @@
  * ExtJS 4–6、layui、Element UI el-table、FineReport 冻结表）；版本差异靠手工指定与页面结构反馈迭代。
  */
 
-import type { AdapterHelpers, Model, ModelCol, ModelError, ModelRow, TableAdapter } from './table-adapters/types.js'
+import type { AdapterHelpers, Model, ModelCol, ModelError, ModelRow, PageInfoDom, TableAdapter } from './table-adapters/types.js'
 import { makeHelpers } from './table-adapters/helpers.js'
+import { makePageInfoReader } from './table-adapters/page-info.js'
+import { makeValueParsers, type ValueParsers } from '@cairn/table-file'
 import { ADAPTER_FACTORIES } from './table-adapters/registry.js'
 
 export type TableShape = 'native' | 'aria' | 'easyui' | 'jqgrid' | 'extjs' | 'layui' | 'elementui' | 'finereport' | 'aggrid' | 'antd' | 'handsontable' | 'cards' | 'keyvalue' | 'listgrid'
@@ -66,6 +68,8 @@ export type ReadTableResult =
       summaryRows: DomRow[]
       excluded: { mergedRows: number; paginationRows: number; footerRows: number }
       colCount: number
+      /** 分页条读数（找到分页条且读出至少一项才有）。 */
+      pageInfo?: PageInfoDom
     }
   | { ok: false; code: string; message: string }
 
@@ -119,7 +123,14 @@ export type TableDomRequest =
  * 页面内核心逻辑：读取 / 识别 / 反馈。控件适配器（easyui、jqGrid…）不在这里，由注册表提供；
  * 核心只通过 TableAdapter 描述认出控件、归一壳节点、取统一模型。原生表格 / ARIA / 卡片 / 键值 / 列表式作为兜底仍在核心里。
  */
-export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, adapters: TableAdapter[]): any {
+export function tableDomCore(
+  el: any,
+  req: TableDomRequest,
+  h: AdapterHelpers,
+  adapters: TableAdapter[],
+  readPageInfo: (root: any, pagerSelector?: string) => PageInfoDom | undefined,
+  values: ValueParsers,
+): any {
   // ---------------------------------------------------------------- 通用辅助
   const { doc, win, clean, textOf, stripSort, roleOf, isHidden, attrSel, leafPath, PAGER_RE, EMPTY_RE, PAGER_SEL, pagerNear, TOTAL_RE, CHECKBOX_SEL } = h
   void stripSort
@@ -573,75 +584,8 @@ export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, a
     return scroller.scrollHeight > rowsHeight * 1.5 + 150 && outsideText < 50
   }
 
-  // ---------------------------------------------------------------- 值解析
-  const toHalf = (s: string): string =>
-    s
-      .replace(/[\uFF10-\uFF19]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
-      .replace(/\uFF0C/g, ',')
-      .replace(/\uFF0E/g, '.')
-      .replace(/\uFF05/g, '%')
-      .replace(/[\uFF08]/g, '(')
-      .replace(/[\uFF09]/g, ')')
-      .replace(/[\uFF0D\u2212]/g, '-')
-      .replace(/\uFF1A/g, ':')
-  const PLACEHOLDERS = new Set(['', '-', '--', '—', '–', '/', 'n/a', 'null'])
-  const shift = (digits: string, n: number): string => {
-    const neg = digits.startsWith('-')
-    const body = neg ? digits.slice(1) : digits
-    const [intPart, fracPart = ''] = body.split('.')
-    const padded = fracPart.padEnd(n, '0')
-    const nextInt = (intPart + padded.slice(0, n)).replace(/^0+(?=\d)/, '')
-    const nextFrac = padded.slice(n)
-    const out = nextFrac ? `${nextInt}.${nextFrac}` : nextInt
-    return neg ? `-${out}` : out
-  }
-  const parseNumber = (raw: string, scale: boolean): { ok: true; value: number; decimal: string } | { ok: false } => {
-    let s = toHalf(raw).replace(/[¥￥$€£]/g, '').trim()
-    let negative = false
-    if (/^\(.*\)$/.test(s)) {
-      negative = true
-      s = s.slice(1, -1).trim()
-    }
-    if (s.startsWith('-')) {
-      negative = true
-      s = s.slice(1).trim()
-    }
-    const m = /^(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\s*([%‰]|[A-Za-z\u4e00-\u9fa5]{0,6})$/.exec(s)
-    if (!m) return { ok: false }
-    let decimal = `${(m[1] as string).replace(/,/g, '')}${m[2] ?? ''}`
-    const unit = m[3] ?? ''
-    if (scale) {
-      if (unit.startsWith('万')) decimal = shift(decimal, 4)
-      else if (unit.startsWith('亿')) decimal = shift(decimal, 8)
-    }
-    if (negative) decimal = `-${decimal}`
-    const value = Number(decimal)
-    if (!Number.isFinite(value)) return { ok: false }
-    return { ok: true, value, decimal }
-  }
-  /** 日期规范化为不带时区的 YYYY-MM-DD / YYYY-MM-DD HH:mm:ss。 */
-  const parseDate = (raw: string): string | null => {
-    const s = toHalf(raw).trim()
-    const compact = /^(\d{4})(\d{2})(\d{2})(?:(\d{2})(\d{2})(\d{2}))?$/.exec(s)
-    const m = compact ?? /^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s)
-    if (!m) return null
-    const y = Number(m[1])
-    const mo = Number(m[2])
-    const d = Number(m[3])
-    if (compact && (y < 1900 || y > 2100)) return null
-    const probe = new Date(Date.UTC(y, mo - 1, d))
-    if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d) return null
-    const p2 = (n: number): string => String(n).padStart(2, '0')
-    const day = `${String(y).padStart(4, '0')}-${p2(mo)}-${p2(d)}`
-    if (m[4] === undefined) return day
-    const hh = Number(m[4])
-    const mm = Number(m[5])
-    const ss = Number(m[6] ?? 0)
-    if (hh > 23 || mm > 59 || ss > 59) return null
-    return `${day} ${p2(hh)}:${p2(mm)}:${p2(ss)}`
-  }
-  const TRUE_SET = new Set(['true', 'yes', 'y', '是', '真', '1', '√', '✓', '✔', '有', '启用', '开'])
-  const FALSE_SET = new Set(['false', 'no', 'n', '否', '假', '0', '×', '✗', '✘', '无', '禁用', '关'])
+  // ---------------------------------------------------------------- 值解析（与导出文件读取共用，见 table-adapters/values.ts）
+  const { toHalf, parseDate, fieldFromText, inferType } = values
   const cellText = (node: any): string => {
     const t = textOf(node)
     if (t) return t
@@ -716,57 +660,9 @@ export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, a
           const cell = row.cells[colIndexOf[i] as number]
           raw = cell ? cellText(cell) : ''
         }
-        const lowered = raw.toLowerCase()
-        if (spec.valueType === 'text') {
-          if (!raw) {
-            values[spec.key] = { value: null, status: 'missing' }
-            digest.push(`${spec.key}:missing`)
-          } else {
-            values[spec.key] = { value: raw, status: 'ok' }
-            digest.push(`${spec.key}:${raw}`)
-          }
-          return
-        }
-        if (PLACEHOLDERS.has(lowered)) {
-          values[spec.key] = { value: null, rawText: raw || undefined, status: 'missing' }
-          digest.push(`${spec.key}:missing`)
-          return
-        }
-        if (spec.valueType === 'number') {
-          const parsed = parseNumber(raw, Boolean(spec.scaleUnits))
-          if (!parsed.ok) {
-            values[spec.key] = { value: null, rawText: raw, status: 'error' }
-            digest.push(`${spec.key}:error:${raw}`)
-            return
-          }
-          values[spec.key] = {
-            value: parsed.value,
-            ...(raw !== String(parsed.value) ? { rawText: raw } : {}),
-            decimalValue: parsed.decimal,
-            status: 'ok',
-          }
-          digest.push(`${spec.key}:${parsed.decimal}`)
-          return
-        }
-        if (spec.valueType === 'date') {
-          const iso = parseDate(raw)
-          if (iso === null) {
-            values[spec.key] = { value: null, rawText: raw, status: 'error' }
-            digest.push(`${spec.key}:error:${raw}`)
-          } else {
-            values[spec.key] = { value: iso, ...(raw !== iso ? { rawText: raw } : {}), status: 'ok' }
-            digest.push(`${spec.key}:${iso}`)
-          }
-          return
-        }
-        const v = toHalf(lowered)
-        if (TRUE_SET.has(v) || FALSE_SET.has(v)) {
-          values[spec.key] = { value: TRUE_SET.has(v), ...(raw !== String(TRUE_SET.has(v)) ? { rawText: raw } : {}), status: 'ok' }
-          digest.push(`${spec.key}:${TRUE_SET.has(v)}`)
-        } else {
-          values[spec.key] = { value: null, rawText: raw, status: 'error' }
-          digest.push(`${spec.key}:error:${raw}`)
-        }
+        const { field, digest: part } = fieldFromText(spec, raw)
+        values[spec.key] = field
+        digest.push(part)
       })
       return { values, rawDigest: digest.join('|') }
     }
@@ -805,6 +701,7 @@ export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, a
       emptyVerified = Boolean(rootEl.querySelector(args.emptySelector)) || Boolean(parent?.querySelector(args.emptySelector))
     }
     const busy = model.isBusy || Boolean(args.loadingSelector && rootEl.querySelector(args.loadingSelector))
+    const pageInfo = readPageInfo(rootEl, adapters.find((a) => a.shape === model.shape)?.pagerSelector)
     return {
       ok: true,
       shape: model.shape,
@@ -818,12 +715,15 @@ export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, a
       summaryRows,
       excluded: { ...model.excluded, footerRows: model.excluded.footerRows + movedTotals },
       colCount: cols.length,
+      ...(pageInfo ? { pageInfo } : {}),
     } satisfies ReadTableResult
   }
 
   // ---------------------------------------------------------------- 模式：识别
   if (req.mode === 'detect') {
     const args = req.detect
+    // 按表根选择器识别时，选择器可能落在控件的挂载容器 / 隐藏空壳 / 内部子表上：先归到真正的控件根（与读取模式一致）
+    if (args.forceRoot) el = resolveShell(el)
     const isTableLike = (node: any): boolean => {
       const t = String(node.tagName || '').toLowerCase()
       const r = roleOf(node)
@@ -983,7 +883,6 @@ export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, a
     const cols = model.cols
     const colDetected: DetectedColumn[] = []
     const seen: Record<string, number> = {}
-    const DATE_LIKE = /^\d{4}\s*[-/.年]\s*\d{1,2}\s*[-/.月]\s*\d{1,2}/
     cols.forEach((col, c) => {
       const cellsAt = sampleRows.map((r) => r.cells[c]).filter(Boolean) as any[]
       const texts = cellsAt.map((cell) => textOf(cell)).filter(Boolean)
@@ -1006,17 +905,9 @@ export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, a
       ) excludedReason = 'action'
       else if (/^(序号|序|行号|no\.?|#)$/i.test(header)) excludedReason = 'index'
       else if (!header && texts.length >= 2 && texts.every((tx, i) => tx === String(i + 1))) excludedReason = 'index'
-      let valueType: DetectedColumn['valueType'] = 'text'
-      let numericKind: DetectedColumn['numericKind']
-      if (texts.length > 0) {
-        const compact = texts.map((tx) => tx.replace(/[,，\s¥￥$€£%元万亿个]/g, ''))
-        if (texts.every((tx) => /^(true|false|yes|no|是|否|真|假)$/i.test(tx))) valueType = 'boolean'
-        else if (texts.every((tx) => DATE_LIKE.test(tx)) || texts.every((tx) => /^\d{8}(\d{6})?$/.test(toHalf(tx).trim()) && parseDate(tx) !== null)) valueType = 'date'
-        else if (compact.every((x) => /^[-(]?\d+(\.\d+)?\)?$/.test(x)) && texts.some((tx) => /\d/.test(tx))) {
-          valueType = 'number'
-          numericKind = compact.every((x) => /^[-(]?\d+\)?$/.test(x)) ? 'integer' : 'decimal'
-        }
-      }
+      const inferred = inferType(texts)
+      const valueType: DetectedColumn['valueType'] = inferred.valueType
+      const numericKind: DetectedColumn['numericKind'] = inferred.numericKind
       const nameBase = header || `列${c + 1}`
       seen[nameBase] = (seen[nameBase] || 0) + 1
       colDetected.push({
@@ -1102,7 +993,9 @@ export function tableDomCore(el: any, req: TableDomRequest, h: AdapterHelpers, a
 const ENTRY_SOURCE = `(el, req) => {
   const h = (${makeHelpers.toString()})(el.ownerDocument);
   const adapters = [${ADAPTER_FACTORIES.map((f) => `(${f.toString()})(h)`).join(',')}];
-  return (${tableDomCore.toString()})(el, req, h, adapters);
+  const readPageInfo = (${makePageInfoReader.toString()})(h);
+  const values = (${makeValueParsers.toString()})();
+  return (${tableDomCore.toString()})(el, req, h, adapters, readPageInfo, values);
 }`
 
 /**

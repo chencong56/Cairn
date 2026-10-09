@@ -18,6 +18,7 @@ import {
 } from './expression.js'
 import {
   tableReadPlanSchema,
+  tableFilePlanSchema,
   tableExpectRuleSchema,
   type TableReadPlan,
   type TableExpectRule,
@@ -91,6 +92,16 @@ export function isAiStepType(type: string): type is AiStepType {
 /** 需要受管 Page / Session 的步骤：确定性浏览器命令与三类 AI。 */
 export function stepUsesBrowser(type: string): boolean {
   return isBrowserStepType(type) || isAiStepType(type)
+}
+
+/**
+ * 这一步执行时会不会操作页面（决定是否要求现场截图 / Trace）。与 stepUsesBrowser 的区别：
+ * 文件来源的提取在浏览器场景里运行，但只读前面下载的文件、不碰页面，它的证据是源文件与读取结果。
+ */
+export function stepTouchesPage(step: { type: string; input?: unknown }): boolean {
+  if (!stepUsesBrowser(step.type)) return false
+  const input = step.input as { as?: unknown; source?: unknown } | undefined
+  return !(step.type === 'extract' && input?.as === 'table' && input.source === 'file')
 }
 
 export function hasAiSteps(steps: readonly { type: string }[]): boolean {
@@ -248,9 +259,17 @@ export const extractTableInputSchema = z.strictObject({
   table: tableReadPlanSchema,
 })
 
+/** 文件来源：读下载步骤存下的文件，不需要页面目标。 */
+export const extractTableFileInputSchema = z.strictObject({
+  as: z.literal('table'),
+  source: z.literal('file'),
+  table: tableFilePlanSchema,
+})
+
 export const extractInputSchema = z.union([
   extractStandardInputSchema,
   extractTableInputSchema,
+  extractTableFileInputSchema,
 ])
 export type ExtractInput = z.infer<typeof extractInputSchema>
 

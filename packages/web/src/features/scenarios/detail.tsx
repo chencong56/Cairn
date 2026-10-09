@@ -2398,7 +2398,7 @@ export function ScenarioDetailPage() {
                 } as typeof current)
               }}
             >
-            <ResolutionSourceProvider targetId={scenario.targetId} scenarioPlan={draft.v2Document?.locatorPlan}>
+            <ResolutionSourceProvider targetId={scenario.targetId} scenarioPlan={draft.v2Document?.locatorPlan} scenarioId={scenario.id} steps={scenarioSteps}>
             <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
               {flowgram ? (
                 <div className='flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row overflow-hidden'>

@@ -241,7 +241,7 @@ export function RowLookupFields({
   const preview = useMemo(() => {
     if (!sample || incomplete) return null
     try {
-      return evaluateTableExpectation(sample, rule)
+      return evaluateTableExpectation(sample, rule, { allowPreview: true })
     } catch {
       return null
     }

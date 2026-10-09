@@ -25,6 +25,7 @@ import {
   safeDownloadFileName,
 } from '@cairn/shared'
 import { MapConsumptionService } from '../map/consumption.service.js'
+import { executeTableFileStep } from './table-file-step.js'
 import type { ObjectService } from '../objects/object.service.js'
 import type { AiPort, BrowserPort } from './ports.js'
 import { persistResolutionDecision, resolutionError, runResolutionLadder } from './resolution-ladder.js'
@@ -85,6 +86,11 @@ export class BrowserStepExecutor implements StepExecutor {
 
   async execute(ctx: StepExecutionContext): Promise<StepExecutionOutcome> {
     const { step, input, signal, sessionGrant, targetId, runId, stepRunId, attemptId, evidencePolicy } = ctx
+
+    // 文件来源的表格提取：读下载步骤存下的文件，不需要浏览器会话
+    if (step.type === 'extract' && step.input.as === 'table' && 'source' in step.input && step.input.source === 'file') {
+      return executeTableFileStep(ctx, step.input.table, { handle: this.handle, objects: this.objects })
+    }
 
     if (!this.browser || !sessionGrant) {
       return {
@@ -450,6 +456,12 @@ export class BrowserStepExecutor implements StepExecutor {
     }
 
     if (step.type === 'extract') {
+      if (step.input.as === 'table' && 'source' in step.input) {
+        return {
+          ok: false,
+          error: { code: 'UNEXPECTED_TABLE_PATH', category: 'EXECUTOR', retryable: false, safeMessage: '文件来源的表格提取不经过浏览器' },
+        }
+      }
       if (step.input.as === 'table') {
         const target = step.input.table?.target ?? { framePath: [], candidates: [{ by: 'css', value: 'table' }] }
         return {

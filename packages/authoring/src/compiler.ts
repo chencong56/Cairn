@@ -25,7 +25,6 @@ import {
   type Step,
   type TargetDescriptor,
   isTablePlanUnconfigured,
-  isTableReadPlanV2,
   validateTableExpectRuleAgainstPlan,
 } from '@cairn/shared'
 import { parse as parseYaml } from 'yaml'
@@ -91,14 +90,14 @@ function locatorSteps(step: Step): Extract<Step, { input: { target?: unknown } }
   if (
     step.type === 'click' ||
     step.type === 'fill' ||
-    step.type === 'extract' ||
+    (step.type === 'extract' && !('source' in step.input && step.input.source === 'file')) ||
     step.type === 'assert' ||
     step.type === 'select' ||
     step.type === 'keyboard' ||
     step.type === 'wait' ||
     step.type === 'upload'
   ) {
-    return [step]
+    return [step as Extract<Step, { input: { target?: unknown } }>]
   }
   if (step.type === 'download' && step.input.target) {
     return [step as Extract<Step, { input: { target?: unknown } }>]
@@ -519,6 +518,7 @@ export function compileScenarioDocument(document: ScenarioDocument, ctx: Compile
 
   addOutcomeCoverageDiagnostics(diagnostics, document, ctx.outcomeManifest, release)
   addTableCheckDiagnostics(diagnostics, document, ctx.outcomeManifest, release)
+  addTableFileSourceDiagnostics(diagnostics, document, release)
 
   if (ctx.target) {
     if (!ctx.target.exists) {
@@ -534,6 +534,26 @@ export function compileScenarioDocument(document: ScenarioDocument, ctx: Compile
     definition: document,
     diagnostics,
   }
+}
+
+/**
+ * 文件来源的提取必须指向本步之前、未停用的下载步骤输出；否则运行时拿不到文件。
+ */
+function addTableFileSourceDiagnostics(diagnostics: CompileDiagnostic[], document: ScenarioDocument, release: boolean): void {
+  document.steps.forEach((step, index) => {
+    if (step.disabled || step.type !== 'extract' || !('source' in step.input) || step.input.source !== 'file') return
+    const fromKey = step.input.table.fromKey
+    const source = document.steps.slice(0, index).find((s) => !s.disabled && s.type === 'download' && s.outputKey === fromKey)
+    if (!source) {
+      add(
+        diagnostics,
+        'SCENARIO_TABLE_FILE_SOURCE_INVALID',
+        release ? 'error' : 'warning',
+        `「${step.name}」要读的文件「${fromKey}」不是本步之前某个下载步骤的输出，请先加下载步骤并填写输出名`,
+        { stepId: step.id },
+      )
+    }
+  })
 }
 
 /**
@@ -555,10 +575,12 @@ function addTableCheckDiagnostics(
     if (!source || source.type !== 'extract' || source.input.as !== 'table') continue
     const plan = source.input.table
     const rule = entry.rule.expect.rule
-    const kind = isTableReadPlanV2(plan) ? plan.kind : undefined
+    const kind = plan.protocol === 'table.read@2' ? plan.kind : undefined
     let message: string | null = null
     if (rule.rule === 'total_row_match' && (kind === 'cards' || kind === 'keyvalue')) {
       message = '卡片和详情信息没有合计行，不能做“各行相加等于合计行”'
+    } else if ((rule.rule === 'page_total' || rule.rule === 'page_consistency') && kind === 'keyvalue') {
+      message = '详情信息没有分页，不能做分页检查'
     } else {
       const checked = validateTableExpectRuleAgainstPlan(rule, plan.columns)
       if (!checked.valid) message = checked.message

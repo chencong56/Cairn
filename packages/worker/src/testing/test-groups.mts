@@ -73,6 +73,7 @@ export const BROWSER_PARALLEL_SPEC_FILES: readonly string[] = [
     'src/browser/table-read-real.browser.spec.ts',
     'src/browser/table-adapters/registry.browser.spec.ts',
     'src/browser/table-read-modern-grids.browser.spec.ts',
+    'src/browser/table-read-page-info.browser.spec.ts',
 ]
 
 export const BROWSER_SPEC_FILES: readonly string[] = [
@@ -181,6 +182,7 @@ export const PURE_SPEC_FILES: readonly string[] = [
   'src/engine/resolution-ladder.spec.ts',
   'src/engine/step-executor-registry.spec.ts',
   'src/engine/fixture-executor.checks.spec.ts',
+  'src/engine/table-recordset.spec.ts',
     'src/engine/outcome-collector.table.spec.ts',
     'src/browser/table-read-v2.timeout.spec.ts',
   'src/internal/http-server.spec.ts',

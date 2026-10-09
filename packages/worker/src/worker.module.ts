@@ -72,7 +72,7 @@ import { createAiPort } from './ai/port'
       provide: STEP_EXECUTOR_REGISTRY,
       useFactory: (handle: DbHandle, browser?: BrowserPort, ai?: AiPort, objects?: ObjectService) => {
         const executors = [
-          new FixtureStepExecutor(),
+          new FixtureStepExecutor(objects),
           new BrowserStepExecutor(handle, browser, ai, undefined, objects),
           new MapIngestExecutor(handle, browser),
         ]

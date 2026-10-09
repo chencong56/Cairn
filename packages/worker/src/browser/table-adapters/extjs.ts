@@ -54,6 +54,7 @@ export function extjsAdapter(h: AdapterHelpers): TableAdapter {
   }
   return {
     shape: 'extjs',
+    pagerSelector: '.x-paging-toolbar',
     claimSelector: '.x-grid,.x-grid-panel',
     gridSelector: '.x-grid',
     model,

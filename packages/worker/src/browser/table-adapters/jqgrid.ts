@@ -64,6 +64,7 @@ export function jqgridAdapter(h: AdapterHelpers): TableAdapter {
   }
   return {
     shape: 'jqgrid',
+    pagerSelector: '.ui-jqgrid-pager',
     claimSelector: '.ui-jqgrid,.ui-jqgrid-view',
     gridSelector: '.ui-jqgrid',
     innerPartSelector: 'table.ui-jqgrid-btable,table.ui-jqgrid-htable',

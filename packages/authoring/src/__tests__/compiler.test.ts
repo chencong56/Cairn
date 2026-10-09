@@ -287,7 +287,7 @@ describe('compileScenarioDocument', () => {
 
   it('数据检查与读取计划对不上时：发布报错、草稿提醒；对得上不报', () => {
     const rootTarget = { framePath: [], candidates: [{ by: 'css', value: '#board' }] }
-    const planOf = (kind?: 'cards') => ({
+    const planOf = (kind?: 'cards' | 'keyvalue') => ({
       protocol: 'table.read@2',
       target: rootTarget,
       ...(kind ? { kind } : {}),
@@ -335,6 +335,10 @@ describe('compileScenarioDocument', () => {
     // 对得上
     expect(codes(compile(planOf('cards'), { rule: 'column_stat', column: 'col_2', stat: 'sum', op: 'gt', value: 0, ignoreEmpty: false }, 'release'))).toHaveLength(0)
     expect(codes(compile(planOf(), { rule: 'total_row_match', column: 'col_2', precision: 'display' }, 'release'))).toHaveLength(0)
+    // 分页检查：不引用列；详情信息没有分页
+    expect(codes(compile(planOf(), { rule: 'page_total', op: 'gt', value: 0 }, 'release'))).toHaveLength(0)
+    expect(codes(compile(planOf(), { rule: 'page_consistency' }, 'release'))).toHaveLength(0)
+    expect(codes(compile(planOf('keyvalue'), { rule: 'page_consistency' }, 'release'))).toHaveLength(1)
   })
 
   it('只有 INFO 条件时给出业务语义提示且不阻断发布', () => {

@@ -1,6 +1,7 @@
 import {
   EXPR_FUNCTIONS,
   EXECUTION_ERROR_CATEGORIES,
+  type ExecutableStepType,
   type ExecutionErrorCategory,
   type OutputShape,
   type LocatorPlan,
@@ -25,7 +26,8 @@ import { BindingFields } from './binding'
 import { CATEGORY_LABELS } from './labels'
 import { TargetFields } from './target'
 import { TableDataFields } from './table-data-fields'
-import { createPlaceholderTablePlan } from './table-plan-edit'
+import { ExtractTypeSelect } from './extract-type-select'
+import { FileTableFields } from './table-file-fields'
 
 function policyHandlers(step: Step, onChange: (step: Step) => void) {
   return {
@@ -43,13 +45,17 @@ export function StepFields({
   shapes,
   disabled,
   onChange,
+  onRequestTypeChange,
 }: {
   step: Step
   bindings: BindingOption[]
   shapes: Map<string, OutputShape>
   disabled?: boolean
   onChange: (step: Step) => void
+  /** 改换步骤类型（检查器的换类型流程）；提取类型下拉里“改用 AI 提取步骤”用它。 */
+  onRequestTypeChange?: (type: ExecutableStepType) => void
 }) {
+  const requestAiExtract = onRequestTypeChange ? () => onRequestTypeChange('ai_extract') : undefined
   if (
     step.type === 'ai_action' ||
     step.type === 'ai_extract' ||
@@ -691,37 +697,15 @@ export function StepFields({
     const extractStep = step
     if (extractStep.input.as === 'table') {
       const tableInput = extractStep.input
+      const isFile = 'source' in tableInput && tableInput.source === 'file'
       return (
         <div className='space-y-3'>
-          <div className='space-y-2'>
-            <Label>提取类型</Label>
-            <Select
-              value='table'
-              disabled={disabled}
-              onValueChange={(value) => {
-                if (value !== 'table') {
-                  onChange({
-                    ...extractStep,
-                    input: {
-                      target: tableInput.target,
-                      as: value as 'text' | 'value' | 'attribute',
-                    },
-                  })
-                }
-              }}
-            >
-              <SelectTrigger className='w-full' aria-label='提取类型'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='text'>文本</SelectItem>
-                <SelectItem value='value'>输入值</SelectItem>
-                <SelectItem value='attribute'>元素属性</SelectItem>
-                <SelectItem value='table'>表格 / 列表数据</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <TableDataFields step={extractStep} disabled={disabled} onChange={onChange} />
+          <ExtractTypeSelect step={extractStep} disabled={disabled} onChange={onChange} onRequestAiExtract={requestAiExtract} />
+          {isFile ? (
+            <FileTableFields step={extractStep} disabled={disabled} onChange={onChange} />
+          ) : (
+            <TableDataFields step={extractStep} disabled={disabled} onChange={onChange} />
+          )}
         </div>
       )
     }
@@ -738,49 +722,7 @@ export function StepFields({
           }
         />
         <div className='grid gap-3 sm:grid-cols-2'>
-          <div className='space-y-2'>
-            <Label>提取类型</Label>
-            <Select
-              value={standardInput.as}
-              disabled={disabled}
-              onValueChange={(value) => {
-                if (value === 'table') {
-                  const placeholder = createPlaceholderTablePlan()
-                  onChange({
-                    ...extractStep,
-                    input: { target: placeholder.target, as: 'table', table: placeholder },
-                  })
-                } else if (value === 'attribute') {
-                  onChange({
-                    ...extractStep,
-                    input: {
-                      target: standardInput.target,
-                      as: 'attribute',
-                      attribute: 'attribute' in standardInput ? standardInput.attribute : 'value',
-                    },
-                  })
-                } else {
-                  onChange({
-                    ...extractStep,
-                    input: {
-                      target: standardInput.target,
-                      as: value as 'text' | 'value',
-                    },
-                  })
-                }
-              }}
-            >
-              <SelectTrigger className='w-full' aria-label='提取类型'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='text'>文本</SelectItem>
-                <SelectItem value='value'>输入值</SelectItem>
-                <SelectItem value='attribute'>元素属性</SelectItem>
-                <SelectItem value='table'>表格 / 列表数据</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <ExtractTypeSelect step={extractStep} disabled={disabled} onChange={onChange} onRequestAiExtract={requestAiExtract} />
           {standardInput.as === 'attribute' ? (
             <div className='space-y-2'>
               <Label htmlFor={`step-attr-${extractStep.id}`}>属性名</Label>
@@ -1341,3 +1283,4 @@ export function StepFields({
 
   return null
 }
+

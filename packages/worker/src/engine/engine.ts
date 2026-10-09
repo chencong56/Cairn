@@ -108,7 +108,7 @@ export class ExecutionEngine {
     this.registry =
       registry ??
       new StepExecutorRegistry([
-        new FixtureStepExecutor(),
+        new FixtureStepExecutor(objects),
         new BrowserStepExecutor(this.handle, this.browser, undefined, undefined, objects),
         new MapIngestExecutor(this.handle, this.browser),
       ])

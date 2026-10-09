@@ -2,7 +2,7 @@ import { Trash2 } from 'lucide-react'
 import { DatePredicateFields } from './date-predicate-fields'
 import { RowLookupFields } from './row-lookup-fields'
 import { useTableSample } from './table-sample-store'
-import type { OutcomeContract, Step, TableExpectRule } from '@cairn/shared'
+import { expectedPageRows, type OutcomeContract, type Step, type TableExpectRule, type TablePageInfo } from '@cairn/shared'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -145,12 +145,15 @@ function RuleFields({
   rule,
   columns,
   kind,
+  pageInfo,
   disabled,
   onChange,
 }: {
   rule: TableExpectRule
   columns: readonly CheckColumn[]
   kind: CheckKind
+  /** 预览读到的分页信息（用于说明“本页应有多少行”的依据）。 */
+  pageInfo?: TablePageInfo | null
   disabled?: boolean
   onChange: (next: TableExpectRule) => void
 }) {
@@ -275,6 +278,24 @@ function RuleFields({
           <span>没有重复值</span>
         </>
       )
+    case 'page_total':
+      return (
+        <>
+          <span>分页显示的总条数</span>
+          <CompareSelect value={rule.op} disabled={disabled} onChange={(op) => onChange({ ...rule, op })} />
+          <NumberInput label='条数' value={rule.value} disabled={disabled} onChange={(value) => onChange({ ...rule, value: Math.max(0, Math.floor(value)) })} />
+          <span>条</span>
+        </>
+      )
+    case 'page_consistency': {
+      const basis = expectedPageRows(pageInfo ?? undefined)
+      return (
+        <span>
+          本页读到的行数与分页显示一致
+          {basis ? <span className='ml-1 text-caption text-muted-foreground'>（按预览：{basis.basis}，应有 {basis.rows} 行）</span> : null}
+        </span>
+      )
+    }
     case 'row_lookup':
       return null
     case 'row_expression':
@@ -320,7 +341,7 @@ export function TableChecksEditor({
             <SelectValue placeholder='添加检查' />
           </SelectTrigger>
           <SelectContent>
-            {templatesFor(kind).map((t) => (
+            {templatesFor(kind, sample?.pageInfo).map((t) => (
               <SelectItem key={t.value} value={t.value} textValue={t.label}>
                 <span className='flex flex-col items-start'>
                   <span>{t.label}</span>
@@ -357,6 +378,7 @@ export function TableChecksEditor({
                     rule={rule}
                     columns={columns}
                     kind={kind}
+                    pageInfo={sample?.pageInfo}
                     disabled={disabled}
                     onChange={(next) => replace(withRule(check, normalizeRule(next, columns), labelOf, kind))}
                   />

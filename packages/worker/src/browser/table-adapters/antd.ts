@@ -79,6 +79,7 @@ export function antdAdapter(h: AdapterHelpers): TableAdapter {
   }
   return {
     shape: 'antd',
+    pagerSelector: '.ant-pagination',
     claimSelector: '.ant-table-wrapper',
     gridSelector: '.ant-table-wrapper',
     innerPartSelector: '.ant-table,.ant-table-container,.ant-table-header,.ant-table-body,.ant-table-content',

@@ -5,11 +5,13 @@ import {
   toStrictNumber,
   evaluateTableExpectation,
   TABLE_SAMPLE_PROTOCOL,
+  isTablePreviewOnly,
   type TableSample,
   type FixtureStepType,
   type JsonValue,
 } from '@cairn/shared'
 import { executeDelay, executeEcho, executeFail } from './executors.js'
+import { loadFullTableSample, type RecordSetObjectPort } from './table-recordset.js'
 import type {
   StepExecutionContext,
   StepExecutionOutcome,
@@ -24,6 +26,9 @@ function isTableSample(val: unknown): TableSample | null {
 
 export class FixtureStepExecutor implements StepExecutor {
   readonly supportedTypes: readonly string[] = [...FIXTURE_STEP_TYPES, ...SYSTEM_STEP_TYPES]
+
+  /** recordSets：读取外置的完整记录集（文件 / 接口来源的大数据量），没有时这类检查判“无法确认”。 */
+  constructor(private readonly recordSets?: Pick<RecordSetObjectPort, 'getObject'>) {}
 
   async execute(ctx: StepExecutionContext): Promise<StepExecutionOutcome> {
     const { step, input, signal, clock, context } = ctx
@@ -191,7 +196,23 @@ export class FixtureStepExecutor implements StepExecutor {
           else if (expect.op === 'lte') passed = numVal <= expect.value
         }
       } else if (expect.kind === 'table') {
-        const evalRes = evaluateTableExpectation(val as TableSample, expect.rule)
+        // 外置记录集：上下文里只有预览，按句柄加载全量后再检查；加载不了就是“无法确认”，绝不拿预览下结论
+        let subject = val as TableSample
+        const tableVal = isTableSample(val)
+        if (tableVal && isTablePreviewOnly(tableVal)) {
+          const loaded = await loadFullTableSample(tableVal, this.recordSets)
+          if (!loaded.ok) {
+            return {
+              kind: 'failed',
+              output: { passed: false, actual: (val ?? null) as JsonValue, expected: expect as unknown as JsonValue },
+              error: { code: 'TABLE_FACTS_UNAVAILABLE', category: 'EXECUTOR', retryable: false, safeMessage: loaded.message },
+              timedOut: false,
+              aborted: false,
+            }
+          }
+          subject = loaded.sample
+        }
+        const evalRes = evaluateTableExpectation(subject, expect.rule)
         const output = {
           passed: evalRes.passed,
           actual: (val ?? null) as JsonValue,

@@ -20,6 +20,17 @@ export type Model = {
 }
 export type ModelError = { error: { code: string; message: string } }
 
+/** 分页条读数（与 shared 的 TablePageInfo 同形；ambiguous 表示有字段因数字矛盾被丢弃）。 */
+export type PageInfoDom = {
+  totalRows?: number
+  currentPage?: number
+  pageSize?: number
+  totalPages?: number
+  rowRange?: { from: number; to: number }
+  rawText: string
+  ambiguous?: boolean
+}
+
 /** 页面内通用辅助，由 makeHelpers 在页面里创建后传给每个适配器。 */
 export type AdapterHelpers = {
   doc: any
@@ -53,6 +64,8 @@ export type TableAdapter = {
   innerPartSelector?: string
   /** 点到控件的某个部件时，归一到真正的根。 */
   normalizeRoot?: (node: any) => any
+  /** 该控件分页条的选择器（在表内或紧挨着的兄弟里找；通用分页条选择器之外的补充）。声明了就必须有一致性用例。 */
+  pagerSelector?: string
   /** 隐藏的原始空壳 → 渲染出来的控件根；不适用返回 null。 */
   resolveShell?: (node: any) => any | null
   model: (root: any) => Model | ModelError

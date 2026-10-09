@@ -22,6 +22,8 @@ const releaseId = '00000000-0000-4000-8000-000000000006'
 const objectId = '00000000-0000-4000-8000-000000000007'
 const digest = 'c'.repeat(64)
 
+const EXTRACT_TARGET = { framePath: [], candidates: [{ by: 'role' as const, value: 'heading', name: '订单' }] }
+
 const extractStep: Step = {
   id: stepId,
   name: '提取',
@@ -29,7 +31,7 @@ const extractStep: Step = {
   effectType: 'READ_ONLY',
   outputKey: 'title',
   input: {
-    target: { framePath: [], candidates: [{ by: 'role', value: 'heading', name: '订单' }] },
+    target: EXTRACT_TARGET,
     as: 'text',
   },
 }
@@ -145,7 +147,7 @@ describe('地图消费服务', () => {
       ctx(extractStep, { mode: 'off' }),
       extractStep,
       notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(result).toEqual({ kind: 'passthrough' })
     expect(browser.execute).not.toHaveBeenCalled()
@@ -159,7 +161,7 @@ describe('地图消费服务', () => {
       ctx(extractStep, frozen('shadow')),
       extractStep,
       found,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(result.kind).toBe('passthrough')
     expect(mocks.appendMapSelectionDecision).toHaveBeenCalledWith(
@@ -208,7 +210,7 @@ describe('地图消费服务', () => {
       ctx(extractStep, frozen('shadow')),
       extractStep,
       notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(result.kind).toBe('passthrough')
     expect(browser.execute).toHaveBeenCalledWith(
@@ -247,7 +249,7 @@ describe('地图消费服务', () => {
       ctx(extractStep, frozen('read_only_fallback')),
       extractStep,
       notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     // 返回体带上 mapDecisionId：把这次替换执行关联到决策账本里的那条 selected 决策，可追溯。
     expect(result).toEqual({
@@ -278,7 +280,7 @@ describe('地图消费服务', () => {
     const browser = { execute: vi.fn().mockResolvedValueOnce(found).mockResolvedValueOnce({ ok: true, output: { value: '单据' } }) }
     const result = await new MapConsumptionService({} as never, browser as never).afterBaseline(
       ctx(extractStep, frozen('read_only_fallback')), extractStep, notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(result.kind).toBe('replaced')
     expect(mocks.appendMapFacts).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
@@ -303,7 +305,7 @@ describe('地图消费服务', () => {
     }
     const result = await new MapConsumptionService({} as never, browser as never).afterBaseline(
       ctx(extractStep, frozen('shadow')), extractStep, notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(result.kind).toBe('passthrough')
     expect(mocks.appendMapSelectionDecision).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
@@ -320,7 +322,7 @@ describe('地图消费服务', () => {
       expired,
       extractStep,
       notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(timeoutResult.kind).toBe('passthrough')
     expect(mocks.loadFrozenMapCandidates).not.toHaveBeenCalled()
@@ -337,7 +339,7 @@ describe('地图消费服务', () => {
       ctx(extractStep, frozen('shadow')),
       extractStep,
       notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(failResult.kind).toBe('passthrough')
     expect(mocks.appendMapSelectionDecision).toHaveBeenCalledWith(
@@ -374,7 +376,7 @@ describe('地图消费服务', () => {
       ctx(extractStep, frozen('read_only_fallback')),
       extractStep,
       notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(result).toEqual({ kind: 'replaced', mapDecisionId: expect.any(String), result: lost })
     expect(browser.execute).toHaveBeenCalledTimes(2)
@@ -399,7 +401,7 @@ describe('地图消费服务', () => {
       ctx(extractStep, frozen('read_only_fallback')),
       extractStep,
       notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' },
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' },
     )
     expect(result.kind).toBe('blocked')
     expect(browser.execute).toHaveBeenCalledTimes(1)
@@ -418,7 +420,7 @@ describe('地图消费服务', () => {
     const browser = { execute: vi.fn() }
     const began = Date.now()
     const result = await new MapConsumptionService({} as never, browser as never).afterBaseline(ctx(extractStep, policy), extractStep, notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' })
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' })
     expect(Date.now() - began).toBeLessThan(300)
     expect(result.kind).toBe('passthrough')
     resolve({ digestOk: true, candidates: [candidate()] })
@@ -430,7 +432,7 @@ describe('地图消费服务', () => {
     mocks.loadFrozenMapCandidates.mockResolvedValueOnce({ digestOk: true, candidates: [candidate()] })
     const browser = { execute: vi.fn().mockRejectedValue(new Error('transport down')) }
     const result = await new MapConsumptionService({} as never, browser as never).afterBaseline(ctx(extractStep, frozen('shadow')), extractStep, notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' })
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' })
     expect(result.kind).toBe('passthrough')
     expect(mocks.appendMapSelectionDecision.mock.calls[0]![1].decision.reasonCode).toBe('QUERY_UNAVAILABLE')
   })
@@ -440,7 +442,7 @@ describe('地图消费服务', () => {
     mocks.appendMapSelectionDecision.mockImplementationOnce(async () => abort.abort())
     const browser = { execute: vi.fn().mockResolvedValue(found) }
     await new MapConsumptionService({} as never, browser as never).afterBaseline({ ...ctx(extractStep, frozen('read_only_fallback')), signal: abort.signal }, extractStep, notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' })
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' })
     expect(browser.execute).toHaveBeenCalledTimes(1)
   })
   it('预算不足以检查全部候选时不能从已命中的部分选取', async () => {
@@ -449,7 +451,7 @@ describe('地图消费服务', () => {
     mocks.loadFrozenMapCandidates.mockResolvedValueOnce({ digestOk: true, candidates: [candidate(), candidate()] })
     const browser = { execute: vi.fn().mockResolvedValue(found) }
     const result = await new MapConsumptionService({} as never, browser as never).afterBaseline(ctx(extractStep, policy), extractStep, notFound,
-      { type: 'extract', target: extractStep.input.target, as: 'text' })
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' })
     expect(result.kind).toBe('passthrough')
     expect(browser.execute).toHaveBeenCalledTimes(1)
     expect(mocks.appendMapSelectionDecision.mock.calls[0]![1].decision.reasonCode).toBe('BUDGET_EXHAUSTED')
@@ -459,7 +461,7 @@ describe('地图消费服务', () => {
     mocks.appendMapSelectionDecision.mockRejectedValueOnce(new Error('ledger unavailable'))
     const browser = { execute: vi.fn() }
     const result = await new MapConsumptionService({} as never, browser as never).afterBaseline(ctx(extractStep, frozen('shadow')), extractStep, found,
-      { type: 'extract', target: extractStep.input.target, as: 'text' })
+      { type: 'extract', target: EXTRACT_TARGET, as: 'text' })
     expect(result).toEqual({ kind: 'passthrough' })
     expect(browser.execute).not.toHaveBeenCalled()
   })

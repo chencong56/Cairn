@@ -93,6 +93,11 @@ export class ObjectService {
     return this.options.now?.() ?? new Date()
   }
 
+  /** 单个对象正文上限（普通证据 / 运行对象）。 */
+  objectMaxBytes(): number {
+    return this.options.maxBytes
+  }
+
   videoMaxBytes(): number {
     return this.options.videoMaxBytes ?? this.options.maxBytes
   }

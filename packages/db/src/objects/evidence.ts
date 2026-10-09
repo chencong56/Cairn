@@ -7,7 +7,7 @@ import {
   FINISHED_RUN_STATUSES,
   OBJECT_MISSING_REASONS,
   RUNTIME_SCHEMA_VERSION,
-  stepUsesBrowser,
+  stepTouchesPage,
   isFinishedRunStatus,
   resolveEvidencePolicy,
   shouldCaptureEvidence,
@@ -495,7 +495,8 @@ function collectRequiredEvidence(
       })
     }
 
-    if (step && stepUsesBrowser(step.type)) {
+    // 只对实际操作页面的尝试要求截图 / Trace：文件来源的提取读的是下载文件，证据是源文件与读取结果
+    if (step && stepTouchesPage(step)) {
       if (shouldCaptureEvidence(policy.screenshot, failed)) {
         const role = requiredScreenshotRole({ failed, stepType: step.type })
         const artifactKey = writeEvidenceArtifactKey({
@@ -526,7 +527,7 @@ function collectRequiredEvidence(
     if (attempt.status === 'RUNNING') return false
     const stepRow = stepRows.find((row) => row.id === attempt.stepRunId)
     const step = stepRow ? stepsById.get(stepRow.stepId) : undefined
-    return Boolean(step && stepUsesBrowser(step.type))
+    return Boolean(step && stepTouchesPage(step))
   })
   if (policy.video === 'always' && finishedBrowserAttempt) {
     const videoRows = evidenceRows

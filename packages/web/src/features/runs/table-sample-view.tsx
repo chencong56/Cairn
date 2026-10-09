@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import type { TableSample } from '@cairn/shared'
-import { columnLabel, coverageSummary, tableSampleOf } from '@/features/authoring/fields/table-plan-edit'
+import { columnLabel, coverageSummary, pageInfoSummary, tableSampleOf } from '@/features/authoring/fields/table-plan-edit'
+import { fetchEvidenceContent } from '@/lib/runs-api'
+import { recordSetToCsv, saveTextFile } from './table-recordset-csv'
 
 const PAGE = 20
 
@@ -28,6 +31,13 @@ export function TableSampleOutput({ output }: { output: unknown }) {
           {summary.text}
         </p>
       ) : null}
+      {sample.source.kind === 'file' && sample.source.file ? (
+        <p className='text-label text-muted-foreground' data-testid='table-sample-source'>
+          来源：文件「{sample.source.file.name}」{sample.source.file.sheet ? `· 工作表「${sample.source.file.sheet}」` : ''}
+        </p>
+      ) : null}
+      {pageInfoSummary(sample) ? <p className='text-label text-muted-foreground'>{pageInfoSummary(sample)}</p> : null}
+      {sample.storage ? <FullRecordSetNote sample={sample} /> : null}
       <div className='overflow-x-auto'>
         <table className='w-full text-label'>
           <thead className='bg-muted/50'>
@@ -77,5 +87,36 @@ export function TableSampleOutput({ output }: { output: unknown }) {
         </p>
       ) : null}
     </div>
+  )
+}
+
+/** 外置记录集：上下文里只有预览，说明全量规模与检查口径，并提供全量下载（CSV）。 */
+function FullRecordSetNote({ sample }: { sample: TableSample }) {
+  const storage = sample.storage!
+  const [busy, setBusy] = useState(false)
+  const download = async () => {
+    if (!storage.evidenceId) return
+    setBusy(true)
+    try {
+      const { blob } = await fetchEvidenceContent(sample.source.runId, storage.evidenceId)
+      const csv = recordSetToCsv(sample.columns, await blob.text())
+      saveTextFile(`表格数据-${storage.rowCount}行.csv`, csv, 'text/csv;charset=utf-8')
+    } catch (error) {
+      toast.error(`下载失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <p className='flex flex-wrap items-center gap-x-2 text-label text-muted-foreground' data-testid='table-sample-fullset'>
+      <span>
+        共 {storage.rowCount} 行，此处显示前 {sample.rows.length} 行；数据检查按全量计算
+      </span>
+      {storage.evidenceId ? (
+        <button type='button' className='text-link disabled:opacity-60' disabled={busy} onClick={() => void download()}>
+          {busy ? '正在准备…' : '下载全量数据（CSV）'}
+        </button>
+      ) : null}
+    </p>
   )
 }

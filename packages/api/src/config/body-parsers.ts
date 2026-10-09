@@ -11,6 +11,10 @@ export function isManagedBrowserWritePath(path: string): boolean {
   return /(?:^|\/)(?:api\/)?runs\/[^/]+\/(?:browser(?:\/.*)?|resume-auth)$/.test(clean)
 }
 
+export function isTableFilePreviewPath(path: string): boolean {
+  return /^\/api\/scenarios\/[^/]+\/table-file\/preview\/?$/.test(path)
+}
+
 function limitParser(parse: RequestHandler, when: (req: Request) => boolean): RequestHandler {
   return (req, res, next) => {
     if (!when(req)) return next()
@@ -36,6 +40,9 @@ export function configureBodyParsers(app: INestApplication) {
     app.use(limitParser(parse, (req) => req.path.startsWith('/api/open/v1')))
     app.use(limitParser(parse, (req) => isManagedBrowserWritePath(req.path)))
   }
+  // 文件来源预览：上传的样例以 base64 放在 JSON 里，单文件上限 20 MiB（base64 后约 27 MiB）
+  const tableFilePreviewParser = json({ limit: '28mb' })
+  app.use(((req, res, next) => (isTableFilePreviewPath(req.path) ? tableFilePreviewParser(req, res, next) : next())) as RequestHandler)
   // Explicit parsers also cover console requests under Express 5.
   const reportAssetParser = json({ limit: '3mb' })
   app.use(((req, res, next) => req.path.replace(/\/$/, '') === '/api/report-assets' ? reportAssetParser(req, res, next) : next()) as RequestHandler)

@@ -72,6 +72,7 @@ export function easyuiAdapter(h: AdapterHelpers): TableAdapter {
   }
   return {
     shape: 'easyui',
+    pagerSelector: '.datagrid-pager',
     claimSelector: '.datagrid-wrap,.datagrid-view,.datagrid',
     gridSelector: '.datagrid-wrap,.datagrid-view',
     innerPartSelector: 'table.datagrid-btable,table.datagrid-htable',

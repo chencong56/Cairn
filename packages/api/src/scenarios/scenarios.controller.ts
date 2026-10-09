@@ -60,16 +60,22 @@ import {
   type AcceptanceHistoryQuery,
   acceptancePreviewRequestBodySchema,
   type AcceptancePreviewRequestBody,
+  tableFilePreviewRequestSchema,
+  type TableFilePreviewRequest,
 } from '@cairn/shared'
 import { ZodValidationPipe } from '../common/zod-validation.pipe'
 import type { RequestAccount } from '../common/request-account'
 import { CurrentAccount } from '../rbac/current-account.decorator'
 import { RequirePermissions } from '../rbac/require-permission.decorator'
 import { ScenariosService } from './scenarios.service'
+import { TableFilePreviewService } from './table-file-preview.service'
 
 @Controller('scenarios')
 export class ScenariosController {
-  constructor(private readonly scenarios: ScenariosService) {}
+  constructor(
+    private readonly scenarios: ScenariosService,
+    private readonly tableFiles: TableFilePreviewService,
+  ) {}
 
   @Get()
   @RequirePermissions('workflow:read')
@@ -147,6 +153,18 @@ export class ScenariosController {
     @CurrentAccount() actor: RequestAccount,
   ) {
     return this.scenarios.previewAcceptance(scenarioId, body, actor)
+  }
+
+  /** 文件来源的编写期预览：解析最近一次运行里下载的文件或上传的样例（不保存）。 */
+  @Post(':scenarioId/table-file/preview')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('workflow:read', 'workflow:write', 'run:read')
+  tableFilePreview(
+    @Param('scenarioId') scenarioId: string,
+    @Body(new ZodValidationPipe(tableFilePreviewRequestSchema)) body: TableFilePreviewRequest,
+    @CurrentAccount() actor: RequestAccount,
+  ) {
+    return this.tableFiles.preview(scenarioId, body, actor.id)
   }
 
   @Post(':scenarioId/copy')

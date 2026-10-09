@@ -115,6 +115,7 @@ export function SectionActionDef({
           shapes={shapes}
           disabled={disabled}
           onChange={onChange}
+          onRequestTypeChange={editableTypes.includes('ai_extract') ? onRequestTypeChange : undefined}
         />
       </div>
     </div>

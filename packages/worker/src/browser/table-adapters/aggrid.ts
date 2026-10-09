@@ -90,6 +90,7 @@ export function aggridAdapter(h: AdapterHelpers): TableAdapter {
   }
   return {
     shape: 'aggrid',
+    pagerSelector: '.ag-paging-panel',
     claimSelector: '.ag-root-wrapper,.ag-root',
     gridSelector: '.ag-root-wrapper',
     innerPartSelector: '.ag-body-viewport,.ag-header,.ag-center-cols-viewport,.ag-center-cols-container',

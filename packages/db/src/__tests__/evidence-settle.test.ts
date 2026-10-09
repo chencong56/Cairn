@@ -559,6 +559,41 @@ describe.each(DRIVERS)('%s 证据轴与收尾（集成）', { timeout: 30_000 },
     expect(listed.items.some((item) => item.type === 'video')).toBe(false)
   })
 
+  it('文件来源的提取不碰页面：不欠截图与录像；同样的页面表格读取缺截图则 INCOMPLETE', async () => {
+    const table = { protocol: 'table.file@1', fromKey: 'exportFile', columns: [{ key: 'name', name: '名称', valueType: 'text' }] }
+    const finishOnly = async (input: Step['input']) => {
+      const step = { id: newId(), name: '读取', type: 'extract', effectType: 'READ_ONLY', outputKey: 'rows', input } as Step
+      const download = {
+        id: newId(), name: '导出', type: 'download', effectType: 'READ_ONLY', outputKey: 'exportFile',
+        input: { target: { framePath: [], candidates: [{ by: 'css', value: '#export' }] } },
+      } as Step
+      const scenario = await createScenarioWithVersion(handle.db, { targetId, name: `文件证据 ${step.id}`, steps: [download, step], actor: { id: actorId } })
+      const created = await createRunWithSnapshot(handle.db, {
+        scenarioId: scenario.id,
+        evidencePolicy: { screenshot: 'always', video: 'always' },
+        actor: { id: actorId },
+      })
+      const worker = await seedWorker(handle)
+      const grant = await forceGrantForRun(handle, created.detail.id, worker.workerId)
+      const stepRun = (await handle.db.select().from(stepRuns).where(eq(stepRuns.runId, created.detail.id))).find((row) => row.stepId === step.id)
+      const started = await startAttempt(handle.db, { runId: created.detail.id, stepRunId: stepRun!.id, inputPayload: { fromKey: 'exportFile' }, grant })
+      await finishAttempt(handle.db, {
+        runId: created.detail.id,
+        attemptId: started!.attemptId,
+        attemptStatus: 'SUCCEEDED',
+        output: { value: { rowCount: 0 } },
+        stepRunStatus: 'SUCCEEDED',
+        runStatus: 'SUCCEEDED',
+        grant,
+      })
+      return settleRunEvidence(handle.db, created.detail.id, { pendingTtlSeconds: 3600, maxUploadAttempts: 3 })
+    }
+    expect((await finishOnly({ as: 'table', source: 'file', table } as never)).evidenceStatus).toBe('COMPLETE')
+    const pageTarget = { framePath: [], candidates: [{ by: 'css', value: '#grid' }] }
+    const pagePlan = { protocol: 'table.read@2', target: pageTarget, columns: table.columns }
+    expect((await finishOnly({ target: pageTarget, as: 'table', table: pagePlan } as never)).evidenceStatus).toBe('INCOMPLETE')
+  })
+
   it('浏览器 Attempt 已结束且尚未 reserve 视频：证据轴 INCOMPLETE', async () => {
     const { runId } = await finishBrowserAttempt({
       evidencePolicy: { screenshot: 'off', video: 'always' },

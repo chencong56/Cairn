@@ -27,10 +27,12 @@ const ALLOWED_EDGES = {
   '@cairn/authoring': ['@cairn/shared'],
   '@cairn/storage': ['@cairn/shared'],
   '@cairn/secret': ['@cairn/shared'],
+  // 文件来源的表格解析（CSV / XLSX / HTML 伪 XLS）：纯库，Worker 执行时用、API 编写期预览时用
+  '@cairn/table-file': ['@cairn/shared'],
   '@cairn/db': ['@cairn/shared', '@cairn/authoring'],
   '@cairn/map': ['@cairn/shared', '@cairn/authoring'],
-  '@cairn/api': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage'],
-  '@cairn/worker': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage'],
+  '@cairn/api': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage', '@cairn/table-file'],
+  '@cairn/worker': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage', '@cairn/table-file'],
   '@cairn/web': ['@cairn/shared', '@cairn/authoring'],
   '@cairn/extension-playwright-crx': ['@cairn/shared', '@cairn/authoring'],
 }

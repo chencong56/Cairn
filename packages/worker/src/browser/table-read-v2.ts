@@ -105,6 +105,7 @@ function sameSnapshot(
 ): boolean {
   if (a.isBusy !== b.isBusy || a.hasPagination !== b.hasPagination || a.emptyVerified !== b.emptyVerified) return false
   if (a.headerDigest !== b.headerDigest || a.totalDataRows !== b.totalDataRows || a.rows.length !== b.rows.length) return false
+  if (JSON.stringify(a.pageInfo ?? null) !== JSON.stringify(b.pageInfo ?? null)) return false
   return a.rows.every((row, i) => row.rawDigest === b.rows[i]!.rawDigest)
 }
 
@@ -175,6 +176,18 @@ export async function sampleTableV2(
   const rowLimitHit = finalSnapshot.totalDataRows > maxRows
   const clues: string[] = []
   if (finalSnapshot.hasPagination) clues.push('pagination_present')
+  if (finalSnapshot.pageInfo?.ambiguous) clues.push('page_info_ambiguous')
+  // 分页信息：只保留读到的字段；ambiguous 只作线索，不进记录集
+  const { ambiguous: _ambiguous, ...pageInfoFields } = finalSnapshot.pageInfo ?? { rawText: '' }
+  const pageInfo =
+    finalSnapshot.pageInfo &&
+    (pageInfoFields.totalRows !== undefined ||
+      pageInfoFields.currentPage !== undefined ||
+      pageInfoFields.pageSize !== undefined ||
+      pageInfoFields.totalPages !== undefined ||
+      pageInfoFields.rowRange !== undefined)
+      ? pageInfoFields
+      : undefined
 
   let status: 'complete' | 'partial' | 'unknown'
   let reasonCode: string | undefined
@@ -231,6 +244,7 @@ export async function sampleTableV2(
     },
     excluded: finalSnapshot.excluded,
     ...(summaryRows.length > 0 ? { summaryRows } : {}),
+    ...(pageInfo ? { pageInfo } : {}),
     presentation: { omitted: false, previewCount: Math.min(TABLE_PREVIEW_ROWS, rows.length) },
   }
 }

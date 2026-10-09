@@ -1,4 +1,5 @@
 import {
+  TABLE_FILE_PROTOCOL,
   TABLE_PLACEHOLDER_COLUMN_NAME,
   TABLE_READ_MAX_COLS,
   TABLE_READ_PROTOCOL_V2,
@@ -7,12 +8,16 @@ import {
   type TableDetected,
   type TableDetectedColumn,
   type TableReadPlan,
+  tableFilePlanSchema,
   tableSampleSchema,
+  type TableFilePlan,
   type TableReadPlanV2,
   type TableSample,
 } from '@cairn/shared'
 
 type PlanColumn = TableReadPlanV2['columns'][number]
+/** 列编辑对页面计划与文件计划通用：两者的 columns 同形。 */
+type ColumnPlan = { columns: PlanColumn[] }
 
 /** 切到“表格 / 列表数据”时的占位计划：还没点选过表格，运行前必须被真实计划替换。 */
 export function createPlaceholderTablePlan(): TableReadPlanV2 {
@@ -24,6 +29,15 @@ export function createPlaceholderTablePlan(): TableReadPlanV2 {
     columns: [{ key: 'col_1', name: TABLE_PLACEHOLDER_COLUMN_NAME, valueType: 'text' }],
     limits: { maxRows: 200, maxCols: TABLE_READ_MAX_COLS, maxBytes: 192 * 1024 },
   }
+}
+
+/** 切到“下载文件里的数据”时的占位计划（还没选文件 / 没预览过）；列为占位列，运行前必须被真实计划替换。 */
+export function createPlaceholderFilePlan(fromKey: string): TableFilePlan {
+  return tableFilePlanSchema.parse({
+    protocol: TABLE_FILE_PROTOCOL,
+    fromKey: /^[A-Za-z][A-Za-z0-9_]{0,127}$/.test(fromKey) ? fromKey : 'downloadFile',
+    columns: [{ key: 'col_1', name: TABLE_PLACEHOLDER_COLUMN_NAME, valueType: 'text' }],
+  })
 }
 
 export type ReadKind = 'table' | 'cards' | 'keyvalue'
@@ -57,12 +71,12 @@ export function columnLabel(column: Pick<PlanColumn, 'name' | 'label'>): string 
 }
 
 /** 勾选 / 取消勾选一列。取消时至少保留一列；勾选时按 DOM 列序插回。 */
-export function toggleColumn(
-  plan: TableReadPlanV2,
+export function toggleColumn<P extends ColumnPlan>(
+  plan: P,
   detectedColumns: readonly TableDetectedColumn[],
   key: string,
   checked: boolean,
-): TableReadPlanV2 {
+): P {
   const present = plan.columns.some((c) => c.key === key)
   if (!checked) {
     if (!present || plan.columns.length <= 1) return plan
@@ -83,12 +97,12 @@ export function toggleColumn(
   return { ...plan, columns }
 }
 
-function mapColumn(plan: TableReadPlanV2, key: string, patch: (column: PlanColumn) => PlanColumn): TableReadPlanV2 {
+function mapColumn<P extends ColumnPlan>(plan: P, key: string, patch: (column: PlanColumn) => PlanColumn): P {
   return { ...plan, columns: plan.columns.map((c) => (c.key === key ? patch(c) : c)) }
 }
 
 /** 改显示名：不影响取数（取数仍按表头里的列名）。留空则恢复为表头列名。 */
-export function renameColumn(plan: TableReadPlanV2, key: string, label: string): TableReadPlanV2 {
+export function renameColumn<P extends ColumnPlan>(plan: P, key: string, label: string): P {
   const trimmed = label.trim()
   return mapColumn(plan, key, (c) => {
     const { label: _old, ...rest } = c
@@ -96,18 +110,18 @@ export function renameColumn(plan: TableReadPlanV2, key: string, label: string):
   })
 }
 
-export function setColumnSensitive(plan: TableReadPlanV2, key: string, sensitive: boolean): TableReadPlanV2 {
+export function setColumnSensitive<P extends ColumnPlan>(plan: P, key: string, sensitive: boolean): P {
   return mapColumn(plan, key, (c) => {
     const { sensitive: _old, ...rest } = c
     return sensitive ? { ...rest, sensitive: true } : rest
   })
 }
 
-export function setColumnType(
-  plan: TableReadPlanV2,
+export function setColumnType<P extends ColumnPlan>(
+  plan: P,
   key: string,
   valueType: 'text' | 'number' | 'boolean' | 'date',
-): TableReadPlanV2 {
+): P {
   return mapColumn(plan, key, (c) => {
     const { numericKind: _old, scaleUnits: _scale, ...rest } = c
     return valueType === 'number'
@@ -117,12 +131,12 @@ export function setColumnType(
 }
 
 /** 取列方式：按表头列名 / 按第几列（显式选择，不会隐式退回）。 */
-export function setColumnSource(
-  plan: TableReadPlanV2,
+export function setColumnSource<P extends ColumnPlan>(
+  plan: P,
   key: string,
   source: 'header' | 'index',
   index: number,
-): TableReadPlanV2 {
+): P {
   return mapColumn(plan, key, (c) => {
     const { source: _s, index: _i, ...rest } = c
     return source === 'index' ? { ...rest, source: 'index', index } : rest
@@ -176,6 +190,19 @@ export function totalRowsSummary(sample: TableSample | null | undefined): string
   return `识别到 ${rows.length} 行合计 / 页脚${labels.length ? `（${labels.join('、')}）` : ''}，不计入数据行`
 }
 
+/** 分页条读数：只列出读到的项，例如“共 45 条 · 第 1 / 3 页 · 每页 20 条”。 */
+export function pageInfoSummary(sample: TableSample | null | undefined): string | null {
+  const info = sample?.pageInfo
+  if (!info) return null
+  const parts: string[] = []
+  if (info.totalRows !== undefined) parts.push(`共 ${info.totalRows} 条`)
+  if (info.currentPage !== undefined) parts.push(info.totalPages !== undefined ? `第 ${info.currentPage} / ${info.totalPages} 页` : `第 ${info.currentPage} 页`)
+  else if (info.totalPages !== undefined) parts.push(`共 ${info.totalPages} 页`)
+  if (info.pageSize !== undefined) parts.push(`每页 ${info.pageSize} 条`)
+  if (info.rowRange) parts.push(`显示第 ${info.rowRange.from}–${info.rowRange.to} 条`)
+  return parts.length > 0 ? `分页显示：${parts.join(' · ')}` : null
+}
+
 /** 一行“范围说明”：读到了多少行、是否只读了当前页、是否能保证读全。 */
 export function coverageSummary(sample: TableSample | null | undefined): { tone: 'ok' | 'warn' | 'bad'; text: string } | null {
   if (!sample) return null
@@ -186,7 +213,13 @@ export function coverageSummary(sample: TableSample | null | undefined): { tone:
   if (status === 'complete') {
     if (total === 0) return { tone: 'ok', text: '现在没有数据（页面上有“暂无数据”提示，或你已确认空表即没有数据）' }
     return paged
-      ? { tone: 'warn', text: `本页读到 ${total} 行；这张表还有分页，检查只针对本页` }
+      ? {
+          tone: 'warn',
+          text:
+            sample.pageInfo?.totalRows !== undefined
+              ? `本页读到 ${total} 行（分页显示共 ${sample.pageInfo.totalRows} 条）；行检查只针对本页，总条数可用“总条数”检查核对`
+              : `本页读到 ${total} 行；这张表还有分页，检查只针对本页`,
+        }
       : { tone: 'ok', text: `已读取全部 ${total} 行` }
   }
   const reason = sample.coverage.reasonMessage ?? '读取结果不完整'

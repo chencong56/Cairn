@@ -24,6 +24,7 @@
     "@cairn/secret": "workspace:*",
     "@cairn/shared": "workspace:*",
     "@cairn/storage": "workspace:*",
+    "@cairn/table-file": "workspace:*",
     "@ffmpeg/core": "0.11.0",
     "@midscene/core": "1.12.6",
     "@midscene/shared": "1.12.6",

@@ -25,6 +25,7 @@ import { PermissionsGuard } from '../rbac/permissions.guard.js'
 import { ActionModulesController } from './action-modules.controller.js'
 import { ActionModulesService } from './action-modules.service.js'
 import { ScenariosController } from '../scenarios/scenarios.controller.js'
+import { TableFilePreviewService } from '../scenarios/table-file-preview.service.js'
 import { ScenariosService } from '../scenarios/scenarios.service.js'
 import { listenForSupertest } from '../__tests__/http-app.js'
 
@@ -118,6 +119,7 @@ describe('AM-D HTTP → 真实库', { timeout: 30_000 }, () => {
         Reflector,
         { provide: ActionModulesService, useValue: new ActionModulesService(db) },
         { provide: ScenariosService, useValue: new ScenariosService(db) },
+        { provide: TableFilePreviewService, useValue: {} },
         { provide: APP_GUARD, useValue: new StaticAuthGuard(account) },
         { provide: APP_GUARD, useClass: PermissionsGuard },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },

@@ -58,6 +58,7 @@ export function layuiAdapter(h: AdapterHelpers): TableAdapter {
   }
   return {
     shape: 'layui',
+    pagerSelector: '.layui-table-page,.layui-laypage',
     claimSelector: '.layui-table-view',
     gridSelector: '.layui-table-view',
     resolveShell: (node: any) => {

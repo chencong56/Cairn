@@ -1,0 +1,32 @@
+{
+  "name": "@cairn/table-file",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "tsc -w --preserveWatchOutput -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@cairn/shared": "workspace:*",
+    "fflate": "^0.8.3",
+    "parse5": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.5",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.11"
+  }
+}

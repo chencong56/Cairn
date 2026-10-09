@@ -21,9 +21,10 @@ import {
   targets,
   type DbHandle,
 } from '@cairn/db/testing'
-import { OBJECT_MISSING_REASONS, ObjectStoreError, writeRunVideoPayload, type Step } from '@cairn/shared'
+import { OBJECT_MISSING_REASONS, ObjectStoreError, tableSampleSchema, writeRunVideoPayload, type Step } from '@cairn/shared'
 import { LocalObjectStore, type ObjectStore } from '@cairn/storage'
 import { ObjectService } from './object.service.js'
+import { externalizeTableSample, loadFullTableSample } from '../engine/table-recordset.js'
 
 const SCHEMA = `cairn_test_${Date.now().toString(36)}_ost`
 
@@ -621,5 +622,39 @@ describe('对象存储托管协议（集成）', { timeout: 30_000 }, () => {
     })
     expect(shorter.byteSize).toBe(20)
     expect(shorter.payload).toMatchObject({ timing: { capturedSpanMs: 43_820 } })
+  })
+
+  describe('大记录集外置（真实对象服务）', () => {
+    const sampleOf = (n: number) =>
+      tableSampleSchema.parse({
+        protocol: 'table.sample@1',
+        source: { kind: 'file', runId, sampledAt: new Date().toISOString(), planDigest: 'a'.repeat(64) },
+        columns: [{ key: 'n', name: '数量', valueType: 'number', numericKind: 'integer' }],
+        rows: Array.from({ length: n }, (_, i) => ({ n: { value: i, rawText: String(i), status: 'ok' } })),
+        rowCount: n,
+        coverage: { status: 'complete' },
+        presentation: { omitted: false, previewCount: 2 },
+      })
+
+    it('写成 file 证据并按句柄还原全量', async () => {
+      const r = await externalizeTableSample({ sample: sampleOf(10), runId, objects, previewLimit: { rows: 2, bytes: 10_000 } })
+      if (!r.ok) throw new Error(r.error.safeMessage)
+      expect(r.sample.rows).toHaveLength(2)
+      const listed = await listRunEvidence(handle.db, runId)
+      const found = listed.items.find((item) => item.id === r.sample.storage!.evidenceId)
+      expect(found?.type).toBe('file')
+      expect(found?.contentType).toBe('application/x-ndjson')
+      const loaded = await loadFullTableSample(r.sample, objects)
+      expect(loaded.ok && loaded.sample.rows.map((row) => row.n!.value)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+    })
+
+    it('超过对象上限（本夹具 1024 字节）：截断到放得下并标为部分', async () => {
+      const r = await externalizeTableSample({ sample: sampleOf(80), runId: otherRunId, objects, previewLimit: { rows: 2, bytes: 10_000 } })
+      if (!r.ok) throw new Error(r.error.safeMessage)
+      expect(r.sample.coverage.status).toBe('partial')
+      expect(r.sample.storage!.byteSize).toBeLessThanOrEqual(1024)
+      const loaded = await loadFullTableSample(r.sample, objects)
+      expect(loaded.ok && loaded.sample.rows.length).toBe(r.sample.storage!.rowCount)
+    })
   })
 })

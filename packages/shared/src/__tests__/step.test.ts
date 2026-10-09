@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkDurationInputSchema, isAiStepType, isBrowserStepType, isExecutableStepType, stepSchema, stepUsesBrowser } from '../step.js'
+import { checkDurationInputSchema, isAiStepType, isBrowserStepType, isExecutableStepType, stepSchema, stepTouchesPage, stepUsesBrowser } from '../step.js'
 
 const echoId = '00000000-0000-4000-8000-000000000011'
 const delayId = '00000000-0000-4000-8000-000000000012'
@@ -88,6 +88,11 @@ describe('stepSchema', () => {
     expect(isBrowserStepType('echo')).toBe(false)
     expect(isAiStepType('ai_action')).toBe(true)
     expect(stepUsesBrowser('ai_extract')).toBe(true)
+    // 文件来源的提取在浏览器场景里跑，但不碰页面：不要求现场截图 / Trace
+    expect(stepTouchesPage({ type: 'extract', input: { as: 'table', source: 'file', table: {} } })).toBe(false)
+    expect(stepTouchesPage({ type: 'extract', input: { as: 'table', table: {} } })).toBe(true)
+    expect(stepTouchesPage({ type: 'extract', input: { as: 'text' } })).toBe(true)
+    expect(stepTouchesPage({ type: 'echo' })).toBe(false)
     expect(isExecutableStepType('ai_assert')).toBe(true)
     expect(
       stepSchema.parse({

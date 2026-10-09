@@ -17,6 +17,7 @@ import type { RequestAccount } from '../common/request-account'
 import { PermissionsGuard } from '../rbac/permissions.guard'
 import { ScenariosController } from './scenarios.controller'
 import { ScenariosService } from './scenarios.service'
+import { TableFilePreviewService } from './table-file-preview.service'
 import { listenForSupertest } from '../__tests__/http-app'
 
 const now = '2026-09-10T00:00:00.000Z'
@@ -115,12 +116,15 @@ function mockService() {
   }
 }
 
+const tableFiles = { preview: vi.fn(async () => ({ ok: true })) }
+
 async function buildApp(account: RequestAccount | null, service: ReturnType<typeof mockService>) {
   const moduleRef = await Test.createTestingModule({
     controllers: [ScenariosController],
     providers: [
       Reflector,
       { provide: ScenariosService, useValue: service },
+      { provide: TableFilePreviewService, useValue: tableFiles },
       { provide: APP_GUARD, useValue: new StaticAuthGuard(account) },
       { provide: APP_GUARD, useClass: PermissionsGuard },
       { provide: APP_FILTER, useClass: AllExceptionsFilter },
@@ -179,6 +183,16 @@ describe('Scenarios HTTP', () => {
     expect(service.aiPathInsights).toHaveBeenCalledWith(scenario.id, { windowDays: 30 })
     await request(adminApp.getHttpServer()).get(`/scenarios/${scenario.id}/ai-path-insights?windowDays=invalid`).expect(400)
     await request(viewerApp.getHttpServer()).get(`/scenarios/${scenario.id}/ai-path-insights`).expect(403)
+  })
+
+  it('文件来源预览需要 workflow:read、workflow:write 与 run:read；请求体按契约校验，返回 200', async () => {
+    const body = { fromKey: 'exportFile', downloadStepId: '00000000-0000-4000-8000-0000000000d1', source: { kind: 'latest_run' } }
+    await request(adminApp.getHttpServer()).post(`/scenarios/${scenario.id}/table-file/preview`).send(body).expect(200)
+    expect(tableFiles.preview).toHaveBeenCalledWith(scenario.id, body, admin.id)
+    await request(adminApp.getHttpServer()).post(`/scenarios/${scenario.id}/table-file/preview`).send({ ...body, source: { kind: 'disk', path: '/etc/passwd' } }).expect(400)
+    await request(viewerApp.getHttpServer()).post(`/scenarios/${scenario.id}/table-file/preview`).send(body).expect(403)
+    await request(writerApp.getHttpServer()).post(`/scenarios/${scenario.id}/table-file/preview`).send(body).expect(403)
+    expect(tableFiles.preview).toHaveBeenCalledTimes(1)
   })
 
   it('无 workflow:write 不能新建', async () => {
