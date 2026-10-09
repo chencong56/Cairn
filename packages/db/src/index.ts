@@ -130,6 +130,7 @@ export const deleteScenario = operation(impl0.deleteScenario);
 export const getScenario = operation(impl0.getScenario);
 export const listScenarioVersions = operation(impl0.listScenarioVersions);
 export const listScenarios = operation(impl0.listScenarios);
+export const summarizeScenarios = operation(impl0.summarizeScenarios);
 export const loadScenarioVersion = operation(impl0.loadScenarioVersion);
 export const loadResolutionLayers = operation(impl0.loadResolutionLayers);
 export { stepsNeedAiExecute } from "./runs/index.js";

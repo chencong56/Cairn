@@ -12,6 +12,7 @@ export {
   getScenario,
   listScenarioVersions,
   listScenarios,
+  summarizeScenarios,
   loadScenarioVersion,
   prepareTrialVersion,
   previewDeleteScenario,

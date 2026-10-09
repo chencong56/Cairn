@@ -17,6 +17,7 @@ import {
   copyScenarioResponseSchema,
   scenarioVersionListResponseSchema,
   scenarioListResponseSchema,
+  scenarioSummarySchema,
   trialRunBodySchema,
   updateScenarioBodySchema,
   type ApplyRecordingImportBody,
@@ -36,6 +37,8 @@ import {
   type ScenarioDetailDto,
   type CopyScenarioResponse,
   type ScenarioListQuery,
+  type ScenarioSummaryDto,
+  type ScenarioSummaryQuery,
   type ScenarioListResponse,
   type TrialRunBody,
   type UpdateScenarioBody,
@@ -86,6 +89,11 @@ const applyRecordingImportResponseSchema = z.object({
 
 export function fetchScenarios(query?: ScenarioListQuery): Promise<ScenarioListResponse> {
   return apiFetch(`/api/scenarios${toQueryString(query)}`, scenarioListResponseSchema)
+}
+
+/** 健康度计数：与列表同样的筛选（不含健康度本身），用于「异常 N」与结果总数。 */
+export function fetchScenarioSummary(query?: ScenarioSummaryQuery): Promise<ScenarioSummaryDto> {
+  return apiFetch(`/api/scenarios/summary${toQueryString(query)}`, scenarioSummarySchema)
 }
 
 export function fetchScenario(id: string): Promise<ScenarioDetailDto> {

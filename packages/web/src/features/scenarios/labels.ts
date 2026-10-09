@@ -46,3 +46,13 @@ export function formatRelativeTime(isoString: string): string {
   if (diffDay < 30) return `${diffDay}天前`
   return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
+
+/** 日历日期：今年只写月日，往年带年份；用于「某日创建」这类不需要精确到分钟的场合。 */
+export function formatCalendarDate(isoString: string): string {
+  const date = new Date(isoString)
+  if (Number.isNaN(date.getTime())) return ''
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return sameYear
+    ? `${date.getMonth() + 1}月${date.getDate()}日`
+    : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
+}

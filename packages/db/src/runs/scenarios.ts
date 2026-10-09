@@ -1,6 +1,6 @@
 import type { ScenarioRow, ScenarioVersionRow } from '../records.js'
 import { atomic, locked, lockedShared, schemaFor } from '../native.js'
-import { and, asc, count, desc, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm'
+import { aliasedTable, and, asc, count, desc, eq, exists, gt, gte, inArray, isNull, lt, not, notExists, notInArray, or, sql, type Column, type SQL, type SQLWrapper } from 'drizzle-orm'
 import {
   compileScenarioDocument,
   deriveOutcomeManifest,
@@ -42,6 +42,17 @@ import {
   scenarioListQuerySchema,
   scenarioListResponseSchema,
   scenarioSchema,
+  scenarioSummaryQuerySchema,
+  scenarioSummarySchema,
+  RUN_HEALTH_RULES,
+  runHealthBucket,
+  runRequirementsOf,
+  type RunHealthBucket,
+  type ScenarioHealthFilter,
+  type ScenarioRecentRun,
+  type ScenarioRunRequirements,
+  type ScenarioSummaryDto,
+  type ScenarioSummaryQuery,
   type ScenarioLatestRun,
   type ScenarioScheduleSummary,
   scenarioVersionListResponseSchema,
@@ -97,7 +108,7 @@ import {
 } from '../console/target-authorization.js'
 import { draftValidationSubject, saveValidationSubjectTx } from './validation.js'
 import { suiteReferenceBlockers, suitesReferencingScenario } from '../suites/suites.js'
-import { cursorFilter, paginateResults } from '../cursor.js'
+import { cursorFilter, encodeCursor, paginateResults } from '../cursor.js'
 import {
   activeRunBlockers,
   assertExpectedCounts,
@@ -447,7 +458,10 @@ function toScenarioDto(
   extras?: {
     draftStepCount?: number
     createdByName?: string | null
+    createdBy?: { id: string; displayName: string; avatar: string | null } | null
     latestRun?: ScenarioLatestRun | null
+    recentRuns?: ScenarioRecentRun[]
+    runRequirements?: ScenarioRunRequirements | null
     schedule?: ScenarioScheduleSummary | null
   },
 ): ScenarioDto {
@@ -463,7 +477,10 @@ function toScenarioDto(
     draftDirty,
     runAccountId: row.runAccountId ?? null,
     createdByName: extras?.createdByName ?? null,
+    createdBy: extras?.createdBy,
     latestRun: extras?.latestRun ?? null,
+    recentRuns: extras?.recentRuns,
+    runRequirements: extras?.runRequirements,
     schedule: extras?.schedule ?? null,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
@@ -577,15 +594,170 @@ export async function getScenario(
   return toDetailDto(db, row, latest, options)
 }
 
-export async function listScenarios(
+/** 场景最近一次正式运行（已发布版本、未删除）的 id；作为相关子查询嵌进按场景的外层查询。 */
+function latestFormalRunId(db: Db, scenarioId: SQLWrapper): SQL {
+  const { runs, scenarioVersions } = schemaFor(db)
+  const run = aliasedTable(runs, 'formal_run')
+  const version = aliasedTable(scenarioVersions, 'formal_version')
+  return sql`(${db
+    .select({ id: run.id })
+    .from(run)
+    .innerJoin(version, eq(version.id, run.scenarioVersionId))
+    .where(and(eq(run.scenarioId, scenarioId), eq(version.kind, 'published'), isNull(run.deletedAt)))
+    .orderBy(desc(run.createdAt), desc(run.id))
+    .limit(1)})`
+}
+
+/** 与 shared 的 runHealthBucket 同一套规则，按优先级逐组排除：运行中 → 异常 → 已取消 → 需关注 → 正常。 */
+function healthBucketCondition(bucket: Exclude<RunHealthBucket, 'never'>, status: Column, outcome: Column): SQL {
+  const rules = RUN_HEALTH_RULES
+  const running = inArray(status, [...rules.runningStatuses])
+  const failing = or(inArray(status, [...rules.failingStatuses]), inArray(outcome, [...rules.failingOutcomes]))!
+  const cancelled = inArray(status, [...rules.cancelledStatuses])
+  const warning = inArray(outcome, [...rules.warningOutcomes])
+  if (bucket === 'running') return running
+  if (bucket === 'failing') return and(not(running), failing)!
+  if (bucket === 'cancelled') return and(not(running), not(failing), cancelled)!
+  if (bucket === 'warning') return and(not(running), not(failing), not(cancelled), warning)!
+  return and(not(running), not(failing), not(cancelled), not(warning))!
+}
+
+function healthFilter(db: Db, buckets: readonly ScenarioHealthFilter[]): SQL {
+  const { runs, scenarioVersions, scenarios } = schemaFor(db)
+  const latest = aliasedTable(runs, 'latest_formal_run')
+  const parts: SQL[] = []
+  const finished = buckets.filter((bucket): bucket is Exclude<ScenarioHealthFilter, 'never'> => bucket !== 'never')
+  if (finished.length > 0) {
+    parts.push(
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(latest)
+          .where(
+            and(
+              eq(latest.id, latestFormalRunId(db, scenarios.id)),
+              or(...finished.map((bucket) => healthBucketCondition(bucket, latest.status, latest.outcomeStatus))),
+            ),
+          ),
+      ),
+    )
+  }
+  if (buckets.includes('never')) {
+    const run = aliasedTable(runs, 'any_formal_run')
+    const version = aliasedTable(scenarioVersions, 'any_formal_version')
+    parts.push(
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(run)
+          .innerJoin(version, eq(version.id, run.scenarioVersionId))
+          .where(and(eq(run.scenarioId, scenarios.id), eq(version.kind, 'published'), isNull(run.deletedAt))),
+      ),
+    )
+  }
+  return or(...parts)!
+}
+
+type ScenarioRunScheduleRow = {
+  id: string
+  name: string | null
+  enabled: number | boolean
+  nextDueAt: Date | null
+  scenarioId: string
+  timeRule: unknown
+}
+
+/** 直属定时调度（consumer 为 scenario_run，未删除）。scenarioId 在调度版本的 JSON 里，在应用层取出，不用库方言的 JSON 查询。 */
+async function loadScenarioRunSchedules(db: Db): Promise<ScenarioRunScheduleRow[]> {
+  const { schedules, scheduleVersions } = schemaFor(db)
+  const rows = await db
+    .select({
+      id: schedules.id,
+      name: schedules.name,
+      enabled: schedules.enabled,
+      nextDueAt: schedules.nextDueAt,
+      consumer: scheduleVersions.consumer,
+      timeRule: scheduleVersions.timeRule,
+    })
+    .from(schedules)
+    .innerJoin(scheduleVersions, eq(scheduleVersions.id, schedules.currentVersionId))
+    .where(and(eq(schedules.consumerKey, 'scenario_run'), isNull(schedules.deletedAt)))
+  return rows.flatMap((row) => {
+    const consumer = row.consumer as { scenarioId?: string } | null
+    return consumer?.scenarioId ? [{ ...row, scenarioId: consumer.scenarioId }] : []
+  })
+}
+
+function scheduleSummaryText(timeRule: unknown): string {
+  if (timeRule && typeof timeRule === 'object') {
+    const rule = timeRule as { kind?: string; intervalMs?: number; windows?: Array<{ windowStart?: string }> }
+    if (rule.kind === 'interval' && rule.intervalMs) return `每隔 ${Math.round(rule.intervalMs / 60000)} 分钟`
+    if (rule.windows && rule.windows.length > 0 && rule.windows[0]?.windowStart) return `每天 ${rule.windows[0].windowStart}`
+  }
+  return '定时调度'
+}
+
+type ScenarioListFilters = Pick<
+  ReturnType<typeof scenarioListQuerySchema.parse>,
+  'search' | 'targetId' | 'status' | 'purpose' | 'hasDraft' | 'schedule' | 'createdBy' | 'createdFrom' | 'createdTo'
+> & { health?: readonly ScenarioHealthFilter[] }
+
+/**
+ * 有未发布修改的场景 id，与列表 DTO 的 draftDirty 同一判定（isDraftDirty）。
+ * 每个场景创建时就写了草稿行，不能拿「有没有草稿」当条件。先在库里粗筛「从未发布，
+ * 或草稿不早于最近一次发布」，再在应用层逐个比对文档。用「不早于」而不是「晚于」：
+ * 复制场景时草稿与版本同一时刻写入，草稿却可能带着来源未发布的修改。
+ * 候选只在调用方的其他筛选范围内取，避免为「全部」以外的筛选比对无关场景。
+ */
+async function dirtyDraftScenarioIds(db: Db, scope: SQL[]): Promise<string[]> {
+  const { scenarioDrafts, scenarioVersions, scenarios } = schemaFor(db)
+  const latest = aliasedTable(scenarioVersions, 'latest_published_version')
+  const newer = aliasedTable(scenarioVersions, 'newer_published_version')
+  const rows = await db
+    .select({
+      id: scenarios.id,
+      document: scenarioDrafts.document,
+      versionId: latest.id,
+      definition: latest.definition,
+      authoringDocument: latest.authoringDocument,
+    })
+    .from(scenarioDrafts)
+    .innerJoin(scenarios, eq(scenarios.id, scenarioDrafts.scenarioId))
+    .leftJoin(latest, and(eq(latest.scenarioId, scenarios.id), eq(latest.kind, 'published')))
+    .where(
+      and(
+        isNull(scenarios.deletedAt),
+        // 只留每个场景版本号最大的那个已发布版本（没有已发布版本时 latest 为空）。
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(newer)
+            .where(and(eq(newer.scenarioId, scenarios.id), eq(newer.kind, 'published'), gt(newer.versionNo, latest.versionNo))),
+        ),
+        or(isNull(latest.id), gte(scenarioDrafts.updatedAt, latest.createdAt)),
+        ...scope,
+      ),
+    )
+  return rows
+    .filter((row) => !row.versionId || isDraftDirty(row.document, row.definition, row.authoringDocument))
+    .map((row) => row.id)
+}
+
+/** 列表与健康度计数共用的筛选条件。 */
+async function scenarioListConditions(
   db: Db,
-  query: ScenarioListQuery = {},
-  actorId?: string,
-): Promise<ScenarioListResponse> {
-  const parsed = scenarioListQuerySchema.parse(query)
-  const { consoleAccounts, runs, schedules, scheduleVersions, scenarioDrafts, scenarioVersions, scenarios } = schemaFor(db)
-  const limit = parsed.limit
-  const filters: (SQL | undefined)[] = [
+  parsed: ScenarioListFilters,
+  actorId: string | undefined,
+  scenarioRunSchedules: () => Promise<ScenarioRunScheduleRow[]>,
+): Promise<SQL[]> {
+  const { scenarios } = schemaFor(db)
+  let scheduleCondition: SQL | undefined
+  if (parsed.schedule) {
+    const ids = [...new Set((await scenarioRunSchedules()).map((row) => row.scenarioId))]
+    if (parsed.schedule === 'scheduled') scheduleCondition = ids.length > 0 ? inArray(scenarios.id, ids) : sql`1 = 0`
+    else if (ids.length > 0) scheduleCondition = notInArray(scenarios.id, ids)
+  }
+  const conditions = [
     await (await import('../console/target-authorization.js')).scopedTargetFilter(db, actorId, scenarios.targetId, 'workflow:read'),
     isNull(scenarios.deletedAt),
     parsed.targetId ? eq(scenarios.targetId, parsed.targetId) : undefined,
@@ -593,30 +765,63 @@ export async function listScenarios(
     parsed.purpose
       ? eq(scenarios.purpose, parsed.purpose)
       : or(eq(scenarios.purpose, 'user'), isNull(scenarios.purpose)),
+    // 名称里的 % 与 _ 按字面匹配：显式转义符，各库行为一致。
     parsed.search
-      ? sql`lower(${scenarios.name}) like ${'%' + parsed.search.toLowerCase() + '%'}`
+      ? sql`lower(${scenarios.name}) like ${'%' + parsed.search.toLowerCase().replace(/[!%_]/g, (char) => `!${char}`) + '%'} escape '!'`
       : undefined,
-    parsed.hasDraft === true
-      ? inArray(
-          scenarios.id,
-          db.select({ scenarioId: scenarioDrafts.scenarioId }).from(scenarioDrafts),
-        )
-      : parsed.hasDraft === false
-        ? notInArray(
-            scenarios.id,
-            db.select({ scenarioId: scenarioDrafts.scenarioId }).from(scenarioDrafts),
-          )
-        : undefined,
-    cursorFilter(scenarios.createdAt, scenarios.id, parsed.cursor),
-  ]
+    parsed.createdBy ? eq(scenarios.createdByConsoleAccountId, parsed.createdBy) : undefined,
+    parsed.createdFrom ? gte(scenarios.createdAt, new Date(parsed.createdFrom)) : undefined,
+    parsed.createdTo ? lt(scenarios.createdAt, new Date(parsed.createdTo)) : undefined,
+    scheduleCondition,
+    parsed.health && parsed.health.length > 0 ? healthFilter(db, parsed.health) : undefined,
+  ].filter((condition): condition is SQL => condition !== undefined)
+  if (parsed.hasDraft !== undefined) {
+    const ids = await dirtyDraftScenarioIds(db, conditions)
+    if (parsed.hasDraft) conditions.push(ids.length > 0 ? inArray(scenarios.id, ids) : sql`1 = 0`)
+    else if (ids.length > 0) conditions.push(notInArray(scenarios.id, ids))
+  }
+  return conditions
+}
+
+/** 「最近更新」排序的游标带前缀，与按创建时间的游标互不混用。base64url 不含「.」，前缀不会与正文冲突。 */
+const UPDATED_CURSOR_PREFIX = 'u.'
+
+function memoize<T>(load: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | undefined
+  return () => (pending ??= load())
+}
+
+export async function listScenarios(
+  db: Db,
+  query: ScenarioListQuery = {},
+  actorId?: string,
+): Promise<ScenarioListResponse> {
+  const parsed = scenarioListQuerySchema.parse(query)
+  const { consoleAccounts, runs, scenarioDrafts, scenarioVersions, scenarios } = schemaFor(db)
+  const limit = parsed.limit
+  const scenarioRunSchedules = memoize(() => loadScenarioRunSchedules(db))
+  const byUpdated = parsed.sort === 'updated'
+  if (parsed.cursor && parsed.cursor.startsWith(UPDATED_CURSOR_PREFIX) !== byUpdated) {
+    throw badRequest('INVALID_CURSOR', '游标与排序方式不匹配，请回到第一页')
+  }
+  const conditions = await scenarioListConditions(db, parsed, actorId, scenarioRunSchedules)
+  const cursor = byUpdated
+    ? cursorFilter(scenarios.updatedAt, scenarios.id, parsed.cursor?.slice(UPDATED_CURSOR_PREFIX.length))
+    : cursorFilter(scenarios.createdAt, scenarios.id, parsed.cursor)
+  if (cursor) conditions.push(cursor)
   const rows = await db
     .select()
     .from(scenarios)
-    .where(and(...filters.filter((f): f is SQL => f !== undefined)))
-    .orderBy(desc(scenarios.createdAt), desc(scenarios.id))
+    .where(and(...conditions))
+    .orderBy(...(byUpdated ? [desc(scenarios.updatedAt), desc(scenarios.id)] : [desc(scenarios.createdAt), desc(scenarios.id)]))
     .limit(limit + 1)
 
   const paginated = paginateResults(rows, limit)
+  const lastRow = paginated.items[paginated.items.length - 1]
+  const nextCursor =
+    byUpdated && paginated.hasMore && lastRow
+      ? UPDATED_CURSOR_PREFIX + encodeCursor(lastRow.updatedAt instanceof Date ? lastRow.updatedAt : new Date(lastRow.updatedAt), lastRow.id)
+      : paginated.nextCursor
   const pageScenarioIds = paginated.items.map((r) => r.id)
 
   let latestByScenario = new Map<string, typeof scenarioVersions.$inferSelect>()
@@ -665,11 +870,11 @@ export async function listScenarios(
   const creatorRows =
     creatorIds.length > 0
       ? await db
-          .select({ id: consoleAccounts.id, displayName: consoleAccounts.displayName })
+          .select({ id: consoleAccounts.id, displayName: consoleAccounts.displayName, avatar: consoleAccounts.avatar })
           .from(consoleAccounts)
           .where(inArray(consoleAccounts.id, creatorIds))
       : []
-  const creatorNameById = new Map(creatorRows.map((c) => [c.id, c.displayName]))
+  const creatorById = new Map(creatorRows.map((c) => [c.id, c]))
 
   // 2. 批量聚合各场景的最近一次运行 (latestRun)
   let latestRunByScenario = new Map<string, ScenarioLatestRun>()
@@ -707,49 +912,47 @@ export async function listScenarios(
     )
   }
 
-  // 3. 批量查询关联的直属定时调度 (schedule)
+  // 3. 最近 5 次正式运行：每个场景单独取，走 (scenario_id, created_at) 索引，不对整张 runs 开窗。
+  const recentRunsByScenario = new Map<string, ScenarioRecentRun[]>(
+    await Promise.all(
+      pageScenarioIds.map(async (scenarioId) => {
+        const recent = await db
+          .select({
+            id: runs.id,
+            status: runs.status,
+            outcomeStatus: runs.outcomeStatus,
+            evidenceStatus: runs.evidenceStatus,
+            triggerSource: runs.triggerSource,
+            executionOrigin: runs.executionOrigin,
+            createdAt: runs.createdAt,
+          })
+          .from(runs)
+          .innerJoin(scenarioVersions, eq(scenarioVersions.id, runs.scenarioVersionId))
+          .where(and(eq(runs.scenarioId, scenarioId), eq(scenarioVersions.kind, 'published'), isNull(runs.deletedAt)))
+          .orderBy(desc(runs.createdAt), desc(runs.id))
+          .limit(5)
+        return [
+          scenarioId,
+          recent.reverse().map((run) => ({ ...run, createdAt: iso(run.createdAt) })),
+        ] as const
+      }),
+    ),
+  )
+
+  // 4. 直属定时调度 (schedule)：同一场景有多条时优先显示启用中的。
   const scheduleByScenario = new Map<string, ScenarioScheduleSummary>()
   if (pageScenarioIds.length > 0) {
-    const scheduleRows = await db
-      .select({
-        id: schedules.id,
-        name: schedules.name,
-        enabled: schedules.enabled,
-        nextDueAt: schedules.nextDueAt,
-        consumer: scheduleVersions.consumer,
-        timeRule: scheduleVersions.timeRule,
+    for (const s of await scenarioRunSchedules()) {
+      if (!pageScenarioIds.includes(s.scenarioId)) continue
+      const existing = scheduleByScenario.get(s.scenarioId)
+      if (existing && (existing.enabled || !s.enabled)) continue
+      scheduleByScenario.set(s.scenarioId, {
+        id: s.id,
+        name: s.name,
+        enabled: Boolean(s.enabled),
+        summary: scheduleSummaryText(s.timeRule),
+        nextDueAt: s.nextDueAt ? iso(s.nextDueAt) : undefined,
       })
-      .from(schedules)
-      .innerJoin(scheduleVersions, eq(scheduleVersions.id, schedules.currentVersionId))
-      .where(eq(schedules.consumerKey, 'scenario_run'))
-
-    for (const s of scheduleRows) {
-      const consumer = s.consumer as { type?: string; scenarioId?: string } | null
-      if (consumer?.scenarioId && pageScenarioIds.includes(consumer.scenarioId)) {
-        const existing = scheduleByScenario.get(consumer.scenarioId)
-        if (!existing || (!existing.enabled && Boolean(s.enabled))) {
-          let summary = '定时调度'
-          if (s.timeRule && typeof s.timeRule === 'object') {
-            const tr = s.timeRule as {
-              kind?: string
-              intervalMs?: number
-              windows?: Array<{ windowStart?: string; windowEnd?: string }>
-            }
-            if (tr.kind === 'interval' && tr.intervalMs) {
-              summary = `每隔 ${Math.round(tr.intervalMs / 60000)} 分钟`
-            } else if (tr.windows && tr.windows.length > 0 && tr.windows[0]?.windowStart) {
-              summary = `每天 ${tr.windows[0].windowStart}`
-            }
-          }
-          scheduleByScenario.set(consumer.scenarioId, {
-            id: s.id,
-            name: s.name,
-            enabled: Boolean(s.enabled),
-            summary,
-            nextDueAt: s.nextDueAt ? iso(s.nextDueAt) : undefined,
-          })
-        }
-      }
     }
   }
 
@@ -764,8 +967,11 @@ export async function listScenarios(
         draft ? !latest || isDraftDirty(draft.document, latest.definition, latest.authoringDocument) : false,
         {
           draftStepCount: draft ? authoringSteps(draft.document).length : 0,
-          createdByName: creatorNameById.get(row.createdByConsoleAccountId) ?? null,
+          createdByName: creatorById.get(row.createdByConsoleAccountId)?.displayName ?? null,
+          createdBy: creatorById.get(row.createdByConsoleAccountId) ?? null,
           latestRun: latestRunByScenario.get(row.id) ?? null,
+          recentRuns: recentRunsByScenario.get(row.id) ?? [],
+          runRequirements: latest ? runRequirementsOf(latest.definition) : null,
           schedule: scheduleByScenario.get(row.id) ?? null,
         },
       ),
@@ -773,9 +979,52 @@ export async function listScenarios(
   }
   return scenarioListResponseSchema.parse({
     items,
-    nextCursor: paginated.nextCursor,
+    nextCursor,
     hasMore: paginated.hasMore,
   })
+}
+
+/** 健康度计数：筛选与列表一致（不含健康度本身），按每个场景最近一次正式运行归组。 */
+export async function summarizeScenarios(
+  db: Db,
+  query: ScenarioSummaryQuery = {},
+  actorId?: string,
+): Promise<ScenarioSummaryDto> {
+  const parsed = scenarioSummaryQuerySchema.parse(query)
+  const { runs, scenarios } = schemaFor(db)
+  const schedules = memoize(() => loadScenarioRunSchedules(db))
+  const conditions = await scenarioListConditions(db, parsed, actorId, schedules)
+  const latest = aliasedTable(runs, 'latest_formal_run')
+  const rows = await db
+    .select({ runId: latest.id, status: latest.status, outcomeStatus: latest.outcomeStatus })
+    .from(scenarios)
+    .leftJoin(latest, eq(latest.id, latestFormalRunId(db, scenarios.id)))
+    .where(and(...conditions))
+  const byHealth: ScenarioSummaryDto['byHealth'] = { failing: 0, warning: 0, running: 0, passing: 0, cancelled: 0, never: 0 }
+  for (const row of rows) {
+    byHealth[runHealthBucket(row.runId && row.status ? { status: row.status, outcomeStatus: row.outcomeStatus } : null)] += 1
+  }
+
+  // 创建人可选项：按除创建人外的同一组筛选统计，选中某人后其他人仍留在列表里可切换。
+  const { consoleAccounts } = schemaFor(db)
+  const creatorConditions = parsed.createdBy
+    ? await scenarioListConditions(db, { ...parsed, createdBy: undefined }, actorId, schedules)
+    : conditions
+  const creatorRows = await db
+    .select({
+      id: consoleAccounts.id,
+      displayName: consoleAccounts.displayName,
+      avatar: consoleAccounts.avatar,
+      count: count(scenarios.id),
+    })
+    .from(scenarios)
+    .innerJoin(consoleAccounts, eq(consoleAccounts.id, scenarios.createdByConsoleAccountId))
+    .where(and(...creatorConditions))
+    .groupBy(consoleAccounts.id, consoleAccounts.displayName, consoleAccounts.avatar)
+  const creators = creatorRows
+    .map((row) => ({ ...row, count: Number(row.count) }))
+    .sort((a, b) => b.count - a.count || a.displayName.localeCompare(b.displayName, 'zh-CN'))
+  return scenarioSummarySchema.parse({ total: rows.length, byHealth, creators })
 }
 
 export async function listScenarioVersions(

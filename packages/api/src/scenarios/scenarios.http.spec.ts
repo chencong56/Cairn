@@ -74,6 +74,7 @@ class StaticAuthGuard implements CanActivate {
 function mockService() {
   return {
     list: vi.fn(async () => ({ items: [scenario] })),
+    summary: vi.fn(async () => ({ total: 1, byHealth: { failing: 1, warning: 0, running: 0, passing: 0, cancelled: 0, never: 0 } })),
     get: vi.fn(async () => scenario),
     create: vi.fn(async () => scenario),
     copy: vi.fn(async () => ({ ...scenario, name: '回显-copy-1', notCopied: [] })),
@@ -154,6 +155,17 @@ describe('Scenarios HTTP', () => {
     await request(viewerApp.getHttpServer()).get('/scenarios/capabilities').expect(200)
     expect(service.capabilities).toHaveBeenCalled()
     expect(service.get).not.toHaveBeenCalled()
+  })
+
+  it('健康度计数只需 workflow:read，且不把 summary 当成场景 id；列表健康度按逗号拆开', async () => {
+    const res = await request(viewerApp.getHttpServer()).get('/scenarios/summary?schedule=scheduled&health=failing').expect(200)
+    expect(res.body.byHealth.failing).toBe(1)
+    expect(service.summary).toHaveBeenCalledWith({ schedule: 'scheduled' }, viewer.id)
+    expect(service.get).not.toHaveBeenCalled()
+
+    await request(viewerApp.getHttpServer()).get('/scenarios?health=failing,never&sort=updated').expect(200)
+    expect(service.list).toHaveBeenCalledWith(expect.objectContaining({ health: ['failing', 'never'], sort: 'updated' }), viewer.id)
+    await request(viewerApp.getHttpServer()).get('/scenarios?health=cancelled').expect(400)
   })
 
   it('解析统计需要 workflow/run/target 读权限', async () => {

@@ -2291,6 +2291,19 @@ export {
   previewScenarioExpansionResponseSchema,
   inlineScenarioModuleInvocationBodySchema,
   scenarioListQuerySchema,
+  scenarioRecentRunSchema,
+  scenarioRunRequirementsSchema,
+  SCENARIO_HEALTH_FILTERS,
+  scenarioHealthFilterSchema,
+  SCENARIO_LIST_SORTS,
+  scenarioSummaryQuerySchema,
+  scenarioSummarySchema,
+  type ScenarioRecentRun,
+  type ScenarioRunRequirements,
+  type ScenarioHealthFilter,
+  type ScenarioListSort,
+  type ScenarioSummaryQuery,
+  type ScenarioSummaryDto,
   type ScenarioStatus,
   type ScenarioVersionKind,
   type ScenarioErrorCode,
@@ -3865,6 +3878,8 @@ export * from './suites.js'
 export * from './reports.js'
 export * from './reports-policy.js'
 export * from './overview-analytics.js'
+export * from './run-health.js'
+export * from './run-requirements.js'
 export * from './duration-facts.js'
 export * from './duration-analysis.js'
 export * from './duration-period.js'

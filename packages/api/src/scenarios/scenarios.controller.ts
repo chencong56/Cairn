@@ -16,6 +16,7 @@ import {
   resolutionStatsQuerySchema,
   saveScenarioDraftBodySchema,
   scenarioListQuerySchema,
+  scenarioSummaryQuerySchema,
   acceptKnowledgeProposalBodySchema,
   createKnowledgeProposalBodySchema,
   rejectKnowledgeProposalBodySchema,
@@ -43,6 +44,7 @@ import {
   type ResolutionStatsQuery,
   type SaveScenarioDraftBody,
   type ScenarioListQuery,
+  type ScenarioSummaryQuery,
   type TrialRunBody,
   type UpdateScenarioBody,
   type PreviewScenarioExpansionBody,
@@ -79,6 +81,13 @@ export class ScenariosController {
   @RequirePermissions('workflow:read')
   capabilities() {
     return this.scenarios.capabilities()
+  }
+
+  /** 健康度计数：筛选与列表一致，不分页。须在 :scenarioId 之前声明。 */
+  @Get('summary')
+  @RequirePermissions('workflow:read')
+  summary(@Query(new ZodValidationPipe(scenarioSummaryQuerySchema)) query: ScenarioSummaryQuery, @CurrentAccount() account: RequestAccount) {
+    return this.scenarios.summary(query, account.id)
   }
 
   @Post()

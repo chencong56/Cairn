@@ -18,6 +18,7 @@ import {
   listScenarioRecordingImports,
   listScenarioVersions,
   listScenarios,
+  summarizeScenarios,
   previewDeleteScenario,
   previewRecordingImport,
   publishScenarioDraft,
@@ -52,6 +53,7 @@ import {
   type ResolutionStatsQuery,
   type SaveScenarioDraftBody,
   type ScenarioListQuery,
+  type ScenarioSummaryQuery,
   type DeleteResourceBody,
   type TrialRunBody,
   type UpdateScenarioBody,
@@ -120,6 +122,10 @@ export class ScenariosService {
 
   list(query?: ScenarioListQuery, actorId?: string) {
     return listScenarios(this.db, query, actorId).catch(rethrowDomain)
+  }
+
+  summary(query?: ScenarioSummaryQuery, actorId?: string) {
+    return summarizeScenarios(this.db, query, actorId).catch(rethrowDomain)
   }
 
   previewDelete(id: string) {

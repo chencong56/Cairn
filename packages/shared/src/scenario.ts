@@ -12,6 +12,9 @@ import {
   type Step,
 } from './step.js'
 import { entityIdSchema, RUNTIME_SCHEMA_VERSION, runtimeSchemaVersionSchema, utcInstantSchema } from './wire.js'
+import { runEvidenceStatusSchema } from './evidence.js'
+// 只取类型：run-health 运行时依赖 run.ts，而 run.ts 依赖本文件。
+import type { RunHealthBucket } from './run-health.js'
 import {
   moduleManifestSchema,
   scenarioAuthoringDocumentV2Schema,
@@ -308,6 +311,23 @@ export const scenarioLatestRunSchema = z.object({
 })
 export type ScenarioLatestRun = z.infer<typeof scenarioLatestRunSchema>
 
+/** 最近正式运行（已发布版本、未删除）；手动、调度、场景集、批量与服务调用都算，试跑不算。 */
+export const scenarioRecentRunSchema = scenarioLatestRunSchema.extend({
+  evidenceStatus: runEvidenceStatusSchema,
+  /** manual / schedule / service；与 executionOrigin（容器）正交。 */
+  triggerSource: z.string().nullable().optional(),
+  /** standalone / suite_member / batch_item：经场景集或批量任务发起时提示用。 */
+  executionOrigin: z.string().optional(),
+})
+export type ScenarioRecentRun = z.infer<typeof scenarioRecentRunSchema>
+
+/** 按最新已发布版本算出的运行前提：列表据此决定直接运行还是先补参数、选账号。 */
+export const scenarioRunRequirementsSchema = z.object({
+  inputs: z.array(scenarioInputDeclSchema).max(64),
+  needsAccount: z.boolean(),
+})
+export type ScenarioRunRequirements = z.infer<typeof scenarioRunRequirementsSchema>
+
 export const scenarioScheduleSummarySchema = z.object({
   id: entityIdSchema,
   name: z.string().nullable().optional(),
@@ -332,7 +352,16 @@ export const scenarioSchema = z.object({
   deletedAt: utcInstantSchema.nullable().optional(),
   deletedBy: resourceDeletedBySchema.nullable().optional(),
   createdByName: z.string().nullable().optional(),
+  /** 创建人；已删除或由系统创建时为 null。仅列表返回。 */
+  createdBy: z
+    .object({ id: entityIdSchema, displayName: z.string(), avatar: z.string().nullable().optional() })
+    .nullable()
+    .optional(),
   latestRun: scenarioLatestRunSchema.nullable().optional(),
+  /** 最近至多 5 次正式运行，旧 → 新；仅列表返回。 */
+  recentRuns: z.array(scenarioRecentRunSchema).max(5).optional(),
+  /** 最新已发布版本的运行前提；未发布为 null；仅列表返回。 */
+  runRequirements: scenarioRunRequirementsSchema.nullable().optional(),
   schedule: scenarioScheduleSummarySchema.nullable().optional(),
   createdAt: utcInstantSchema,
   updatedAt: utcInstantSchema,
@@ -386,16 +415,71 @@ export const scenarioDetailSchema = scenarioSchema.extend({
 })
 export type ScenarioDetailDto = z.infer<typeof scenarioDetailSchema>
 
-export const scenarioListQuerySchema = z.object({
+/** 列表可筛选的健康度；「已取消」只在全部里出现，不单独筛。 */
+export const SCENARIO_HEALTH_FILTERS = ['failing', 'warning', 'running', 'passing', 'never'] as const satisfies readonly RunHealthBucket[]
+export const scenarioHealthFilterSchema = z.enum(SCENARIO_HEALTH_FILTERS)
+export type ScenarioHealthFilter = z.infer<typeof scenarioHealthFilterSchema>
+
+export const SCENARIO_LIST_SORTS = ['created', 'updated'] as const
+export type ScenarioListSort = (typeof SCENARIO_LIST_SORTS)[number]
+
+const scenarioListFilterShape = {
   search: z.string().trim().optional(),
   targetId: entityIdSchema.optional(),
   status: scenarioStatusSchema.optional(),
   purpose: z.enum(['user', 'module_verification']).optional(),
   hasDraft: z.coerce.boolean().optional(),
+  /** 按最近一次正式运行的健康度筛选；多个值用逗号分隔，取并集。 */
+  health: z
+    .preprocess(
+      (value) => (typeof value === 'string' ? value.split(',').filter(Boolean) : value),
+      z.array(scenarioHealthFilterSchema).min(1).max(SCENARIO_HEALTH_FILTERS.length),
+    )
+    .optional(),
+  /** 只看直属定时调度（不含场景集调度）。 */
+  schedule: z.enum(['scheduled', 'unscheduled']).optional(),
+  /** 创建人（控制台账号 id）。 */
+  createdBy: entityIdSchema.optional(),
+  /** 创建时间范围：含起点、不含终点；由调用方按自己的时区换算成时刻。 */
+  createdFrom: utcInstantSchema.optional(),
+  createdTo: utcInstantSchema.optional(),
+}
+
+export const scenarioListQuerySchema = z.object({
+  ...scenarioListFilterShape,
+  sort: z.enum(SCENARIO_LIST_SORTS).default('created'),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().min(1).optional(),
 })
 export type ScenarioListQuery = z.input<typeof scenarioListQuerySchema>
+
+/** 健康度计数：与列表相同的筛选，但不按健康度本身过滤、不分页。 */
+export const scenarioSummaryQuerySchema = z.object(scenarioListFilterShape).omit({ health: true })
+export type ScenarioSummaryQuery = z.input<typeof scenarioSummaryQuerySchema>
+
+export const scenarioSummarySchema = z.object({
+  total: z.number().int().nonnegative(),
+  /** 当前筛选（不含创建人本身）下出现过的创建人，供创建人筛选列出可选项。 */
+  creators: z
+    .array(
+      z.object({
+        id: entityIdSchema,
+        displayName: z.string(),
+        avatar: z.string().nullable().optional(),
+        count: z.number().int().nonnegative(),
+      }),
+    )
+    .optional(),
+  byHealth: z.object({
+    failing: z.number().int().nonnegative(),
+    warning: z.number().int().nonnegative(),
+    running: z.number().int().nonnegative(),
+    passing: z.number().int().nonnegative(),
+    cancelled: z.number().int().nonnegative(),
+    never: z.number().int().nonnegative(),
+  }),
+})
+export type ScenarioSummaryDto = z.infer<typeof scenarioSummarySchema>
 
 export const scenarioListResponseSchema = z.object({
   items: z.array(scenarioSchema),
