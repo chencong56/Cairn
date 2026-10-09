@@ -206,7 +206,9 @@ export function AccountInstancesSubtable({
                       ? '已登录'
                       : inst.authState === 'EXPIRED'
                         ? '需要登录'
-                        : '待检查'}
+                        : inst.authState === 'NOT_REQUIRED'
+                          ? '无需认证'
+                          : '待检查'}
                   </TableCell>
                   <TableCell>
                     {inst.occupancy?.occupyingRunId ? (

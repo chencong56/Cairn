@@ -23,6 +23,7 @@ import {
   type CredentialValidityPolicy,
 } from '@cairn/shared'
 import type { AuditActor } from '../audit/record.js'
+import { credentialUsername } from '../console/account-identity.js'
 import { recordAudit } from '../audit/record.js'
 import type { Db } from '../client.js'
 import { cursorFilter, encodeCursor, paginateResults } from '../cursor.js'
@@ -919,7 +920,7 @@ async function registerCredentialImpl(
       id: account.id,
       targetId: account.targetId,
       displayName: body.name ?? account.displayName,
-      username: account.username,
+      username: credentialUsername(account),
       configRevision: account.configRevision,
       secretId: sealed.id,
       secretProvider: sealed.provider,
@@ -993,7 +994,7 @@ async function replaceCredentialMaterialImpl(
         id: account.id,
         targetId: account.targetId,
         displayName: account.displayName,
-        username: account.username,
+        username: credentialUsername(account),
         configRevision: account.configRevision,
         secretId: sealed.id,
         secretProvider: sealed.provider,
@@ -1010,7 +1011,7 @@ async function replaceCredentialMaterialImpl(
           id: account.id,
           targetId: account.targetId,
           displayName: account.displayName,
-          username: account.username,
+          username: credentialUsername(account),
           configRevision: account.configRevision,
           secretId: sealed.id,
           secretProvider: sealed.provider,

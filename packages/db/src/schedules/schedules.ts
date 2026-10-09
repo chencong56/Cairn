@@ -53,6 +53,7 @@ import {
   type ScheduleTriggerBody,
   type ScheduleWriteResponse,
   type Step,
+  stepUsesBrowser,
 } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { recordAudit } from '../audit/record.js'
@@ -719,7 +720,10 @@ export async function writeSchedule(
     }
     const consumer = parsed.definition.consumer
     if (consumer.type === 'scenario_run' && !consumer.accountBinding.resolved) {
-      consumer.accountBinding = { targetAccountId: await resolveRunTargetAccountId(tx, { targetId: consumer.targetId, requestedAccountId: consumer.accountBinding.targetAccountId }), resolved: true }
+      // 保存时按「本次指定 → 场景指定 → 目标默认 → 唯一可用」冻结；之后改场景运行账号不会追随。
+      const pinned = await loadScenarioVersion(tx, consumer.scenarioId, consumer.scenarioVersionId)
+      const needsBrowser = pinned.version.definition.steps.some((step) => !step.disabled && stepUsesBrowser(step.type))
+      consumer.accountBinding = { targetAccountId: await resolveRunTargetAccountId(tx, { targetId: consumer.targetId, requestedAccountId: consumer.accountBinding.targetAccountId, scenarioId: consumer.scenarioId, needsBrowser }), resolved: true }
     }
     if (consumer.type === 'suite_run' && consumer.members.some(member => !member.accountResolved)) {
       const preview = await previewSuiteRun(tx, { suiteId: consumer.suiteId, suiteVersionId: consumer.suiteVersionId, sharedInput: consumer.sharedInput, defaultTargetAccountId: consumer.defaultTargetAccountId,

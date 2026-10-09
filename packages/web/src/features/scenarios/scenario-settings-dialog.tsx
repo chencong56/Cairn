@@ -15,7 +15,8 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScenarioLocatorSettings } from './scenario-locator-settings'
 import { ScenarioReportSettings } from '@/features/reports/profiles'
-import { FileText, Layers, Settings, Sliders } from 'lucide-react'
+import { FileText, Layers, Settings, Sliders, UserRound } from 'lucide-react'
+import { ScenarioRunAccountSettings } from './scenario-run-account-settings'
 
 export interface ScenarioSettingsDialogProps {
   open: boolean
@@ -27,6 +28,10 @@ export interface ScenarioSettingsDialogProps {
   target?: TargetResolutionPolicy | null
   disabled?: boolean
   onChange: (document: ScenarioAuthoringDocumentV2) => void
+  /** 场景运行账号；null 表示跟随目标默认。 */
+  runAccountId?: string | null
+  /** 目标有两个及以上可用身份时才显示运行账号页签。 */
+  showRunAccount?: boolean
 }
 
 export function ScenarioSettingsDialog({
@@ -39,6 +44,8 @@ export function ScenarioSettingsDialog({
   target,
   disabled,
   onChange,
+  runAccountId = null,
+  showRunAccount = false,
 }: ScenarioSettingsDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -51,15 +58,21 @@ export function ScenarioSettingsDialog({
             <div>
               <DialogTitle>场景配置</DialogTitle>
               <DialogDescription className='mt-0.5 text-label'>
-                管理本场景全局运行策略、页面元素定位基线与运行报告配置。
+                管理本场景的运行账号、页面元素定位基线与运行报告配置。
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
         <div className='py-1'>
-          <Tabs defaultValue='locator' className='w-full'>
+          <Tabs defaultValue={showRunAccount ? 'run-account' : 'locator'} className='w-full'>
             <TabsList className='w-full justify-start border-b mb-3'>
+              {showRunAccount ? (
+                <TabsTrigger value='run-account' className='gap-1.5'>
+                  <UserRound className='size-3.5' />
+                  <span>运行账号</span>
+                </TabsTrigger>
+              ) : null}
               <TabsTrigger value='locator' className='gap-1.5'>
                 <Sliders className='size-3.5' />
                 <span>定位策略</span>
@@ -70,6 +83,16 @@ export function ScenarioSettingsDialog({
               </TabsTrigger>
             </TabsList>
 
+            {showRunAccount ? (
+              <TabsContent value='run-account' className='space-y-4 max-h-[60vh] overflow-y-auto pr-1'>
+                <ScenarioRunAccountSettings
+                  scenarioId={scenarioId}
+                  targetId={targetId}
+                  runAccountId={runAccountId}
+                  disabled={disabled}
+                />
+              </TabsContent>
+            ) : null}
             <TabsContent value='locator' className='space-y-4 max-h-[60vh] overflow-y-auto pr-1'>
               <ScenarioLocatorSettings
                 document={document}

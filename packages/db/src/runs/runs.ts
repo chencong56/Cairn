@@ -16,6 +16,7 @@ import { markDurationRollupDirty } from './duration-rollup.js'
 import { and, asc, count, desc, eq, exists, inArray, isNotNull, isNull, max, ne, notExists, or, sql, type SQL } from 'drizzle-orm'
 import { applyPatchToDocument, computeDigestManifest, computeTargetDigest, evaluatePatchGuards, findStepInDocument } from '@cairn/authoring'
 import { createOrUpdateRepairCandidateTx, settleCandidateValidationTx } from '../repair/index.js'
+import { accountSourceSubject, runAsForIdentity, stepUsesBrowser, type AccountSource, type RunAs } from '@cairn/shared'
 import { canonicalJson, runTriggerSourceSchema, syncSha256, type OutcomeStatus, type RepairSourceRunKind, type RunReportStatus, type RunTriggerSource, type ValidationSubject } from '@cairn/shared'
 import {
   assembleRunOutput,
@@ -120,6 +121,7 @@ import { attempts, evidences, runs, scenarios, stepRuns, type EvidenceRow } from
 import { targetAccounts, targets } from '../schema/targets.js'
 import { getPlatformConfig } from '../platform-config/store.js'
 import { assertAccountAllowsBusiness } from '../console/account-usage.js'
+import { resolveRunAccountChoice, type RunAccountChoice } from './run-account.js'
 import { appendFinishAttemptMapFactsTx } from '../map/attempt-facts.js'
 import { freezeMapConsumptionTx, insertMapRunReleaseRefTx } from '../map/consumption.js'
 import { computeIdempotencyDigest } from './digest.js'
@@ -1051,29 +1053,21 @@ export async function loadRunDetail(db: Db, runId: string, actorId?: string): Pr
   })
 }
 
+/**
+ * 取运行账号 id（不关心来自哪一层时用）。顺序见 `resolveRunAccountChoice`：
+ * 本次指定 → 场景指定 → 场景集默认 → 目标默认 → 唯一可用。
+ */
 export async function resolveRunTargetAccountId(
   db: Db,
-  input: { targetId: string; requestedAccountId?: string },
+  input: {
+    targetId: string
+    requestedAccountId?: string
+    scenarioId?: string
+    suiteDefaultAccountId?: string | null
+    needsBrowser?: boolean
+  },
 ): Promise<string | undefined> {
-  if (input.requestedAccountId) return input.requestedAccountId
-  const { targetAccounts } = schemaFor(db)
-  const rows = await db
-    .select()
-    .from(targetAccounts)
-    .where(
-      and(
-        eq(targetAccounts.targetId, input.targetId),
-        eq(targetAccounts.status, 'active'),
-        isNull(targetAccounts.deletedAt),
-        ne(targetAccounts.usage, 'map'),
-      ),
-    )
-  const withSecret = rows.filter((row) => row.secretId && row.secretProvider)
-  if (withSecret.length === 1) return withSecret[0]!.id
-  if (withSecret.length > 1) {
-    throw badRequest('RUN_ACCOUNT_REQUIRED', '目标系统有多个已保存口令的账号，请指定本次使用的目标账号')
-  }
-  return undefined
+  return (await resolveRunAccountChoice(db, input)).accountId
 }
 
 export type CreateRunWithSnapshotInput = CreateRunBody & {
@@ -1091,6 +1085,8 @@ export type CreateRunWithSnapshotInput = CreateRunBody & {
   suiteMemberId?: string
   reportDefaults?: { profileId?: string; displayName?: string; suppressMemberReport?: boolean }
   resolvedTargetAccountId?: string | null
+  /** 预先解析好的账号来自哪一层；缺省时，给了账号按「本次指定」记。 */
+  resolvedAccountSource?: AccountSource
   serviceDelivery?: ServiceDeliveryPolicy
   pauseBeforeStepId?: string
   validationSubject?: ValidationSubject
@@ -1164,14 +1160,23 @@ export async function writeRunWithSnapshot(
     })
   }
 
-  const targetAccountId = input.resolvedTargetAccountId !== undefined ? input.resolvedTargetAccountId ?? undefined : await resolveRunTargetAccountId(db, {
-    targetId: scenario.targetId,
-    requestedAccountId: input.targetAccountId,
-  })
+  const accountChoice: RunAccountChoice = input.resolvedTargetAccountId !== undefined
+    ? {
+        accountId: input.resolvedTargetAccountId ?? undefined,
+        source: input.resolvedTargetAccountId ? (input.resolvedAccountSource ?? 'explicit') : undefined,
+      }
+    : await resolveRunAccountChoice(db, {
+        targetId: scenario.targetId,
+        requestedAccountId: input.targetAccountId,
+        scenarioRunAccountId: scenario.runAccountId ?? null,
+        needsBrowser: version.definition.steps.some((step) => !step.disabled && stepUsesBrowser(step.type)),
+      })
+  const targetAccountId = accountChoice.accountId
 
   let secretRef: RunSnapshot['secretRef']
   let credentialBinding: RunSnapshot['credentialBinding']
   let maxConcurrentSessions = 1
+  let runAs: RunAs | undefined
   if (targetAccountId) {
     const [account] = await db
       .select()
@@ -1181,10 +1186,14 @@ export async function writeRunWithSnapshot(
     if (!account || account.deletedAt || account.targetId !== scenario.targetId) {
       throw badRequest('RUN_ACCOUNT_MISMATCH', '目标账号不属于该场景绑定的目标系统')
     }
-    if (account.status === 'disabled') throw conflict('RUN_ACCOUNT_DISABLED', '目标账号已停用')
+    if (account.status === 'disabled') {
+      throw conflict('RUN_ACCOUNT_DISABLED', `${accountSourceSubject(accountChoice.source)}「${account.displayName}」已停用`)
+    }
     maxConcurrentSessions = account.maxConcurrentSessions ?? 1
+    runAs = runAsForIdentity(account.identityKind)
     if (!input.mapJob) assertAccountAllowsBusiness(account.usage)
-    if (account.secretId && account.secretProvider) {
+    // 访客不带凭据：不冻结 secretRef / credentialBinding，Worker 也不会去登录。
+    if (runAs !== 'visitor' && account.secretId && account.secretProvider) {
       const current = await resolveAccountCurrentCredential(db, account.id)
       if (current) {
         secretRef = { provider: current.provider, secretId: current.secretId }
@@ -1221,13 +1230,15 @@ export async function writeRunWithSnapshot(
       })
     }
   }
-  const authVerification = await freezeAuthVerificationForRun(db, {
-    targetId: scenario.targetId,
-    targetAccountId,
-    loginFields: target.loginFields ?? null,
-    platformRevision: platform?.revision ?? 1,
-    sessionAuth: document.sessionAuth,
-  })
+  const authVerification = runAs === 'visitor'
+    ? undefined
+    : await freezeAuthVerificationForRun(db, {
+        targetId: scenario.targetId,
+        targetAccountId,
+        loginFields: target.loginFields ?? null,
+        platformRevision: platform?.revision ?? 1,
+        sessionAuth: document.sessionAuth,
+      })
 
   const idempotencyDigest = input.externalIdempotencyDigest ?? (input.idempotencyKey
     ? computeIdempotencyDigest({
@@ -1310,6 +1321,8 @@ export async function writeRunWithSnapshot(
           deadlineAt: input.deadlineAt,
           targetId: scenario.targetId,
           targetAccountId,
+          runAs,
+          accountSource: accountChoice.source,
           secretRef,
           credentialBinding,
           scenarioId: scenario.id,

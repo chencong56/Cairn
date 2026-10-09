@@ -33,7 +33,7 @@ export const targets = cairnSchema.table(
     name: text('name').notNull(),
     entryUrl: text('entry_url').notNull(),
     loginUrl: text('login_url'),
-    authMethod: text('auth_method', { enum: ['password', 'manual'] })
+    authMethod: text('auth_method', { enum: ['password', 'manual', 'none'] })
       .notNull()
       .default('password'),
     captchaMode: text('captcha_mode', { enum: ['none', 'image', 'slider', 'sms', 'other'] })
@@ -61,6 +61,8 @@ export const targets = cairnSchema.table(
     /** Target 级 AI 动作采集开关：'inherit'（沿用平台配置，含 NULL）或 'off'。 */
     aiActionTrace: text('ai_action_trace'),
     sensitiveSelectors: jsonb('sensitive_selectors').$type<string[]>().notNull().default([]),
+    /** 目标默认账号（可为访客）。不加外键：与 target_accounts 成环，归属与状态在应用层校验。 */
+    defaultAccountId: uuid('default_account_id'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: jsonb('deleted_by').$type<ResourceDeletedBy>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -88,7 +90,8 @@ export const targetAccounts = cairnSchema.table(
       .notNull()
       .references(() => targets.id, { onDelete: 'restrict' }),
     displayName: text('display_name').notNull(),
-    username: text('username').notNull(),
+    /** 访客没有登录名；登录账号必填，由应用层保证。 */
+    username: text('username'),
     secretProvider: text('secret_provider'),
     secretId: uuid('secret_id').references(() => secrets.id, { onDelete: 'restrict' }),
     totpSecretId: uuid('totp_secret_id').references(() => secrets.id, { onDelete: 'set null' }),
@@ -100,6 +103,9 @@ export const targetAccounts = cairnSchema.table(
     expectedIdentity: text('expected_identity'),
     usage: text('usage').notNull().default('business').$type<'map' | 'business' | 'both'>(),
     mapUsageGuard: text('map_usage_guard'),
+    identityKind: text('identity_kind').notNull().default('credential').$type<'credential' | 'visitor'>(),
+    /** 访客写 'Y'，其余为 NULL；配合唯一索引保证每个目标至多一个访客。 */
+    visitorGuard: text('visitor_guard'),
     configRevision: integer('config_revision').notNull().default(1),
     maxConcurrentSessions: integer('max_concurrent_sessions').notNull().default(1),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -110,6 +116,7 @@ export const targetAccounts = cairnSchema.table(
   (t) => [
     uniqueIndex('target_accounts_target_username_idx').on(t.targetId, t.username),
     uniqueIndex('target_accounts_map_usage').on(t.targetId, t.mapUsageGuard),
+    uniqueIndex('target_accounts_visitor_guard').on(t.targetId, t.visitorGuard),
     index('target_accounts_target_id_idx').on(t.targetId),
     index('target_accounts_deleted_at_idx').on(t.deletedAt),
   ],

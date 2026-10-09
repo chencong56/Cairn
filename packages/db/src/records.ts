@@ -137,7 +137,7 @@ export type Target = {
   code: string
   entryUrl: string
   loginUrl: string | null
-  authMethod: 'password' | 'manual'
+  authMethod: 'password' | 'manual' | 'none'
   captchaMode: 'none' | 'image' | 'slider' | 'sms' | 'other'
   iconKey: string
   accentKey: string
@@ -156,6 +156,7 @@ export type Target = {
   /** 'inherit'（含 null）沿用平台配置，'off' 关闭该目标系统的 AI 动作采集。 */
   aiActionTrace: string | null
   sensitiveSelectors: string[]
+  defaultAccountId: string | null
   deletedAt: Date | null
   deletedBy: ResourceDeletedBy | null
 }
@@ -169,7 +170,7 @@ export type NewTarget = {
   createdAt?: Date | undefined
   updatedAt?: Date | undefined
   loginUrl?: string | null | undefined
-  authMethod?: 'password' | 'manual' | undefined
+  authMethod?: 'password' | 'manual' | 'none' | undefined
   captchaMode?: 'none' | 'image' | 'slider' | 'sms' | 'other' | undefined
   iconKey?: string | undefined
   accentKey?: string | undefined
@@ -187,6 +188,7 @@ export type NewTarget = {
   captcha?: TargetCaptchaDefinition | null | undefined
   sensitiveSelectors?: string[] | undefined
   currentAuthProfileRevision?: number | null | undefined
+  defaultAccountId?: string | null | undefined
   deletedAt?: Date | null | undefined
   deletedBy?: ResourceDeletedBy | null | undefined
 }
@@ -198,7 +200,7 @@ export type TargetAccount = {
   createdAt: Date
   updatedAt: Date
   targetId: string
-  username: string
+  username: string | null
   secretProvider: string | null
   secretId: string | null
   totpSecretId: string | null
@@ -207,6 +209,8 @@ export type TargetAccount = {
   expectedIdentity: string | null
   usage: 'business' | 'map' | 'both'
   mapUsageGuard: string | null
+  identityKind: 'credential' | 'visitor'
+  visitorGuard: string | null
   configRevision: number
   maxConcurrentSessions: number
   deletedAt: Date | null
@@ -216,7 +220,7 @@ export type TargetAccount = {
 export type NewTargetAccount = {
   displayName: string
   targetId: string
-  username: string
+  username?: string | null | undefined
   id?: string | undefined
   status?: 'active' | 'disabled' | undefined
   createdAt?: Date | undefined
@@ -229,6 +233,8 @@ export type NewTargetAccount = {
   expectedIdentity?: string | null | undefined
   usage?: 'business' | 'map' | 'both' | undefined
   mapUsageGuard?: string | null | undefined
+  identityKind?: 'credential' | 'visitor' | undefined
+  visitorGuard?: string | null | undefined
   configRevision?: number | undefined
   maxConcurrentSessions?: number | undefined
   deletedAt?: Date | null | undefined
@@ -252,6 +258,7 @@ export type ScenarioRow = {
   updatedAt: Date
   targetId: string
   createdByConsoleAccountId: string
+  runAccountId?: string | null
   deletedAt: Date | null
   deletedBy: ResourceDeletedBy | null
 }
@@ -584,7 +591,7 @@ export type BrowserSessionRow = {
   idleTtlSeconds: number
   maxLifetimeSeconds: number
   health: 'UNKNOWN' | 'HEALTHY' | 'UNHEALTHY'
-  authState: 'UNKNOWN' | 'AUTHENTICATED' | 'EXPIRED'
+  authState: 'UNKNOWN' | 'AUTHENTICATED' | 'EXPIRED' | 'NOT_REQUIRED'
   ownerWorkerId: string
   ownerWorkerInstanceId: string | null
   generation: number
@@ -645,7 +652,7 @@ export type NewBrowserSession = {
   updatedAt?: Date | undefined
   lastUsedAt?: Date | undefined
   health?: 'UNKNOWN' | 'HEALTHY' | 'UNHEALTHY' | undefined
-  authState?: 'UNKNOWN' | 'AUTHENTICATED' | 'EXPIRED' | undefined
+  authState?: 'UNKNOWN' | 'AUTHENTICATED' | 'EXPIRED' | 'NOT_REQUIRED' | undefined
   fencingToken?: number | undefined
   version?: number | undefined
   authControlEpoch?: number | undefined

@@ -41,6 +41,8 @@ import {
   type ScenarioModuleInvocationNode,
   type Step,
   type RepairCandidate,
+  isUsableIdentity,
+  resolveRunAccount,
 } from '@cairn/shared'
 import {
   ArrowLeft,
@@ -453,9 +455,22 @@ export function ScenarioDetailPage() {
     queryFn: () => fetchTargetAccounts(scenario!.targetId),
     enabled: Boolean(scenario?.targetId && canReadTarget),
   })
-  const studioAccountId =
-    trialRun?.targetAccountId ??
-    (preferredPasswordAccountId(accountsQuery.data?.items ?? []) || undefined)
+  // 受管画面连哪个会话：有试跑就跟试跑冻结的账号；否则与开跑同一顺序（场景指定 → 目标默认 → 唯一可用）。
+  const studioAccountId = useMemo(() => {
+    if (trialRun?.targetAccountId) return trialRun.targetAccountId
+    const items = accountsQuery.data?.items ?? []
+    const resolved = resolveRunAccount({
+      scenario: scenario?.runAccountId ?? null,
+      targetDefault: items.find((item) => item.isDefault)?.id ?? null,
+      accounts: items,
+    })
+    if (resolved.ok && resolved.accountId && items.some((item) => item.id === resolved.accountId && isUsableIdentity(item))) {
+      return resolved.accountId
+    }
+    // 多个账号、未设默认时仍按原规则挑一个可用账号，保证画面能连上。
+    return preferredPasswordAccountId(items) || undefined
+  }, [accountsQuery.data?.items, scenario?.runAccountId, trialRun?.targetAccountId])
+  const studioAccount = accountsQuery.data?.items.find((item) => item.id === studioAccountId)
   const sessionQuery = useQuery({
     queryKey: ['account-session', scenario?.targetId, studioAccountId],
     queryFn: () => fetchAccountSession(scenario!.targetId, studioAccountId!),
@@ -1469,6 +1484,8 @@ export function ScenarioDetailPage() {
             targetId={scenario!.targetId}
             document={draft.v2Document}
             disabled={disabled}
+            runAccountId={scenario?.runAccountId ?? null}
+            showRunAccount={(target?.usableIdentityCount ?? 0) >= 2}
             compileDiagnostics={compile?.diagnostics ?? []}
             platform={platformConfigQuery.data?.document}
             target={target?.resolutionPolicy}
@@ -2647,6 +2664,7 @@ export function ScenarioDetailPage() {
                               scenarioId={scenarioId}
                               targetId={scenario.targetId}
                               targetAccountId={studioAccountId}
+                              accountIsVisitor={studioAccount?.identityKind === 'visitor'}
                               onStartTrial={() => {
                                 setTrialPauseBeforeStepId(undefined)
                                 setTrialOpen(true)
@@ -2760,6 +2778,7 @@ export function ScenarioDetailPage() {
                       scenarioId={scenarioId}
                       targetId={scenario.targetId}
                       targetAccountId={studioAccountId}
+                      accountIsVisitor={studioAccount?.identityKind === 'visitor'}
                       onStartTrial={() => {
                         setTrialPauseBeforeStepId(undefined)
                         setTrialOpen(true)
@@ -3026,6 +3045,7 @@ export function ScenarioDetailPage() {
           revision={draft.baseline?.revision ?? 1}
           inputs={document?.inputs ?? []}
           needsAccount={document ? documentUsesBrowser(document) : false}
+          scenarioRunAccountId={scenario.runAccountId ?? null}
           pauseBeforeStepId={trialPauseBeforeStepId}
           purpose={trialPurpose}
           onCreated={(run) => {
@@ -3197,6 +3217,8 @@ export function ScenarioDetailPage() {
           target={target?.resolutionPolicy}
           disabled={disabled}
           onChange={(next) => draft.applyStructure(next, draft.selectedId)}
+          runAccountId={scenario.runAccountId ?? null}
+          showRunAccount={(target?.usableIdentityCount ?? 0) >= 2}
         />
       ) : null}
     </>

@@ -16,6 +16,7 @@ import { runtimeInvariantManifestSchema, type RuntimeInvariantManifest } from '.
 import { frozenCredentialBindingSchema } from './credentials.js'
 import { secretRefSchema } from './secret-ref.js'
 import { sessionPolicySchema } from './session.js'
+import { accountSourceSchema, runAsSchema } from './run-account.js'
 import { scenarioOutputDeclSchema } from './scenario.js'
 import { serviceDeliveryPolicySchema } from './service-delivery.js'
 import { aiTaskEvidenceSnapshotSchema } from './ai-path-learning.js'
@@ -340,6 +341,10 @@ export const runSnapshotSchema = z
     /** 未绑定 Target 的 Snapshot 不得执行。缺这个字段在这里就失败。 */
     targetId: entityIdSchema,
     targetAccountId: entityIdSchema.optional(),
+    /** 运行身份，由所选账号的身份类型推出。可选：旧快照无此字段，按 login 解释。 */
+    runAs: runAsSchema.optional(),
+    /** 运行账号取自取值顺序的哪一层。可选：旧快照无此字段。 */
+    accountSource: accountSourceSchema.optional(),
     secretRef: secretRefSchema.optional(),
     /**
      * 冻结的凭据版本与登录名配对。可选：旧快照无此字段仍可解析，
@@ -705,6 +710,16 @@ export const runSnapshotSchema = z
         path: ['targetAccountId'],
         message: '有 secretRef 时必须同时给出 targetAccountId',
       })
+    }
+    if (snapshot.runAs === 'visitor') {
+      if (!snapshot.targetAccountId) {
+        ctx.addIssue({ code: 'custom', path: ['targetAccountId'], message: '访客运行必须冻结访客账号' })
+      }
+      for (const key of ['secretRef', 'credentialBinding', 'authVerification'] as const) {
+        if (snapshot[key]) {
+          ctx.addIssue({ code: 'custom', path: [key], message: '访客运行不得携带凭据或认证核验配置' })
+        }
+      }
     }
     const resolution = snapshot.resolution
     const needsAiExecution = snapshot.steps.some((step) => !step.disabled && isAiStepType(step.type)) ||

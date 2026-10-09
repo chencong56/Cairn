@@ -382,6 +382,38 @@ describe('BrowserSessionManager（集成）', { timeout: 120_000 }, () => {
     }
   })
 
+  it('访客运行：手工登录目标上也不探测、不填表、不进等待认证，会话记为 NOT_REQUIRED', async () => {
+    const visitorId = newId()
+    await handle.db.insert(targetAccounts).values({
+      id: visitorId,
+      targetId: manualTargetId,
+      displayName: '访客',
+      username: null,
+      identityKind: 'visitor',
+      visitorGuard: 'Y',
+      status: 'active',
+    })
+    const { snapshot: run, grant } = await makeRunningSnapshot({ targetId: manualTargetId, accountId: visitorId })
+    expect(run).toMatchObject({ runAs: 'visitor', accountSource: 'explicit', targetAccountId: visitorId })
+    expect(run.authVerification).toBeUndefined()
+    manager.resolveCredential = async () => {
+      throw new Error('访客运行不应解析凭据')
+    }
+    const result = await manager.acquire(run, grant)
+    if (!result.ok) {
+      // 无 chromium：launch 先失败——可接受；但绝不能进入等待认证。
+      expect(result.waitingForAuth).not.toBe(true)
+      expect(['BROWSER_UNAVAILABLE', 'BROWSER_LAUNCH_FAILED', 'PROFILE_LOCKED']).toContain(result.code)
+      return
+    }
+    const session = await getSessionById(handle.db, result.grant.sessionId)
+    expect(session?.authState).toBe('NOT_REQUIRED')
+    expect((await getRun(handle.db, run.runId)).status).not.toBe('WAITING_FOR_AUTH')
+    const events = await listSessionEvents(handle.db, { key: { targetId: manualTargetId, targetAccountId: visitorId } })
+    expect(events.items.some((event) => event.type === 'auth.attempt_started')).toBe(false)
+    await manager.release(result.grant.leaseId, 'test')
+  })
+
   it('acquire → renew → release；丢租 guard；LEASE_UNKNOWN', async () => {
     const account = await makeAccount('password', 'lease')
     const { snapshot: run, grant } = await makeRunningSnapshot({ targetId, accountId: account })

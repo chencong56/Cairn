@@ -17,7 +17,8 @@ export const SESSION_HEALTH = ['UNKNOWN', 'HEALTHY', 'UNHEALTHY'] as const
 export type SessionHealth = (typeof SESSION_HEALTH)[number]
 export const sessionHealthSchema = z.enum(SESSION_HEALTH)
 
-export const SESSION_AUTH_STATES = ['UNKNOWN', 'AUTHENTICATED', 'EXPIRED'] as const
+/** NOT_REQUIRED：访客会话无需认证，不是「已登录」，也不是「待核验」。 */
+export const SESSION_AUTH_STATES = ['UNKNOWN', 'AUTHENTICATED', 'EXPIRED', 'NOT_REQUIRED'] as const
 export type SessionAuthState = (typeof SESSION_AUTH_STATES)[number]
 export const sessionAuthStateSchema = z.enum(SESSION_AUTH_STATES)
 
@@ -75,6 +76,10 @@ export const SESSION_ERROR_CODES = [
   'AUTH_CREDENTIAL_UNREADABLE',
   'AUTH_CREDENTIAL_MISSING',
   'AUTH_STORAGE_STATE_INVALID',
+  /** 访客会话不支持核验、登录或续期。 */
+  'SESSION_VISITOR_NO_AUTH',
+  /** 访客运行撞上登录页：不进入认证恢复，当前步骤失败。 */
+  'VISITOR_LOGIN_REQUIRED',
 ] as const
 export type SessionErrorCode = (typeof SESSION_ERROR_CODES)[number]
 export const sessionErrorCodeSchema = z.enum(SESSION_ERROR_CODES)

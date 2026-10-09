@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   deleteTarget: vi.fn(),
   deleteTargetAccount: vi.fn(),
   updateTargetAccount: vi.fn(),
+  updateTarget: vi.fn(),
   updateTargetSessionPolicy: vi.fn(),
   updateTargetResolutionPolicy: vi.fn(),
   updateTargetAiActionTrace: vi.fn(),

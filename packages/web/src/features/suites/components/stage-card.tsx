@@ -47,7 +47,7 @@ export function StageCard({
   canWrite: boolean
   scenarioNames: Map<string, string>
   availableScenarios: Array<{ id: string; name: string; latestVersionId?: string }>
-  targetAccounts: Array<{ id: string; displayName: string; username: string }>
+  targetAccounts: Array<{ id: string; displayName: string; username: string | null; identityKind?: string | null }>
   targetId: string
   selectedMemberId?: string | null
   isSelected?: boolean

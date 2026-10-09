@@ -30,6 +30,7 @@ import {
   fetchTargetCleanup,
   previewDeleteTarget,
   retryTargetCleanup,
+  updateTarget,
 } from '@/lib/targets-api'
 import { fetchSessionOverview } from '@/lib/sessions-api'
 import { CleanupStatusIndicator } from '@/components/cleanup-status-indicator'
@@ -59,12 +60,14 @@ import { PageHeader } from '@/components/layout/page-header'
 import { PageSkeleton } from '@/components/page-skeleton'
 import { QueryErrorState } from '@/components/query-error-state'
 import { StatusBadge } from '@/components/status-badge'
+import { Badge } from '@/components/ui/badge'
 import { AccessPolicyCard } from './access-policy-card'
 import { ResolutionPolicyCard } from './resolution-policy-card'
 import { AiActionTraceCard } from './ai-action-trace-card'
 import { AuthProfileCard } from './auth-profile-card'
 import { SessionPolicyCard } from './session-policy-card'
 import { AccountFormDialog } from './account-form-dialog'
+import { VisitorAccountDialog } from './visitor-account-dialog'
 import { TargetAccountPasswordDialog } from './account-password-dialog'
 import { TargetFormDialog } from './target-form-dialog'
 import { SystemInfoSheet } from './system-info-sheet'
@@ -208,8 +211,31 @@ export function TargetDetailPage() {
       }
     }, [target]),
   )
-  const accounts = accountsQuery.data?.items ?? []
+  // 访客置顶：它是目标级的身份，不是普通登录账号。
+  const accounts = useMemo(
+    () =>
+      [...(accountsQuery.data?.items ?? [])].sort(
+        (a, b) => Number(b.identityKind === 'visitor') - Number(a.identityKind === 'visitor'),
+      ),
+    [accountsQuery.data?.items],
+  )
   const accountsFiltered = Boolean(accountSearch.trim() || accountStatus !== 'all')
+  const canChooseDefault = (target?.usableIdentityCount ?? 0) >= 2
+  const [settingDefaultId, setSettingDefaultId] = useState<string | null>(null)
+  const setDefaultAccount = async (accountId: string) => {
+    if (!target) return
+    setSettingDefaultId(accountId)
+    try {
+      await updateTarget(target.id, { defaultAccountId: accountId })
+      toast.success('已设为默认账号')
+      await queryClient.invalidateQueries({ queryKey: ['target', target.id] })
+      await queryClient.invalidateQueries({ queryKey: ['target-accounts', target.id] })
+    } catch (error) {
+      toast.error(error instanceof ApiRequestError ? error.message : '设置默认账号失败')
+    } finally {
+      setSettingDefaultId(null)
+    }
+  }
 
   const handleAccountSearchChange = (value: string) => {
     setAccountSearch(value)
@@ -429,7 +455,7 @@ export function TargetDetailPage() {
                           className='pl-9'
                         />
                       </div>
-                      {canTargetWrite ? (
+                      {canTargetWrite && target.authMethod !== 'none' ? (
                         <Button onClick={() => setAddAccountOpen(true)}>
                           <Plus />
                           添加目标账号
@@ -489,23 +515,38 @@ export function TargetDetailPage() {
                           {accounts.map((item) => (
                             <TableRow key={item.id}>
                               <TableCell className='py-4 font-medium text-text-primary'>
-                                <span
-                                  className='block max-w-64 truncate'
-                                  title={item.displayName}
-                                >
-                                  {item.displayName}
-                                </span>
+                                <div className='flex min-w-0 items-center gap-1.5'>
+                                  <span
+                                    className='block max-w-56 truncate'
+                                    title={item.displayName}
+                                  >
+                                    {item.displayName}
+                                  </span>
+                                  {item.identityKind === 'visitor' ? (
+                                    <StatusBadge tone='info'>访客</StatusBadge>
+                                  ) : null}
+                                  {item.isDefault ? (
+                                    <Badge variant='outline' className='font-normal text-label text-text-secondary'>默认</Badge>
+                                  ) : null}
+                                </div>
                               </TableCell>
                               <TableCell>
-                                <code
-                                  className='block max-w-48 truncate font-mono text-label text-text-secondary'
-                                  title={item.username}
-                                >
-                                  {item.username}
-                                </code>
+                                {item.username ? (
+                                  <code
+                                    className='block max-w-48 truncate font-mono text-label text-text-secondary'
+                                    title={item.username}
+                                  >
+                                    {item.username}
+                                  </code>
+                                ) : (
+                                  <span className='text-label text-muted-foreground'>无需登录</span>
+                                )}
                               </TableCell>
                               <TableCell>
                                 {(() => {
+                                  if (item.identityKind === 'visitor') {
+                                    return <span className='text-label text-muted-foreground'>无需凭据</span>
+                                  }
                                   if (!item.hasPassword) {
                                     return (
                                       <StatusBadge tone='neutral'>
@@ -585,7 +626,7 @@ export function TargetDetailPage() {
                                 })()}
                               </TableCell>
                               <TableCell className='text-label text-muted-foreground'>
-                                {item.expectedIdentity ?? '未设置'}
+                                {item.identityKind === 'visitor' ? '—' : (item.expectedIdentity ?? '未设置')}
                               </TableCell>
                               <TableCell className='text-label text-muted-foreground'>
                                 {ACCOUNT_USAGE_LABELS[item.usage ?? 'business']}
@@ -603,6 +644,16 @@ export function TargetDetailPage() {
                               </TableCell>
                               <TableCell className='text-right'>
                                 <div className='flex items-center justify-end gap-1'>
+                                  {canTargetWrite && canChooseDefault && !item.isDefault && item.status === 'active' && item.usage !== 'map' ? (
+                                    <Button
+                                      variant='ghost'
+                                      size='sm'
+                                      loading={settingDefaultId === item.id}
+                                      onClick={() => void setDefaultAccount(item.id)}
+                                    >
+                                      设为默认
+                                    </Button>
+                                  ) : null}
                                   {canReadSession ? (
                                     <Button variant='ghost' size='sm' asChild>
                                       <Link
@@ -616,7 +667,7 @@ export function TargetDetailPage() {
                                       </Link>
                                     </Button>
                                   ) : null}
-                                  {canWriteCredential ? (
+                                  {canWriteCredential && item.identityKind !== 'visitor' ? (
                                     <Button
                                       variant='ghost'
                                       size='sm'
@@ -635,7 +686,7 @@ export function TargetDetailPage() {
                                       编辑
                                     </Button>
                                   ) : null}
-                                  {canTargetDelete ? (
+                                  {canTargetDelete && item.identityKind !== 'visitor' ? (
                                     <Button
                                       variant='ghost'
                                       size='sm'
@@ -710,8 +761,19 @@ export function TargetDetailPage() {
               onOpenChange={setEditOpen}
               current={target}
             />
+            {editingAccount?.identityKind === 'visitor' ? (
+              <VisitorAccountDialog
+                open
+                onOpenChange={(next) => {
+                  if (!next) setEditingAccount(undefined)
+                }}
+                targetId={targetId}
+                current={editingAccount}
+                noLoginTarget={target.authMethod === 'none'}
+              />
+            ) : null}
             <AccountFormDialog
-              open={addAccountOpen || !!editingAccount}
+              open={addAccountOpen || (!!editingAccount && editingAccount.identityKind !== 'visitor')}
               onOpenChange={(next) => {
                 if (!next) {
                   setAddAccountOpen(false)
@@ -720,7 +782,7 @@ export function TargetDetailPage() {
                 }
               }}
               targetId={targetId}
-              current={editingAccount}
+              current={editingAccount?.identityKind === 'visitor' ? undefined : editingAccount}
               defaultUsername={prefillUsername}
               accountSessionMode={target.effectiveSessionPolicy?.accountSessionMode ?? 'exclusive'}
               liveCount={
@@ -762,7 +824,7 @@ export function TargetDetailPage() {
         title='删除目标账号'
         desc={
           removingAccount
-            ? `确定删除「${removingAccount.displayName}」（${removingAccount.username}）及其已保存凭据吗？`
+            ? `确定删除「${removingAccount.displayName}」（${removingAccount.username ?? '访客'}）及其已保存凭据吗？`
             : ''
         }
         confirmText='删除'

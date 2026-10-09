@@ -69,6 +69,9 @@ import { openedEntryDuringVerify } from './landing-settle.js'
 import { SessionLeaseError, type LiveHandle, type SessionManagerContext } from './session-live.js'
 import { shouldContinueCaptchaRetry } from './captcha/login-outcome.js'
 
+/** 访客会话收到这些维护操作一律失败；请求入口已拒绝，这里兜住排队中的旧操作。 */
+const VISITOR_REJECTED_OPERATION_KINDS = new Set(['VERIFY_AUTH', 'LOGIN', 'RENEW_AUTH', 'REFRESH_LOGIN_PAGE'])
+
 async function settleAfterMaintenanceLogin(
   ctx: SessionManagerContext,
   session: SessionRecord,
@@ -726,6 +729,22 @@ export async function runMaintenanceAuth(this: SessionManagerContext,
     const db = this.dbHandle
     const live = this.lives.get(session.id)
     if (!live) return { ok: false, code: 'SESSION_NOT_CLAIMABLE' }
+    const account = await loadAccountForExecution(db, operation.targetAccountId)
+    if (account?.identityKind === 'visitor') {
+      // 访客会话没有登录态：准备只开浏览器与入口页，核验 / 登录 / 续期一律不做。
+      if (VISITOR_REJECTED_OPERATION_KINDS.has(operation.kind)) return { ok: false, code: 'SESSION_VISITOR_NO_AUTH' }
+      await setSessionProbe(db, {
+        sessionId: session.id,
+        ...this.ownerScope(),
+        health: 'HEALTHY',
+        authState: 'NOT_REQUIRED',
+      })
+      await peekOperationProgress(operation.id)?.mark('auth_probed', {
+        durationMs: 0,
+        detail: { authState: 'NOT_REQUIRED', via: 'visitor' },
+      })
+      return { ok: true }
+    }
     const liveAuth = await readLiveSessionAuth(db)
     const target = await loadTargetForExecution(db, operation.targetId)
     if (!target) return { ok: false, code: 'SESSION_TARGET_MISSING' }

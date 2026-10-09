@@ -13,7 +13,6 @@ import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
 import { createRun } from '@/lib/runs-api'
 import { fetchScenario, fetchScenarioCapabilities, fetchScenarios } from '@/lib/scenarios-api'
-import { fetchTargetAccounts } from '@/lib/targets-api'
 import { inheritCaptureLabel } from '@/features/platform-config/labels'
 import { Button } from '@/components/ui/button'
 import {
@@ -40,13 +39,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { CAPTURE_MODE_LABELS } from './labels'
 import { AccountSessionHint } from './account-session-hint'
+import { RunAccountField, effectiveRunAccount, useRunAccountChoice } from './run-account-field'
 import { RunInputFields, missingRunInput, runInputValues } from './run-input-fields'
-import {
-  passwordAccounts,
-  preferredPasswordAccountId,
-  unusableAccountCopy,
-  unusableAccountReason,
-} from './target-account'
+import { unusableAccountCopy, unusableAccountReason } from './target-account'
 
 import { useResetOnChange } from '@/hooks/use-reset-on-change'
 type RunCreateDialogProps = {
@@ -110,19 +105,17 @@ export function RunCreateDialog({
   const inputValues = inputDraft.scenarioId === scenarioId ? inputDraft.values : {}
   const missing = missingRunInput(inputDecls, inputValues)
   const targetId = selected?.targetId ?? fallbackScenario.data?.targetId ?? defaultTargetId
-  const [accountSearch, setAccountSearch] = useState('')
-  const accounts = useQuery({
-    queryKey: ['target-accounts', targetId, { limit: 100, search: accountSearch.trim() || undefined }],
-    queryFn: () =>
-      fetchTargetAccounts(targetId!, {
-        limit: 100,
-        search: accountSearch.trim() || undefined,
-      }),
-    enabled: open && !!targetId,
+  const accountChoice = useRunAccountChoice({
+    targetId,
+    scenarioRunAccountId: executionScenario.data?.runAccountId ?? null,
+    enabled: open,
   })
+  const accounts = accountChoice.accountsQuery
+  /** '' 表示按默认顺序取（场景指定 → 目标默认 → 唯一可用），请求里不带账号。 */
   const [targetAccountId, setTargetAccountId] = useState('')
-  const accountItems = accounts.data?.items ?? []
-  const usableAccounts = passwordAccounts(accountItems)
+  const accountItems = accountChoice.accounts
+  const usableAccounts = accountChoice.usable
+  const effectiveAccount = effectiveRunAccount(accountChoice, targetAccountId)
   const emptyAccountReason = accounts.isPending ? undefined : unusableAccountReason(accountItems)
   const [screenshotOverride, setScreenshotOverride] = useState<EvidenceCaptureMode | null>(null)
   const [videoOverride, setVideoOverride] = useState<VideoCaptureMode | null>(null)
@@ -133,10 +126,8 @@ export function RunCreateDialog({
   const inheritVideo = capabilities.data?.defaults?.evidence.video ?? 'always'
   const inheritTrace = capabilities.data?.defaults?.evidence.trace ?? 'off'
 
-  // 账号列表到达或切换场景时，按首选密码账号重新预选。
-  const pickPreferredAccount = () => setTargetAccountId(preferredPasswordAccountId(accounts.data?.items ?? []))
-  useResetOnChange(accounts.data, pickPreferredAccount)
-  useResetOnChange(scenarioId, pickPreferredAccount)
+  // 切换场景时回到默认顺序，不沿用上一个场景的临时改选。
+  useResetOnChange(scenarioId, () => setTargetAccountId(''))
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -190,35 +181,23 @@ export function RunCreateDialog({
             ) : null}
           </div>
           <div className='space-y-2'>
-            <Label>目标账号{needsAccount ? '（必选）' : '（可选）'}</Label>
-            <Input
-              aria-label='搜索目标账号'
-              placeholder='搜索登录名或显示名'
-              value={accountSearch}
-              onChange={(event) => setAccountSearch(event.target.value)}
+            <RunAccountField
+              choice={accountChoice}
+              value={targetAccountId}
+              onChange={setTargetAccountId}
+              needsAccount={needsAccount}
             />
-            <Select
-              value={targetAccountId || (usableAccounts.length > 0 ? '' : '__none__')}
-              onValueChange={(value) => setTargetAccountId(value === '__none__' ? '' : value)}
-            >
-              <SelectTrigger className='w-full'>
-                <SelectValue placeholder={usableAccounts.length > 0 ? '选择目标账号' : '不指定目标账号'} />
-              </SelectTrigger>
-              <SelectContent>
-                {usableAccounts.length === 0 ? <SelectItem value='__none__'>不指定</SelectItem> : null}
-                {usableAccounts.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.displayName}（{item.username}
-                      {item.hasPassword ? '' : ' · 未保存口令'}）
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            {targetId ? <AccountSessionHint targetId={targetId} account={accounts.data?.items.find(item => item.id === targetAccountId)} /> : null}
+            {targetId && effectiveAccount?.identityKind !== 'visitor' ? (
+              <AccountSessionHint targetId={targetId} account={effectiveAccount} />
+            ) : null}
             {usableAccounts.length > 0 ? (
-              <p className='text-label text-muted-foreground'>
-                未保存口令、仅手工登录或验证码不能自动处理时，运行可能等待人工登录。可先到浏览器页准备该账号。
-              </p>
+              effectiveAccount?.identityKind === 'visitor' ? (
+                <p className='text-label text-muted-foreground'>访客运行不登录，也不会等待人工认证。</p>
+              ) : (
+                <p className='text-label text-muted-foreground'>
+                  未保存口令、仅手工登录或验证码不能自动处理时，运行可能等待人工登录。可先到浏览器页准备该账号。
+                </p>
+              )
             ) : emptyAccountReason ? (
               <p className='text-label text-muted-foreground'>
                 {unusableAccountCopy(emptyAccountReason)}
@@ -350,8 +329,8 @@ export function RunCreateDialog({
               !published ||
               Boolean(missing) ||
               accounts.isPending ||
-              (needsAccount && !targetAccountId) ||
-              Boolean(targetAccountId && !accounts.data?.items.some(item => item.id === targetAccountId && item.status === 'active'))
+              (needsAccount && !effectiveAccount) ||
+              Boolean(effectiveAccount && effectiveAccount.status !== 'active')
             }
             onClick={() => {
               if (missing) {

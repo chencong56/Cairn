@@ -160,6 +160,7 @@ export class ScenariosService {
         steps: body.steps,
         inputs: body.inputs,
         status: body.status,
+        runAccountId: body.runAccountId,
         actor: { id: actor.id },
         executableTypes: await this.runtimeTypes(),
         // 新建场景默认带页面接口 / 脚本错误约束（平台开关，默认开；存量场景不回填）。
@@ -183,6 +184,7 @@ export class ScenariosService {
       return await updateScenarioMeta(this.db, id, {
         name: body.name,
         status: body.status,
+        runAccountId: body.runAccountId,
         actor: { id: actor.id },
       })
     } catch (error) {

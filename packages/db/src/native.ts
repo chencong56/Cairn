@@ -180,6 +180,7 @@ export const indexedTextLimits: Record<string, number> = {
   'target_accounts.expected_identity': 256,
   'target_accounts.usage': 16,
   'target_accounts.map_usage_guard': 1,
+  'target_accounts.visitor_guard': 1,
   'target_auth_profiles.digest': 64,
   'target_account_auth_budget.paused_reason': 128,
   'credentials.type': 32,

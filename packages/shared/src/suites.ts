@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { accountSourceSchema } from './run-account.js'
 import { nextCursorSchema } from './rbac.js'
 import { resourceDeletedBySchema } from './resource-lifecycle.js'
 import { outcomeStatusSchema } from './outcome.js'
@@ -637,6 +638,8 @@ export const suiteRunPreviewMemberSchema = z.object({
   scenarioVersionId: entityIdSchema,
   effectiveInput: z.record(z.string(), jsonValueSchema),
   targetAccountId: entityIdSchema.nullable(),
+  /** 运行账号取自哪一层；冻结账号或未取到时省略。 */
+  accountSource: accountSourceSchema.optional(),
   issues: z.array(suiteValidationIssueSchema),
   entryNavigationWarning: z.boolean(),
 })

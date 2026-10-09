@@ -119,7 +119,7 @@ describe('RunCreateDialog', () => {
     expect(mocks.createRun.mock.calls[0]![0]).not.toHaveProperty('evidencePolicy')
   })
 
-  it('目标账号选择支持远程搜索', async () => {
+  it('只有一个可用身份时只读显示运行账号，不让人选', async () => {
     mocks.fetchTargetAccounts.mockResolvedValue({
       items: [
         {
@@ -133,15 +133,45 @@ describe('RunCreateDialog', () => {
     })
     const screen = await renderDialog()
     await selectScenario(screen)
-    const search = screen.getByRole('textbox', { name: '搜索目标账号' })
-    await expect.element(search).toBeInTheDocument()
-    await search.fill('ops')
-    await vi.waitFor(() =>
-      expect(mocks.fetchTargetAccounts).toHaveBeenCalledWith(
-        TARGET_ID,
-        expect.objectContaining({ search: 'ops', limit: 100 }),
-      ),
-    )
+    await expect.element(screen.getByText('值班账号 (ops)')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '运行账号' }).elements()).toHaveLength(0)
+    await screen.getByRole('button', { name: '创建运行' }).click()
+    await vi.waitFor(() => expect(mocks.createRun).toHaveBeenCalledTimes(1))
+    // 不改选时不带账号，由服务端按「场景指定 → 目标默认 → 唯一可用」取，快照里来源才准确。
+    expect(mocks.createRun.mock.calls[0]![0].targetAccountId).toBeUndefined()
+  })
+
+  it('多个可用身份时预选目标默认，改选成访客给出提示', async () => {
+    mocks.fetchTargetAccounts.mockResolvedValue({
+      items: [
+        {
+          id: '22222222-2222-4222-8222-222222222222',
+          displayName: '值班账号',
+          username: 'ops',
+          status: 'active',
+          hasPassword: true,
+          isDefault: true,
+        },
+        {
+          id: '33333333-3333-4333-8333-333333333333',
+          displayName: '访客',
+          username: null,
+          identityKind: 'visitor',
+          status: 'active',
+          hasPassword: false,
+        },
+      ],
+    })
+    const screen = await renderDialog()
+    await selectScenario(screen)
+    const picker = screen.getByRole('combobox', { name: '运行账号' })
+    await expect.element(picker).toHaveTextContent('值班账号 (ops) · 目标默认')
+    await picker.click()
+    await screen.getByRole('option', { name: '访客' }).click()
+    await expect.element(screen.getByText(/本场景默认以登录账号运行，这次将以\s*访客运行/)).toBeInTheDocument()
+    await screen.getByRole('button', { name: '创建运行' }).click()
+    await vi.waitFor(() => expect(mocks.createRun).toHaveBeenCalledTimes(1))
+    expect(mocks.createRun.mock.calls[0]![0].targetAccountId).toBe('33333333-3333-4333-8333-333333333333')
   })
 
   it('按已发布定义的标签出字段，提交对象 input，不出现 JSON 框', async () => {

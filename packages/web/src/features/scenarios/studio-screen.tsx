@@ -84,6 +84,8 @@ export type StudioScreenProps = {
   stepOrder?: string[]
   onRunToStep?: (targetStepId: string) => void
   trialDisabledReason?: string
+  /** 画面连的是访客会话：准备不登录；到了登录页提示会污染访客数据。 */
+  accountIsVisitor?: boolean
 }
 
 export function StudioScreen({
@@ -98,6 +100,7 @@ export function StudioScreen({
   stepOrder = [],
   onRunToStep,
   trialDisabledReason,
+  accountIsVisitor = false,
 }: StudioScreenProps) {
   const user = useAuthStore((state) => state.auth.user)
   const canRead = Boolean(user && hasPermission(user.permissions, 'run:read'))
@@ -158,8 +161,42 @@ export function StudioScreen({
   const eventsQuery = useQuery({
     queryKey: ['account-session-events', targetId, targetAccountId],
     queryFn: () => fetchAccountSessionEvents(targetId!, targetAccountId!),
-    enabled: Boolean(targetId && targetAccountId && canReadSession && (connecting || prepareFailed)),
+    enabled: Boolean(
+      targetId &&
+        targetAccountId &&
+        canReadSession &&
+        (connecting || prepareFailed || (accountIsVisitor && session?.session?.status === 'OPEN')),
+    ),
   })
+  // 访客会话最新一条相关事件是「到了登录页」：提示在这里登录会把登录状态留在访客数据里。
+  const visitorOnLoginPage = (() => {
+    if (!accountIsVisitor || session?.session?.status !== 'OPEN') return false
+    const currentSessionId = session.session.id
+    const latest = (eventsQuery.data?.items ?? []).find(
+      (event) =>
+        (event.sessionId === currentSessionId || event.type === 'profile.reset') &&
+        ['auth.signal_observed', 'session.created', 'session.closed', 'session.restarted', 'profile.reset'].includes(event.type),
+    )
+    return latest?.type === 'auth.signal_observed'
+  })()
+  const [resettingVisitor, setResettingVisitor] = useState(false)
+  const resetVisitorData = async () => {
+    if (!targetId || !targetAccountId) return
+    setResettingVisitor(true)
+    try {
+      await requestAccountSessionOperation(targetId, targetAccountId, {
+        kind: 'RESET_PROFILE',
+        idempotencyKey: newSessionIdempotencyKey('RESET_PROFILE'),
+        confirmAccountId: targetAccountId,
+        ...(session?.session?.id ? { expectedSessionId: session.session.id } : {}),
+      })
+      toast.success('已清空访客浏览数据，下次连接会用全新的访客会话')
+    } catch (error) {
+      toast.error(error instanceof ApiRequestError ? error.message : '清空访客浏览数据失败')
+    } finally {
+      setResettingVisitor(false)
+    }
+  }
 
   // 当处于 connecting 时每秒更新计时；每 3 秒兜底刷新一次，防范 SSE 瞬时断线或延迟。
   // 依赖只取稳定的 refetch：查询结果对象每次渲染都会变，放进依赖会让计时器每秒重建、计数永远到不了 3。
@@ -714,6 +751,27 @@ export function StudioScreen({
               </Alert>
             ) : null}
             {alignmentBanner}
+            {visitorOnLoginPage ? (
+              <Alert variant='warning' className='mx-3 mt-2 w-auto'>
+                <AlertDescription>
+                  这是访客会话。在这里登录会把登录状态留在访客的浏览数据里，影响之后所有访客运行。需要登录请把场景的运行账号改为登录账号。
+                  {canDisposeSession ? (
+                    <>
+                      {' '}
+                      <Button
+                        size='sm'
+                        variant='link'
+                        className='h-auto p-0 align-baseline'
+                        loading={resettingVisitor}
+                        onClick={() => void resetVisitorData()}
+                      >
+                        清空访客浏览数据
+                      </Button>
+                    </>
+                  ) : null}
+                </AlertDescription>
+              </Alert>
+            ) : null}
             <BrowserView
               runId={sessionViewId}
               runStatus={occupyingOperationId ? (session?.currentOperation?.status ?? 'RUNNING') : 'RUNNING'}
@@ -813,7 +871,12 @@ export function StudioScreen({
 
             {/* 四阶段 Stepper 进度条 */}
             <div className='my-5 flex items-center justify-between w-full px-2'>
-              {PREPARATION_STEPS.map((step, idx) => {
+              {PREPARATION_STEPS.map((rawStep, idx) => {
+                // 访客不登录：登录这一步显示为已跳过，避免让人以为在等登录。
+                const step =
+                  accountIsVisitor && rawStep.key === 'authenticating'
+                    ? { ...rawStep, title: '无需登录（已跳过）' }
+                    : rawStep
                 const isFailed = prepareFailed && stageInfo.failedStepIndex === idx
                 const isDone = !isFailed && stageInfo.stepIndex > idx
                 const isCurrent = !prepareFailed && stageInfo.stepIndex === idx

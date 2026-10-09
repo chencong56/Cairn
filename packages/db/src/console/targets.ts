@@ -54,6 +54,8 @@ import {
   tallyKnownBytes,
   compactLoginFields,
   DEFAULT_ACCOUNT_USAGE,
+  accountAllowsBusiness,
+  isUsableIdentity,
   DEFAULT_TARGET_ICON_KEY,
   DEFAULT_TARGET_ACCENT_KEY,
   deletePreviewResponseSchema,
@@ -120,6 +122,22 @@ import { getPlatformConfig } from '../platform-config/store.js'
 import { parseTargetSessionPolicyOverride } from '../sessions/session-policy.js'
 import { retireSchedulesForOwner } from '../schedules/schedules.js'
 import { softDeleteSuitesForTarget } from '../suites/suites.js'
+import { credentialUsername } from './account-identity.js'
+import {
+  assertDefaultRemovable,
+  assertRunAccountChoice,
+  assertVisitorDisableAllowed,
+  ensureVisitorAccount,
+  findVisitorAccountId,
+  loadTargetIdentities,
+  reconcileTargetDefault,
+  resetScenarioRunAccounts,
+  usableIdentityIds,
+} from './target-identity.js'
+
+function accountLabel(displayName: string, username: string | null): string {
+  return username ? `${displayName}（${username}）` : displayName
+}
 
 function iso(value: Date): string {
   return value.toISOString()
@@ -237,8 +255,9 @@ export class TargetsStore {
       .limit(limit + 1)
     const counts = await this.accountCounts()
     const paginated = paginateResults(rows, limit)
+    const identities = await this.identitySummaries(paginated.items.map((row) => row.id))
     return targetListResponseSchema.parse({
-      items: paginated.items.map((row) => this.toTarget(row, counts.get(row.id) ?? 0)),
+      items: paginated.items.map((row) => this.toTarget(row, counts.get(row.id) ?? 0, identities.get(row.id))),
       nextCursor: paginated.nextCursor,
       hasMore: paginated.hasMore,
     })
@@ -249,7 +268,8 @@ export class TargetsStore {
     const counts = await this.accountCounts(id)
     const sessionPolicy = parseTargetSessionPolicyOverride(row.sessionPolicy)
     const resolutionPolicy = parseTargetResolutionPolicy(row.resolutionPolicy)
-    return this.toTarget(row, counts.get(id) ?? 0, {
+    const identities = await this.identitySummaries([id])
+    return this.toTarget(row, counts.get(id) ?? 0, identities.get(id), {
       sessionPolicy,
       effectiveSessionPolicy: resolveSessionPolicyLayers({
         platformDefault: await this.platformSessionDefaults(),
@@ -440,11 +460,39 @@ export class TargetsStore {
         if (targetData.account) {
           await this.insertAccount(tx, id, targetData.account, actor, now)
         }
+        if (targetData.authMethod === 'none' || targetData.visitorEnabled) {
+          await this.enableVisitor(tx, id, actor, now)
+        }
       })
     } catch (error) {
       await rethrowUnique(this.db, error, 'target', { code: targetData.code })
     }
     return this.getTarget(id)
+  }
+
+  /** 开启访客：新建或重新启用访客账号，并按可用身份变化收敛默认账号。 */
+  private async enableVisitor(tx: Db, targetId: string, actor: RequestAccount, now: Date): Promise<void> {
+    const before = usableIdentityIds(await loadTargetIdentities(tx, targetId))
+    const visitor = await ensureVisitorAccount(tx, targetId, now)
+    if (!visitor.changed) return
+    await this.writeAudit(tx, actor, 'target_account.create', 'target_account', visitor.id, '开启访客运行')
+    await reconcileTargetDefault(tx, targetId, before, now)
+  }
+
+  /** 停用访客：仍有启用中的调度使用访客、或它是默认账号且还剩两个及以上可用身份时拒绝。 */
+  private async disableVisitor(tx: Db, targetId: string, actor: RequestAccount, now: Date): Promise<void> {
+    const { targetAccounts } = schemaFor(tx)
+    const visitorId = await findVisitorAccountId(tx, targetId)
+    if (!visitorId) return
+    const identities = await loadTargetIdentities(tx, targetId)
+    const visitor = identities.find((row) => row.id === visitorId)
+    if (!visitor || visitor.status !== 'active') return
+    await assertVisitorDisableAllowed(tx, targetId, visitorId)
+    await assertDefaultRemovable(tx, targetId, visitorId)
+    const before = usableIdentityIds(identities)
+    await tx.update(targetAccounts).set({ status: 'disabled', updatedAt: now }).where(eq(targetAccounts.id, visitorId))
+    await this.writeAudit(tx, actor, 'target_account.update', 'target_account', visitorId, '停用访客运行')
+    await reconcileTargetDefault(tx, targetId, before, now)
   }
 
   async updateTarget(
@@ -477,22 +525,38 @@ export class TargetsStore {
       parsed.authMethod !== undefined ||
       parsed.captchaMode !== undefined ||
       parsed.captcha !== undefined
+    const nextAuthMethod = parsed.authMethod ?? current.authMethod
+    // 「无需登录」的目标不参与登录：登录页、登录字段与验证码配置一律置空。
+    const noLogin = nextAuthMethod === 'none'
     try {
       await this.db.transaction(async (tx) => {
         await lockConsoleAuthorization(tx, actor.id)
         await assertTargetPermission(tx, actor.id, id, 'target:write')
+        const identitiesBefore = await loadTargetIdentities(tx, id)
+        if (noLogin && current.authMethod !== 'none' && identitiesBefore.some((row) => row.identityKind === 'credential')) {
+          throw failure('conflict', {
+            code: 'TARGET_AUTH_METHOD_HAS_ACCOUNTS',
+            message: '目标下还有登录账号，不能改为无需登录。只想让部分场景不登录的话，开启访客运行即可',
+          })
+        }
+        if (noLogin && parsed.visitorEnabled === false) {
+          throw failure('conflict', {
+            code: 'TARGET_VISITOR_IN_USE',
+            message: '无需登录的目标只有访客这一个身份，不能停用；请先把登录方式改为账号密码或仅手工登录',
+          })
+        }
         await tx
           .update(targets)
           .set({
             name: parsed.name ?? current.name,
             entryUrl: parsed.entryUrl ?? current.entryUrl,
-            loginUrl: parsed.loginUrl === undefined ? current.loginUrl : parsed.loginUrl,
-            authMethod: parsed.authMethod ?? current.authMethod,
-            captchaMode: parsed.captchaMode ?? current.captchaMode,
+            loginUrl: noLogin ? null : parsed.loginUrl === undefined ? current.loginUrl : parsed.loginUrl,
+            authMethod: nextAuthMethod,
+            captchaMode: noLogin ? 'none' : (parsed.captchaMode ?? current.captchaMode),
             status: parsed.status ?? current.status,
             iconKey: parsed.iconKey ?? current.iconKey,
             accentKey: parsed.accentKey ?? current.accentKey,
-            loginFields: parsed.loginFields === undefined ? current.loginFields : parsed.loginFields,
+            loginFields: noLogin ? null : parsed.loginFields === undefined ? current.loginFields : parsed.loginFields,
             loginLeaveTimeoutMs:
               parsed.loginLeaveTimeoutMs === undefined
                 ? current.loginLeaveTimeoutMs
@@ -505,7 +569,7 @@ export class TargetsStore {
               parsed.landingSettleTimeoutMs === undefined
                 ? current.landingSettleTimeoutMs
                 : parsed.landingSettleTimeoutMs,
-            captcha: parsed.captcha === undefined ? current.captcha : parsed.captcha,
+            captcha: noLogin ? null : parsed.captcha === undefined ? current.captcha : parsed.captcha,
             sensitiveSelectors:
               parsed.sensitiveSelectors === undefined
                 ? current.sensitiveSelectors
@@ -513,6 +577,19 @@ export class TargetsStore {
             updatedAt: now,
           })
           .where(eq(targets.id, id))
+        if (noLogin || parsed.visitorEnabled === true) {
+          await this.enableVisitor(tx, id, actor, now)
+        } else if (parsed.visitorEnabled === false) {
+          await this.disableVisitor(tx, id, actor, now)
+        }
+        if (parsed.defaultAccountId !== undefined) {
+          if (parsed.defaultAccountId) await assertRunAccountChoice(tx, id, parsed.defaultAccountId)
+          await tx
+            .update(targets)
+            .set({ defaultAccountId: parsed.defaultAccountId, updatedAt: now })
+            .where(eq(targets.id, id))
+          await this.writeAudit(tx, actor, 'target.update', 'target', id, parsed.defaultAccountId ? '设置了默认账号' : '清除了默认账号')
+        }
         if (authSurfaceTouched) {
           await tx
             .update(targetAccounts)
@@ -782,6 +859,7 @@ export class TargetsStore {
               secretId: null,
               secretProvider: null,
               mapUsageGuard: null,
+              visitorGuard: null,
               updatedAt: now,
             })
             .where(and(eq(targetAccounts.targetId, id), isNull(targetAccounts.deletedAt)))
@@ -994,7 +1072,7 @@ export class TargetsStore {
         this.toAccount(
           row,
           profile,
-          { ...extras.get(row.id), accountSessionMode },
+          { ...extras.get(row.id), accountSessionMode, defaultAccountId: target.defaultAccountId },
           credentialViews.get(row.id),
           snapshotSummaries.get(row.id),
         ),
@@ -1053,8 +1131,34 @@ export class TargetsStore {
         const [lockedAccount] = await tx.select().from(targetAccounts).where(and(eq(targetAccounts.id, accountId), eq(targetAccounts.targetId, targetId), isNull(targetAccounts.deletedAt))).for('update')
         if (!lockedAccount) throw failure('not_found', '目标账号不存在')
         current = lockedAccount
+        const isVisitor = lockedAccount.identityKind === 'visitor'
+        if (
+          isVisitor &&
+          (body.username !== undefined || body.password !== undefined || body.clearPassword || body.totpSecret !== undefined ||
+            body.clearTotp || body.usage !== undefined || body.validity !== undefined || body.ownerConsoleAccountId !== undefined ||
+            body.confirmIdentityMaterial || body.expectedRevision !== undefined)
+        ) {
+          throw failure('conflict', {
+            code: 'TARGET_ACCOUNT_VISITOR_READONLY',
+            message: '访客账号只能修改显示名、启用状态和并发上限，不能登记登录名、口令或有效期',
+          })
+        }
         nextUsage = body.usage ?? current.usage ?? DEFAULT_ACCOUNT_USAGE
         usernameChanged = body.username !== undefined && body.username !== current.username
+        const disabling = body.status === 'disabled' && current.status === 'active'
+        const leavingBusiness = accountAllowsBusiness(current.usage) && !accountAllowsBusiness(nextUsage)
+        if (disabling && isVisitor) {
+          const [targetRow] = await tx.select({ authMethod: targets.authMethod }).from(targets).where(eq(targets.id, targetId)).limit(1)
+          if (targetRow?.authMethod === 'none') {
+            throw failure('conflict', {
+              code: 'TARGET_VISITOR_IN_USE',
+              message: '无需登录的目标只有访客这一个身份，不能停用；请先把登录方式改为账号密码或仅手工登录',
+            })
+          }
+          await assertVisitorDisableAllowed(tx, targetId, accountId)
+        }
+        if (disabling || leavingBusiness) await assertDefaultRemovable(tx, targetId, accountId)
+        const usableBefore = usableIdentityIds(await loadTargetIdentities(tx, targetId))
         const editsIdentity = body.displayName !== undefined || body.username !== undefined || body.status !== undefined || body.usage !== undefined
         if (editsIdentity) await assertTargetPermission(tx, actor.id, targetId, 'target:write')
         if (nextSecret || body.clearPassword || body.totpSecret || body.clearTotp || body.validity || body.ownerConsoleAccountId !== undefined || body.confirmIdentityMaterial) {
@@ -1064,7 +1168,8 @@ export class TargetsStore {
         const { credentials, browserSessions } = schemaFor(tx)
         const [catalog] = await tx.select().from(credentials).where(eq(credentials.id, accountId)).for('update')
         if (body.expectedRevision !== undefined && catalog?.revision !== body.expectedRevision) throw failure('conflict', { code: 'CREDENTIAL_REVISION_CONFLICT', message: '账号已被他人更新，请重新核对' })
-        if (body.maxConcurrentSessions != null && body.maxConcurrentSessions > 1) {
+        // 访客运行总按 concurrent 冻结，不受目标会话模式限制。
+        if (body.maxConcurrentSessions != null && body.maxConcurrentSessions > 1 && !isVisitor) {
           const [targetRow] = await tx.select({ sessionPolicy: targets.sessionPolicy }).from(targets).where(eq(targets.id, targetId)).limit(1)
           const platformDefaults = await this.platformSessionDefaults()
           const mode = resolveSessionPolicyLayers({
@@ -1144,13 +1249,14 @@ export class TargetsStore {
             updatedAt: now,
           })
           .where(eq(targetAccounts.id, accountId))
+        await reconcileTargetDefault(tx, targetId, usableBefore, now)
         if (nextSecret) {
           await replaceTargetAccountSecret(tx, {
             account: {
               id: accountId,
               targetId,
               displayName: body.displayName ?? current.displayName,
-              username: body.username ?? current.username,
+              username: credentialUsername({ username: body.username ?? current.username }),
               configRevision: usernameChanged ? current.configRevision + 1 : current.configRevision,
               secretId: nextSecret.id,
               secretProvider: LOCAL_SECRET_PROVIDER,
@@ -1165,7 +1271,7 @@ export class TargetsStore {
         } else if (usernameChanged && !body.confirmIdentityMaterial) {
           await markIdentityReconfirm(tx, {
             accountId,
-            username: body.username ?? current.username,
+            username: credentialUsername({ username: body.username ?? current.username }),
             identityRevision: current.configRevision + 1,
           })
         } else if (body.confirmIdentityMaterial) {
@@ -1174,7 +1280,7 @@ export class TargetsStore {
               id: accountId,
               targetId,
               displayName: body.displayName ?? current.displayName,
-              username: body.username ?? current.username,
+              username: credentialUsername({ username: body.username ?? current.username }),
               configRevision: usernameChanged ? current.configRevision + 1 : current.configRevision,
               secretId: current.secretId,
               secretProvider: current.secretProvider,
@@ -1202,7 +1308,7 @@ export class TargetsStore {
             'target_account.update',
             'target_account',
             accountId,
-            `${body.displayName ?? current.displayName}（${body.username ?? current.username}）`,
+            accountLabel(body.displayName ?? current.displayName, body.username ?? current.username),
           )
         }
         if (nextSecret || body.clearPassword) {
@@ -1212,14 +1318,14 @@ export class TargetsStore {
             'target_account.password',
             'target_account',
             accountId,
-            body.username ?? current.username,
+            credentialUsername({ username: body.username ?? current.username }),
           )
         }
       })
     } catch (error) {
       await rethrowUnique(this.db, error, 'account', {
         targetId,
-        username: body.username ?? current.username,
+        username: body.username ?? current.username ?? undefined,
       })
     }
     return this.getAccount(targetId, accountId)
@@ -1252,6 +1358,14 @@ export class TargetsStore {
             deletedBy: current.deletedBy,
           })
         }
+        if (current.identityKind === 'visitor') {
+          throw failure('conflict', {
+            code: 'TARGET_ACCOUNT_VISITOR_READONLY',
+            message: '访客账号不能单独删除；不需要访客时请在目标里关闭「允许访客运行」',
+          })
+        }
+        await assertDefaultRemovable(tx as unknown as Db, targetId, accountId)
+        const usableBefore = usableIdentityIds(await loadTargetIdentities(tx as unknown as Db, targetId))
 
         const activeRuns = await tx
           .select({ id: runs.id })
@@ -1302,6 +1416,9 @@ export class TargetsStore {
           now,
           { kind: 'console', id: actor.id },
         )
+        // 指定它为运行账号的场景改回「跟随目标默认」；默认账号按剩余可用身份收敛。
+        const resetScenarios = await resetScenarioRunAccounts(tx as unknown as Db, [accountId], now)
+        await reconcileTargetDefault(tx as unknown as Db, targetId, usableBefore, now)
 
         await this.writeAudit(
           tx,
@@ -1309,7 +1426,9 @@ export class TargetsStore {
           'target_account.delete',
           'target_account',
           accountId,
-          `${current.displayName}（${current.username}）`,
+          resetScenarios.length > 0
+            ? `${accountLabel(current.displayName, current.username)}；${resetScenarios.length} 个场景的运行账号改回跟随目标默认`
+            : accountLabel(current.displayName, current.username),
         )
         return toDeleteResult({ id: accountId, deletedAt: now, deletedBy })
       })
@@ -1339,7 +1458,7 @@ export class TargetsStore {
     return this.toAccount(
       row,
       profile,
-      { ...extras.get(accountId), accountSessionMode },
+      { ...extras.get(accountId), accountSessionMode, defaultAccountId: target.defaultAccountId },
       await loadAccountCredentialView(this.db, accountId),
       snapshotSummary,
     )
@@ -1378,6 +1497,34 @@ export class TargetsStore {
     return row
   }
 
+  /** 每个目标启用中的访客与可用身份数；用于界面决定是否显示账号选择。 */
+  private async identitySummaries(
+    targetIds: string[],
+  ): Promise<Map<string, { visitorAccountId: string | null; usableIdentityCount: number }>> {
+    const result = new Map<string, { visitorAccountId: string | null; usableIdentityCount: number }>()
+    if (targetIds.length === 0) return result
+    const { targetAccounts } = schemaFor(this.db)
+    const rows = await this.db
+      .select({
+        id: targetAccounts.id,
+        targetId: targetAccounts.targetId,
+        identityKind: targetAccounts.identityKind,
+        status: targetAccounts.status,
+        usage: targetAccounts.usage,
+        deletedAt: targetAccounts.deletedAt,
+      })
+      .from(targetAccounts)
+      .where(and(inArray(targetAccounts.targetId, targetIds), isNull(targetAccounts.deletedAt)))
+    for (const targetId of targetIds) result.set(targetId, { visitorAccountId: null, usableIdentityCount: 0 })
+    for (const row of rows) {
+      const entry = result.get(row.targetId)!
+      if (!isUsableIdentity(row)) continue
+      entry.usableIdentityCount += 1
+      if (row.identityKind === 'visitor') entry.visitorAccountId = row.id
+    }
+    return result
+  }
+
   private async accountCounts(targetId?: string): Promise<Map<string, number>> {
     const { targetAccounts } = schemaFor(this.db)
     const condition = targetId
@@ -1411,8 +1558,15 @@ export class TargetsStore {
     now: Date,
   ): Promise<string> {
     const { secrets, targetAccounts, targets } = schemaFor(tx)
-    const [liveTarget] = await tx.select({ id: targets.id }).from(targets).where(and(eq(targets.id, targetId), isNull(targets.deletedAt))).for('share')
+    const [liveTarget] = await tx.select({ id: targets.id, authMethod: targets.authMethod }).from(targets).where(and(eq(targets.id, targetId), isNull(targets.deletedAt))).for('share')
     if (!liveTarget) throw failure('not_found', '目标系统不存在')
+    if (liveTarget.authMethod === 'none') {
+      throw failure('conflict', {
+        code: 'TARGET_AUTH_METHOD_HAS_ACCOUNTS',
+        message: '无需登录的目标不能登记登录账号；需要登录时先把登录方式改为账号密码或仅手工登录',
+      })
+    }
+    const usableBefore = usableIdentityIds(await loadTargetIdentities(tx, targetId))
     if (body.password || body.totpSecret || body.validity || body.ownerConsoleAccountId) {
       await assertTargetPermission(tx, actor.id, targetId, 'credential:read')
       await assertTargetPermission(tx, actor.id, targetId, 'credential:write')
@@ -1501,12 +1655,14 @@ export class TargetsStore {
       actor,
       now,
     })
+    await reconcileTargetDefault(tx, targetId, usableBefore, now)
     return id
   }
 
   private toTarget(
     row: Target,
     accountCount: number,
+    identity: { visitorAccountId: string | null; usableIdentityCount: number } | undefined,
     extras?: {
       sessionPolicy?: TargetDto['sessionPolicy']
       effectiveSessionPolicy?: TargetDto['effectiveSessionPolicy']
@@ -1538,6 +1694,9 @@ export class TargetsStore {
         ? { effectiveSessionPolicy: extras.effectiveSessionPolicy }
         : {}),
       resolutionPolicy: extras?.resolutionPolicy ?? parseTargetResolutionPolicy(row.resolutionPolicy),
+      defaultAccountId: row.defaultAccountId ?? null,
+      visitorAccountId: identity?.visitorAccountId ?? null,
+      usableIdentityCount: identity?.usableIdentityCount ?? 0,
       createdAt: iso(row.createdAt),
       updatedAt: iso(row.updatedAt),
     })
@@ -1552,6 +1711,7 @@ export class TargetsStore {
       lastAuthError?: string | null
       autoLoginPausedReason?: string | null
       accountSessionMode?: 'exclusive' | 'concurrent'
+      defaultAccountId?: string | null
     },
     credential?: Awaited<ReturnType<typeof loadAccountCredentialView>>,
     snapshotSummary?: SessionSnapshotSummary | null,
@@ -1561,6 +1721,8 @@ export class TargetsStore {
       targetId: row.targetId,
       displayName: row.displayName,
       username: row.username,
+      identityKind: row.identityKind,
+      isDefault: Boolean(extras?.defaultAccountId) && extras?.defaultAccountId === row.id,
       hasPassword: Boolean(row.secretId),
       hasTotp: Boolean(row.totpSecretId),
       hasStorageState: Boolean(row.storageStateSecretId),
@@ -1596,9 +1758,10 @@ export class TargetsStore {
           }
         : {}),
       maxConcurrentSessions: row.maxConcurrentSessions ?? 1,
-      effectiveAccountSessionMode: extras?.accountSessionMode,
+      // 访客运行总按 concurrent 冻结（见 assembleRunSnapshot），上限只看访客自己的设置。
+      effectiveAccountSessionMode: row.identityKind === 'visitor' ? 'concurrent' : extras?.accountSessionMode,
       effectiveMaxConcurrentSessions: effectiveAccountSessionCap({
-        accountSessionMode: extras?.accountSessionMode,
+        accountSessionMode: row.identityKind === 'visitor' ? 'concurrent' : extras?.accountSessionMode,
         maxConcurrentSessions: row.maxConcurrentSessions ?? 1,
       }),
       createdAt: iso(row.createdAt),
@@ -1631,6 +1794,7 @@ export class TargetsStore {
         )
         .for('update')
       if (!account) throw failure('not_found', '目标账号不存在')
+      credentialUsername(account)
 
       await tx.insert(secrets).values({
         id: sealed.id,

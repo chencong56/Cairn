@@ -30,16 +30,18 @@ export async function readAccountSessionCap(db: Db, key: SessionKey): Promise<Ac
   const policy = await loadResolvedSessionPolicyForTarget(db, key.targetId)
   const { targetAccounts } = schemaFor(db)
   const [account] = await db
-    .select({ maxConcurrentSessions: targetAccounts.maxConcurrentSessions })
+    .select({ maxConcurrentSessions: targetAccounts.maxConcurrentSessions, identityKind: targetAccounts.identityKind })
     .from(targetAccounts)
     .where(eq(targetAccounts.id, key.targetAccountId))
     .limit(1)
   const maxConcurrentSessions = account?.maxConcurrentSessions ?? 1
+  // 访客没有「一个账号同时只能在线一个会话」的问题，上限只看访客自己的设置。
+  const mode = account?.identityKind === 'visitor' ? 'concurrent' : policy.accountSessionMode
   return {
-    mode: policy.accountSessionMode,
+    mode,
     maxConcurrentSessions,
     effectiveCap: effectiveAccountSessionCap({
-      accountSessionMode: policy.accountSessionMode,
+      accountSessionMode: mode,
       maxConcurrentSessions,
     }),
   }

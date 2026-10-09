@@ -9,7 +9,7 @@ import {
   type ScenarioOutputDecl,
   type TargetResolutionPolicy,
 } from '@cairn/shared'
-import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, FileText, Layers, Sliders, Sparkles } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, FileText, Layers, Sliders, Sparkles, UserRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { InputsEditor } from '@/features/authoring/step-editor'
@@ -19,6 +19,7 @@ import { DiagnosticList } from './diagnostic-list'
 import { ScenarioOutputsEditor } from '../../scenario-outputs-editor'
 import { ScenarioLocatorSettings } from '../../scenario-locator-settings'
 import { ScenarioReportSettings } from '@/features/reports/profiles'
+import { ScenarioRunAccountSettings } from '../../scenario-run-account-settings'
 import {
   collectVariableSources,
   documentContextKeysAny,
@@ -46,6 +47,10 @@ export interface ScenarioConfigWorkspaceProps {
   onOpenAcceptanceAudit?: () => void
   /** 跳转至「定位健康与自愈」专属工作区。 */
   onOpenHealth?: () => void
+  /** 场景运行账号；null 表示跟随目标默认。 */
+  runAccountId?: string | null
+  /** 目标有两个及以上可用身份（例如开了访客）时才显示运行账号。 */
+  showRunAccount?: boolean
 }
 
 export type ScenarioPartitionKey = 'inputs' | 'outcomes' | 'outputs' | 'settings'
@@ -69,6 +74,8 @@ export function ScenarioConfigWorkspace({
   onSelectDiagnostic,
   onOpenAcceptanceAudit,
   onOpenHealth,
+  runAccountId = null,
+  showRunAccount = false,
 }: ScenarioConfigWorkspaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [activeTab, setActiveTab] = useState<ScenarioPartitionKey>('inputs')
@@ -418,7 +425,7 @@ export function ScenarioConfigWorkspace({
               <div>
                 <h4 className='text-body font-semibold text-foreground'>高级设置 (Settings)</h4>
                 <p className='text-caption text-muted-foreground'>
-                  元素定位默认策略与执行报告自动生成配置
+                  {showRunAccount ? '运行账号、元素定位默认策略与执行报告配置' : '元素定位默认策略与执行报告自动生成配置'}
                 </p>
               </div>
             </div>
@@ -434,6 +441,22 @@ export function ScenarioConfigWorkspace({
 
           {!collapsedPartitions.settings && (
             <div className='space-y-6'>
+              {/* 运行账号（场景级，独立即时保存） */}
+              {showRunAccount ? (
+                <div className='space-y-3 pb-4 border-b border-border-divider/60'>
+                  <div className='flex items-center gap-1.5 text-label font-medium text-foreground'>
+                    <UserRound className='size-3.5 text-primary' />
+                    <span>运行账号</span>
+                  </div>
+                  <ScenarioRunAccountSettings
+                    scenarioId={scenarioId}
+                    targetId={targetId}
+                    runAccountId={runAccountId}
+                    disabled={disabled}
+                    showLabel={false}
+                  />
+                </div>
+              ) : null}
               {/* 定位策略 */}
               <div className='space-y-3'>
                 <div className='flex items-center gap-1.5 text-label font-medium text-foreground'>

@@ -3,6 +3,7 @@ import {
   findActiveLeaseForSession,
   getPlatformConfig,
   getSessionById,
+  loadAccountForExecution,
   loadCurrentAuthProfile,
   loadTargetForExecution,
   requestMaintenanceOperation,
@@ -22,10 +23,15 @@ export async function attachSessionAuthObserver(this: SessionManagerContext, ses
   const session = await getSessionById(this.dbHandle, sessionId)
   if (!session) return
   const target = await loadTargetForExecution(this.dbHandle, session.targetId)
+  const account = await loadAccountForExecution(this.dbHandle, session.targetAccountId)
+  const visitor = account?.identityKind === 'visitor'
+  // 访客只认配置的登录页，不拿入口页兜底：「无需登录」目标回到首页不能算到了登录页。
+  const loginUrl = visitor ? (target?.loginUrl ?? null) : (target?.loginUrl ?? target?.entryUrl ?? null)
+  if (visitor && !loginUrl) return
   const profile = await loadCurrentAuthProfile(this.dbHandle, session.targetId)
   const observer = observeRunAuthPage({
     page: live.handle.basePage,
-    loginUrl: target?.loginUrl ?? target?.entryUrl ?? null,
+    loginUrl,
     definition: profile?.definition,
     onSignal: (signal) => {
       void handleSessionAuthSignal(this, sessionId, signal).catch((error) => {
@@ -81,6 +87,9 @@ export async function handleSessionAuthSignal(
     generation: session.generation,
     payload: { kind: signal.kind, summary: signal.summary },
   })
+  // 访客会话没有登录态可核验：只留事件，受管画面据此提示「在访客会话里登录会污染访客数据」。
+  const account = await loadAccountForExecution(manager.dbHandle, session.targetAccountId)
+  if (account?.identityKind === 'visitor') return
   const platform = await getPlatformConfig(manager.dbHandle)
   const fallbackInterval =
     platform?.document.sessionRetention.maintenanceIntervalSeconds ??

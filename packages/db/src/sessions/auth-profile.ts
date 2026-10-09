@@ -525,6 +525,9 @@ export async function startAuthProfileValidation(
     .where(and(eq(targetAccounts.id, input.targetAccountId), eq(targetAccounts.targetId, input.targetId)))
     .limit(1)
   if (!account || account.deletedAt) throw notFound('TARGET_ACCOUNT_NOT_FOUND', '目标账号不存在')
+  if (account.identityKind === 'visitor') {
+    throw badRequest('SESSION_VISITOR_NO_AUTH', '访客没有登录态，不能用来验收登录核验规则')
+  }
   const kindParams: AuthKindParams = {
     revision: profile.revision,
     requiredSteps: requiredValidationSteps(profile.definition),
@@ -724,7 +727,7 @@ export async function loadAccountAuthDisplay(
 
 export async function assertLiveAuthConfiguration(
   db: Db,
-  input: { targetId: string; targetAccountId: string },
+  input: { targetId: string; targetAccountId: string; runAs?: 'login' | 'visitor' },
 ): Promise<{ ok: true } | { ok: false; code: 'AUTH_CONFIGURATION_REVOKED'; message: string }> {
   const { targets, targetAccounts } = schemaFor(db)
   const [target] = await db.select().from(targets).where(eq(targets.id, input.targetId)).limit(1)
@@ -734,6 +737,10 @@ export async function assertLiveAuthConfiguration(
   }
   if (!account || account.deletedAt || account.status === 'disabled' || account.targetId !== input.targetId) {
     return { ok: false, code: 'AUTH_CONFIGURATION_REVOKED', message: '目标账号已停用或撤销' }
+  }
+  // 身份类型创建后不可变；对不上说明数据被改坏，闭合失败，不按另一种身份继续。
+  if (input.runAs && (account.identityKind === 'visitor') !== (input.runAs === 'visitor')) {
+    return { ok: false, code: 'AUTH_CONFIGURATION_REVOKED', message: '目标账号的身份类型与本次运行冻结的不一致' }
   }
   return { ok: true }
 }

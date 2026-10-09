@@ -12,6 +12,8 @@ import {
   type ScheduleDto,
   type JsonValue,
   type ScheduleWeekday,
+  isUsableIdentity,
+  resolveRunAccount,
 } from '@cairn/shared'
 import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
@@ -25,6 +27,7 @@ import {
 } from '@/lib/schedules-api'
 import { fetchSuites, fetchSuite } from '@/lib/suites-api'
 import { fetchTargetAccounts, fetchTargets } from '@/lib/targets-api'
+import { accountOptionLabel } from '@/features/runs/target-account'
 import { useCan } from '@/hooks/use-permissions'
 import { Button } from '@/components/ui/button'
 import {
@@ -879,23 +882,45 @@ export function ScheduleEditorDialog({
                   </p>
                 ) : null}
               </div>
-              <div className='grid gap-1'>
-                <Label htmlFor='schedule-account'>目标账号</Label>
-                <SelectField
-                  id='schedule-account'
-
-                  disabled={!canWrite}
-                  value={accountId}
-                  onValueChange={(value) => setAccountId(value)}
-                >
-                  <SelectFieldOption value=''>按场景规则解析</SelectFieldOption>
-                  {(accountsQuery.data?.items ?? []).map((item) => (
-                    <SelectFieldOption key={item.id} value={item.id}>
-                      {item.displayName}
-                    </SelectFieldOption>
-                  ))}
-                </SelectField>
-              </div>
+              {(() => {
+                // 保存时按「指定 → 场景运行账号 → 目标默认 → 唯一可用」解析并冻结，之后不追随场景修改。
+                const usable = (accountsQuery.data?.items ?? []).filter(isUsableIdentity)
+                const followed = resolveRunAccount({
+                  scenario: selectedScenario?.runAccountId ?? null,
+                  targetDefault: usable.find((item) => item.isDefault)?.id ?? null,
+                  accounts: usable,
+                })
+                const followedAccount = followed.ok && followed.accountId ? usable.find((item) => item.id === followed.accountId) : undefined
+                if (usable.length <= 1 && !accountId) {
+                  return (
+                    <div className='grid gap-1'>
+                      <Label>运行账号</Label>
+                      <p className='text-body text-text-primary'>{usable[0] ? accountOptionLabel(usable[0]) : '不需要账号'}</p>
+                    </div>
+                  )
+                }
+                return (
+                  <div className='grid gap-1'>
+                    <Label htmlFor='schedule-account'>运行账号</Label>
+                    <SelectField
+                      id='schedule-account'
+                      disabled={!canWrite}
+                      value={accountId}
+                      onValueChange={(value) => setAccountId(value)}
+                    >
+                      <SelectFieldOption value=''>
+                        {followedAccount ? `跟随场景（当前：${accountOptionLabel(followedAccount)}）` : '跟随场景'}
+                      </SelectFieldOption>
+                      {usable.map((item) => (
+                        <SelectFieldOption key={item.id} value={item.id}>
+                          {accountOptionLabel(item)}
+                        </SelectFieldOption>
+                      ))}
+                    </SelectField>
+                    <p className='text-label text-muted-foreground'>保存时确定账号；之后改场景的运行账号，调度不会自动跟着改。</p>
+                  </div>
+                )
+              })()}
             </div>
           ) : null}
           {type === 'suite_run' ? (
@@ -945,7 +970,7 @@ export function ScheduleEditorDialog({
                 onValueChange={setAccountId}
               >
                 <SelectFieldOption value=''>由平台选择可用账号</SelectFieldOption>
-                {(accountsQuery.data?.items ?? []).map((item) => (
+                {(accountsQuery.data?.items ?? []).filter((item) => item.identityKind !== 'visitor').map((item) => (
                   <SelectFieldOption
                     key={item.id}
                     value={item.id}

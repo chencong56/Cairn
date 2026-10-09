@@ -136,7 +136,7 @@ export const TARGET_CONFIG_FORM_FIELDS = [
     id: 'authMethod',
     label: '认证方式',
     aliases: ['登录方式'],
-    help: '目标系统的登录处理方式。',
+    help: '目标系统的登录处理方式。公开站点选无需登录（所有场景以访客运行）；部分页面要登录的，选账号密码并在目标里开启访客。',
     requiredOnCreate: false,
     kind: 'choice',
     choices: AUTH_METHODS,

@@ -16,6 +16,8 @@ import {
   isCleanupFailed,
   mergeSuiteMemberInput,
   resolveSuiteMemberAccountId,
+  stepUsesBrowser,
+  type AccountSource,
   suiteRunListQuerySchema,
   suiteRunListResponseSchema,
   suiteRunObservationSchema,
@@ -53,7 +55,8 @@ import { sha256Hex } from '../runs/digest.js'
 import { badRequest, conflict, DomainError, mapRestriction, notFound } from '../runs/errors.js'
 import { loadResolutionLayers, stepsNeedAiExecute } from '../runs/resolution-layers.js'
 import { loadScenarioVersion } from '../runs/scenarios.js'
-import { resolveRunTargetAccountId, writeRunWithSnapshot, softDeleteRunTx } from '../runs/runs.js'
+import { writeRunWithSnapshot, softDeleteRunTx } from '../runs/runs.js'
+import { resolveRunAccountChoice } from '../runs/run-account.js'
 import { requestRunCancel } from '../runs/runs.js'
 import { readAccountSessionCap } from '../sessions/account-session-concurrency.js'
 import { assertExpectedCounts, assertResourceIdle, liveTargetExists, pendingWriteBlockers, snapshotDeletedBy } from '../lifecycle.js'
@@ -278,6 +281,16 @@ async function resolvePublishedVersion(db: Db, suiteId: string, suiteVersionId?:
   return { suite, version, document: version.document }
 }
 
+async function memberNeedsBrowser(db: Db, scenarioId: string, scenarioVersionId: string): Promise<boolean> {
+  try {
+    const loaded = await loadScenarioVersion(db, scenarioId, scenarioVersionId)
+    return loaded.version.definition.steps.some((step) => !step.disabled && stepUsesBrowser(step.type))
+  } catch {
+    // 版本读不到由成员校验另行报错；这里按需要浏览器处理，取不定账号就如实报出来。
+    return true
+  }
+}
+
 export async function previewSuiteRun(
   db: Db,
   body: CreateSuiteRunBody,
@@ -321,15 +334,30 @@ export async function previewSuiteRun(
         runOverride: override?.input,
       })
       let targetAccountId: string | null = null
+      let accountSource: AccountSource | undefined
       try {
-        targetAccountId = frozenAccounts?.[member.memberId] === null ? null : await resolveRunTargetAccountId(db, { targetId: suite.targetId, requestedAccountId: frozenAccounts?.[member.memberId] ?? resolveSuiteMemberAccountId({
-          runMemberAccountId: override?.targetAccountId,
-          memberAccountId: member.targetAccountId,
-          runDefaultAccountId: input.defaultTargetAccountId,
-          suiteDefaultAccountId: document.defaultTargetAccountId,
-        }) }) ?? null
+        // 成员与本次运行的成员覆盖是「本次指定」；场景自己指定的运行账号排在场景集默认之前。
+        if (frozenAccounts?.[member.memberId] !== null) {
+          const choice = await resolveRunAccountChoice(db, {
+            targetId: suite.targetId,
+            requestedAccountId: frozenAccounts?.[member.memberId] ?? resolveSuiteMemberAccountId({
+              runMemberAccountId: override?.targetAccountId,
+              memberAccountId: member.targetAccountId,
+            }),
+            scenarioId: member.scenarioId,
+            suiteDefaultAccountId: input.defaultTargetAccountId ?? document.defaultTargetAccountId,
+            needsBrowser: await memberNeedsBrowser(db, member.scenarioId, member.scenarioVersionId),
+          })
+          targetAccountId = choice.accountId ?? null
+          accountSource = frozenAccounts?.[member.memberId] ? undefined : choice.source
+        }
       } catch (error) {
-        issues.push({ memberId: member.memberId, code: 'RUN_ACCOUNT_REQUIRED', message: error instanceof Error ? error.message : '请选择目标账号', severity: 'error' })
+        issues.push({
+          memberId: member.memberId,
+          code: error instanceof DomainError ? error.code : 'RUN_ACCOUNT_REQUIRED',
+          message: error instanceof Error ? error.message : '请选择目标账号',
+          severity: 'error',
+        })
       }
       const [scenario] = await db.select({ name: scenarios.name }).from(scenarios).where(eq(scenarios.id, member.scenarioId)).limit(1)
       const memberIssues = issues.filter((item) => item.memberId === member.memberId)
@@ -342,6 +370,7 @@ export async function previewSuiteRun(
         scenarioVersionId: member.scenarioVersionId,
         effectiveInput,
         targetAccountId,
+        ...(accountSource ? { accountSource } : {}),
         issues: memberIssues,
         entryNavigationWarning: memberIssues.some((item) => item.code === 'ENTRY_NAVIGATION_WARNING'),
       })
@@ -514,6 +543,7 @@ async function createSuiteRunTx(
             scenarioVersionId: member.scenarioVersionId,
             targetAccountId: member.targetAccountId ?? undefined,
             resolvedTargetAccountId: member.targetAccountId,
+            resolvedAccountSource: member.accountSource,
             input: member.effectiveInput,
             actor,
             deadlineAt,

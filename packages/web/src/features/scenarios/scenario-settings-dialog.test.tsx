@@ -60,7 +60,7 @@ describe('ScenarioSettingsDialog 场景配置弹窗', () => {
 
     // 验证弹窗标题与描述
     await expect.element(screen.getByRole('heading', { name: '场景配置' })).toBeInTheDocument()
-    await expect.element(screen.getByText('管理本场景全局运行策略、页面元素定位基线与运行报告配置。')).toBeInTheDocument()
+    await expect.element(screen.getByText('管理本场景的运行账号、页面元素定位基线与运行报告配置。')).toBeInTheDocument()
 
     // 验证 Tab 切换项
     await expect.element(screen.getByRole('tab', { name: '定位策略' })).toBeInTheDocument()

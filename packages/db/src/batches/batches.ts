@@ -7,6 +7,7 @@ import {
   FIXTURE_STEPS_DISABLED_MESSAGE,
   isFinishedRunStatus,
   isFixtureStepType,
+  stepUsesBrowser,
   unresolvedRunInputMessage,
   unresolvedRunInputs,
   type BatchDetail,
@@ -109,7 +110,12 @@ async function assertBatchCanStart(
 
   const accountId =
     input.targetAccountId ??
-    (await resolveRunTargetAccountId(db, { targetId: scenario.targetId, requestedAccountId: undefined }))
+    (await resolveRunTargetAccountId(db, {
+      targetId: scenario.targetId,
+      requestedAccountId: undefined,
+      scenarioId: scenario.id,
+      needsBrowser: version.definition.steps.some((step) => !step.disabled && stepUsesBrowser(step.type)),
+    }))
   if (accountId) {
     const [account] = await db
       .select()

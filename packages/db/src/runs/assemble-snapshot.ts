@@ -39,6 +39,8 @@ import {
   type LocatorResolution,
   type LocatorRoute,
   type RunSnapshot,
+  type RunAs,
+  type AccountSource,
   type ScenarioOutputDecl,
   type ServiceDeliveryPolicy,
   type SessionPolicyOverride,
@@ -115,6 +117,9 @@ export type AssembleRunSnapshotInput = {
   deadlineAt?: Date
   targetId: string
   targetAccountId?: string
+  /** 由所选账号身份类型推出；访客运行不带凭据与认证核验。 */
+  runAs?: RunAs
+  accountSource?: AccountSource
   secretRef?: RunSnapshot['secretRef']
   credentialBinding?: RunSnapshot['credentialBinding']
   scenarioId: string
@@ -148,7 +153,8 @@ export type AssembleRunSnapshotInput = {
   platformRevision?: number
   aiExecution?: AiExecutionConfig
   hangWaitMs?: number
-  authVerification: FrozenAuthVerification
+  /** 访客运行不冻结认证核验。 */
+  authVerification?: FrozenAuthVerification
   accessPolicy: FrozenTargetAccessPolicy
   mapConsumption: FrozenMapConsumption
   suiteAdmission?: SuiteAdmissionSnapshot
@@ -162,11 +168,20 @@ export type AssembleRunSnapshotInput = {
 
 export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapshot & { digest: string } {
   const document = input.platformDocument ?? FACTORY_PLATFORM_CONFIG
-  const sessionPolicy = resolvePlatformSessionPolicy(
+  const resolvedSessionPolicy = resolvePlatformSessionPolicy(
     input.sessionPolicyOverride,
     document.session,
     parseTargetSessionPolicyOverride(input.target.sessionPolicy),
   )
+  // 访客没有「一个账号同时只能在线一个会话」的问题，并发上限取访客账号自己的设置；
+  // 也没有登录态可探测，AUTH_DRIVEN 回收退回 IDLE。
+  const sessionPolicy = input.runAs === 'visitor'
+    ? {
+        ...resolvedSessionPolicy,
+        accountSessionMode: 'concurrent' as const,
+        reclaim: resolvedSessionPolicy.reclaim === 'AUTH_DRIVEN' ? ('IDLE' as const) : resolvedSessionPolicy.reclaim,
+      }
+    : resolvedSessionPolicy
   const evidencePolicy = resolvePlatformEvidencePolicy(
     input.mapJob ? MAP_JOB_EVIDENCE_POLICY : input.evidencePolicyOverride,
     document.evidence,
@@ -189,6 +204,8 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
     runId: input.runId,
     targetId: input.targetId,
     targetAccountId: input.targetAccountId,
+    ...(input.runAs ? { runAs: input.runAs } : {}),
+    ...(input.accountSource ? { accountSource: input.accountSource } : {}),
     secretRef: input.secretRef,
     ...(input.credentialBinding ? { credentialBinding: input.credentialBinding } : {}),
     scenarioId: input.scenarioId,
@@ -241,7 +258,7 @@ export function assembleRunSnapshot(input: AssembleRunSnapshotInput): RunSnapsho
         ? { sensitiveSelectors: input.target.sensitiveSelectors }
         : {}),
     }),
-    authVerification: input.authVerification,
+    ...(input.authVerification ? { authVerification: input.authVerification } : {}),
     ...(input.platformRevision ? { platformConfigRevision: input.platformRevision } : {}),
     runAuthRecovery: document.runAuthRecovery,
     aiExecution: resolveAssembledAiExecution({

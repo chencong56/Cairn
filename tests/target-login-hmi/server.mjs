@@ -128,6 +128,35 @@ const server = createServer(async (req, res) => {
       return
     }
 
+    // 访客联调：公开目录页不需要登录；订单页未登录跳转登录页。
+    if (req.method === 'GET' && path === '/catalog') {
+      send(
+        res,
+        200,
+        `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>公开目录</title></head>
+<body><h1 id="catalog-title">公开设备目录</h1><ul id="catalog">
+<li class="item">1 号站 · 价格 120</li><li class="item">2 号站 · 价格 180</li></ul>
+<a id="orders-link" href="/orders">我的订单</a></body></html>`,
+        { 'Content-Type': 'text/html; charset=utf-8' },
+      )
+      return
+    }
+
+    if (req.method === 'GET' && path === '/orders') {
+      if (!isAuthed(req)) {
+        redirect(res, '/login')
+        return
+      }
+      send(
+        res,
+        200,
+        `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>我的订单</title></head>
+<body><h1 id="orders-title">我的订单</h1></body></html>`,
+        { 'Content-Type': 'text/html; charset=utf-8' },
+      )
+      return
+    }
+
     if ((req.method === 'GET' || req.method === 'POST') && path === '/logout') {
       redirect(res, '/login', {
         'Set-Cookie': `${SESSION_COOKIE}=; Path=/; Max-Age=0`,

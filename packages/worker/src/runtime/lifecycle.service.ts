@@ -2043,6 +2043,11 @@ export class LifecycleService
               profile
             ? "RENEW_AUTH"
             : "VERIFY_AUTH";
+        // 访客会话没有登录态可核验或续期，只在到达最长寿命时重启。
+        if (account?.identityKind === "visitor" && kind !== "RESTART") {
+          await scheduleNextAuthCheck(this.handle, session.id);
+          continue;
+        }
         const prefix =
           kind === "RESTART"
             ? "bg-restart"

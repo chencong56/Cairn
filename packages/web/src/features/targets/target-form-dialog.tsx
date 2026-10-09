@@ -107,6 +107,7 @@ function TargetFormFields({
   })
 
   const watchedValues = form.watch()
+  const noLogin = watchedValues.authMethod === 'none'
   const draftValues = useMemo(() => {
     const res: Record<string, string> = {}
     if (watchedValues.name) res.name = watchedValues.name
@@ -282,13 +283,17 @@ function TargetFormFields({
   const onSubmit = async (values: TargetFormValues) => {
     setSaving(true)
     try {
-      const loginFields = loginFieldsFromForm(values)
-      const captcha = captchaFromForm(values)
+      const noLogin = values.authMethod === 'none'
+      // 无需登录：登录页、登录字段与验证码一律不提交，服务端也会置空。
+      const loginFields = noLogin ? null : loginFieldsFromForm(values)
+      const captcha = noLogin ? null : captchaFromForm(values)
+      const loginUrl = noLogin || values.loginUrl.trim() === '' ? null : values.loginUrl
       if (isEdit && current) {
+        const visitorChanged = !noLogin && values.visitorEnabled !== Boolean(current.visitorAccountId)
         await updateTarget(current.id, {
           name: values.name,
           entryUrl: values.entryUrl,
-          loginUrl: values.loginUrl.trim() === '' ? null : values.loginUrl,
+          loginUrl,
           loginLeaveTimeoutMs: loginLeaveTimeoutFromForm(values.loginLeaveTimeoutSeconds),
           landingSettleMode: values.landingSettleMode,
           landingSettleTimeoutMs: loginLeaveTimeoutFromForm(values.landingSettleTimeoutSeconds),
@@ -300,6 +305,7 @@ function TargetFormFields({
           loginFields,
           captcha,
           sensitiveSelectors: selectorsFromForm(values.sensitiveSelectors),
+          ...(visitorChanged ? { visitorEnabled: values.visitorEnabled } : {}),
         })
         preAdoptValuesRef.current = null
         useAssistantStore.getState().setLastAdopted(null)
@@ -308,13 +314,14 @@ function TargetFormFields({
         await queryClient.invalidateQueries({
           queryKey: ['target', current.id],
         })
+        await queryClient.invalidateQueries({ queryKey: ['target-accounts', current.id] })
         onOpenChange(false)
       } else {
         const parsed = createTargetBodySchema.parse({
           code: values.code,
           name: values.name,
           entryUrl: values.entryUrl,
-          loginUrl: values.loginUrl.trim() === '' ? null : values.loginUrl,
+          loginUrl,
           loginLeaveTimeoutMs: loginLeaveTimeoutFromForm(values.loginLeaveTimeoutSeconds),
           landingSettleMode: values.landingSettleMode,
           landingSettleTimeoutMs: loginLeaveTimeoutFromForm(values.landingSettleTimeoutSeconds),
@@ -327,6 +334,7 @@ function TargetFormFields({
           captcha,
           sensitiveSelectors: selectorsFromForm(values.sensitiveSelectors),
           account: accountFromForm(values),
+          ...(!noLogin && values.visitorEnabled ? { visitorEnabled: true } : {}),
         })
         const created = await createTarget(parsed)
         preAdoptValuesRef.current = null
@@ -360,7 +368,14 @@ function TargetFormFields({
           onSubmit={form.handleSubmit(onSubmit)}
         >
           <div className='flex-1 overflow-y-auto px-6 pt-5 pb-8'>
-            <div className='grid grid-cols-1 md:grid-cols-[1.15fr_1fr] gap-6 items-start'>
+            {/* 新建「无需登录」目标时右栏（首个账号、登录框定位）整栏不适用，改为单栏。 */}
+            <div
+              className={
+                !isEdit && noLogin
+                  ? 'grid grid-cols-1 gap-6 items-start max-w-2xl'
+                  : 'grid grid-cols-1 md:grid-cols-[1.15fr_1fr] gap-6 items-start'
+              }
+            >
               {/* 左列：系统身份与核心准入 */}
               <div className='space-y-4'>
                 <div className='flex items-center justify-between pb-1.5 border-b border-border-divider'>
@@ -381,6 +396,7 @@ function TargetFormFields({
               </div>
 
               {/* 右列：运行时装配（编辑态承接运行策略，保持左右平衡） */}
+              {!isEdit && noLogin ? null : (
               <div className='space-y-4'>
                 <div className='flex items-center justify-between pb-1.5 border-b border-border-divider'>
                   <h4 className='text-body font-semibold text-text-primary'>
@@ -392,12 +408,14 @@ function TargetFormFields({
                 </div>
 
                 {!isEdit ? (
-                  <TargetFormAccountSection
-                    form={form}
-                    open={accountOpen}
-                    onOpenChange={handleAccountToggle}
-                    allowCredential={canWriteInitialCredential}
-                  />
+                  noLogin ? null : (
+                    <TargetFormAccountSection
+                      form={form}
+                      open={accountOpen}
+                      onOpenChange={handleAccountToggle}
+                      allowCredential={canWriteInitialCredential}
+                    />
+                  )
                 ) : (
                   <TargetFormBasicFields
                     form={form}
@@ -406,12 +424,15 @@ function TargetFormFields({
                   />
                 )}
 
-                <TargetFormLocatorSection
-                  form={form}
-                  open={locatorOpen}
-                  onOpenChange={handleLocatorToggle}
-                />
+                {noLogin ? null : (
+                  <TargetFormLocatorSection
+                    form={form}
+                    open={locatorOpen}
+                    onOpenChange={handleLocatorToggle}
+                  />
+                )}
               </div>
+              )}
             </div>
           </div>
 

@@ -7,7 +7,8 @@ import {
   TARGET_CONFIG_MAX_TIMEOUT_SECONDS,
   targetConfigFieldHelp,
 } from '@cairn/shared'
-import { ChevronDown, HelpCircle, ShieldAlert } from 'lucide-react'
+import { ChevronDown, Globe, HelpCircle, ShieldAlert } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
 import {
   FormControl,
   FormField,
@@ -78,6 +79,8 @@ export function TargetFormBasicFields({
 
   const showIdentity = section === 'all' || section === 'identity'
   const showRuntime = section === 'all' || section === 'runtime'
+  // 无需登录：登录页、登录等待、登录后整理与验证码都不参与执行，表单里不再展示。
+  const noLogin = form.watch('authMethod') === 'none'
 
   return (
     <div className='space-y-3.5'>
@@ -139,27 +142,31 @@ export function TargetFormBasicFields({
             )}
           />
 
-          <FormField
-            control={form.control}
-            name='loginUrl'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>
-                  登录 URL <span className='text-label font-normal text-muted-foreground'>（可选）</span>
-                </FormLabel>
-                <FormControl>
-                  <Input {...field} placeholder='留空则与入口相同' />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          {noLogin ? null : (
+            <FormField
+              control={form.control}
+              name='loginUrl'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    登录 URL <span className='text-label font-normal text-muted-foreground'>（可选）</span>
+                  </FormLabel>
+                  <FormControl>
+                    <Input {...field} placeholder='留空则与入口相同' />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
         </>
       )}
 
       {showRuntime && (
         <>
 
+      {noLogin ? null : (
+      <>
       <FormField
         control={form.control}
         name='loginLeaveTimeoutSeconds'
@@ -221,6 +228,8 @@ export function TargetFormBasicFields({
           )}
         />
       </div>
+      </>
+      )}
 
       <div className='grid gap-3 sm:grid-cols-2'>
         <FormField
@@ -253,6 +262,7 @@ export function TargetFormBasicFields({
             </FormItem>
           )}
         />
+        {noLogin ? null : (
         <FormField
           control={form.control}
           name='captchaMode'
@@ -277,7 +287,33 @@ export function TargetFormBasicFields({
             </FormItem>
           )}
         />
+        )}
       </div>
+
+      {noLogin ? (
+        <div className='flex items-start gap-2 rounded-md border border-border bg-surface-subtle px-3 py-2 text-label text-muted-foreground'>
+          <Globe className='mt-0.5 size-3.5 shrink-0' aria-hidden='true' />
+          <span>本目标的所有场景都以访客运行：不登录、不需要账号，平台会自动维护一个访客身份。</span>
+        </div>
+      ) : (
+        <FormField
+          control={form.control}
+          name='visitorEnabled'
+          render={({ field }) => (
+            <FormItem className='flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2'>
+              <div className='min-w-0'>
+                <FormLabel className='leading-5'>允许访客运行</FormLabel>
+                <p className='mt-0.5 text-label text-muted-foreground'>
+                  开启后，场景可以选择不登录、以访客身份运行，适合公开页面。
+                </p>
+              </div>
+              <FormControl>
+                <Switch aria-label='允许访客运行' checked={field.value} onCheckedChange={field.onChange} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+      )}
 
       <FormField
         control={form.control}

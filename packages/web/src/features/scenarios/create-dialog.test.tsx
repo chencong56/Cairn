@@ -16,6 +16,7 @@ vi.mock('@/lib/scenarios-api', () => ({ createScenario: mocks.createScenario }))
 vi.mock('@/lib/targets-api', () => ({
   fetchTargets: mocks.fetchTargets,
   fetchTarget: mocks.fetchTarget,
+  fetchTargetAccounts: vi.fn().mockResolvedValue({ items: [] }),
 }))
 
 const targets: TargetListResponse = {

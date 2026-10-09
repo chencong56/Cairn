@@ -110,7 +110,7 @@ export function AccountFormDialog({
     values: current
       ? {
           displayName: current.displayName,
-          username: current.username,
+          username: current.username ?? '',
           password: '',
           totpSecret: '',
           status: current.status,

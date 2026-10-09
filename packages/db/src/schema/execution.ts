@@ -58,6 +58,8 @@ export const scenarios = cairnSchema.table(
     createdByConsoleAccountId: uuid('created_by_console_account_id')
       .notNull()
       .references(() => consoleAccounts.id, { onDelete: 'restrict' }),
+    /** 场景运行账号；NULL 表示跟随目标默认。场景级、不随版本，归属在应用层校验。 */
+    runAccountId: uuid('run_account_id'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: jsonb('deleted_by').$type<ResourceDeletedBy>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

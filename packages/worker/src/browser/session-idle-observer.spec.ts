@@ -3,6 +3,7 @@ import {
   appendSessionEvent,
   findActiveLeaseForSession,
   getSessionById,
+  loadAccountForExecution,
   requestMaintenanceOperation,
 } from '@cairn/db'
 import { handleSessionAuthSignal } from './session-idle-observer'
@@ -16,6 +17,7 @@ vi.mock('@cairn/db', async (load) => ({
   requestMaintenanceOperation: vi.fn(async () => ({ operation: null, created: false })),
   loadCurrentAuthProfile: vi.fn(async () => null),
   loadTargetForExecution: vi.fn(async () => ({ loginUrl: 'https://example.com/login', entryUrl: 'https://example.com' })),
+  loadAccountForExecution: vi.fn(async () => ({ identityKind: 'credential' })),
 }))
 
 const manager = {
@@ -55,6 +57,29 @@ it('无 EXECUTION 租约时落账并排后台 VERIFY', async () => {
       body: expect.objectContaining({ kind: 'VERIFY_AUTH' }),
     }),
   )
+})
+
+it('访客会话到登录页只落账，不排后台核验', async () => {
+  vi.mocked(getSessionById).mockResolvedValue({
+    id: 's',
+    status: 'OPEN',
+    targetId: 't',
+    targetAccountId: 'v',
+    generation: 1,
+    authProbeIntervalSeconds: 900,
+  } as any)
+  vi.mocked(findActiveLeaseForSession).mockResolvedValue(null)
+  vi.mocked(loadAccountForExecution).mockResolvedValueOnce({ identityKind: 'visitor' } as any)
+  await handleSessionAuthSignal(manager, 's', {
+    kind: 'navigated_to_login',
+    at: new Date().toISOString(),
+    summary: '导航到登录页',
+  })
+  expect(appendSessionEvent).toHaveBeenCalledWith(
+    {},
+    expect.objectContaining({ type: 'auth.signal_observed', sessionId: 's' }),
+  )
+  expect(requestMaintenanceOperation).not.toHaveBeenCalled()
 })
 
 it('有 EXECUTION 租约时交给 D 门禁，不排后台 VERIFY', async () => {

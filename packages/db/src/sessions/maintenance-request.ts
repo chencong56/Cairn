@@ -32,6 +32,9 @@ import {
   manualControlLive,
 } from './manual-control.js'
 
+/** 访客会话没有登录态：核验、登录与续期一律拒绝。 */
+const VISITOR_REJECTED_KINDS = new Set<string>(['VERIFY_AUTH', 'LOGIN', 'RENEW_AUTH', 'REFRESH_LOGIN_PAGE'])
+
 export async function requestMaintenanceOperation(
   db: Db,
   input: {
@@ -52,13 +55,16 @@ export async function requestMaintenanceOperation(
     if (input.actor && input.origin !== 'BACKGROUND') await shareConsoleAuthorization(tx, input.actor.id)
     const origin = input.origin ?? 'USER'
     const { targetAccounts, sessionOperations } = schemaFor(tx)
-    await locked(
+    const [lockedAccount] = await locked(
       tx,
       tx
-        .select({ id: targetAccounts.id })
+        .select({ id: targetAccounts.id, identityKind: targetAccounts.identityKind })
         .from(targetAccounts)
         .where(eq(targetAccounts.id, input.key.targetAccountId)),
     )
+    if (lockedAccount?.identityKind === 'visitor' && VISITOR_REJECTED_KINDS.has(input.body.kind)) {
+      throw conflict('SESSION_VISITOR_NO_AUTH', '访客会话无需登录，不支持核验、登录或续期')
+    }
     await assertMaintenanceAuthorized(tx, {
       ...input.key,
       kind: input.body.kind,

@@ -31,6 +31,15 @@ const echoStep: Step = {
   input: { value: 'hello' },
 }
 
+// 运行账号只对要开浏览器的场景按默认顺序取；不开浏览器的场景只认本次指定。
+const openStep: Step = {
+  id: '00000000-0000-4000-8000-000000000082',
+  name: '打开首页',
+  type: 'navigate',
+  effectType: 'READ_ONLY',
+  input: { url: 'https://example.com/' },
+}
+
 describe('执行内核控制面（集成）', { timeout: 30_000 }, () => {
   let handle: DbHandle
   let targets: TargetsService
@@ -168,7 +177,7 @@ describe('执行内核控制面（集成）', { timeout: 30_000 }, () => {
       { displayName: '运维', username: 'ops', password: 'hunter2-secret', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
-    const scenario = await scenarios.create({ targetId: target.id, name: '自动绑', steps: [echoStep] }, actor)
+    const scenario = await scenarios.create({ targetId: target.id, name: '自动绑', steps: [openStep] }, actor)
     const created = await runs.create({ scenarioId: scenario.id }, actor)
     expect(created.detail.snapshot.targetAccountId).toBe(account.id)
     expect(created.detail.snapshot.secretRef).toEqual({
@@ -177,9 +186,9 @@ describe('执行内核控制面（集成）', { timeout: 30_000 }, () => {
     })
   })
 
-  it('多个已保存口令账号时必须显式指定', async () => {
+  it('多个账号时按目标默认取；没有默认账号就必须显式指定', async () => {
     const target = await createTarget(slug('multi-acct'))
-    await targets.createAccount(
+    const first = await targets.createAccount(
       target.id,
       { displayName: '一号', username: 'one', password: 'hunter2-one', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
@@ -189,7 +198,11 @@ describe('执行内核控制面（集成）', { timeout: 30_000 }, () => {
       { displayName: '二号', username: 'two', password: 'hunter2-two', status: 'active', validity: { mode: 'days', amount: 90, timeZone: 'UTC' } },
       actor,
     )
-    const scenario = await scenarios.create({ targetId: target.id, name: '多账号', steps: [echoStep] }, actor)
+    const scenario = await scenarios.create({ targetId: target.id, name: '多账号', steps: [openStep] }, actor)
+    // 可用身份从 1 个变成 2 个时，原来那个自动成为默认，之前能跑的不会突然要求指定。
+    const byDefault = await runs.create({ scenarioId: scenario.id }, actor)
+    expect(byDefault.detail.snapshot).toMatchObject({ targetAccountId: first.id, accountSource: 'target_default' })
+    await targets.updateTarget(target.id, { defaultAccountId: null }, actor)
     try {
       await runs.create({ scenarioId: scenario.id }, actor)
       expect.unreachable()

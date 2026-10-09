@@ -77,6 +77,7 @@ import {
 import { recordAudit, type AuditActor } from '../audit/record.js'
 import { freezeMapDraftBindingsTx, reconcileMapDraftBindingsTx } from '../map/references.js'
 import type { Db } from '../client.js'
+import { assertRunAccountChoice } from '../console/target-identity.js'
 import { newId } from '../id.js'
 import { sha256Hex } from './digest.js'
 import { expireRepairCandidatesOnPublishTx } from '../repair/index.js'
@@ -460,6 +461,7 @@ function toScenarioDto(
     latestVersionNo: latest ? publishedVersionNo(latest) : null,
     stepCount: latest?.definition.steps.length ?? extras?.draftStepCount ?? 0,
     draftDirty,
+    runAccountId: row.runAccountId ?? null,
     createdByName: extras?.createdByName ?? null,
     latestRun: extras?.latestRun ?? null,
     schedule: extras?.schedule ?? null,
@@ -806,6 +808,8 @@ export async function createScenarioWithVersion(
     inputs?: ScenarioInputDecl[]
     outputs?: ScenarioOutputDecl
     status?: ScenarioStatus
+    /** 运行账号；省略或 null 表示跟随目标默认。 */
+    runAccountId?: string | null
     actor: AuditActor
     compileMode?: 'save' | 'release'
     executableTypes?: readonly string[]
@@ -838,11 +842,13 @@ export async function createScenarioWithVersion(
   const digest = sourceDocumentDigest(compiled.definition)
   try {
     await db.transaction(async (tx) => {
+      if (input.runAccountId) await assertRunAccountChoice(tx as unknown as Db, input.targetId, input.runAccountId)
       await tx.insert(scenarios).values({
         id,
         targetId: input.targetId,
         name: input.name,
         status: input.status ?? 'active',
+        runAccountId: input.runAccountId ?? null,
         createdByConsoleAccountId: input.actor.id,
         createdAt: now,
         updatedAt: now,
@@ -957,6 +963,8 @@ async function copyScenarioTx(
     name,
     status: 'active',
     purpose: 'user',
+    // 运行账号是场景级配置，随复制带过去。
+    runAccountId: source.runAccountId ?? null,
     createdByConsoleAccountId: actor.id,
     createdAt: now,
     updatedAt: now,
@@ -1093,7 +1101,7 @@ async function copyScenarioTx(
 export async function updateScenarioMeta(
   db: Db,
   scenarioId: string,
-  input: { name?: string; status?: ScenarioStatus; actor: AuditActor },
+  input: { name?: string; status?: ScenarioStatus; runAccountId?: string | null; actor: AuditActor },
 ): Promise<ScenarioDetailDto> {
   const { scenarios } = schemaFor(db)
   const [current] = await db
@@ -1105,14 +1113,26 @@ export async function updateScenarioMeta(
   const now = new Date()
   try {
     await db.transaction(async (tx) => {
+      if (input.runAccountId) await assertRunAccountChoice(tx as unknown as Db, current.targetId, input.runAccountId)
       await tx
         .update(scenarios)
         .set({
           name: input.name ?? current.name,
           status: input.status ?? current.status,
+          runAccountId: input.runAccountId === undefined ? current.runAccountId : input.runAccountId,
           updatedAt: now,
         })
         .where(eq(scenarios.id, scenarioId))
+      if (input.runAccountId !== undefined && input.runAccountId !== (current.runAccountId ?? null)) {
+        await recordAudit(
+          tx as unknown as Db,
+          input.actor,
+          'scenario.update',
+          'scenario',
+          scenarioId,
+          input.runAccountId ? '修改了运行账号' : '运行账号改为跟随目标默认',
+        )
+      }
       if (input.name !== undefined && input.name !== current.name) {
         await recordAudit(
           tx as unknown as Db,

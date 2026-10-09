@@ -1,4 +1,5 @@
 import type { SuiteMember } from '@cairn/shared'
+import { accountOptionLabel } from '@/features/runs/target-account'
 import {
   ArrowDown,
   ArrowUp,
@@ -41,7 +42,7 @@ export function MemberNode({
   member: SuiteMember
   canWrite: boolean
   scenarioName: string
-  targetAccounts: Array<{ id: string; displayName: string; username: string }>
+  targetAccounts: Array<{ id: string; displayName: string; username: string | null; identityKind?: string | null }>
   targetId: string
   canMoveUp: boolean
   canMoveDown: boolean
@@ -165,14 +166,14 @@ export function MemberNode({
               >
                 <div className='flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden'>
                   <User className='size-3 shrink-0 text-muted-foreground' />
-                  <SelectValue placeholder='跟随集合默认账号' />
+                  <SelectValue placeholder='跟随场景 / 集合默认' />
                 </div>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='__default__'>跟随集合默认账号</SelectItem>
+                <SelectItem value='__default__'>跟随场景 / 集合默认</SelectItem>
                 {targetAccounts.map((account) => (
                   <SelectItem key={account.id} value={account.id}>
-                    {account.displayName} ({account.username})
+                    {accountOptionLabel(account)}
                   </SelectItem>
                 ))}
               </SelectContent>

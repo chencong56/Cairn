@@ -104,7 +104,8 @@ type OverviewAccountRow = {
   targetStatus: 'active' | 'disabled'
   targetAccountId: string
   accountDisplayName: string
-  accountUsername: string
+  accountUsername: string | null
+  accountIdentityKind: 'credential' | 'visitor'
   accountStatus: 'active' | 'disabled'
   maxConcurrentSessions: number
   targetSessionPolicy: Record<string, unknown> | null
@@ -450,6 +451,7 @@ async function loadOverviewAccounts(
       targetAccountId: targetAccounts.id,
       accountDisplayName: targetAccounts.displayName,
       accountUsername: targetAccounts.username,
+      accountIdentityKind: targetAccounts.identityKind,
       accountStatus: targetAccounts.status,
       maxConcurrentSessions: targetAccounts.maxConcurrentSessions,
       targetSessionPolicy: targets.sessionPolicy,
@@ -576,12 +578,13 @@ async function loadPlatformSessionMode(db: Db): Promise<AccountSessionMode> {
 }
 
 function capFromAccount(
-  account: Pick<OverviewAccountRow, 'maxConcurrentSessions' | 'targetSessionPolicy'>,
+  account: Pick<OverviewAccountRow, 'maxConcurrentSessions' | 'targetSessionPolicy'> & { accountIdentityKind?: string },
   platformSessionMode?: AccountSessionMode,
 ) {
   const override = parseTargetSessionPolicyOverride(account.targetSessionPolicy)
   return effectiveAccountSessionCap({
-    accountSessionMode: override?.accountSessionMode ?? platformSessionMode,
+    accountSessionMode:
+      account.accountIdentityKind === 'visitor' ? 'concurrent' : (override?.accountSessionMode ?? platformSessionMode),
     maxConcurrentSessions: account.maxConcurrentSessions,
   })
 }
@@ -617,6 +620,7 @@ function toAccountOverviewItem(
     targetAccountId: account.targetAccountId,
     accountDisplayName: account.accountDisplayName,
     accountUsername: account.accountUsername,
+    accountIdentityKind: account.accountIdentityKind,
     accountStatus: account.accountStatus,
     status,
     retained: isRetained(facts, now),
@@ -891,7 +895,7 @@ function accountNameMatches(
   const needle = search.trim().toLowerCase()
   return (
     account.accountDisplayName.toLowerCase().includes(needle) ||
-    account.accountUsername.toLowerCase().includes(needle)
+    (account.accountUsername ?? '').toLowerCase().includes(needle)
   )
 }
 
@@ -979,6 +983,23 @@ function actionsFor(
   detectionReady: boolean,
   liveCount = 0,
   effectiveCap = 1,
+  visitor = false,
+) {
+  const actions = baseActionsFor(status, retained, detectionReady, liveCount, effectiveCap)
+  if (!visitor) return actions
+  // 访客会话没有登录态：核验、登录、续期与登录后整理一律不可用。
+  const notApplicable = new Set(['VERIFY_AUTH', 'LOGIN', 'RENEW_AUTH', 'SETTLE_LANDING'])
+  return actions.map((action) =>
+    notApplicable.has(action.kind) ? { ...action, enabled: false, disabledReason: '访客无需登录' } : action,
+  )
+}
+
+function baseActionsFor(
+  status: AccountSessionStatus,
+  retained: boolean,
+  detectionReady: boolean,
+  liveCount = 0,
+  effectiveCap = 1,
 ) {
   const idle =
     status === 'ready' ||
@@ -1048,6 +1069,7 @@ export async function getAccountSessionDetail(db: Db, key: SessionKey): Promise<
       targetAccountId: targetAccounts.id,
       accountDisplayName: targetAccounts.displayName,
       accountUsername: targetAccounts.username,
+      accountIdentityKind: targetAccounts.identityKind,
       accountStatus: targetAccounts.status,
       hasPassword: targetAccounts.secretId,
       expectedIdentity: targetAccounts.expectedIdentity,
@@ -1161,6 +1183,7 @@ export async function getAccountSessionDetail(db: Db, key: SessionKey): Promise<
     targetAccountId: account.targetAccountId,
     accountDisplayName: account.accountDisplayName,
     accountUsername: account.accountUsername,
+    accountIdentityKind: account.accountIdentityKind,
     accountStatus: account.accountStatus,
     hasPassword: Boolean(account.hasPassword),
     expectedIdentity: account.expectedIdentity,
@@ -1301,6 +1324,7 @@ export async function getAccountSessionDetail(db: Db, key: SessionKey): Promise<
       }),
       facts.instances.length,
       cap.effectiveCap,
+      account.accountIdentityKind === 'visitor',
     ),
     asOf: now.toISOString(),
   }

@@ -108,7 +108,7 @@ export function constructRuleBasedProposal(
   }
 
   // Auth method
-  if (/无密码|免密/i.test(cleaned)) {
+  if (/无需登录|不需要登录|不用登录|免登录|无登录|公开站点|公开网站|无密码|免密/i.test(cleaned)) {
     changes.push({ fieldId: 'authMethod', value: 'none' })
   } else if (/用户名密码|账号密码|密码登录/i.test(cleaned)) {
     changes.push({ fieldId: 'authMethod', value: 'password' })

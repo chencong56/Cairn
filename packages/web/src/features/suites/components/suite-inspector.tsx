@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { accountOptionLabel } from '@/features/runs/target-account'
 import type { SuiteDocument, SuiteMember, SuiteStage } from '@cairn/shared'
 import {
   ArrowLeft,
@@ -33,7 +34,7 @@ export interface SuiteInspectorProps {
   document: SuiteDocument
   isStageMode?: boolean
   canWrite: boolean
-  targetAccounts: Array<{ id: string; displayName: string; username: string }>
+  targetAccounts: Array<{ id: string; displayName: string; username: string | null; identityKind?: string | null }>
   targetId: string
   selectedMember?: SuiteMember | null
   selectedStage?: SuiteStage | null
@@ -163,13 +164,13 @@ export function SuiteInspector({
                 aria-label={`${selectedMember.memberId} 目标账号`}
                 className='h-8 text-label'
               >
-                <SelectValue placeholder='跟随集合默认账号' />
+                <SelectValue placeholder='跟随场景 / 集合默认' />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='__default__'>跟随集合默认账号</SelectItem>
+                <SelectItem value='__default__'>跟随场景 / 集合默认</SelectItem>
                 {targetAccounts.map((account) => (
                   <SelectItem key={account.id} value={account.id}>
-                    {account.displayName} ({account.username})
+                    {accountOptionLabel(account)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -554,13 +555,13 @@ export function SuiteInspector({
               }
             >
               <SelectTrigger id='suite-default-target-account' aria-label='默认目标账号' className='h-8 text-label'>
-                <SelectValue placeholder='系统默认账号' />
+                <SelectValue placeholder='目标默认账号' />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='__none__'>系统默认账号</SelectItem>
+                <SelectItem value='__none__'>目标默认账号</SelectItem>
                 {targetAccounts.map((account) => (
                   <SelectItem key={account.id} value={account.id}>
-                    {account.displayName} ({account.username})
+                    {accountOptionLabel(account)}
                   </SelectItem>
                 ))}
               </SelectContent>

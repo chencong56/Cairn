@@ -12,6 +12,7 @@ import {
   decideAuthRecovery,
   deriveRecoveryRule,
   isContextRecoverable,
+  isVisitorRun,
   PROCESS_LOG_EVENTS,
   redactAuthUrl,
   resolveRunAuthRecovery,
@@ -63,6 +64,20 @@ export async function handleAuthGate(
   | { kind: 'retry'; attemptId: string; attemptNo: number }
 > {
   const error = input.outcome.error
+  if (isVisitorRun(input.snapshot)) {
+    // 访客运行停在登录页：不进认证恢复、不等人，当前步骤即失败，提示改用登录账号。
+    await this.close({
+      runId: input.runId, attemptId: input.attemptId, attemptStatus: 'FAILED',
+      error: {
+        code: 'VISITOR_LOGIN_REQUIRED', category: 'VALIDATION', retryable: false,
+        safeMessage: '页面要求登录，但本次以访客运行。如果这个流程需要登录，请把场景的运行账号改为登录账号。',
+      },
+      diagnostics: input.outcome.diagnostics, screenshot: input.outcome.screenshot, trace: input.outcome.trace,
+      stepRunStatus: 'FAILED', runStatus: 'FAILED', skipRemaining: true,
+      grant: input.grant, sessionLease: sessionLeaseFor(input), secrets: input.secrets, mapFacts: input.mapFacts,
+    })
+    return { kind: 'leave', exit: 'failed' }
+  }
   const detail = await loadRunDetail(this.handle, input.runId)
   if (!detail) return { kind: 'leave', exit: 'stopped' }
   const existing = detail.authCheckpoint

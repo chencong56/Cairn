@@ -27,6 +27,7 @@ import {
   classifyInterruptedAttempt,
   isContextRecoverable,
   pageLooksLikeLogin,
+  isVisitorRun,
   shouldCloseAuthGate,
   computeContextVersion,
   type AuthObservation,
@@ -515,6 +516,20 @@ export async function observeInRunAuthHeld(this: SessionManagerContext,
         runId,
         signals.map((signal) => ({ type: 'run.auth_signal' as const, payload: signal })),
       ).catch(() => undefined)
+    }
+    if (isVisitorRun(snapshot)) {
+      // 访客运行不核验、不恢复：确实停在登录页才关门，由认证门禁判当前步骤 VISITOR_LOGIN_REQUIRED。
+      if (!onLogin) {
+        this.runAuth.set(grant.leaseId, { ...state, pendingSignal: false })
+        return null
+      }
+      this.authGateClosed.add(grant.leaseId)
+      const error = authGateClosedError(
+        classification === 'dispatched'
+          ? classifyInterruptedAttempt({ effectType: 'IDEMPOTENT', dispatched: true })
+          : 'not_dispatched',
+      )
+      return { ...error, cause: { ...error.cause, message: 'EXPIRED' } }
     }
     if (!shouldCloseAuthGate({ capability, signals })) return null
     this.authGateClosed.add(grant.leaseId)

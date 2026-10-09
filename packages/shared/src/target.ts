@@ -24,6 +24,7 @@ import {
 import { targetResolutionPolicySchema } from './resolution-policy.js'
 import { aiActionTraceTargetModeSchema } from './ai-path-learning.js'
 import { entityIdSchema, timeoutMsSchema, utcInstantSchema } from './wire.js'
+import { identityKindSchema } from './run-account.js'
 import { sensitiveSelectorsSchema } from './evidence-slots.js'
 
 export {
@@ -58,9 +59,13 @@ export type TargetAccentKey = (typeof TARGET_ACCENT_KEYS)[number]
 export const DEFAULT_TARGET_ACCENT_KEY: TargetAccentKey = 'blue'
 export const targetAccentKeySchema = z.enum(TARGET_ACCENT_KEYS)
 
-export const AUTH_METHODS = ['password', 'manual'] as const
+export const AUTH_METHODS = ['password', 'manual', 'none'] as const
 export type AuthMethod = (typeof AUTH_METHODS)[number]
-export const AUTH_METHOD_LABELS: Record<AuthMethod, string> = { password: '账号密码', manual: '仅手工登录' }
+export const AUTH_METHOD_LABELS: Record<AuthMethod, string> = {
+  password: '账号密码',
+  manual: '仅手工登录',
+  none: '无需登录',
+}
 
 export const CAPTCHA_MODES = ['none', 'image', 'slider', 'sms', 'other'] as const
 export type CaptchaMode = (typeof CAPTCHA_MODES)[number]
@@ -89,6 +94,11 @@ export const TARGET_ERROR_CODES = [
   'AUTH_SCOPE_INVALID',
   'TARGET_ACCOUNT_MAP_USAGE_CONFLICT',
   'MAP_ACCOUNT_USAGE_REQUIRED',
+  'TARGET_AUTH_METHOD_HAS_ACCOUNTS',
+  'TARGET_ACCOUNT_VISITOR_READONLY',
+  'TARGET_VISITOR_IN_USE',
+  'TARGET_DEFAULT_ACCOUNT_INVALID',
+  'TARGET_DEFAULT_ACCOUNT_IN_USE',
 ] as const
 export type TargetErrorCode = (typeof TARGET_ERROR_CODES)[number]
 
@@ -164,6 +174,12 @@ export const targetSchema = z.object({
   sessionPolicy: targetSessionPolicyOverrideSchema.nullable().optional(),
   effectiveSessionPolicy: sessionPolicySchema.optional(),
   resolutionPolicy: targetResolutionPolicySchema.nullable().optional(),
+  /** 目标默认账号（可为访客）；只在可用身份有两个及以上时才有意义。 */
+  defaultAccountId: z.string().min(1).nullable().optional(),
+  /** 启用中的访客账号；为空表示未开启访客。 */
+  visitorAccountId: z.string().min(1).nullable().optional(),
+  /** 可用身份数：启用、可用于业务的登录账号加上启用的访客。 */
+  usableIdentityCount: z.number().int().nonnegative().optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 })
@@ -189,7 +205,12 @@ export const targetAccountSchema = z.object({
   id: z.string().min(1),
   targetId: z.string().min(1),
   displayName: z.string().min(1),
-  username: z.string().min(1),
+  /** 访客没有登录名。 */
+  username: z.string().min(1).nullable(),
+  /** 缺省按登录账号解释。 */
+  identityKind: identityKindSchema.optional(),
+  /** 是否为目标默认账号。 */
+  isDefault: z.boolean().optional(),
   hasPassword: z.boolean(),
   hasTotp: z.boolean().default(false),
   hasStorageState: z.boolean().default(false),
@@ -283,6 +304,13 @@ export const createTargetBodySchema = z
     captcha: targetCaptchaDefinitionSchema.nullable().optional(),
     sensitiveSelectors: sensitiveSelectorsSchema.optional(),
     account: createTargetAccountBodySchema.optional(),
+    /** 有登录方式的目标是否额外开启访客；「无需登录」目标总是只有访客。 */
+    visitorEnabled: z.boolean().optional(),
+  })
+  .superRefine((body, ctx) => {
+    if (body.authMethod === 'none' && body.account) {
+      ctx.addIssue({ code: 'custom', path: ['account'], message: '无需登录的目标不能登记登录账号' })
+    }
   })
   .transform((body) => ({
     ...body,
@@ -310,6 +338,8 @@ export const updateTargetBodySchema = z
     landingSettleTimeoutMs: timeoutMsSchema.nullable().optional(),
     captcha: targetCaptchaDefinitionSchema.nullable().optional(),
     sensitiveSelectors: sensitiveSelectorsSchema.optional(),
+    visitorEnabled: z.boolean().optional(),
+    defaultAccountId: entityIdSchema.nullable().optional(),
   })
   .refine(
     (body) =>
@@ -326,7 +356,9 @@ export const updateTargetBodySchema = z
       body.landingSettleMode !== undefined ||
       body.landingSettleTimeoutMs !== undefined ||
       body.captcha !== undefined ||
-      body.sensitiveSelectors !== undefined,
+      body.sensitiveSelectors !== undefined ||
+      body.visitorEnabled !== undefined ||
+      body.defaultAccountId !== undefined,
     { message: '至少提供一个要修改的字段' },
   )
 export type UpdateTargetBody = z.infer<typeof updateTargetBodySchema>

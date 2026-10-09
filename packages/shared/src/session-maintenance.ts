@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { identityKindSchema } from './run-account.js'
 import { pageRefSchema } from './managed-browser.js'
 import type { IdentityState } from './session-auth.js'
 import { browserIsolationSchema, type SessionAuthState, type SessionStatus } from './session.js'
@@ -390,7 +391,9 @@ export const accountSessionOverviewItemSchema = z.strictObject({
   targetName: z.string().min(1),
   targetAccountId: entityIdSchema,
   accountDisplayName: z.string().min(1),
-  accountUsername: z.string().min(1),
+  /** 访客没有登录名。 */
+  accountUsername: z.string().min(1).nullable(),
+  accountIdentityKind: identityKindSchema.optional(),
   accountStatus: z.enum(['active', 'disabled']),
   status: accountSessionStatusSchema,
   retained: z.boolean(),
@@ -563,7 +566,9 @@ export const accountSessionDetailSchema = z.strictObject({
   targetName: z.string().min(1),
   targetAccountId: entityIdSchema,
   accountDisplayName: z.string().min(1),
-  accountUsername: z.string().min(1),
+  /** 访客没有登录名。 */
+  accountUsername: z.string().min(1).nullable(),
+  accountIdentityKind: identityKindSchema.optional(),
   accountStatus: z.enum(['active', 'disabled']),
   hasPassword: z.boolean(),
   expectedIdentity: z.string().nullable(),

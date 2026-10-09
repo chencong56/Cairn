@@ -582,6 +582,8 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
 
     const created = await createRunWithSnapshot(handle.db, {
       scenarioId: scenario.id,
+      // 夹具目标上 openLease 会陆续登记多个账号；这里要的是不绑账号的 Run（假浏览器端口不需要账号）。
+      resolvedTargetAccountId: null,
       actor: { id: actorId },
     })
 
@@ -660,6 +662,8 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
 
     const created = await createRunWithSnapshot(handle.db, {
       scenarioId: scenario.id,
+      // 夹具目标上 openLease 会陆续登记多个账号；这里要的是不绑账号的 Run（假浏览器端口不需要账号）。
+      resolvedTargetAccountId: null,
       actor: { id: actorId },
     })
 
@@ -716,6 +720,8 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
 
     const created = await createRunWithSnapshot(handle.db, {
       scenarioId: scenario.id,
+      // 夹具目标上 openLease 会陆续登记多个账号；这里要的是不绑账号的 Run（假浏览器端口不需要账号）。
+      resolvedTargetAccountId: null,
       actor: { id: actorId },
     })
 
@@ -773,6 +779,8 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
     })
     const created = await createRunWithSnapshot(handle.db, {
       scenarioId: scenario.id,
+      // 夹具目标上 openLease 会陆续登记多个账号；这里要的是不绑账号的 Run（假浏览器端口不需要账号）。
+      resolvedTargetAccountId: null,
       actor: { id: actorId },
     })
     expect(created.detail.snapshot.runtimeInvariantManifest?.entries).toHaveLength(1)
@@ -805,6 +813,7 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
       })
       const created = await createRunWithSnapshot(handle.db, {
         scenarioId: scenario.id,
+        resolvedTargetAccountId: null,
         actor: { id: actorId },
       })
       const grant = await claimThis(created.detail.id)
@@ -833,6 +842,8 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
     })
     const created = await createRunWithSnapshot(handle.db, {
       scenarioId: scenario.id,
+      // 夹具目标上 openLease 会陆续登记多个账号；这里要的是不绑账号的 Run（假浏览器端口不需要账号）。
+      resolvedTargetAccountId: null,
       actor: { id: actorId },
     })
     expect(created.detail.snapshot.runtimeInvariantManifest?.entries).toHaveLength(1)
@@ -887,6 +898,7 @@ describe('ExecutionEngine 结果轴与巡检集成', { timeout: 30_000 }, () => 
     const created = await createRunWithSnapshot(handle.db, {
       scenarioId: scenario.id,
       targetAccountId: input.targetAccountId,
+      ...(input.targetAccountId ? {} : { resolvedTargetAccountId: null }),
       actor: { id: actorId },
     })
     expect(created.detail.snapshot.runtimeInvariantManifest?.entries.length ?? 0).toBe(

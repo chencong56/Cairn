@@ -6,14 +6,9 @@ import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
 import { fetchScenarioCapabilities, trialScenario } from '@/lib/scenarios-api'
 import { CAPTURE_MODE_LABELS } from '@/features/platform-config/labels'
-import { fetchTargetAccounts } from '@/lib/targets-api'
 import { AccountSessionHint } from '@/features/runs/account-session-hint'
-import {
-  passwordAccounts,
-  preferredPasswordAccountId,
-  unusableAccountCopy,
-  unusableAccountReason,
-} from '@/features/runs/target-account'
+import { unusableAccountCopy, unusableAccountReason } from '@/features/runs/target-account'
+import { RunAccountField, effectiveRunAccount, useRunAccountChoice } from '@/features/runs/run-account-field'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,13 +21,6 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 
 type TrialDialogProps = {
   open: boolean
@@ -42,6 +30,8 @@ type TrialDialogProps = {
   revision: number
   inputs: ScenarioInputDecl[]
   needsAccount?: boolean
+  /** 场景运行账号；null 表示跟随目标默认。 */
+  scenarioRunAccountId?: string | null
   pauseBeforeStepId?: string
   /**
    * 验收用途：baseline 为基线运行（逐步停住并采集页面结构；带 pauseBeforeStepId 时直接跑到该步前），
@@ -88,16 +78,14 @@ export function TrialDialog({
   revision,
   inputs,
   needsAccount = false,
+  scenarioRunAccountId = null,
   pauseBeforeStepId,
   purpose = 'trial',
   onCreated,
   onConflict,
 }: TrialDialogProps) {
-  const accounts = useQuery({
-    queryKey: ['target-accounts', targetId],
-    queryFn: () => fetchTargetAccounts(targetId),
-    enabled: open,
-  })
+  const accountChoice = useRunAccountChoice({ targetId, scenarioRunAccountId, enabled: open })
+  const accounts = accountChoice.accountsQuery
   const capabilities = useQuery({
     queryKey: ['scenarios', 'capabilities'],
     queryFn: fetchScenarioCapabilities,
@@ -106,9 +94,11 @@ export function TrialDialog({
     const inheritScreenshot = capabilities.data?.defaults?.evidence.screenshot
     const inheritVideo = capabilities.data?.defaults?.evidence.video
     const inheritTrace = capabilities.data?.defaults?.evidence.trace
+  /** '' 表示按默认顺序取，请求里不带账号。 */
   const [targetAccountId, setTargetAccountId] = useState('')
-  const accountItems = accounts.data?.items ?? []
-  const usableAccounts = passwordAccounts(accountItems)
+  const accountItems = accountChoice.accounts
+  const usableAccounts = accountChoice.usable
+  const effectiveAccount = effectiveRunAccount(accountChoice, targetAccountId)
   const emptyAccountReason = accounts.isPending ? undefined : unusableAccountReason(accountItems)
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -122,8 +112,8 @@ export function TrialDialog({
   }, [fingerprint])
 
   useEffect(() => {
-    setTargetAccountId(preferredPasswordAccountId(accounts.data?.items ?? []))
-  }, [accounts.data, targetId])
+    setTargetAccountId('')
+  }, [targetId])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -146,25 +136,17 @@ export function TrialDialog({
         </DialogHeader>
         <div className='space-y-4'>
           <div className='space-y-2'>
-            <Label>目标账号{needsAccount ? '（必选）' : '（可选）'}</Label>
-            <Select
-              value={targetAccountId || (usableAccounts.length > 0 ? undefined : '__none__')}
-              onValueChange={(value) => setTargetAccountId(value === '__none__' ? '' : value)}
-            >
-              <SelectTrigger className='w-full'>
-                <SelectValue placeholder={usableAccounts.length > 0 ? '选择目标账号' : '不指定目标账号'} />
-              </SelectTrigger>
-              <SelectContent>
-                {usableAccounts.length === 0 ? <SelectItem value='__none__'>不指定</SelectItem> : null}
-                {usableAccounts.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.displayName}（{item.username}
-                      {item.hasPassword ? '' : ' · 未保存口令'}）
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <AccountSessionHint targetId={targetId} account={accounts.data?.items.find(item => item.id === targetAccountId)} />
+            <RunAccountField
+              choice={accountChoice}
+              value={targetAccountId}
+              onChange={setTargetAccountId}
+              needsAccount={needsAccount}
+            />
+            {effectiveAccount?.identityKind === 'visitor' ? (
+              <p className='text-label text-muted-foreground'>访客运行不登录，也不会等待人工认证。</p>
+            ) : (
+              <AccountSessionHint targetId={targetId} account={effectiveAccount} />
+            )}
             {usableAccounts.length === 0 && emptyAccountReason ? (
               <p className='text-label text-muted-foreground'>{unusableAccountCopy(emptyAccountReason)}</p>
             ) : null}
@@ -215,7 +197,7 @@ export function TrialDialog({
           </Button>
           <Button
             loading={saving}
-            disabled={accounts.isPending || (needsAccount && !targetAccountId) || Boolean(targetAccountId && !accounts.data?.items.some(item => item.id === targetAccountId && item.status === 'active'))}
+            disabled={accounts.isPending || (needsAccount && !effectiveAccount) || Boolean(effectiveAccount && effectiveAccount.status !== 'active')}
             onClick={() => {
               const parsed = runInputSchema.safeParse(values)
               if (!parsed.success) {

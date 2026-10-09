@@ -2810,6 +2810,27 @@ export {
   type ImportStorageStateBody,
 } from './target.js'
 export {
+  IDENTITY_KINDS,
+  IDENTITY_KIND_LABELS,
+  identityKindSchema,
+  DEFAULT_VISITOR_DISPLAY_NAME,
+  RUN_AS_VALUES,
+  runAsSchema,
+  runAsForIdentity,
+  isVisitorRun,
+  ACCOUNT_SOURCES,
+  ACCOUNT_SOURCE_LABELS,
+  accountSourceSchema,
+  isUsableIdentity,
+  resolveRunAccount,
+  accountSourceSubject,
+  type IdentityKind,
+  type RunAs,
+  type AccountSource,
+  type RunAccountCandidate,
+  type RunAccountResolution,
+} from './run-account.js'
+export {
   targetOverviewQuerySchema,
   targetOverviewScopedCountSchema,
   targetOverviewVisibleSchema,

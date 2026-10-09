@@ -36,6 +36,7 @@ import {
   deriveRecoveryRule,
   inRunAuthVerifyAllowed,
   isAuthEvidenceFresh,
+  isVisitorRun,
   pageLooksLikeLogin,
   planAuthEnsure,
   shouldSubmitStoredCredentials,
@@ -353,6 +354,7 @@ export async function finishClaimedAcquire(this: SessionManagerContext,
         const stillLive = await assertLiveAuthConfiguration(this.dbHandle, {
           targetId: run.targetId,
           targetAccountId: run.targetAccountId,
+          runAs: run.runAs,
         })
         if (!stillLive.ok) {
           await this.abandonOccupancy(grant.leaseId, 'auth_failed')
@@ -1112,6 +1114,17 @@ export async function ensureAuth(this: SessionManagerContext,
     const targetInfo = await this.loadTargetAuth(run)
     if (!targetInfo) {
       return { ok: false, code: 'SESSION_TARGET_MISSING', message: '目标系统不存在' }
+    }
+
+    if (isVisitorRun(run)) {
+      // 访客不探测登录态、不填表、不进等待认证；会话记为「无需认证」，不冒充已登录。
+      await setSessionProbe(db, {
+        sessionId: session.id,
+        ...this.ownerScope(),
+        health: 'HEALTHY',
+        authState: 'NOT_REQUIRED',
+      })
+      return { ok: true, session: (await getSessionById(db, session.id))! }
     }
 
     const verification = run.authVerification

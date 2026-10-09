@@ -4,6 +4,7 @@ import type { Db } from '../client.js'
 import { newId } from '../id.js'
 import { schemaFor } from '../native.js'
 import { DomainError } from '../runs/errors.js'
+import { credentialUsername } from '../console/account-identity.js'
 
 export type CredentialConsumeGrant = {
   username: string
@@ -42,7 +43,7 @@ export async function authorizeSecretConsume(
       .limit(1)
     if (account) {
       return {
-        username: account.username,
+        username: credentialUsername(account),
         secretId: input.secretId,
         provider: account.provider ?? 'local',
         credentialId: newId(),
@@ -123,7 +124,7 @@ export async function resolveAccountCurrentCredential(
     return null
   }
   try {
-    return await authorizeSecretConsume(db, { secretId: account.secretId, expectedUsername: account.username })
+    return await authorizeSecretConsume(db, { secretId: account.secretId, expectedUsername: account.username ?? undefined })
   } catch (error) {
     if (error instanceof CredentialConsumeDenied) return null
     throw error
@@ -245,6 +246,7 @@ export async function resolveAccountAuthMaterials(
   const [account] = await db
     .select({
       username: targetAccounts.username,
+      identityKind: targetAccounts.identityKind,
       secretId: targetAccounts.secretId,
       totpSecretId: targetAccounts.totpSecretId,
       storageStateSecretId: targetAccounts.storageStateSecretId,
@@ -254,7 +256,8 @@ export async function resolveAccountAuthMaterials(
     .from(targetAccounts)
     .where(and(eq(targetAccounts.id, accountId), isNull(targetAccounts.deletedAt)))
     .limit(1)
-  if (!account) return null
+  // 访客没有登录材料。
+  if (!account || account.identityKind === 'visitor' || account.username == null) return null
   return {
     username: account.username,
     passwordSecretId: account.secretId ?? undefined,

@@ -327,6 +327,8 @@ export const scenarioSchema = z.object({
   latestVersionNo: z.number().int().min(1).nullable(),
   stepCount: z.number().int().min(0).max(MAX_COMPILED_SCENARIO_STEPS),
   draftDirty: z.boolean().default(false),
+  /** 场景运行账号；null 表示跟随目标默认。场景级、不随版本。 */
+  runAccountId: entityIdSchema.nullable().optional(),
   deletedAt: utcInstantSchema.nullable().optional(),
   deletedBy: resourceDeletedBySchema.nullable().optional(),
   createdByName: z.string().nullable().optional(),
@@ -426,6 +428,8 @@ export const createScenarioBodySchema = z.strictObject({
   steps: z.array(stepSchema).min(1).max(MAX_SCENARIO_STEPS),
   inputs: z.array(scenarioInputDeclSchema).max(64).optional(),
   status: scenarioStatusSchema.optional(),
+  /** 运行账号；省略或 null 表示跟随目标默认。 */
+  runAccountId: entityIdSchema.nullable().optional(),
 })
 export type CreateScenarioBody = z.infer<typeof createScenarioBodySchema>
 
@@ -475,8 +479,10 @@ export const updateScenarioBodySchema = z
   .strictObject({
     name: scenarioNameSchema.optional(),
     status: scenarioStatusSchema.optional(),
+    /** 运行账号；null 表示改回跟随目标默认。 */
+    runAccountId: entityIdSchema.nullable().optional(),
   })
-  .refine((body) => body.name !== undefined || body.status !== undefined, {
+  .refine((body) => body.name !== undefined || body.status !== undefined || body.runAccountId !== undefined, {
     message: '至少提供一个要修改的字段',
   })
 export type UpdateScenarioBody = z.infer<typeof updateScenarioBodySchema>

@@ -272,6 +272,7 @@ describe.skipIf(!parsed.success)('迁移与 Drizzle schema 一致性（集成）
       { column_name: 'id', is_nullable: 'NO' },
       { column_name: 'name', is_nullable: 'NO' },
       { column_name: 'purpose', is_nullable: 'NO' },
+      { column_name: 'run_account_id', is_nullable: 'YES' },
       { column_name: 'status', is_nullable: 'NO' },
       { column_name: 'target_id', is_nullable: 'NO' },
       { column_name: 'updated_at', is_nullable: 'NO' },

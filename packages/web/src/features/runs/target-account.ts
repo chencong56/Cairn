@@ -45,3 +45,16 @@ export function unusableAccountReason(
 export function unusableAccountCopy(reason: UnusableAccountReason): string {
   return UNUSABLE_ACCOUNT_COPY[reason]
 }
+
+/** 账号选项文案：访客没有登录名，标出「访客」而不是空括号。 */
+export function accountOptionLabel(account: {
+  displayName: string
+  username?: string | null
+  identityKind?: string | null
+}): string {
+  if (account.identityKind === 'visitor') {
+    // 默认显示名就是「访客」，再加后缀会变成「访客（访客）」。
+    return account.displayName.includes('访客') ? account.displayName : `${account.displayName}（访客）`
+  }
+  return account.username ? `${account.displayName} (${account.username})` : account.displayName
+}

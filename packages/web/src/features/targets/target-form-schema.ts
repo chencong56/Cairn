@@ -36,8 +36,12 @@ export const targetFormSchema = z
     captchaBgBy: z.enum(LOGIN_LOCATOR_BY),
     captchaBgValue: z.string(),
     sensitiveSelectors: z.string(),
+    /** 有登录方式的目标是否额外开启访客；「无需登录」目标总是只有访客。 */
+    visitorEnabled: z.boolean(),
   })
   .superRefine((values, ctx) => {
+    // 无需登录的目标不登记登录账号，首个账号字段整段忽略。
+    if (values.authMethod === 'none') return
     const hasAny =
       values.accountDisplayName.trim() !== '' ||
       values.accountUsername.trim() !== '' ||
@@ -99,6 +103,7 @@ export const EMPTY_TARGET_FORM_VALUES: TargetFormValues = {
   captchaBgBy: 'css',
   captchaBgValue: '',
   sensitiveSelectors: '',
+  visitorEnabled: false,
 }
 
 export function locatorFromForm(by: LoginLocatorBy, value: string) {
@@ -160,6 +165,7 @@ export function captchaFromForm(values: TargetFormValues): TargetCaptchaDefiniti
 export function accountFromForm(
   values: TargetFormValues
 ): CreateTargetAccountBody | undefined {
+  if (values.authMethod === 'none') return undefined
   const displayName = values.accountDisplayName.trim()
   const username = values.accountUsername.trim()
   const password = values.accountPassword
@@ -214,6 +220,7 @@ export function valuesFromTarget(current: TargetDto): TargetFormValues {
     captchaBgBy: current.captcha?.slider?.bgLocator?.by ?? 'css',
     captchaBgValue: current.captcha?.slider?.bgLocator?.value ?? '',
     sensitiveSelectors: (current.sensitiveSelectors ?? []).join('\n'),
+    visitorEnabled: Boolean(current.visitorAccountId),
   }
 }
 

@@ -208,6 +208,7 @@ const AUTH_PROBE_RESULT_LABELS: Record<string, string> = {
   EXPIRED: '未登录',
   NEEDS_LOGIN: '未登录',
   UNKNOWN: '无法确认',
+  NOT_REQUIRED: '无需认证',
 }
 
 export const OPERATION_PROGRESS_LABELS: Record<SessionOperationProgressPhase, string> = {
@@ -242,7 +243,12 @@ export function describeOperationProgress(payload: Record<string, unknown>): {
 }
 
 export function sessionAuthLabel(authState?: string | null, identityState?: string | null) {
-  const auth: Record<string, string> = { AUTHENTICATED: '登录已核验', EXPIRED: '登录已失效', UNKNOWN: '登录待核验' }
+  const auth: Record<string, string> = {
+    AUTHENTICATED: '登录已核验',
+    EXPIRED: '登录已失效',
+    UNKNOWN: '登录待核验',
+    NOT_REQUIRED: '无需认证（访客）',
+  }
   const identity: Record<string, string> = { MATCH: '账号一致', MISMATCH: '账号不符', UNVERIFIED: '身份未核验' }
   return [auth[authState ?? 'UNKNOWN'] ?? '登录待核验', identityState ? identity[identityState] : null].filter(Boolean).join(' · ')
 }

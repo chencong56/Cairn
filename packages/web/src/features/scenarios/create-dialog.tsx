@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { CreateScenarioBody } from '@cairn/shared'
+import { isUsableIdentity, type CreateScenarioBody } from '@cairn/shared'
 import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
 import { createScenario } from '@/lib/scenarios-api'
-import { fetchTarget, fetchTargets } from '@/lib/targets-api'
+import { fetchTarget, fetchTargetAccounts, fetchTargets } from '@/lib/targets-api'
+import { accountOptionLabel } from '@/features/runs/target-account'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -64,12 +65,24 @@ export function ScenarioCreateDialog({
   const [userEditedUrl, setUserEditedUrl] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  /** '' 表示跟随目标默认。 */
+  const [runAccountId, setRunAccountId] = useState('')
 
   // 若传入 defaultTargetId 且用户未主动编辑过 URL，在目标系统数据就绪后自动填入其 entryUrl
   const selectedTarget = useMemo(
     () => items.find((t) => t.id === targetId),
     [items, targetId],
   )
+
+  // 目标有两个及以上可用身份（例如开了访客）时，新建场景就要说清楚用哪个账号跑；预选跟随目标默认。
+  const chooseRunAccount = (selectedTarget?.usableIdentityCount ?? 0) >= 2
+  const accountsQuery = useQuery({
+    queryKey: ['target-accounts', targetId, { limit: 100 }],
+    queryFn: () => fetchTargetAccounts(targetId, { limit: 100 }),
+    enabled: open && chooseRunAccount,
+  })
+  const usableAccounts = (accountsQuery.data?.items ?? []).filter(isUsableIdentity)
+  const targetDefault = usableAccounts.find((item) => item.isDefault)
 
   // 用户未手动改过地址时，跟随所选目标系统的入口地址
   useResetOnChange(`${selectedTarget?.entryUrl ?? ''}:${userEditedUrl}`, () => {
@@ -78,6 +91,7 @@ export function ScenarioCreateDialog({
 
   function handleTargetChange(nextTargetId: string) {
     setTargetId(nextTargetId)
+    setRunAccountId('')
     const nextTarget = items.find((t) => t.id === nextTargetId)
     if (nextTarget?.entryUrl && !userEditedUrl) {
       setUrl(nextTarget.entryUrl)
@@ -96,6 +110,7 @@ export function ScenarioCreateDialog({
     setUrl('')
     setUserEditedUrl(false)
     setError('')
+    setRunAccountId('')
   }
 
   async function submit() {
@@ -109,6 +124,7 @@ export function ScenarioCreateDialog({
           ? { ...first, name: '打开页面', input: { url: url.trim() } }
           : first,
       ],
+      ...(chooseRunAccount && runAccountId ? { runAccountId } : {}),
     }
     setSaving(true)
     setError('')
@@ -203,6 +219,29 @@ export function ScenarioCreateDialog({
               </p>
             ) : null}
           </div>
+          {chooseRunAccount ? (
+            <div className='space-y-2'>
+              <Label htmlFor='scenario-run-account'>运行账号</Label>
+              <Select value={runAccountId || '__default__'} onValueChange={(value) => setRunAccountId(value === '__default__' ? '' : value)}>
+                <SelectTrigger id='scenario-run-account' aria-label='运行账号' className='w-full'>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='__default__'>
+                    {targetDefault ? `跟随目标默认（当前：${accountOptionLabel(targetDefault)}）` : '跟随目标默认'}
+                  </SelectItem>
+                  {usableAccounts.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {accountOptionLabel(item)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className='text-small text-muted-foreground'>
+                场景的所有步骤都用这个账号运行；选「访客」就不登录。之后可以在场景配置里修改。
+              </p>
+            </div>
+          ) : null}
           <div className='space-y-2'>
             <Label htmlFor='scenario-url'>首步页面地址</Label>
             <Input

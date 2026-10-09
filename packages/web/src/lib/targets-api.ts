@@ -48,7 +48,7 @@ import {
   type TargetAuthProfileView,
   type UpdateTargetAccountIdentityBody,
   type UpdateTargetAccountBody,
-  type UpdateTargetBody,
+  type UpdateTargetInput,
   type TargetSessionPolicyPatch,
   type TargetResolutionPolicyPatch,
 } from '@cairn/shared'
@@ -89,7 +89,7 @@ export function createTarget(body: CreateTargetBody): Promise<TargetDto> {
   })
 }
 
-export function updateTarget(id: string, body: UpdateTargetBody): Promise<TargetDto> {
+export function updateTarget(id: string, body: UpdateTargetInput): Promise<TargetDto> {
   return apiFetch(`/api/targets/${id}`, targetSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

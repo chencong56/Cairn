@@ -27,6 +27,11 @@ node server.mjs
 
 换端口：`HMI_PORT=4180 node server.mjs`。
 
+### 访客联调
+
+- `/catalog`：公开目录页，不需要登录，用来验证访客场景。
+- `/orders`：订单页，未登录时跳转 `/login`，用来验证访客运行撞上登录页时报 `VISITOR_LOGIN_REQUIRED`。
+
 ## 自检
 
 ```bash
