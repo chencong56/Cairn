@@ -20,7 +20,12 @@ import {
 } from "@cairn/authoring";
 import * as logical from "./schema/index.js";
 
-const ORDER = [
+/**
+ * 迁移归档覆盖的全部逻辑表，按外键依赖排序（被引用的表在前）。
+ * 新增表必须登记在这里：`transfer-coverage.test.ts` 校验它与 schema 全集一致、且顺序满足库内外键，
+ * 漏登记的表在导出时会被静默丢掉。
+ */
+export const TRANSFER_TABLE_ORDER = [
   "consoleAccounts",
   "consoleRoles",
   "secrets",
@@ -90,6 +95,7 @@ const ORDER = [
   "moduleInvocationResults",
   "stepRuns",
   "attempts",
+  "targetFixtures",
   "storedObjects",
   "evidences",
   "browserSessions",
@@ -184,7 +190,52 @@ const ORDER = [
   "exportJobArtifacts",
   "reportRevisionOutputs",
   "suiteReportTriggers",
+  "reportTriggers",
+  "reportAiJobs",
+  "acceptanceSweepBatches",
+  "acceptanceCoverageSnapshots",
+  "moduleTestCases",
+  "moduleCaseExecutions",
+  "moduleCaseResults",
+  "moduleTestBatches",
+  "datasets",
+  "datasetRows",
+  "batches",
+  "batchItems",
+  "targetBusinessSources",
+  "targetBusinessSourceSnapshots",
+  "targetBusinessRecords",
+  "recordingGeneralizations",
+  "runEvents",
+  "stepIterations",
+  "outcomeResults",
+  "runVideoMediaJobs",
+  "repairCandidates",
+  "runDurationFacts",
+  "runNodeDurationFacts",
+  "durationReportSubscriptions",
+  "durationReportIssues",
+  "durationScenarioDaily",
+  "durationNodeDaily",
+  "durationRollupDirty",
+  "durationRollupState",
+  "mapConsumptionEligibilitySuspensions",
+  "mapMenuEntries",
+  "mapMenuEntryCommands",
+  "mapMenuEntryRevisions",
+  "mapIngestPages",
+  "reliabilitySignals",
+  "featureWindows",
+  "baselineRevisions",
+  "reliabilityEvaluations",
+  "reliabilityCheckpoints",
+  "reliabilityIncidents",
+  "reliabilityIncidentMembers",
+  "reliabilityRunReceipts",
+  "reliabilityRunSamples",
+  "mapChangeCandidates",
 ] as const;
+const ORDER = TRANSFER_TABLE_ORDER;
 const LOGICAL_VERSION = latestLogicalVersion();
 const bundleSchema = z
   .object({
