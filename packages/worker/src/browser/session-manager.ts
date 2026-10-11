@@ -44,7 +44,10 @@ import {
   type SessionGrant,
   type SessionPolicy,
   type PlatformConfigDocument,
-  type PlatformBrowserPrewarm
+  type PlatformBrowserPrewarm,
+  type NetworkListObservation,
+  type NetworkInspectObservation,
+  type NetworkReadObservation,
 } from '@cairn/shared'
 import type { LocalSecretProvider } from '@cairn/secret'
 import { ObjectService } from '../objects/object.service'
@@ -75,6 +78,7 @@ import { settleOccupiedLanding, type SettleOccupiedLandingInput } from './landin
 import { acquireRunAuthControl, applyRecoveryRule, executeAuthInput, expiredAuthObservation, failInRunAuthRecovery, heartbeatRunAuthControl, inputRunAuthControl, observeInRunAuth, observeInRunAuthHeld, releaseRunAuthControl, restoreAuthGateFromCheckpoint, resumeRunAuth, verifyInRunAuth } from './session-auth-control.js'
 import { adoptPage, assertCommand, closeManagedPage, closeRunPage, ensureRunPage, execute, invalidate, pageForGrant, runManagedPage, runSurfaceCommand, startTracingForLease, stopTracingForLease, withManagedPage } from './session-command.js'
 import { type PageHealthCollector } from './page-health-collector.js'
+import { type NetworkCapture } from './network-capture.js'
 import { type PageHealthDrain, type PageHealthStepInfo, type WatchedRequest } from '@cairn/shared'
 import {
   discardSealedVideo,
@@ -127,6 +131,8 @@ export class BrowserSessionManager {
   readonly leaseTtls = new Map<string, number>()
   readonly tracingByLease = new Map<string, boolean>()
   readonly pageHealthByLease = new Map<string, PageHealthCollector>()
+  /** 场景里有接口来源的提取步骤时，运行占用期间按租约捕获接口响应。 */
+  readonly networkCaptureByLease = new Map<string, NetworkCapture>()
   readonly videoRecorders = new Map<string, RunVideoRecorder>()
   readonly observeGrants = new Map<string, ObserveGrantEntry>()
   readonly authGateClosed = new Set<string>()
@@ -387,13 +393,21 @@ export class BrowserSessionManager {
   /** 标记页面健康归属的步骤；info 为 null 表示该步骤结束。没有页面健康约束时无操作。 */
   markPageHealthStep(grant: SessionGrant, info: PageHealthStepInfo | null): void {
     const collector = this.pageHealthByLease.get(grant.leaseId)
-    if (!collector) return
+    const capture = this.networkCaptureByLease.get(grant.leaseId)
+    if (!collector && !capture) return
     // 会话中途重建后浏览器上下文已换，采集器要跟过去。
     const sessionId = this.leaseToSession.get(grant.leaseId)
     const context = sessionId ? this.lives.get(sessionId)?.handle.context : undefined
-    if (context && typeof context.on === 'function' && !collector.isBoundTo(context)) collector.rebind(context as never)
-    if (info) collector.beginStep(info)
-    else collector.endStep()
+    const live = context && typeof context.on === 'function' ? context : undefined
+    if (collector) {
+      if (live && !collector.isBoundTo(live)) collector.rebind(live as never)
+      if (info) collector.beginStep(info)
+      else collector.endStep()
+    }
+    if (capture) {
+      if (live && !capture.isBoundTo(live)) capture.rebind(live as never)
+      if (info) capture.beginStep()
+    }
   }
 
   /** 该步骤发起的、命中成功条件关注清单的请求；没有采集器时返回 undefined（调用方判「无法判断」）。 */
@@ -945,7 +959,7 @@ export class BrowserSessionManager {
     return describeHoldPage.call(this, runId)
   }
 
-  async observeRun(input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation | TableDetectObservation> {
+  async observeRun(input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation | TableDetectObservation | NetworkListObservation | NetworkInspectObservation | NetworkReadObservation> {
     return observeRun.call(this, input)
   }
 

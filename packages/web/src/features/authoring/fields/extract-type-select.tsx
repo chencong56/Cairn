@@ -3,10 +3,10 @@ import { isTablePlanUnconfigured, type Step } from '@cairn/shared'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { createPlaceholderFilePlan, createPlaceholderTablePlan } from './table-plan-edit'
+import { createPlaceholderFilePlan, createPlaceholderNetworkPlan, createPlaceholderTablePlan } from './table-plan-edit'
 
 type ExtractStep = Extract<Step, { type: 'extract' }>
-type ExtractKind = 'text' | 'value' | 'attribute' | 'table' | 'table_file'
+type ExtractKind = 'text' | 'value' | 'attribute' | 'table' | 'table_file' | 'table_network'
 
 type Option = { value: ExtractKind; label: string; hint: string }
 
@@ -28,6 +28,7 @@ const EXTRACT_TYPE_GROUPS: Array<{ label: string; options: Option[] }> = [
     options: [
       { value: 'table', label: '页面上的表格 / 列表数据', hint: '表格、卡片、详情信息' },
       { value: 'table_file', label: '下载文件里的数据', hint: '导出的 CSV、Excel' },
+      { value: 'table_network', label: '接口返回的数据（含图表）', hint: '图表数字、页面背后的查询接口' },
     ],
   },
 ]
@@ -35,7 +36,11 @@ const OPTIONS = EXTRACT_TYPE_GROUPS.flatMap((g) => g.options)
 const AI_EXTRACT = '__ai_extract'
 
 function extractKindOf(input: ExtractStep['input']): ExtractKind {
-  if (input.as === 'table') return 'source' in input && input.source === 'file' ? 'table_file' : 'table'
+  if (input.as === 'table') {
+    if ('source' in input && input.source === 'file') return 'table_file'
+    if ('source' in input && input.source === 'network') return 'table_network'
+    return 'table'
+  }
   return input.as
 }
 
@@ -47,6 +52,7 @@ function inputForKind(step: ExtractStep, kind: ExtractKind): ExtractStep['input'
     return { target: placeholder.target, as: 'table', table: placeholder }
   }
   if (kind === 'table_file') return { as: 'table', source: 'file', table: createPlaceholderFilePlan('downloadFile') }
+  if (kind === 'table_network') return { as: 'table', source: 'network', table: createPlaceholderNetworkPlan() }
   if (kind === 'attribute') {
     return { target: pageTarget, as: 'attribute', attribute: 'attribute' in step.input && step.input.attribute ? step.input.attribute : 'value' }
   }

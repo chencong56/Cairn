@@ -8,7 +8,11 @@ import { entityIdSchema } from './wire.js'
 import {
   TABLE_DETECT_MAX_COLS,
   TABLE_FILE_MAX_BYTES,
+  TABLE_NETWORK_CAPTURE_MAX_ENTRIES,
+  TABLE_READ_MAX_COLS,
+  tableColumnSpecSchema,
   tableFilePlanSchema,
+  tableNetworkPlanSchema,
   tableSampleSchema,
   tableReadPlanSchema,
   tableReadPlanV2Schema,
@@ -137,6 +141,24 @@ export const observeTableOperationSchema = z.union([
 ])
 export type ObserveTableOperation = z.infer<typeof observeTableOperationSchema>
 
+/**
+ * 接口来源的编写期操作（“选择接口返回的数据”对话框）。捕获从第一次 list / reload 开始，之前发出的请求看不到。
+ * list：开始（或继续）捕获并列出；reload：开着捕获刷新当前页再列出；
+ * inspect：某个响应的 JSON 结构与建议；read：按读取计划读成记录集预览（指定 entryId 时只读那一个响应）。
+ */
+export const observeNetworkOperationSchema = z.union([
+  z.strictObject({ op: z.literal('network'), subOp: z.enum(['list', 'reload']), pageId: observePageIdSchema }),
+  z.strictObject({ op: z.literal('network'), subOp: z.literal('inspect'), entryId: z.string().uuid(), pageId: observePageIdSchema }),
+  z.strictObject({
+    op: z.literal('network'),
+    subOp: z.literal('read'),
+    entryId: z.string().uuid().optional(),
+    plan: tableNetworkPlanSchema,
+    pageId: observePageIdSchema,
+  }),
+])
+export type ObserveNetworkOperation = z.infer<typeof observeNetworkOperationSchema>
+
 export const observeOperationSchema = z.union([
   z.strictObject({
     op: z.enum(['highlight', 'pick', 'structure']),
@@ -148,6 +170,7 @@ export const observeOperationSchema = z.union([
     pageId: observePageIdSchema,
   }),
   observeTableOperationSchema,
+  observeNetworkOperationSchema,
 ])
 export type ObserveOperation = z.infer<typeof observeOperationSchema>
 
@@ -203,8 +226,11 @@ export const tableDetectedColumnSchema = z.strictObject({
   key: z.string(),
   name: z.string(),
   groupPath: z.string().optional(),
-  /** 被自动排除的原因：复选框 / 序号 / 操作按钮。 */
-  excludedReason: z.enum(['checkbox', 'index', 'action', 'hidden']).optional(),
+  /** 被自动排除的原因：复选框 / 序号 / 操作按钮 / 隐藏；derived＝从状态组件派生的“语义 / 百分比”列，默认不勾。 */
+  excludedReason: z.enum(['checkbox', 'index', 'action', 'hidden', 'derived']).optional(),
+  /** 派生列 / 状态区域列的读法（tone / percent / order）与显示名（如“「状态」的语义”）。 */
+  read: z.enum(['tone', 'percent', 'order']).optional(),
+  label: z.string().max(64).optional(),
   /** 依据样本单元格给出的类型建议，供勾回被排除的列或改类型时使用。 */
   valueType: z.enum(['text', 'number', 'boolean', 'date']),
   numericKind: z.enum(['integer', 'decimal']).optional(),
@@ -240,7 +266,14 @@ export const tableDetectedSchema = z.strictObject({
     )
     .max(6),
   /** 识别出的控件形态：原生表格 / ARIA 网格 / easyui / jqGrid / ExtJS / layui。 */
-  shape: z.enum(['native', 'aria', 'easyui', 'jqgrid', 'extjs', 'layui', 'elementui', 'finereport', 'aggrid', 'antd', 'handsontable', 'cards', 'keyvalue', 'listgrid']).optional(),
+  shape: z.enum(['native', 'aria', 'easyui', 'jqgrid', 'extjs', 'layui', 'elementui', 'finereport', 'aggrid', 'antd', 'handsontable', 'cards', 'keyvalue', 'listgrid', 'status']).optional(),
+  /** 像交叉表（数值区多级列头且多为数字列）时的建议：前几列是行维度、列头有几层；不自动改读法，由用户确认。 */
+  crosstabHint: z
+    .strictObject({
+      rowDims: z.number().int().min(1),
+      depth: z.number().int().min(2).max(4),
+    })
+    .optional(),
   /** 给用户看的识别说明（自动排除了哪些列、表没有表头等）。 */
   notes: z.array(z.string()).max(16),
 })
@@ -311,6 +344,8 @@ export const tableDetectObservationSchema = z.strictObject({
   detected: tableDetectedSchema.optional(),
   /** 没认出时的原因（给用户看的话 + 错误码）。 */
   reason: z.strictObject({ code: z.string(), message: z.string(), feedback: z.string().max(9000).optional() }).optional(),
+  /** 点在图表上：图表里的数字不在页面上，引导改读接口返回的数据。 */
+  chart: z.strictObject({ lib: z.enum(['echarts', 'chartjs', 'highcharts', 'other']) }).optional(),
   source: z.enum(['managed', 'extension']).default('managed'),
 })
 export type TableDetectObservation = z.infer<typeof tableDetectObservationSchema>
@@ -431,3 +466,83 @@ export const authoringCapabilitiesSchema = z.strictObject({
   stepTypesExtra: z.array(z.enum(['select', 'keyboard', 'wait'])),
 })
 export type AuthoringCapabilities = z.infer<typeof authoringCapabilitiesSchema>
+
+// ---------------------------------------------------------------------------
+// 接口来源：编写期返回结构
+// ---------------------------------------------------------------------------
+
+export const networkCapturedEntrySchema = z.strictObject({
+  id: z.string().uuid(),
+  at: z.string(),
+  method: z.string().max(16),
+  /** 去掉查询串的地址。 */
+  url: z.string().max(2048),
+  status: z.number().int(),
+  byteSize: z.number().int().nonnegative(),
+  contentType: z.string().max(128).optional(),
+  /** 正文能按 JSON 解析。 */
+  json: z.boolean(),
+  /** 超过单个响应上限，没有留正文。 */
+  tooLarge: z.boolean().optional(),
+  /** 含对象数组或列式数组、最像数据源。 */
+  best: z.boolean().optional(),
+  /** 最佳建议的行数。 */
+  rowHint: z.number().int().nonnegative().optional(),
+})
+export type NetworkCapturedEntry = z.infer<typeof networkCapturedEntrySchema>
+
+const observedPageSchema = z.strictObject({
+  pageRef: pageRefSchema.optional(),
+  url: z.string().optional(),
+  title: z.string().optional(),
+})
+
+export const networkListObservationSchema = z.strictObject({
+  outcome: targetObservationOutcomeSchema,
+  page: observedPageSchema,
+  /** 从什么时候开始捕获（之前发出的请求看不到）。 */
+  capturingSince: z.string(),
+  entries: z.array(networkCapturedEntrySchema).max(TABLE_NETWORK_CAPTURE_MAX_ENTRIES),
+})
+export type NetworkListObservation = z.infer<typeof networkListObservationSchema>
+
+export const jsonOutlineNodeSchema = z.strictObject({
+  path: z.string().max(512),
+  key: z.string().max(256),
+  depth: z.number().int().nonnegative(),
+  type: z.enum(['object', 'array', 'string', 'number', 'boolean', 'null']),
+  length: z.number().int().nonnegative().optional(),
+  preview: z.string().max(256).optional(),
+  rows: z.boolean().optional(),
+  series: z.boolean().optional(),
+  numeric: z.boolean().optional(),
+})
+export type JsonOutlineNodeDto = z.infer<typeof jsonOutlineNodeSchema>
+
+export const networkTableSuggestionSchema = z.strictObject({
+  layout: z.enum(['rows', 'columns']),
+  rowsPath: z.string().max(256).optional(),
+  totalPath: z.string().max(256).optional(),
+  rowCount: z.number().int().nonnegative(),
+  columns: z.array(tableColumnSpecSchema).max(TABLE_READ_MAX_COLS),
+  score: z.number(),
+})
+export type NetworkTableSuggestion = z.infer<typeof networkTableSuggestionSchema>
+
+export const networkInspectObservationSchema = z.strictObject({
+  outcome: targetObservationOutcomeSchema,
+  entry: networkCapturedEntrySchema.optional(),
+  nodes: z.array(jsonOutlineNodeSchema).max(400),
+  truncated: z.boolean(),
+  suggestions: z.array(networkTableSuggestionSchema).max(5),
+  reason: z.strictObject({ code: z.string(), message: z.string() }).optional(),
+})
+export type NetworkInspectObservation = z.infer<typeof networkInspectObservationSchema>
+
+export const networkReadObservationSchema = z.strictObject({
+  outcome: targetObservationOutcomeSchema,
+  entry: networkCapturedEntrySchema.optional(),
+  sample: tableSampleSchema.optional(),
+  reason: z.strictObject({ code: z.string(), message: z.string() }).optional(),
+})
+export type NetworkReadObservation = z.infer<typeof networkReadObservationSchema>

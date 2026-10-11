@@ -80,6 +80,18 @@ export function antdAdapter(h: AdapterHelpers): TableAdapter {
   return {
     shape: 'antd',
     pagerSelector: '.ant-pagination',
+    // 树形数据：行带 ant-table-row-level-N；父行有展开按钮（-expanded / -collapsed），叶子是占位按钮（-spaced）。没展开的子行不渲染
+    rowLevel: (rowEl: any) => {
+      const m = /(?:^|\s)ant-table-row-level-(\d+)(?:\s|$)/.exec(String(rowEl?.className ?? ''))
+      if (!m) return null
+      const btn = rowEl.querySelector('.ant-table-row-expand-icon')
+      const hasChildren = Boolean(btn) && !btn.classList.contains('ant-table-row-expand-icon-spaced')
+      return {
+        level: Number(m[1]),
+        hasChildren,
+        ...(hasChildren ? { expanded: btn.classList.contains('ant-table-row-expand-icon-expanded') } : {}),
+      }
+    },
     claimSelector: '.ant-table-wrapper',
     gridSelector: '.ant-table-wrapper',
     innerPartSelector: '.ant-table,.ant-table-container,.ant-table-header,.ant-table-body,.ant-table-content',

@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import type { NetworkObserveOwner } from '@/lib/network-observe-api'
 import { resolveOutcomeWriteback } from '@cairn/authoring'
 import {
   observationShowsFragileCss,
@@ -144,6 +145,10 @@ type AuthoringObserveValue = {
   previewTable: (plan: TableReadPlan) => Promise<TableObservation | undefined>
   /** 画面正在查看的是不是“非执行当前页”的弹出页（执行时这一步在“当前页”运行，需要先切过去）。 */
   viewingPopup: () => boolean
+  /** 接口来源的编写期操作发往哪里（调试挂起的运行或受管会话）；没有可用的受管画面时为空。 */
+  networkOwner?: NetworkObserveOwner
+  /** 受管画面正在查看的页（接口捕获按页区分）。 */
+  viewedPageId: () => string | undefined
   applyForTrial: (target?: TargetDescriptor) => void
   clearOverlay: (stepId: string) => void
   writeBack: () => void
@@ -170,6 +175,7 @@ const closedObserve: AuthoringObserveValue = {
   detectTableRoot: async () => undefined,
   previewTable: async () => undefined,
   viewingPopup: () => false,
+  viewedPageId: () => undefined,
   applyForTrial: () => undefined,
   clearOverlay: () => undefined,
   writeBack: () => undefined,
@@ -558,6 +564,8 @@ export function AuthoringObserveProvider({
       },
       // 只有查看的是“非执行当前页”的弹出页时才提示（跟随当前页时 pageId 为空）
       viewingPopup: () => viewedPage.current?.kind === 'popup' && viewedPage.current.pageId !== undefined,
+      networkOwner: !livePage ? undefined : holding && runId ? { kind: 'run', runId } : sessionId ? { kind: 'session', sessionId } : undefined,
+      viewedPageId: () => viewedPage.current?.pageId,
       applyForTrial: (target) => {
         const next = target ?? lastPicked ?? highlight?.target
         if (!runId || !holding || !next) {

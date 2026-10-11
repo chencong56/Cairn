@@ -212,7 +212,25 @@ export class FixtureStepExecutor implements StepExecutor {
           }
           subject = loaded.sample
         }
-        const evalRes = evaluateTableExpectation(subject, expect.rule)
+        // 与另一份数据一致：另一份按 otherKey 从上下文取，同样先加载全量；取不到交给求值判“无法确认”
+        let other: TableSample | undefined
+        if (expect.rule.rule === 'record_sets_match') {
+          const otherVal = isTableSample(context[expect.rule.otherKey])
+          if (otherVal && isTablePreviewOnly(otherVal)) {
+            const loaded = await loadFullTableSample(otherVal, this.recordSets)
+            if (!loaded.ok) {
+              return {
+                kind: 'failed',
+                output: { passed: false, actual: (val ?? null) as JsonValue, expected: expect as unknown as JsonValue },
+                error: { code: 'TABLE_FACTS_UNAVAILABLE', category: 'EXECUTOR', retryable: false, safeMessage: `另一份数据「${expect.rule.otherKey}」：${loaded.message}` },
+                timedOut: false,
+                aborted: false,
+              }
+            }
+            other = loaded.sample
+          } else if (otherVal) other = otherVal
+        }
+        const evalRes = evaluateTableExpectation(subject, expect.rule, other ? { other } : {})
         const output = {
           passed: evalRes.passed,
           actual: (val ?? null) as JsonValue,

@@ -83,6 +83,13 @@ export const tableColumnSpecSchema = z
     sensitive: z.boolean().optional(),
     /** v2：数字列把“万 / 亿”换算为数值；缺省不换算。 */
     scaleUnits: z.boolean().optional(),
+    /** 接口来源：字段在 JSON 里的路径（按行读时相对每一行，按列读时是整个响应里的数组路径）。 */
+    path: z.string().regex(/^[^.]+(?:\.[^.]+)*$/, '路径须为用点分隔的字段名或序号').max(256).optional(),
+    /**
+     * 这一列怎么读：缺省读文字；tone＝格里状态组件（标签 / 徽标 / 进度 / 步骤 / 告警）的语义；
+     * percent＝进度百分比；order＝第几项（状态区域里的步骤序号）。语义只按组件库官方类名认，认不出记为“未识别”。
+     */
+    read: z.enum(['text', 'tone', 'percent', 'order']).optional(),
   })
   .refine(
     (col) => col.valueType !== 'number' || col.numericKind !== undefined,
@@ -134,13 +141,39 @@ export const TABLE_READ_DEFAULT_SELECTED_COLS = 32
 export const TABLE_DETECT_MAX_COLS = 128
 export const TABLE_READ_MAX_BYTES_LIMIT = 240 * 1024
 
+/** 交叉表：列维度列的 key（第 i 层为 dim_i）与数值列的 key；行维度沿用读取计划里的列。 */
+export const TABLE_CROSSTAB_DIM_PREFIX = 'dim_'
+export const TABLE_CROSSTAB_VALUE_KEY = 'value'
+export const TABLE_CROSSTAB_MAX_DIMS = 4
+/** 合计 / 小计格随记录集内联保存的体积上限；超出时只保留前面的，核对判“无法确认”。 */
+export const TABLE_CROSSTAB_TOTALS_MAX_BYTES = 40 * 1024
+
+/**
+ * 交叉表（透视表）读法：读取计划里的列是行维度（表格最前面的几列），其余列按表头层级拆成列维度，
+ * 每个数值格变成长表的一行 { 行维度…, 列维度…, 值 }。表头或行头是“合计 / 小计”的格单独作为汇总，不进长表。
+ */
+export const tableCrosstabLayoutSchema = z.strictObject({
+  mode: z.literal('crosstab'),
+  /** 列头每一层叫什么（自上而下）；表头比这更深时，多出的层并进最后一层。 */
+  columnDims: z.array(z.string().trim().min(1).max(64)).min(1).max(TABLE_CROSSTAB_MAX_DIMS),
+  value: z
+    .strictObject({
+      name: z.string().trim().min(1).max(64).default('值'),
+      numericKind: tableNumericKindSchema.default('decimal'),
+      /** 数值把“万 / 亿”换算为数值；缺省不换算。 */
+      scaleUnits: z.boolean().optional(),
+    })
+    .default({ name: '值', numericKind: 'decimal' }),
+})
+export type TableCrosstabLayout = z.infer<typeof tableCrosstabLayoutSchema>
+
 export const tableReadPlanV2Schema = z.strictObject({
   protocol: z.literal(TABLE_READ_PROTOCOL_V2),
   /** 表根的完整目标描述（含 framePath）。采样器按它定位，不再只认第一个 css 候选。 */
   target: targetDescriptorSchema,
   scope: z.literal('current_page').default('current_page'),
-  /** 读取形态：缺省按表格；cards = 一组重复卡片（每张一行），keyvalue = 一块“名称：值”信息（一行）。 */
-  kind: z.enum(['table', 'cards', 'keyvalue']).optional(),
+  /** 读取形态：缺省按表格；cards = 一组重复卡片（每张一行），keyvalue = 一块“名称：值”信息（一行），status = 一组状态（步骤条 / 告警 / 标签，每个一行）。 */
+  kind: z.enum(['table', 'cards', 'keyvalue', 'status']).optional(),
   rows: z
     .strictObject({
       selector: z.string().max(256).optional(),
@@ -160,6 +193,19 @@ export const tableReadPlanV2Schema = z.strictObject({
     })
     .default({ excludeHeader: true, header: 'auto' }),
   columns: z.array(tableColumnSpecSchema).min(1).max(TABLE_READ_MAX_COLS),
+  /**
+   * 读法：缺省按普通平铺读；tree＝树形表格，每行另带层级（rowMeta）与“层级路径”列，
+   * scope 选全部已展开的行 / 只取顶层 / 只取最底层。有没展开的节点就判“部分”（只取顶层时除外）。
+   * crosstab＝交叉表，逆透视成长表（见 tableCrosstabLayoutSchema）。
+   */
+  layout: z
+    .discriminatedUnion('mode', [
+      /** 认出了层级，但用户选了按普通读（保留这个选择，编辑器里“读法”开关才不会消失）。 */
+      z.strictObject({ mode: z.literal('flat') }),
+      z.strictObject({ mode: z.literal('tree'), scope: z.enum(['all', 'top', 'leaf']).default('all') }),
+      tableCrosstabLayoutSchema,
+    ])
+    .optional(),
   readiness: tableReadinessPolicySchema.optional(),
   limits: z
     .strictObject({
@@ -178,6 +224,68 @@ export type TableReadPlan = z.infer<typeof tableReadPlanSchema>
 
 export function isTableReadPlanV2(plan: TableReadPlan): plan is TableReadPlanV2 {
   return plan.protocol === TABLE_READ_PROTOCOL_V2
+}
+
+/**
+ * 状态语义：按组件库官方类名的显式映射表认（antd、Element、Bootstrap、layui、ARIA），表外一律 unknown，不按颜色猜。
+ * 读出来 unknown 的格记为读不出（“未识别”），拿它作条件时判“无法确认”。
+ */
+export const TABLE_STATUS_TONES = ['success', 'warning', 'error', 'info', 'processing', 'default'] as const
+export type TableStatusTone = (typeof TABLE_STATUS_TONES)[number]
+export const TABLE_STATUS_TONE_LABEL: Record<TableStatusTone, string> = {
+  success: '成功',
+  warning: '警告',
+  error: '错误',
+  info: '信息',
+  processing: '进行中',
+  default: '默认',
+}
+
+/** 树形读取时系统加的一列：祖先与自身首列文字用“ / ”连接（如“华东 / 上海 / 站点0001”），可用作检查条件。 */
+export const TABLE_TREE_PATH_KEY = 'tree_path'
+export const TABLE_TREE_PATH_NAME = '层级路径'
+export const TABLE_TREE_PATH_COLUMN: TableColumnSpec = { key: TABLE_TREE_PATH_KEY, name: TABLE_TREE_PATH_NAME, valueType: 'text' }
+
+/** 交叉表长表在行维度之后追加的列：每层列维度一列（文字），最后是数值。 */
+export function tableCrosstabExtraColumns(layout: TableCrosstabLayout): TableColumnSpec[] {
+  return [
+    ...layout.columnDims.map((name, i) => ({ key: `${TABLE_CROSSTAB_DIM_PREFIX}${i + 1}`, name, valueType: 'text' as const })),
+    {
+      key: TABLE_CROSSTAB_VALUE_KEY,
+      name: layout.value.name,
+      valueType: 'number' as const,
+      numericKind: layout.value.numericKind,
+      ...(layout.value.scaleUnits ? { scaleUnits: true } : {}),
+    },
+  ]
+}
+
+/** 数据检查可引用的列：读取计划里的列；树形读取时另有“层级路径”；交叉表是长表的列（行维度、列维度、数值）。 */
+export function tablePlanCheckColumns(plan: {
+  columns: TableColumnSpec[]
+  layout?: { mode: 'flat' } | { mode: 'tree' } | TableCrosstabLayout
+}): TableColumnSpec[] {
+  if (plan.layout?.mode === 'crosstab') return [...plan.columns, ...tableCrosstabExtraColumns(plan.layout)]
+  return plan.layout?.mode === 'tree' && !plan.columns.some((c) => c.key === TABLE_TREE_PATH_KEY) ? [...plan.columns, TABLE_TREE_PATH_COLUMN] : plan.columns
+}
+
+/** 交叉表计划自身是否成立：行维度只能是表头列，列维度名不重名、不与行维度重名，列 key 不占用长表保留的 key。 */
+export function validateCrosstabPlan(plan: Pick<TableReadPlanV2, 'columns' | 'layout' | 'kind'>): { valid: true } | { valid: false; code: string; message: string } {
+  const layout = plan.layout
+  if (layout?.mode !== 'crosstab') return { valid: true }
+  if (plan.kind && plan.kind !== 'table') return { valid: false, code: 'TABLE_CROSSTAB_KIND', message: '只有表格能按交叉表读，卡片 / 详情 / 状态不行' }
+  for (const c of plan.columns) {
+    if (c.key === TABLE_CROSSTAB_VALUE_KEY || c.key.startsWith(TABLE_CROSSTAB_DIM_PREFIX)) {
+      return { valid: false, code: 'TABLE_CROSSTAB_KEY_RESERVED', message: `行维度列的 key「${c.key}」与交叉表长表的列冲突` }
+    }
+    if (c.selector || (c.read && c.read !== 'text')) {
+      return { valid: false, code: 'TABLE_CROSSTAB_ROW_DIM_INVALID', message: `行维度「${c.label ?? c.name}」须是表格里的一列（按表头或第几列取），不能是选择器或状态读法` }
+    }
+  }
+  const names = [...plan.columns.map((c) => c.label ?? c.name), ...layout.columnDims, layout.value.name]
+  const dup = names.find((n, i) => names.indexOf(n) !== i)
+  if (dup) return { valid: false, code: 'TABLE_CROSSTAB_NAME_DUPLICATE', message: `交叉表里有两列都叫「${dup}」，请给列头各层或数值换个名字` }
+  return { valid: true }
 }
 
 /** 编辑器切到“表格数据”时生成的占位计划（还没点选过表格）。运行前必须被真实计划替换。 */
@@ -294,6 +402,77 @@ export const tableFilePlanSchema = z.strictObject({
 })
 export type TableFilePlan = z.infer<typeof tableFilePlanSchema>
 
+// ---------------------------------------------------------------------------
+// 接口来源：把页面自己发出的 JSON 接口响应读成记录集（只读、不重放、不存请求头）
+// ---------------------------------------------------------------------------
+
+export const TABLE_NETWORK_PROTOCOL = 'table.network@1' as const
+/** 受管页面的接口响应缓冲：最近多少个、总计多大（先进先出）。单个响应上限见 TABLE_NETWORK_RESPONSE_MAX_BYTES。 */
+export const TABLE_NETWORK_CAPTURE_MAX_ENTRIES = 30
+export const TABLE_NETWORK_CAPTURE_MAX_BYTES = 16 * 1024 * 1024
+export const TABLE_NETWORK_WAIT_MAX_MS = 60_000
+export const TABLE_NETWORK_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
+
+/** JSON 路径：用点分隔的字段名或数组序号，如 data.list、series.0.data。 */
+export const tableJsonPathSchema = z.string().regex(/^[^.]+(?:\.[^.]+)*$/, '路径须为用点分隔的字段名或序号').max(256)
+
+export const tableNetworkMatchSchema = z.strictObject({
+  /** 地址里包含的片段；只和去掉查询串的地址比，时间戳等查询参数不影响匹配。 */
+  url: z.string().trim().min(1).max(512),
+  method: z.enum(TABLE_NETWORK_METHODS).optional(),
+  /** 期望的状态码；缺省要求 2xx。 */
+  status: z.number().int().min(100).max(599).optional(),
+})
+export type TableNetworkMatch = z.infer<typeof tableNetworkMatchSchema>
+
+export const tableNetworkPlanSchema = z
+  .strictObject({
+    protocol: z.literal(TABLE_NETWORK_PROTOCOL),
+    match: tableNetworkMatchSchema,
+    /** latest：取窗口内最近一个；single：窗口内必须恰好一个，多个就报错。 */
+    pick: z.enum(['latest', 'single']).default('latest'),
+    /**
+     * 什么时候的响应：page_load＝当前页面加载以来（缺省）；step_start＝本步开始后的新响应。
+     * 窗口内还没有匹配、或匹配的请求还在途时，最多等 waitMs。
+     */
+    window: z
+      .strictObject({
+        since: z.enum(['page_load', 'step_start']).default('page_load'),
+        waitMs: z.number().int().min(0).max(TABLE_NETWORK_WAIT_MAX_MS).default(10_000),
+      })
+      .default({ since: 'page_load', waitMs: 10_000 }),
+    /** rows：rowsPath 指向对象数组，每项一行，列路径相对每一项；columns：图表常见的“列式”数据，每列路径指向一个数组，按下标拼行。 */
+    layout: z.enum(['rows', 'columns']).default('rows'),
+    rowsPath: tableJsonPathSchema.optional(),
+    /** 接口给出的总条数字段，读出来作为分页信息的总条数。 */
+    totalPath: tableJsonPathSchema.optional(),
+    columns: z.array(tableColumnSpecSchema).min(1).max(TABLE_READ_MAX_COLS),
+    limits: z
+      .strictObject({
+        maxRows: z.number().int().min(1).max(TABLE_RECORDSET_MAX_ROWS).default(TABLE_RECORDSET_MAX_ROWS),
+      })
+      .default({ maxRows: TABLE_RECORDSET_MAX_ROWS }),
+  })
+  .superRefine((plan, ctx) => {
+    if (plan.layout === 'rows' && !plan.rowsPath) ctx.addIssue({ code: 'custom', path: ['rowsPath'], message: '按行读取须指定数据行所在的数组' })
+    if (plan.layout === 'columns' && plan.rowsPath) ctx.addIssue({ code: 'custom', path: ['rowsPath'], message: '按列读取时每列各自指定数组路径，不用 rowsPath' })
+    plan.columns.forEach((col, i) => {
+      if (!col.path) ctx.addIssue({ code: 'custom', path: ['columns', i, 'path'], message: `列「${col.name}」缺少字段路径` })
+    })
+  })
+export type TableNetworkPlan = z.infer<typeof tableNetworkPlanSchema>
+
+/** 记录集里“匹配到哪个请求”的描述：只有方法、去掉查询串的地址、状态码、时间、大小与摘要，不含请求头与响应原文。 */
+export const tableNetworkRequestSchema = z.strictObject({
+  method: z.string().min(1).max(16),
+  url: z.string().min(1).max(2048),
+  status: z.number().int().min(0).max(999),
+  at: utcInstantSchema,
+  byteSize: z.number().int().nonnegative(),
+  digest: z.string().min(1).max(128),
+})
+export type TableNetworkRequest = z.infer<typeof tableNetworkRequestSchema>
+
 export const tableRowFieldSchema = z.strictObject({
   value: jsonValueSchema,
   rawText: z.string().optional(),
@@ -326,6 +505,8 @@ export const tableSampleSchema = z.strictObject({
         encoding: z.string().max(32).optional(),
       })
       .optional(),
+    /** 接口来源：匹配到的是哪个请求（去敏描述）。 */
+    request: tableNetworkRequestSchema.optional(),
     runId: entityIdSchema,
     stepRunId: entityIdSchema.optional(),
     attemptId: entityIdSchema.optional(),
@@ -350,6 +531,45 @@ export const tableSampleSchema = z.strictObject({
   summaryRows: z.array(z.record(z.string(), tableRowFieldSchema)).max(5).optional(),
   /** 分页条上读到的分页信息（只有读到才有）。 */
   pageInfo: tablePageInfoSchema.optional(),
+  /**
+   * 树形读取：与 rows 一一对应的层级信息。level 从 0 起；parentIndex 是父行在 rows 里的位置（父行没读进来时不给）；
+   * expanded 只在有子行时给（false＝没展开，它的子行没读到）。
+   */
+  rowMeta: z
+    .array(
+      z.strictObject({
+        level: z.number().int().min(0).max(64),
+        parentIndex: z.number().int().nonnegative().optional(),
+        hasChildren: z.boolean(),
+        expanded: z.boolean().optional(),
+      }),
+    )
+    .optional(),
+  /**
+   * 交叉表读取：rows 是逆透视后的长表（只含明细格）；表头或行头为“合计 / 小计”的格单独放在 totals 里。
+   * 每个合计格的 rowLevel / colLevel 说明它汇总的范围：前 rowLevel 个行维度、前 colLevel 层列维度与它相同的明细格
+   * （等于维度个数时就是同一行 / 同一列）。dims 是行维度在前、列维度在后的显示文字。
+   */
+  crosstab: z
+    .strictObject({
+      rowDims: z.array(z.string()).min(1),
+      colDims: z.array(z.string()).min(1).max(TABLE_CROSSTAB_MAX_DIMS),
+      valueKey: z.string(),
+      /** 逆透视前：读到的数据行数与数值列数。 */
+      sourceRows: z.number().int().nonnegative(),
+      sourceColumns: z.number().int().nonnegative(),
+      totals: z.array(
+        z.strictObject({
+          rowLevel: z.number().int().min(0).max(64),
+          colLevel: z.number().int().min(0).max(TABLE_CROSSTAB_MAX_DIMS),
+          dims: z.array(z.string().nullable()),
+          value: tableRowFieldSchema,
+        }),
+      ),
+      /** 合计格太多、超出内联上限，只保留了前面的。 */
+      totalsTruncated: z.boolean().optional(),
+    })
+    .optional(),
   presentation: z.strictObject({
     omitted: z.boolean().default(false),
     previewCount: z.number().int().nonnegative().default(20),
@@ -501,6 +721,17 @@ export const tableExpectRuleSchema = z.discriminatedUnion('rule', [
     /** display：按合计行显示的小数位比较（显示值常是四舍五入的）；exact：精确比较。 */
     precision: z.enum(['display', 'exact']).default('display'),
   }),
+  /** 树形读取：每个父行的数字列等于它直接子行之和（精度规则同合计行核对）。 */
+  z.strictObject({
+    rule: z.literal('tree_rollup_match'),
+    column: z.string().min(1).max(64),
+    precision: z.enum(['display', 'exact']).default('display'),
+  }),
+  /** 交叉表读取：每个合计 / 小计格等于它汇总范围内明细格之和（空格当 0；精度规则同合计行核对）。 */
+  z.strictObject({
+    rule: z.literal('crosstab_total_match'),
+    precision: z.enum(['display', 'exact']).default('display'),
+  }),
   /** 列里没有重复值（去首尾空白后比较，空值不参与）。 */
   z.strictObject({
     rule: z.literal('column_unique'),
@@ -515,6 +746,27 @@ export const tableExpectRuleSchema = z.discriminatedUnion('rule', [
   /** 本页读到的行数与分页条一致（显示的“第 x 到 y 条”，或按每页条数、总条数、当前页算出的本页应有条数）。 */
   z.strictObject({
     rule: z.literal('page_consistency'),
+  }),
+  /**
+   * 与另一份数据一致：本步的记录集和本步之前另一个提取步骤的记录集，按键列逐行比对指定列，
+   * 报告缺行、多行与值不一致（例如“页面表格与接口返回一致”）。
+   */
+  z.strictObject({
+    rule: z.literal('record_sets_match'),
+    /** 另一份数据：之前某个提取步骤的输出名。 */
+    otherKey: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,127}$/, '须为提取步骤的输出名'),
+    key: z.strictObject({ column: z.string().min(1).max(64), otherColumn: z.string().min(1).max(64) }),
+    columns: z
+      .array(
+        z.strictObject({
+          column: z.string().min(1).max(64),
+          otherColumn: z.string().min(1).max(64),
+          /** display：数字按两边中较少的小数位比较（页面显示常四舍五入）；exact：精确比较。 */
+          precision: z.enum(['display', 'exact']).default('display'),
+        }),
+      )
+      .min(1)
+      .max(TABLE_READ_MAX_COLS),
   }),
   /**
    * 找到某一行，再检查它：先按 where 找行（全部满足才算这一行），再要求找到的行满足 expect。
@@ -598,6 +850,18 @@ export const tableOutcomeDetailsSchema = z.strictObject({
       closest: z.array(z.string().max(128)).max(3),
     })
     .optional(),
+  /** 与另一份数据比对（record_sets_match）的补充：一句人话与缺行 / 多行 / 值不一致的行数。 */
+  compare: z
+    .strictObject({
+      summary: z.string().max(512),
+      otherRowCount: z.number().int().nonnegative(),
+      /** 另一份有、本表没有。 */
+      missing: z.number().int().nonnegative(),
+      /** 本表有、另一份没有。 */
+      extra: z.number().int().nonnegative(),
+      mismatched: z.number().int().nonnegative(),
+    })
+    .optional(),
 })
 export type TableOutcomeDetails = z.infer<typeof tableOutcomeDetailsSchema>
 
@@ -649,7 +913,7 @@ export function checkTablePredicate(
     return { status: 'unknown', reasonCode: 'FIELD_MISSING', reasonSummary: '字段缺失或未读取到' }
   }
   if (field.status === 'error') {
-    return { status: 'unknown', reasonCode: 'FIELD_PARSE_ERROR', reasonSummary: '字段值解析失败' }
+    return { status: 'unknown', reasonCode: 'FIELD_PARSE_ERROR', reasonSummary: field.rawText ? `字段值读不出（${field.rawText.slice(0, 60)}）` : '字段值解析失败' }
   }
   if (field.status === 'masked') {
     return { status: 'unknown', reasonCode: 'FIELD_MASKED', reasonSummary: '字段已被脱敏遮蔽' }
@@ -1102,7 +1366,9 @@ export function describeTablePredicate(predicate: TablePredicate): string {
   }
   const v = (predicate as { value: string | number | boolean }).value
   if (typeof predicate.op === 'string' && predicate.op.startsWith('date_')) return `${PREDICATE_OP_TEXT[predicate.op]} ${v}`
-  const shown = typeof v === 'string' ? `「${v}」` : String(v)
+  // 状态语义的取值是英文代号，给人看时换成中文
+  const tone = typeof v === 'string' && (TABLE_STATUS_TONES as readonly string[]).includes(v) ? TABLE_STATUS_TONE_LABEL[v as TableStatusTone] : null
+  const shown = tone ? `「${tone}」` : typeof v === 'string' ? `「${v}」` : String(v)
   if (predicate.op === 'starts_with') return `以${shown}开头`
   if (predicate.op === 'ends_with') return `以${shown}结尾`
   return `${PREDICATE_OP_TEXT[predicate.op] ?? predicate.op}${typeof v === 'string' ? '' : ' '}${shown}`
@@ -1301,7 +1567,8 @@ function evaluateRowLookup(
 export function evaluateTableExpectation(
   sample: TableSample,
   rule: TableExpectRule,
-  options: { allowPreview?: boolean } = {},
+  /** other：record_sets_match 要比对的另一份记录集（由调用方按 otherKey 从上下文取来并加载全量）。 */
+  options: { allowPreview?: boolean; other?: TableSample } = {},
 ): TableEvaluationResult {
   const coverageComplete = sample.coverage.status === 'complete'
   const coverageDetails = coverageDetailsOf(sample)
@@ -1527,8 +1794,17 @@ export function evaluateTableExpectation(
     return evaluateColumnRule(sample, rule, coverageDetails)
   }
 
+  // 3b'. 树形：父行等于子行之和
+  if (rule.rule === 'tree_rollup_match') return evaluateTreeRollup(sample, rule, coverageDetails)
+
+  // 3b''. 交叉表：合计 / 小计格等于明细之和
+  if (rule.rule === 'crosstab_total_match') return evaluateCrosstabTotals(sample, rule, coverageDetails)
+
   // 3c. 本页行数与分页一致
   if (rule.rule === 'page_consistency') return evaluatePageConsistency(sample, coverageDetails)
+
+  // 3c'. 与另一份数据逐行一致
+  if (rule.rule === 'record_sets_match') return evaluateRecordSetsMatch(sample, rule, options.other, coverageDetails, options)
 
   // 3d. 找到某一行，再检查它
   if (rule.rule === 'row_lookup') {
@@ -1887,6 +2163,14 @@ function validatePredicateOnColumn(
       }
     }
     const pred = predicate
+    // 状态语义列：只能等于 / 不等于某个语义，或判空
+    if (col.read === 'tone') {
+      if (pred.op === 'is_empty' || pred.op === 'is_not_empty') return { valid: true }
+      if ((pred.op !== 'eq' && pred.op !== 'neq') || !(TABLE_STATUS_TONES as readonly unknown[]).includes(pred.value)) {
+        return { valid: false, code: 'TABLE_TONE_PREDICATE_INVALID', message: `「${col.label ?? col.name}」是状态语义，只能选成功 / 警告 / 错误 / 信息 / 进行中 / 默认` }
+      }
+      return { valid: true }
+    }
     if ('numericPolicy' in pred && pred.numericPolicy && col.valueType !== 'number') {
       return {
         valid: false,
@@ -1959,7 +2243,24 @@ export function validateTableExpectRuleAgainstPlan(
   rule: TableExpectRule,
   columns: TableColumnSpec[],
 ): { valid: true } | { valid: false; code: string; message: string } {
-  if (rule.rule === 'row_count' || rule.rule === 'page_total' || rule.rule === 'page_consistency') return { valid: true }
+  if (rule.rule === 'row_count' || rule.rule === 'page_total' || rule.rule === 'page_consistency' || rule.rule === 'crosstab_total_match') return { valid: true }
+
+  // 另一份数据的列由编译期按对方的读取计划另行核对
+  if (rule.rule === 'record_sets_match') {
+    for (const key of [rule.key.column, ...rule.columns.map((c) => c.column)]) {
+      if (!columns.some((c) => c.key === key)) {
+        return { valid: false, code: 'TABLE_COLUMN_NOT_DECLARED', message: `规则引用了读取计划未声明的列 "${key}"` }
+      }
+    }
+    return { valid: true }
+  }
+
+  if (rule.rule === 'tree_rollup_match') {
+    const col = columns.find((c) => c.key === rule.column)
+    if (!col) return { valid: false, code: 'TABLE_COLUMN_NOT_DECLARED', message: `规则引用了读取计划未声明的列 "${rule.column}"` }
+    if (col.valueType !== 'number') return { valid: false, code: 'TABLE_NUMBER_COLUMN_REQUIRED', message: `父行与子行之和核对只接受数字列，列 "${col.key}" 是 ${col.valueType}` }
+    return { valid: true }
+  }
 
   if (rule.rule === 'column_stat' || rule.rule === 'total_row_match' || rule.rule === 'column_unique') {
     const col = columns.find((c) => c.key === rule.column)
@@ -2131,4 +2432,295 @@ function evaluatePageConsistency(sample: TableSample, coverage: TableOutcomeDeta
     reasonMessage: passed ? undefined : `本页读到 ${actual} 行，但${expected.basis}，应有 ${expected.rows} 行`,
     details: pageDetails(coverage, actual),
   }
+}
+
+// ---------------------------------------------------------------------------
+// 与另一份数据一致（record_sets_match）
+// ---------------------------------------------------------------------------
+
+type RecordSetsRule = Extract<TableExpectRule, { rule: 'record_sets_match' }>
+
+const NUMERIC_TEXT = /^-?\d{1,3}(?:,\d{3})+(?:\.\d+)?$|^-?\d+(?:\.\d+)?$/
+
+/** 一格的可比较值：数字→精确十进制；像数字的文字（含千分位）也按数字比；其余按去空白的文字比。 */
+type Comparable = { kind: 'empty' } | { kind: 'number'; value: ScaledDecimal } | { kind: 'text'; value: string } | { kind: 'unreadable'; why: string }
+
+function comparableOf(field: TableRowField | undefined): Comparable {
+  if (!field || field.status === 'missing') return { kind: 'empty' }
+  if (field.status === 'masked') return { kind: 'unreadable', why: '已打码' }
+  if (field.status === 'error') return { kind: 'unreadable', why: '读不出' }
+  const v = field.value
+  if (v === null || v === '') return { kind: 'empty' }
+  if (typeof v === 'number') {
+    const scaled = toScaledDecimal(field.decimalValue, v)
+    return scaled ? { kind: 'number', value: scaled } : { kind: 'unreadable', why: '读不出' }
+  }
+  if (typeof v === 'boolean') return { kind: 'text', value: String(v) }
+  const text = String(typeof v === 'object' ? JSON.stringify(v) : v).replace(/\s+/g, ' ').trim()
+  if (NUMERIC_TEXT.test(text)) {
+    const scaled = parseScaledDecimal(text.replace(/,/g, ''))
+    if (scaled) return { kind: 'number', value: scaled }
+  }
+  return text === '' ? { kind: 'empty' } : { kind: 'text', value: text }
+}
+
+function comparableText(c: Comparable): string {
+  if (c.kind === 'number') return scaledToString(c.value)
+  if (c.kind === 'text') return c.value
+  if (c.kind === 'empty') return '（空）'
+  return `（${c.why}）`
+}
+
+/** 两格是否一致：数字 display 精度按两边较少的小数位比较；一边是数字一边是文字算不一致。 */
+function sameValue(a: Comparable, b: Comparable, precision: 'display' | 'exact'): boolean {
+  if (a.kind === 'empty' || b.kind === 'empty') return a.kind === b.kind
+  if (a.kind === 'number' && b.kind === 'number') {
+    if (precision === 'exact') return compareScaled(a.value, b.value) === 0
+    const scale = Math.min(a.value.scale, b.value.scale)
+    return compareScaled(roundScaled(a.value, scale), roundScaled(b.value, scale)) === 0
+  }
+  return a.kind === 'text' && b.kind === 'text' && a.value === b.value
+}
+
+function keyIndex(sample: TableSample, column: string): { ok: true; byKey: Map<string, number> } | { ok: false; code: string; message: string } {
+  const label = sample.columns.find((c) => c.key === column)?.name ?? column
+  const byKey = new Map<string, number>()
+  for (let i = 0; i < sample.rows.length; i++) {
+    const c = comparableOf(sample.rows[i]![column])
+    if (c.kind === 'empty' || c.kind === 'unreadable') {
+      return { ok: false, code: 'TABLE_COMPARE_KEY_MISSING', message: `第 ${i + 1} 行的键「${label}」为空或读不出，不能逐行比对` }
+    }
+    const key = comparableText(c)
+    if (byKey.has(key)) {
+      return { ok: false, code: 'TABLE_COMPARE_KEY_NOT_UNIQUE', message: `键「${label}」有重复值「${key}」，不能逐行比对；请换一个每行都不同的列作键` }
+    }
+    byKey.set(key, i)
+  }
+  return { ok: true, byKey }
+}
+
+function evaluateRecordSetsMatch(
+  sample: TableSample,
+  rule: RecordSetsRule,
+  other: TableSample | undefined,
+  coverage: TableOutcomeDetails['coverage'],
+  options: { allowPreview?: boolean },
+): TableEvaluationResult {
+  if (!other) return unknownResult(sample, 'TABLE_COMPARE_OTHER_MISSING', `没有读到要比对的另一份数据「${rule.otherKey}」，无法确认`)
+  if (isTablePreviewOnly(other) && !options.allowPreview) {
+    return unknownResult(sample, 'TABLE_FULLSET_NOT_LOADED', `另一份数据「${rule.otherKey}」只有预览行，完整数据没有加载，无法确认`)
+  }
+  if (other.coverage.status !== 'complete') {
+    return unknownResult(sample, 'TABLE_FACTS_UNAVAILABLE', `另一份数据「${rule.otherKey}」没有读全，无法逐行比对`)
+  }
+  const label = (s: TableSample, key: string) => s.columns.find((c) => c.key === key)?.name ?? key
+  for (const [s, key] of [
+    [sample, rule.key.column],
+    [other, rule.key.otherColumn],
+    ...rule.columns.flatMap((c) => [[sample, c.column], [other, c.otherColumn]] as const),
+  ] as const) {
+    if (!s.columns.some((c) => c.key === key)) {
+      return unknownResult(sample, 'TABLE_COLUMN_NOT_DECLARED', `${s === sample ? '本表' : `另一份数据「${rule.otherKey}」`}没有列「${key}」，无法比对`)
+    }
+  }
+  const mine = keyIndex(sample, rule.key.column)
+  if (!mine.ok) return unknownResult(sample, mine.code, mine.message)
+  const theirs = keyIndex(other, rule.key.otherColumn)
+  if (!theirs.ok) return unknownResult(sample, theirs.code, `另一份数据：${theirs.message}`)
+
+  const keyLabel = label(sample, rule.key.column)
+  const violating: TableViolatingRowPreview[] = []
+  let mismatched = 0
+  let extra = 0
+  let matched = 0
+  for (const [key, i] of mine.byKey) {
+    const j = theirs.byKey.get(key)
+    if (j === undefined) {
+      extra++
+      violating.push(rowPreview(i, key, null, 'RECORD_EXTRA', `${keyLabel} ${key}：本表有，另一份没有`))
+      continue
+    }
+    const diffs: string[] = []
+    for (const col of rule.columns) {
+      const a = comparableOf(sample.rows[i]![col.column])
+      const b = comparableOf(other.rows[j]![col.otherColumn])
+      if (a.kind === 'unreadable' || b.kind === 'unreadable') {
+        return unknownResult(sample, 'TABLE_FIELD_UNAVAILABLE', `${keyLabel} ${key} 的「${label(sample, col.column)}」${a.kind === 'unreadable' ? a.why : (b as { why: string }).why}，无法比对`)
+      }
+      if (!sameValue(a, b, col.precision)) diffs.push(`${label(sample, col.column)} 本表 ${comparableText(a)}，另一份 ${comparableText(b)}`)
+    }
+    if (diffs.length > 0) {
+      mismatched++
+      violating.push(rowPreview(i, sample.rows[i]![rule.columns[0]!.column]?.value ?? null, other.rows[j]![rule.columns[0]!.otherColumn]?.value ?? null, 'RECORD_VALUE_MISMATCH', `${keyLabel} ${key}：${diffs.join('；')}`))
+    } else matched++
+  }
+  let missing = 0
+  for (const [key, j] of theirs.byKey) {
+    if (mine.byKey.has(key)) continue
+    missing++
+    violating.push(rowPreview(j, null, key, 'RECORD_MISSING', `${keyLabel} ${key}：另一份有，本表没有`))
+  }
+  const passed = missing === 0 && extra === 0 && mismatched === 0
+  const parts = [missing ? `缺 ${missing} 行` : '', extra ? `多 ${extra} 行` : '', mismatched ? `${mismatched} 行值不一致` : ''].filter(Boolean)
+  const summary = passed
+    ? `与「${rule.otherKey}」逐行一致（${matched} 行）`
+    : `与「${rule.otherKey}」比对：${matched} 行一致；${parts.join('、')}`
+  const count = missing + extra + mismatched
+  return {
+    passed,
+    reasonCode: passed ? undefined : 'RECORD_SETS_MISMATCH',
+    reasonMessage: passed ? undefined : summary,
+    details: {
+      ...detailsOf(sample, coverage, { matchedRows: matched, violatingRowsCount: count, violatingRows: violating }),
+      compare: { summary: truncateUtf8Bytes(summary, 512).text, otherRowCount: other.rows.length, missing, extra, mismatched },
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 树形：父行等于子行之和（tree_rollup_match）
+// ---------------------------------------------------------------------------
+
+function evaluateTreeRollup(
+  sample: TableSample,
+  rule: Extract<TableExpectRule, { rule: 'tree_rollup_match' }>,
+  coverage: TableOutcomeDetails['coverage'],
+): TableEvaluationResult {
+  const meta = sample.rowMeta
+  if (!meta || meta.length !== sample.rows.length) {
+    return unknownResult(sample, 'TABLE_TREE_LEVELS_MISSING', '这次不是按树形读取的，没有父子关系，无法核对；请把读法改为“树形”')
+  }
+  const label = sample.columns.find((c) => c.key === rule.column)?.name ?? rule.column
+  const children = new Map<number, number[]>()
+  meta.forEach((m, i) => {
+    if (m.parentIndex !== undefined) children.set(m.parentIndex, [...(children.get(m.parentIndex) ?? []), i])
+  })
+  if (children.size === 0) {
+    return unknownResult(sample, 'TABLE_TREE_NO_PARENTS', '没有读到带子行的父行（只取顶层或最底层时没有父子行可比），无法核对')
+  }
+  const nameOf = (i: number): string => {
+    const path = sample.rows[i]?.[TABLE_TREE_PATH_KEY]?.value
+    return typeof path === 'string' && path ? path : `第 ${i + 1} 行`
+  }
+  const valueOf = (i: number): ScaledDecimal | null => {
+    const f = sample.rows[i]?.[rule.column]
+    if (!f || f.status !== 'ok' || typeof f.value !== 'number') return null
+    return toScaledDecimal(f.decimalValue, f.value)
+  }
+  const violating: TableViolatingRowPreview[] = []
+  let checked = 0
+  for (const [p, kids] of [...children].sort((a, b) => a[0] - b[0])) {
+    const own = valueOf(p)
+    const parts = kids.map(valueOf)
+    if (!own || parts.some((x) => !x)) {
+      return unknownResult(sample, 'TABLE_FIELD_UNAVAILABLE', `「${nameOf(p)}」或它的子行「${label}」读不出数字，无法核对`)
+    }
+    checked++
+    const sum = sumScaled(parts as ScaledDecimal[])
+    const compared = rule.precision === 'display' ? roundScaled(sum, own.scale) : sum
+    if (compareScaled(compared, own) !== 0) {
+      violating.push(
+        rowPreview(p, scaledToString(sum), scaledToString(own), 'TREE_ROLLUP_MISMATCH', `「${nameOf(p)}」的${label}：子行相加 ${scaledToString(sum)}，本行 ${scaledToString(own)}`),
+      )
+    }
+  }
+  const passed = violating.length === 0
+  return {
+    passed,
+    reasonCode: passed ? undefined : 'TREE_ROLLUP_MISMATCH',
+    reasonMessage: passed ? undefined : `${violating.length} 个父行的「${label}」与子行之和不一致：${violating[0]!.reasonSummary}`,
+    details: detailsOf(sample, coverage, { matchedRows: checked - violating.length, violatingRowsCount: violating.length, violatingRows: violating }),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 交叉表：合计 / 小计格等于它汇总范围内明细格之和（crosstab_total_match）
+// ---------------------------------------------------------------------------
+
+/** 维度格的比较文字：原文优先；与逆透视时写进合计格 dims 的口径一致。空格返回 null。 */
+export function crosstabDimText(field: TableRowField | undefined): string | null {
+  if (!field || field.status === 'missing') return null
+  const v = field.rawText ?? field.value
+  if (v === null || v === undefined) return null
+  const text = String(typeof v === 'object' ? JSON.stringify(v) : v).trim()
+  return text === '' ? null : text
+}
+
+/** 合计格的显示名：「行维度 / …」×「列维度 / …」（只取到汇总那一层为止的文字）。 */
+export function crosstabTotalName(total: { rowLevel: number; colLevel: number; dims: ReadonlyArray<string | null> }, rowDimCount: number): string {
+  const part = (dims: ReadonlyArray<string | null>) => dims.filter((d): d is string => Boolean(d)).join(' / ') || '全部'
+  return `「${part(total.dims.slice(0, rowDimCount))}」×「${part(total.dims.slice(rowDimCount))}」`
+}
+
+type CrosstabValue = { kind: 'number'; value: ScaledDecimal } | { kind: 'unreadable'; why: string }
+
+/** 数值格：空当 0（报表里空着 / “-” 就是没有）；读不出 / 打码则无法核对。 */
+function crosstabValueOf(field: TableRowField | undefined): CrosstabValue {
+  if (!field || field.status === 'missing' || (field.status === 'ok' && (field.value === null || field.value === ''))) return { kind: 'number', value: { int: 0n, scale: 0 } }
+  if (field.status === 'masked') return { kind: 'unreadable', why: '已打码' }
+  if (field.status !== 'ok' || typeof field.value !== 'number') return { kind: 'unreadable', why: `读不出数字（${field.rawText ?? String(field.value)}）` }
+  const scaled = toScaledDecimal(field.decimalValue, field.value)
+  return scaled ? { kind: 'number', value: scaled } : { kind: 'unreadable', why: '读不出数字' }
+}
+
+function evaluateCrosstabTotals(
+  sample: TableSample,
+  rule: Extract<TableExpectRule, { rule: 'crosstab_total_match' }>,
+  coverage: TableOutcomeDetails['coverage'],
+): TableEvaluationResult {
+  const x = sample.crosstab
+  if (!x) return unknownResult(sample, 'TABLE_CROSSTAB_MISSING', '这次不是按交叉表读取的，没有合计格可核对；请把读法改为“交叉表”')
+  if (x.totals.length === 0) return unknownResult(sample, 'TABLE_CROSSTAB_NO_TOTALS', '没有读到“合计 / 小计”行或列，无法核对')
+  if (x.totalsTruncated) {
+    return unknownResult(sample, 'TABLE_CROSSTAB_TOTALS_TRUNCATED', `合计格太多，只保存了前 ${x.totals.length} 个，无法确认全部合计`)
+  }
+  const R = x.rowDims.length
+  const keys = [...x.rowDims, ...x.colDims]
+  const cells = sample.rows.map((row) => ({ dims: keys.map((k) => crosstabDimText(row[k])), value: crosstabValueOf(row[x.valueKey]) }))
+  const violating: TableViolatingRowPreview[] = []
+  const unknown: string[] = []
+  let checked = 0
+  x.totals.forEach((total, t) => {
+    const name = crosstabTotalName(total, R)
+    const shown = crosstabValueOf(total.value)
+    if (shown.kind === 'unreadable') {
+      unknown.push(`${name}${shown.why}`)
+      return
+    }
+    // 汇总范围：前 rowLevel 个行维度、前 colLevel 层列维度与合计格相同
+    const covered = cells.filter((c) => {
+      for (let i = 0; i < total.rowLevel; i++) if (c.dims[i] !== total.dims[i]) return false
+      for (let j = 0; j < total.colLevel; j++) if (c.dims[R + j] !== total.dims[R + j]) return false
+      return true
+    })
+    if (covered.length === 0) {
+      unknown.push(`${name}找不到它汇总的明细格`)
+      return
+    }
+    const bad = covered.find((c) => c.value.kind === 'unreadable')
+    if (bad) {
+      unknown.push(`${name}汇总的明细里有格${(bad.value as { why: string }).why}`)
+      return
+    }
+    checked++
+    const sum = sumScaled(covered.map((c) => (c.value as { value: ScaledDecimal }).value))
+    const compared = rule.precision === 'display' ? roundScaled(sum, shown.value.scale) : sum
+    if (compareScaled(compared, shown.value) !== 0) {
+      violating.push(
+        rowPreview(t, scaledToString(sum), scaledToString(shown.value), 'CROSSTAB_TOTAL_MISMATCH', `${name}：明细相加 ${scaledToString(sum)}，合计格 ${scaledToString(shown.value)}`),
+      )
+    }
+  })
+  if (violating.length > 0) {
+    return {
+      passed: false,
+      reasonCode: 'CROSSTAB_TOTAL_MISMATCH',
+      reasonMessage: `${violating.length} 个合计格与明细之和不一致：${violating[0]!.reasonSummary}`,
+      details: detailsOf(sample, coverage, { matchedRows: checked - violating.length, violatingRowsCount: violating.length, violatingRows: violating }),
+    }
+  }
+  if (unknown.length > 0) {
+    return unknownResult(sample, 'TABLE_FIELD_UNAVAILABLE', `${unknown.length} 个合计格无法核对：${unknown[0]}`)
+  }
+  return { passed: true, details: detailsOf(sample, coverage, { matchedRows: checked, violatingRowsCount: 0 }) }
 }

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { isChromiumAvailableCached } from '../../testing/chromium-probe.js'
 import { detectTable } from '../table-read-v2.js'
-import { FIXTURES, centerOf, deps, plan, run, startHarness, startPortalHarness, type FixtureHarness, type PortalHarness, type TruthRows } from '../../testing/table-read-test-kit.js'
+import { FIXTURES, centerOf, deps, plan, run, startHarness, startPortalHarness, visibleTreeRows, type FixtureHarness, type PortalHarness, type TreeTruthRow, type TruthRows } from '../../testing/table-read-test-kit.js'
 import { ADAPTER_FACTORIES } from './registry.js'
 import type { AdapterHelpers } from './types.js'
 
@@ -47,6 +47,17 @@ export const PAGE_INFO_CASES: Record<string, PageInfoCase> = {
   antd: { file: 'antd?rows=45&paged=1', root: '#grid', portal: true, truthFields: ['totalRows', 'currentPage', 'pageSize'] },
 }
 
+/**
+ * 树形层级：声明了 rowLevel 的适配器各挂一条真值用例。页面数据都来自靶场同一份树形数据（/grids/truth?view=tree），
+ * collapsed 列出页面上折叠着的节点（它们的后代看不到）。
+ */
+type RowLevelCase = { file: string; root: string; portal?: boolean; collapsed: string[] }
+export const ROW_LEVEL_CASES: Record<string, RowLevelCase> = {
+  antd: { file: 'tree?lib=antd', root: '#grid', portal: true, collapsed: [] },
+  elementui: { file: 'elementui-tree.html', root: '.el-table', collapsed: ['华北'] },
+  easyui: { file: 'easyui-treegrid.html', root: '.datagrid-wrap', collapsed: ['西南'] },
+}
+
 const adapters = ADAPTER_FACTORIES.map((f) => f({} as AdapterHelpers))
 
 describe('适配器注册表描述', () => {
@@ -62,6 +73,9 @@ describe('适配器注册表描述', () => {
   })
   it('声明了分页条选择器的适配器都有分页读数用例', () => {
     expect(adapters.filter((a) => a.pagerSelector && !PAGE_INFO_CASES[a.shape]).map((a) => a.shape)).toEqual([])
+  })
+  it('声明了树形层级的适配器都有层级用例', () => {
+    expect(adapters.filter((a) => a.rowLevel && !ROW_LEVEL_CASES[a.shape]).map((a) => a.shape)).toEqual([])
   })
 })
 
@@ -135,6 +149,28 @@ describe('适配器注册表 × 点选识别一致性', { timeout: 120_000 }, ()
       }
       const { rawText: _raw, ...fields } = sample.pageInfo ?? { rawText: '' }
       expect(fields, `分页条原文：${sample.pageInfo?.rawText ?? '（没找到分页条）'}`).toEqual(expected)
+      await page.close()
+    })
+  }
+
+  for (const a of adapters.filter((x) => x.rowLevel)) {
+    it(`${a.shape}：树形层级与真值一致（识别出树形、层级 / 层级路径 / 展开状态逐行对上）`, async ({ skip }) => {
+      if (!available) skip()
+      const c = ROW_LEVEL_CASES[a.shape]!
+      const page = c.portal ? await portal!.newPage() : await harness!.browser.newPage()
+      await page.goto(c.portal ? `${portal!.base}/grids/${c.file}` : `${harness!.base}/${c.file}`)
+      await page.waitForSelector(c.root)
+      await page.getByText('华东').first().waitFor()
+      const detected = await detectTable(page, { kind: 'root', selector: c.root, framePath: [] }, deps)
+      expect(detected.outcome).toBe('FOUND')
+      if (detected.outcome !== 'FOUND') return
+      expect(detected.detected.plan.layout).toEqual({ mode: 'tree', scope: 'all' })
+      const sample = await run(page, detected.detected.plan)
+      const truth = (await portal!.truth<{ rows: TreeTruthRow[] }>('tree', '')).rows
+      const want = visibleTreeRows(truth, c.collapsed)
+      expect(sample.rows.map((r) => r.tree_path?.value)).toEqual(want.map((r) => r.path))
+      expect(sample.rowMeta?.map((m) => [m.level, m.hasChildren, m.expanded ?? null])).toEqual(want.map((r) => [r.level, r.hasChildren, r.hasChildren ? (r.expanded ?? true) : null]))
+      expect(sample.coverage.status).toBe(c.collapsed.length > 0 ? 'partial' : 'complete')
       await page.close()
     })
   }

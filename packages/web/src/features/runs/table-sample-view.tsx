@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import type { TableSample } from '@cairn/shared'
+import { crosstabTotalName, type TableSample } from '@cairn/shared'
 import { columnLabel, coverageSummary, pageInfoSummary, tableSampleOf } from '@/features/authoring/fields/table-plan-edit'
+import { StatusCell, TreeCell } from '@/features/authoring/fields/table-preview-grid'
 import { fetchEvidenceContent } from '@/lib/runs-api'
 import { recordSetToCsv, saveTextFile } from './table-recordset-csv'
 
@@ -17,6 +18,8 @@ function cell(sample: TableSample, rowIndex: number, key: string): string {
 }
 
 /** 表格读取结果：列名、行、页脚（合计）行，顶部一行范围说明与覆盖度。 */
+const formatSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
+
 export function TableSampleOutput({ output }: { output: unknown }) {
   const sample = tableSampleOf(output)
   const [shown, setShown] = useState(PAGE)
@@ -36,6 +39,11 @@ export function TableSampleOutput({ output }: { output: unknown }) {
           来源：文件「{sample.source.file.name}」{sample.source.file.sheet ? `· 工作表「${sample.source.file.sheet}」` : ''}
         </p>
       ) : null}
+      {sample.source.kind === 'network' && sample.source.request ? (
+        <p className='break-all text-label text-muted-foreground' data-testid='table-sample-source'>
+          来源：接口 {sample.source.request.method} {sample.source.request.url} · {sample.source.request.status} · {new Date(sample.source.request.at).toLocaleTimeString()} · {formatSize(sample.source.request.byteSize)}
+        </p>
+      ) : null}
       {pageInfoSummary(sample) ? <p className='text-label text-muted-foreground'>{pageInfoSummary(sample)}</p> : null}
       {sample.storage ? <FullRecordSetNote sample={sample} /> : null}
       <div className='overflow-x-auto'>
@@ -48,13 +56,24 @@ export function TableSampleOutput({ output }: { output: unknown }) {
             </tr>
           </thead>
           <tbody>
-            {Array.from({ length: rows }).map((_, i) => (
-              <tr key={i} className='border-t'>
-                {sample.columns.map((c) => (
-                  <td key={c.key} className='px-2 py-1'>{cell(sample, i, c.key)}</td>
-                ))}
-              </tr>
-            ))}
+            {Array.from({ length: rows }).map((_, i) => {
+              const meta = sample.rowMeta?.[i]
+              return (
+                <tr key={i} className='border-t' data-level={meta?.level}>
+                  {sample.columns.map((c, j) => (
+                    <td key={c.key} className='px-2 py-1'>
+                      {meta && j === 0 ? (
+                        <TreeCell level={meta.level} hasChildren={meta.hasChildren} expanded={meta.expanded} text={cell(sample, i, c.key)} />
+                      ) : c.read === 'tone' || c.read === 'percent' ? (
+                        <StatusCell field={sample.rows[i]?.[c.key]} read={c.read} />
+                      ) : (
+                        cell(sample, i, c.key)
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
           </tbody>
           {sample.summaryRows?.length ? (
             <tfoot className='border-t bg-muted/30'>
@@ -79,12 +98,46 @@ export function TableSampleOutput({ output }: { output: unknown }) {
           再显示 {Math.min(PAGE, sample.rows.length - rows)} 行（还剩 {sample.rows.length - rows} 行）
         </button>
       ) : null}
+      {sample.crosstab?.totals.length ? <CrosstabTotals sample={sample} /> : null}
       {sample.excluded && (sample.excluded.mergedRows || sample.excluded.paginationRows || sample.excluded.footerRows) ? (
         <p className='text-label text-muted-foreground'>
           未计入数据行：{sample.excluded.mergedRows ? `分组或说明行 ${sample.excluded.mergedRows} 行 ` : ''}
           {sample.excluded.paginationRows ? `分页栏 ${sample.excluded.paginationRows} 行 ` : ''}
           {sample.excluded.footerRows ? `页脚 ${sample.excluded.footerRows} 行` : ''}
         </p>
+      ) : null}
+    </div>
+  )
+}
+
+/** 交叉表合计 / 小计格：单独一列展示（行维度数只用于取显示名，逆透视时已写进 dims）。 */
+function CrosstabTotals({ sample }: { sample: TableSample }) {
+  const cross = sample.crosstab!
+  const [expanded, setExpanded] = useState(false)
+  const valueOf = (field: { status: string; value?: unknown; rawText?: string } | undefined): string => {
+    if (!field || field.status === 'missing') return '0'
+    if (field.status === 'masked') return '••••'
+    if (field.status === 'error') return `${field.rawText ?? ''}（读不出）`
+    return String(field.rawText ?? field.value ?? '')
+  }
+  const shown = expanded ? cross.totals : cross.totals.slice(0, 8)
+  return (
+    <div className='space-y-1 text-label' data-testid='table-crosstab-totals'>
+      <p className='text-muted-foreground'>
+        合计 / 小计格（{cross.totals.length} 个，不占数据行）
+        {cross.totalsTruncated ? `，合计格太多，只保存了前 ${cross.totals.length} 个` : ''}
+      </p>
+      <ul className='flex flex-wrap gap-x-3 gap-y-1'>
+        {shown.map((t, i) => (
+          <li key={i}>
+            {crosstabTotalName(t, cross.rowDims.length)} = {valueOf(t.value)}
+          </li>
+        ))}
+      </ul>
+      {cross.totals.length > shown.length ? (
+        <button type='button' className='text-link' onClick={() => setExpanded(true)}>
+          再显示 {cross.totals.length - shown.length} 个
+        </button>
       ) : null}
     </div>
   )

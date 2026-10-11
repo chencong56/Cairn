@@ -6,6 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DatePredicateFields } from './date-predicate-fields'
+import { ToneDot } from './tone-dot'
 import {
   columnTypeOf,
   defaultPredicate,
@@ -13,6 +14,7 @@ import {
   lookupIncomplete,
   normalizePredicate,
   predicateOptionsFor,
+  TONE_OPTIONS,
   type CheckColumn,
   type CheckKind,
 } from './table-checks-model'
@@ -64,7 +66,7 @@ function ConditionBlock({
   const shownOp = pendingOp ?? pred.op
   const needsValue = shownOp !== 'is_empty' && shownOp !== 'is_not_empty'
   const currentValue = 'value' in pred ? pred.value : undefined
-  const candidates = type === 'boolean' ? [] : candidatesOf(sample, cond.column)
+  const candidates = type === 'boolean' || type === 'tone' ? [] : candidatesOf(sample, cond.column)
   const pages = Math.max(1, Math.ceil(candidates.length / CHIPS_PER_PAGE))
   const chips = candidates.slice((page % pages) * CHIPS_PER_PAGE, (page % pages) * CHIPS_PER_PAGE + CHIPS_PER_PAGE)
 
@@ -91,6 +93,7 @@ function ConditionBlock({
     if (op === 'is_empty' || op === 'is_not_empty') return commit({ op })
     if (type === 'number') return commit({ op, value: typeof currentValue === 'number' ? currentValue : 0 } as TablePredicate)
     if (type === 'boolean') return commit({ op: op as 'eq' | 'neq', value: typeof currentValue === 'boolean' ? currentValue : true })
+    if (type === 'tone') return commit({ op: op as 'eq' | 'neq', value: typeof currentValue === 'string' && TONE_OPTIONS.some((t) => t.value === currentValue) ? currentValue : 'success' })
     const text = typeof currentValue === 'string' ? currentValue : ''
     if ((op === 'contains' || op === 'starts_with') && text === '') {
       setPendingOp(op)
@@ -142,7 +145,21 @@ function ConditionBlock({
       )}
       {needsValue && type !== 'date' ? (
         <div className='space-y-1' style={{ gridColumn: '1 / -1' }}>
-          {type === 'boolean' ? (
+          {type === 'tone' ? (
+            <Select value={typeof currentValue === 'string' ? currentValue : 'success'} disabled={disabled} onValueChange={(v) => commit({ op: shownOp as 'eq' | 'neq', value: v })}>
+              <SelectTrigger className='h-8 w-full' aria-label='语义'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TONE_OPTIONS.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>
+                    <ToneDot tone={t.value} />
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : type === 'boolean' ? (
             <Select value={currentValue === false ? 'false' : 'true'} disabled={disabled} onValueChange={(v) => commit({ op: shownOp as 'eq' | 'neq', value: v === 'true' })}>
               <SelectTrigger className='h-8 w-full' aria-label='值'>
                 <SelectValue />

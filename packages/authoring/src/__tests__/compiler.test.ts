@@ -339,6 +339,74 @@ describe('compileScenarioDocument', () => {
     expect(codes(compile(planOf(), { rule: 'page_total', op: 'gt', value: 0 }, 'release'))).toHaveLength(0)
     expect(codes(compile(planOf(), { rule: 'page_consistency' }, 'release'))).toHaveLength(0)
     expect(codes(compile(planOf('keyvalue'), { rule: 'page_consistency' }, 'release'))).toHaveLength(1)
+    // 树形：父子之和要求树形读法且读全部；“层级路径”只在树形读法下可用
+    const treeOf = (scope: 'all' | 'top') => ({ ...planOf(), layout: { mode: 'tree', scope } })
+    expect(codes(compile(treeOf('all'), { rule: 'tree_rollup_match', column: 'col_2', precision: 'display' }, 'release'))).toHaveLength(0)
+    expect(codes(compile(treeOf('top'), { rule: 'tree_rollup_match', column: 'col_2', precision: 'display' }, 'release'))).toHaveLength(1)
+    expect(codes(compile(planOf(), { rule: 'tree_rollup_match', column: 'col_2', precision: 'display' }, 'release'))).toHaveLength(1)
+    const byPath = { rule: 'any_row', column: 'tree_path', predicate: { op: 'contains', value: '华东' } }
+    expect(codes(compile(treeOf('all'), byPath, 'release'))).toHaveLength(0)
+    expect(codes(compile(planOf(), byPath, 'release'))).toHaveLength(1)
+  })
+
+  it('与另一份数据一致：另一份须是本步之前的提取输出、两边列都存在；接口来源步骤不要求页面目标', () => {
+    const rootTarget = { framePath: [], candidates: [{ by: 'css', value: '#grid' }] }
+    const pageStep = {
+      id: ids.b,
+      name: '读页面表格',
+      type: 'extract' as const,
+      effectType: 'READ_ONLY' as const,
+      outputKey: 'pageRows',
+      input: {
+        target: rootTarget,
+        as: 'table' as const,
+        table: { protocol: 'table.read@2', target: rootTarget, columns: [{ key: 'no', name: '编号', valueType: 'text' }, { key: 'qty', name: '数量', valueType: 'number', numericKind: 'integer' }] },
+      },
+    }
+    const apiStep = {
+      id: ids.c,
+      name: '读接口',
+      type: 'extract' as const,
+      effectType: 'READ_ONLY' as const,
+      outputKey: 'apiRows',
+      input: {
+        as: 'table' as const,
+        source: 'network' as const,
+        table: {
+          protocol: 'table.network@1',
+          match: { url: '/grids/api/sites' },
+          rowsPath: 'data.list',
+          columns: [{ key: 'id', name: 'id', path: 'id', valueType: 'number', numericKind: 'integer' }, { key: 'qty', name: 'qty', path: 'qty', valueType: 'number', numericKind: 'integer' }],
+        },
+      },
+    }
+    const check = (stepId: string, key: string, rule: unknown) => ({
+      contractId: ids.d,
+      scope: 'step' as const,
+      meaning: '与页面一致',
+      severity: 'MUST' as const,
+      onViolation: 'continue' as const,
+      provenance: 'manual' as const,
+      stepId,
+      rule: { kind: 'context' as const, key, expect: { kind: 'table' as const, rule } },
+    })
+    const rule = (otherKey: string, otherQty = 'qty') => ({ rule: 'record_sets_match', otherKey, key: { column: 'id', otherColumn: 'no' }, columns: [{ column: 'qty', otherColumn: otherQty, precision: 'display' }] })
+    const compile = (entry: unknown) =>
+      compileScenarioDocument(document([navigate(ids.a), pageStep as never, apiStep as never]), {
+        mode: 'release',
+        target: { exists: true, status: 'active' },
+        outcomeManifest: { entries: [entry as never] },
+      })
+    const invalid = (r: ReturnType<typeof compile>) => r.diagnostics.filter((d) => d.code === 'SCENARIO_TABLE_CHECK_INVALID')
+
+    const ok = compile(check(ids.c, 'apiRows', rule('pageRows')))
+    expect(invalid(ok)).toHaveLength(0)
+    // 接口来源步骤没有页面目标，不因定位报错
+    expect(ok.diagnostics.filter((d) => d.stepId === ids.c)).toEqual([])
+    // 另一份不存在 / 在本步之后 / 缺列
+    expect(invalid(compile(check(ids.c, 'apiRows', rule('nope'))))[0]?.message).toContain('不是本步之前')
+    expect(invalid(compile(check(ids.b, 'pageRows', { ...rule('apiRows'), key: { column: 'no', otherColumn: 'id' } })))[0]?.message).toContain('不是本步之前')
+    expect(invalid(compile(check(ids.c, 'apiRows', rule('pageRows', 'amount'))))[0]?.message).toContain('没有列「amount」')
   })
 
   it('只有 INFO 条件时给出业务语义提示且不阻断发布', () => {

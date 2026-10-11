@@ -47,6 +47,9 @@ import {
   observeOperationSchema,
   parseWorkerEndpoints,
   targetObservationSchema,
+  networkInspectObservationSchema,
+  networkListObservationSchema,
+  networkReadObservationSchema,
   tableDetectObservationSchema,
   tableObservationSchema,
   platformConfigDocumentSchema,
@@ -270,6 +273,11 @@ export class BrowserSessionsService {
       JSON.stringify(operation),
     )
     // 会话态（未试跑）开放目标观察、点选识别与读取预览；表格发现仍走运行观察。
+    if (operation.op === 'network') {
+      if (operation.subOp === 'inspect') return networkInspectObservationSchema.parse(raw)
+      if (operation.subOp === 'read') return networkReadObservationSchema.parse(raw)
+      return networkListObservationSchema.parse(raw)
+    }
     if (operation.op === 'table' && operation.subOp === 'detect') return tableDetectObservationSchema.parse(raw)
     if (operation.op === 'table' && operation.subOp === 'sample') return tableObservationSchema.parse(raw)
     return targetObservationSchema.parse(raw)

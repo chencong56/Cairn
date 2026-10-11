@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AddressInfo } from 'node:net'
 import { expect } from 'vitest'
-import { chromium, type Browser, type Page } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { tableReadPlanV2Schema, TABLE_READ_PROTOCOL_V2, type TableReadPlanV2 } from '@cairn/shared'
 import { locate } from '../browser/surface.js'
 import { pickOnPage } from '../browser/observe.js'
@@ -29,7 +29,7 @@ export type ColumnInput = {
 export function plan(
   selector: string,
   columns: ColumnInput[],
-  extra: Partial<Pick<TableReadPlanV2, 'rows' | 'readiness' | 'limits' | 'kind'>> = {},
+  extra: Partial<Pick<TableReadPlanV2, 'rows' | 'readiness' | 'limits' | 'kind' | 'layout'>> = {},
   framePath: TableReadPlanV2['target']['framePath'] = [],
 ): TableReadPlanV2 {
   return tableReadPlanV2Schema.parse({
@@ -93,6 +93,8 @@ export async function centerOf(page: Page, selector: string): Promise<{ x: numbe
 export type PortalHarness = {
   base: string
   newPage: () => Promise<Page>
+  /** 页面所在的浏览器上下文（接口捕获挂在上下文上）。 */
+  context: BrowserContext
   /** 靶场标准答案：/grids/truth?view=…&<与页面相同的参数>。 */
   truth: <T = TruthRows>(view: string, query: string) => Promise<T>
   close: () => Promise<void>
@@ -137,6 +139,7 @@ export async function startPortalHarness(): Promise<PortalHarness> {
   await context.addCookies([{ name: 'portal_session', value: 'demo', url: base }])
   return {
     base,
+    context,
     newPage: () => context.newPage(),
     truth: async <T,>(view: string, query: string) => {
       const res = await context.request.get(`${base}/grids/truth?view=${view}&${query.replace(/^\?/, '')}`)
@@ -148,4 +151,14 @@ export async function startPortalHarness(): Promise<PortalHarness> {
       await new Promise<void>((done) => server.close(() => done()))
     },
   }
+}
+
+/** 靶场树形真值（/grids/truth?view=tree）的一行。 */
+export type TreeTruthRow = { level: number; name: string; path: string; qty: number; amount: number; hasChildren: boolean; expanded?: boolean }
+
+/** 全部展开的树形真值 → 指定节点折叠后页面上看得到的行（折叠节点的后代都看不到）。 */
+export function visibleTreeRows(rows: readonly TreeTruthRow[], collapsed: readonly string[]): TreeTruthRow[] {
+  const shut = new Set(collapsed)
+  const hidden = (path: string) => [...shut].some((name) => rows.some((r) => r.name === name && path.startsWith(`${r.path} / `)))
+  return rows.filter((r) => !hidden(r.path)).map((r) => (shut.has(r.name) ? { ...r, expanded: false } : r))
 }

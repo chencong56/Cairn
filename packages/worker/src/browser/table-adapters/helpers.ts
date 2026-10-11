@@ -1,6 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { AdapterHelpers } from './types.js'
 
+/**
+ * Node 侧判断“合计 / 小计”表头文字（交叉表逆透视拆列维度用）。
+ * makeHelpers 里的 TOTAL_RE 序列化进页面执行、不能引用模块作用域，两处必须同步改。
+ */
+export const TOTAL_HEADER_RE = /^(合计|总计|小计|汇总|合\s*计|总\s*计|total|sum|subtotal)\s*[:：]?$/i
+
 /** 页面内自包含：不得引用模块作用域内的任何运行时值。 */
 export function makeHelpers(doc: any): AdapterHelpers {
   const win: any = doc.defaultView

@@ -28,6 +28,7 @@ import { TargetFields } from './target'
 import { TableDataFields } from './table-data-fields'
 import { ExtractTypeSelect } from './extract-type-select'
 import { FileTableFields } from './table-file-fields'
+import { NetworkTableFields } from './table-network-fields'
 
 function policyHandlers(step: Step, onChange: (step: Step) => void) {
   return {
@@ -697,12 +698,14 @@ export function StepFields({
     const extractStep = step
     if (extractStep.input.as === 'table') {
       const tableInput = extractStep.input
-      const isFile = 'source' in tableInput && tableInput.source === 'file'
+      const source = 'source' in tableInput ? tableInput.source : 'page'
       return (
         <div className='space-y-3'>
           <ExtractTypeSelect step={extractStep} disabled={disabled} onChange={onChange} onRequestAiExtract={requestAiExtract} />
-          {isFile ? (
+          {source === 'file' ? (
             <FileTableFields step={extractStep} disabled={disabled} onChange={onChange} />
+          ) : source === 'network' ? (
+            <NetworkTableFields step={extractStep} disabled={disabled} onChange={onChange} />
           ) : (
             <TableDataFields step={extractStep} disabled={disabled} onChange={onChange} />
           )}

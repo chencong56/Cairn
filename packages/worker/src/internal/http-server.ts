@@ -15,6 +15,9 @@ import {
   observeOperationSchema,
   requireInternalSecret,
   resumeAuthBodySchema,
+  networkInspectObservationSchema,
+  networkListObservationSchema,
+  networkReadObservationSchema,
   structureObservationSchema,
   tableObservationSchema,
   tableDiscoveryObservationSchema,
@@ -219,6 +222,12 @@ async function handleRequest(
     const result = await ctx.sessions.observeRun({ runId, actorId, op: body })
     const parsed = body.op === 'structure'
       ? structureObservationSchema.parse(result)
+      : body.op === 'network'
+        ? body.subOp === 'inspect'
+          ? networkInspectObservationSchema.parse(result)
+          : body.subOp === 'read'
+            ? networkReadObservationSchema.parse(result)
+            : networkListObservationSchema.parse(result)
       : body.op === 'table'
         ? body.subOp === 'discover'
           ? tableDiscoveryObservationSchema.parse(result)

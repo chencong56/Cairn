@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { outcomeContractSchema } from '@cairn/shared'
 import {
+  TONE_OPTIONS,
   buildTableCheck,
+  defaultCompareRule,
   defaultRule,
+  pairColumns,
   sentenceOf,
   splitTableChecks,
   templatesFor,
@@ -184,3 +187,97 @@ describe('分页检查模板', () => {
     expect(sentenceOf({ rule: 'page_consistency' }, labelOf)).toBe('本页读到的行数与分页显示一致')
   })
 })
+
+describe('与另一份数据一致', () => {
+  const page: CheckColumn[] = [
+    { key: 'col_1', label: '编号', numeric: true },
+    { key: 'col_2', label: '站点名称', numeric: false },
+    { key: 'col_4', label: '数量', numeric: true },
+    { key: 'col_5', label: '金额（元）', numeric: true },
+  ]
+  const api = { key: 'apiRows', stepId: 's1', stepName: '读接口', columns: [
+    { key: 'id', label: 'id', numeric: true },
+    { key: 'name', label: 'name', numeric: false },
+    { key: 'qty', label: 'qty', numeric: true },
+    { key: 'amount', label: 'amount', numeric: true },
+  ] as CheckColumn[] }
+
+  it('只有本步之前还有别的一组数据时才出现这个模板；详情信息不出现', () => {
+    expect(templatesFor('table').some((t) => t.value === 'record_sets_match')).toBe(false)
+    expect(templatesFor('table', null, [api]).some((t) => t.value === 'record_sets_match')).toBe(true)
+    expect(templatesFor('keyvalue', null, [api]).some((t) => t.value === 'record_sets_match')).toBe(false)
+  })
+
+  it('按列名自动配对（含常见中英文字段名、去掉括号里的单位）：第一对作键，其余都比对', () => {
+    expect(pairColumns(page, api.columns)).toEqual([
+      { column: 'col_1', otherColumn: 'id' },
+      { column: 'col_2', otherColumn: 'name' },
+      { column: 'col_4', otherColumn: 'qty' },
+      { column: 'col_5', otherColumn: 'amount' },
+    ])
+    const rule = defaultCompareRule(page, api)
+    expect(rule).toMatchObject({ rule: 'record_sets_match', otherKey: 'apiRows', key: { column: 'col_1', otherColumn: 'id' } })
+    expect(rule && rule.rule === 'record_sets_match' ? rule.columns.map((c) => c.otherColumn) : []).toEqual(['name', 'qty', 'amount'])
+    const labelOf = (k: string) => page.find((c) => c.key === k)?.label ?? k
+    expect(sentenceOf(rule!, labelOf)).toBe('与「apiRows」按「编号」逐行一致（比对「站点名称」、「数量」、「金额（元）」）')
+  })
+
+  it('一对也配不上：退回第一列作键、第二列比对，交给用户改', () => {
+    const rule = defaultCompareRule([{ key: 'a', label: '甲', numeric: false }, { key: 'b', label: '乙', numeric: true }], { ...api, columns: [{ key: 'x', label: 'x', numeric: false }, { key: 'y', label: 'y', numeric: true }] })
+    expect(rule).toMatchObject({ key: { column: 'a', otherColumn: 'x' }, columns: [{ column: 'b', otherColumn: 'y' }] })
+  })
+})
+
+describe('父行等于子行之和', () => {
+  const cols: CheckColumn[] = [
+    { key: 'name', label: '名称', numeric: false },
+    { key: 'qty', label: '数量', numeric: true },
+    { key: 'tree_path', label: '层级路径', numeric: false },
+  ]
+  it('只有树形且读全部已展开的行时才出现；默认取第一个数字列；句子说清楚', () => {
+    expect(templatesFor('table').some((t) => t.value === 'tree_rollup_match')).toBe(false)
+    expect(templatesFor('table', null, [], true).some((t) => t.value === 'tree_rollup_match')).toBe(true)
+    expect(templatesFor('cards', null, [], true).some((t) => t.value === 'tree_rollup_match')).toBe(false)
+    const rule = defaultRule('tree_rollup_match', cols)
+    expect(rule).toEqual({ rule: 'tree_rollup_match', column: 'qty', precision: 'display' })
+    expect(sentenceOf(rule!, (k) => cols.find((c) => c.key === k)?.label ?? k)).toBe('每个父行的「数量」等于其下一级之和')
+  })
+})
+
+describe('合计格等于明细之和', () => {
+  const cols: CheckColumn[] = [
+    { key: 'col_1', label: '区域', numeric: false },
+    { key: 'col_2', label: '城市', numeric: false },
+    { key: 'value', label: '值', numeric: true },
+  ]
+  it('只有交叉表读法才出现；默认按显示精度；句子说清楚', () => {
+    expect(templatesFor('table').some((t) => t.value === 'crosstab_total_match')).toBe(false)
+    expect(templatesFor('table', null, [], true, true).some((t) => t.value === 'crosstab_total_match')).toBe(true)
+    expect(templatesFor('cards', null, [], false, true).some((t) => t.value === 'crosstab_total_match')).toBe(false)
+    const rule = defaultRule('crosstab_total_match', cols)
+    expect(rule).toEqual({ rule: 'crosstab_total_match', precision: 'display' })
+    const labelOf = (k: string) => cols.find((c) => c.key === k)?.label ?? k
+    expect(sentenceOf(rule!, labelOf)).toBe('每个合计 / 小计格等于它汇总范围内明细之和')
+    expect(sentenceOf({ rule: 'crosstab_total_match', precision: 'exact' }, labelOf)).toBe('每个合计 / 小计格等于它汇总范围内明细之和（精确比较）')
+  })
+})
+
+describe('状态信号', () => {
+  const cols: CheckColumn[] = [
+    { key: 'text', label: '文字', numeric: false },
+    { key: 'tone', label: '语义', numeric: false, valueType: 'tone' },
+  ]
+  const labelOf = (k: string) => cols.find((c) => c.key === k)?.label ?? k
+  it('状态用“项”说话；模板只有适用的几种', () => {
+    expect(templatesFor('status').map((t) => t.label)).toEqual(['共有多少项', '每一项都满足', '至少有一项满足', '找到某一项，再检查它'])
+    expect(sentenceOf({ rule: 'row_count', op: 'gte', value: 1 }, labelOf, 'status')).toBe('状态共有大于等于 1 项')
+  })
+  it('语义条件：只给是 / 不是，默认“成功”；句子里显示中文', () => {
+    expect(predicateOptionsFor('tone', 'where').map((o) => o.label)).toEqual(['是', '不是'])
+    expect(predicateOptionsFor('tone', 'expect').map((o) => o.op)).toEqual(['eq', 'neq', 'is_empty', 'is_not_empty'])
+    expect(defaultPredicate(cols[1], 'expect')).toEqual({ op: 'eq', value: 'success' })
+    expect(TONE_OPTIONS.map((t) => t.label)).toEqual(['成功', '警告', '错误', '信息', '进行中', '默认'])
+    expect(sentenceOf({ rule: 'all_rows', column: 'tone', predicate: { op: 'neq', value: 'error' }, allowEmpty: false }, labelOf, 'status')).toBe('每一项的「语义」都不是「错误」')
+  })
+})
+

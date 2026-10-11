@@ -95,4 +95,90 @@ describe('TableSampleOutput', () => {
     const screen = await render(<TableSampleOutput output={{ value: fromFile }} />)
     await expect.element(screen.getByTestId('table-sample-source')).toHaveTextContent('来源：文件「站点清单.xlsx」· 工作表「站点明细」')
   })
+
+  it('接口来源：显示方法、去敏地址、状态码与大小；总条数说成“接口给的”而不是分页', async () => {
+    const fromApi: TableSample = {
+      ...sample,
+      source: { ...sample.source, kind: 'network', request: { method: 'POST', url: 'http://lab/grids/api/sites', status: 200, at: '2026-10-09T06:02:11.000Z', byteSize: 32_768, digest: 'sha256:x' } },
+      pageInfo: { totalRows: 45, rawText: '接口 data.total = 45' },
+    }
+    const screen = await render(<TableSampleOutput output={{ value: fromApi }} />)
+    await expect.element(screen.getByTestId('table-sample-source')).toHaveTextContent('来源：接口 POST http://lab/grids/api/sites · 200')
+    await expect.element(screen.getByTestId('table-sample-source')).toHaveTextContent('32 KB')
+    await expect.element(screen.getByText('接口给的总条数：45')).toBeVisible()
+  })
+
+  it('树形：第一列按层级缩进，父行带 ▾ / ▸', async () => {
+    const tree: TableSample = {
+      ...sample,
+      columns: [{ key: 'region', name: '名称', valueType: 'text' }],
+      rows: [{ region: { value: '华东', status: 'ok' } }, { region: { value: '上海', status: 'ok' } }, { region: { value: '华北', status: 'ok' } }],
+      rowMeta: [{ level: 0, hasChildren: true, expanded: true }, { level: 1, parentIndex: 0, hasChildren: false }, { level: 0, hasChildren: true, expanded: false }],
+      rowCount: 3,
+      summaryRows: undefined,
+      coverage: { requestedScope: 'current_page', observedScope: 'current_page', status: 'partial', reasonCode: 'TABLE_TREE_COLLAPSED', reasonMessage: '有 1 个节点没展开，读不全。要读全，请在本步前加点击展开的步骤' },
+      presentation: { omitted: false, previewCount: 3 },
+    }
+    const screen = await render(<TableSampleOutput output={{ value: tree }} />)
+    const rows = Array.from(document.querySelectorAll('tbody tr')) as HTMLElement[]
+    expect(rows.map((r) => r.dataset.level)).toEqual(['0', '1', '0'])
+    expect(rows.map((r) => r.textContent)).toEqual(['▾华东', '上海', '▸（没展开）华北'])
+    await expect.element(screen.getByText('有 1 个节点没展开', { exact: false })).toBeVisible()
+  })
+
+  it('交叉表：合计 / 小计格单独列出，不占数据行；截断时如实说明', async () => {
+    const cross: TableSample = {
+      ...sample,
+      columns: [
+        { key: 'col_1', name: '区域', valueType: 'text' },
+        { key: 'col_2', name: '城市', valueType: 'text' },
+        { key: 'dim_1', name: '指标', valueType: 'text' },
+        { key: 'value', name: '值', valueType: 'number', numericKind: 'decimal' },
+      ],
+      rows: [
+        { col_1: { value: '华东', status: 'ok' }, col_2: { value: '上海', status: 'ok' }, dim_1: { value: '本年累计', status: 'ok' }, value: { value: 12.5, rawText: '12.5', status: 'ok' } },
+      ],
+      rowCount: 1,
+      summaryRows: undefined,
+      crosstab: {
+        rowDims: ['col_1', 'col_2'],
+        colDims: ['dim_1'],
+        valueKey: 'value',
+        sourceRows: 2,
+        sourceColumns: 3,
+        totals: [
+          { rowLevel: 1, colLevel: 0, dims: ['华东', '小计', '合计'], value: { value: 277.5, rawText: '277.5', status: 'ok' } },
+          { rowLevel: 0, colLevel: 1, dims: [null, null, '本年累计'], value: { value: null, status: 'missing' } },
+        ],
+        totalsTruncated: true,
+      },
+      presentation: { omitted: false, previewCount: 1 },
+    }
+    const screen = await render(<TableSampleOutput output={{ value: cross }} />)
+    await expect.element(screen.getByText('合计 / 小计格（2 个，不占数据行），合计格太多，只保存了前 2 个')).toBeVisible()
+    await expect.element(screen.getByText('「华东 / 小计」×「合计」 = 277.5')).toBeVisible()
+    await expect.element(screen.getByText('「全部」×「本年累计」 = 0')).toBeVisible()
+  })
+
+  it('状态：语义格画色点加中文，未识别显示“未识别”；百分比带 %', async () => {
+    const status: TableSample = {
+      ...sample,
+      columns: [
+        { key: 'text', name: '文字', valueType: 'text' },
+        { key: 'tone', name: '语义', valueType: 'text', read: 'tone' },
+        { key: 'pct', name: '进度', valueType: 'number', numericKind: 'decimal', read: 'percent' },
+      ],
+      rows: [
+        { text: { value: '财务复核', status: 'ok' }, tone: { value: 'processing', rawText: '财务复核', status: 'ok' }, pct: { value: 60, decimalValue: '60', status: 'ok' } },
+        { text: { value: '绿色标签', status: 'ok' }, tone: { value: null, rawText: '未识别的状态样式：绿色标签', status: 'error' }, pct: { value: null, status: 'missing' } },
+      ],
+      rowCount: 2,
+      summaryRows: undefined,
+      presentation: { omitted: false, previewCount: 2 },
+    }
+    await render(<TableSampleOutput output={{ value: status }} />)
+    const cells = Array.from(document.querySelectorAll('tbody tr')).map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent))
+    expect(cells).toEqual([['财务复核', '进行中', '60%'], ['绿色标签', '未识别', '—']])
+  })
 })
+

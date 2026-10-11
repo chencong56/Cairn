@@ -1,5 +1,6 @@
 import {
   TABLE_FILE_PROTOCOL,
+  TABLE_NETWORK_PROTOCOL,
   TABLE_PLACEHOLDER_COLUMN_NAME,
   TABLE_READ_MAX_COLS,
   TABLE_READ_PROTOCOL_V2,
@@ -9,8 +10,10 @@ import {
   type TableDetectedColumn,
   type TableReadPlan,
   tableFilePlanSchema,
+  tableNetworkPlanSchema,
   tableSampleSchema,
   type TableFilePlan,
+  type TableNetworkPlan,
   type TableReadPlanV2,
   type TableSample,
 } from '@cairn/shared'
@@ -40,14 +43,24 @@ export function createPlaceholderFilePlan(fromKey: string): TableFilePlan {
   })
 }
 
-export type ReadKind = 'table' | 'cards' | 'keyvalue'
+/** 切到“接口返回的数据”时的占位计划（还没选接口）；列为占位列，运行前必须被真实计划替换。 */
+export function createPlaceholderNetworkPlan(): TableNetworkPlan {
+  return tableNetworkPlanSchema.parse({
+    protocol: TABLE_NETWORK_PROTOCOL,
+    match: { url: '/' },
+    rowsPath: 'data',
+    columns: [{ key: 'col_1', name: TABLE_PLACEHOLDER_COLUMN_NAME, path: 'col_1', valueType: 'text' }],
+  })
+}
+
+export type ReadKind = 'table' | 'cards' | 'keyvalue' | 'status'
 
 export function planKind(plan: TableReadPlan | null | undefined): ReadKind {
   return plan && isTableReadPlanV2(plan) && plan.kind ? plan.kind : 'table'
 }
 
 export function kindNoun(kind: ReadKind): string {
-  return kind === 'cards' ? '卡片' : kind === 'keyvalue' ? '详情信息' : '表格'
+  return kind === 'cards' ? '卡片' : kind === 'keyvalue' ? '详情信息' : kind === 'status' ? '状态' : '表格'
 }
 
 /** 识别结果的一行结论：表格 N 行 × M 列 / 卡片 N 张 / 详情信息 N 项。 */
@@ -55,6 +68,7 @@ export function foundSummary(detected: Pick<TableDetected, 'rowCount' | 'colCoun
   const kind = planKind(detected.plan)
   if (kind === 'cards') return `找到一组卡片，${detected.rowCount} 张，每张 ${detected.colCount} 项`
   if (kind === 'keyvalue') return `找到一块详情信息，共 ${detected.colCount} 项`
+  if (kind === 'status') return `找到一组状态，${detected.rowCount} 项`
   return `找到一张表格，${detected.rowCount} 行 × ${detected.colCount} 列`
 }
 
@@ -85,9 +99,13 @@ export function toggleColumn<P extends ColumnPlan>(
   if (present) return plan
   const info = detectedColumns.find((c) => c.key === key)
   if (!info) return plan
+  const path = (info as TableDetectedColumn & { path?: string }).path
   const spec: PlanColumn = {
     key: info.key,
     name: info.name,
+    ...(info.label ? { label: info.label } : {}),
+    ...(info.read ? { read: info.read } : {}),
+    ...(path ? { path } : {}),
     ...(info.source === 'index' ? { source: 'index' as const, index: info.index } : {}),
     valueType: info.valueType,
     ...(info.valueType === 'number' ? { numericKind: info.numericKind ?? 'decimal' } : {}),
@@ -163,6 +181,69 @@ export function setTotalRow(plan: TableReadPlanV2, columnKey: string | null, equ
   }
 }
 
+/** 读法：树形（带读取范围）或普通（记下“按普通读”，开关不消失）。 */
+export function setTreeLayout(plan: TableReadPlanV2, scope: 'all' | 'top' | 'leaf' | null): TableReadPlanV2 {
+  return { ...plan, layout: scope === null ? { mode: 'flat' } : { mode: 'tree', scope } }
+}
+
+export const TREE_SCOPE_LABEL: Record<'all' | 'top' | 'leaf', string> = {
+  all: '全部已展开的行',
+  top: '只取顶层',
+  leaf: '只取最底层',
+}
+
+/** 切到交叉表时列维度层的默认名：一层叫“指标”，多层先占位，用户在配置里改。 */
+export function crosstabLayerNames(depth: number): string[] {
+  return depth <= 1 ? ['指标'] : Array.from({ length: Math.min(4, Math.max(1, depth)) }, (_, i) => `列头${i + 1}`)
+}
+
+/** 读法：交叉表（plan.columns 是行维度，其余可见列逆透视成长表）；null 改回普通。 */
+export function setCrosstabLayout(
+  plan: TableReadPlanV2,
+  config: { columnDims: readonly string[]; valueName?: string; numericKind?: 'integer' | 'decimal' } | null,
+): TableReadPlanV2 {
+  if (!config) return { ...plan, layout: { mode: 'flat' } }
+  const columnDims = config.columnDims.map((n) => n.trim().slice(0, 64)).filter(Boolean).slice(0, 4)
+  if (columnDims.length === 0) return { ...plan, layout: { mode: 'flat' } }
+  const name = (config.valueName ?? '').trim().slice(0, 64) || '值'
+  return { ...plan, layout: { mode: 'crosstab', columnDims, value: { name, numericKind: config.numericKind ?? 'decimal' } } }
+}
+
+/** 交叉表的前几列是行维度：按识别到的列序把前 N 列写成 plan.columns。 */
+export function setCrosstabRowDims(plan: TableReadPlanV2, detectedColumns: readonly TableDetectedColumn[], count: number): TableReadPlanV2 {
+  const kept = detectedColumns.filter((c) => !c.excludedReason)
+  const max = kept.length || plan.columns.length
+  const n = Math.min(max, Math.max(1, Math.floor(count) || 1))
+  const picked: PlanColumn[] = []
+  for (const info of kept) {
+    if (picked.length >= n) break
+    const existing = plan.columns.find((c) => c.key === info.key)
+    picked.push(
+      existing ?? {
+        key: info.key,
+        name: info.name,
+        ...(info.source === 'index' ? { source: 'index' as const, index: info.index } : {}),
+        valueType: info.valueType,
+        ...(info.valueType === 'number' ? { numericKind: info.numericKind ?? 'decimal' } : {}),
+      },
+    )
+  }
+  return { ...plan, columns: picked.length > 0 ? picked : plan.columns.slice(0, n) }
+}
+
+/** 改交叉表第 i 层列维度 / 数值列的名字。 */
+export function setCrosstabColumnDim(plan: TableReadPlanV2, index: number, name: string): TableReadPlanV2 {
+  if (plan.layout?.mode !== 'crosstab') return plan
+  const columnDims = plan.layout.columnDims.map((n, i) => (i === index ? name.trim().slice(0, 64) || n : n))
+  return { ...plan, layout: { ...plan.layout, columnDims } }
+}
+
+export function setCrosstabValueName(plan: TableReadPlanV2, name: string): TableReadPlanV2 {
+  if (plan.layout?.mode !== 'crosstab') return plan
+  const value = { ...plan.layout.value, name: name.trim().slice(0, 64) || plan.layout.value.name }
+  return { ...plan, layout: { ...plan.layout, value } }
+}
+
 export function setMaxRows(plan: TableReadPlanV2, maxRows: number): TableReadPlanV2 {
   const value = Math.min(200, Math.max(1, Math.floor(maxRows) || 1))
   return { ...plan, limits: { ...plan.limits, maxRows: value } }
@@ -194,6 +275,8 @@ export function totalRowsSummary(sample: TableSample | null | undefined): string
 export function pageInfoSummary(sample: TableSample | null | undefined): string | null {
   const info = sample?.pageInfo
   if (!info) return null
+  // 接口来源的总条数读自接口字段，不是分页条
+  if (sample?.source.kind === 'network') return info.totalRows !== undefined ? `接口给的总条数：${info.totalRows}` : null
   const parts: string[] = []
   if (info.totalRows !== undefined) parts.push(`共 ${info.totalRows} 条`)
   if (info.currentPage !== undefined) parts.push(info.totalPages !== undefined ? `第 ${info.currentPage} / ${info.totalPages} 页` : `第 ${info.currentPage} 页`)
@@ -227,6 +310,7 @@ export function coverageSummary(sample: TableSample | null | undefined): { tone:
 }
 
 export function excludedReasonText(reason: NonNullable<TableDetectedColumn['excludedReason']>): string {
+  if (reason === 'derived') return '派生列，需要时勾选'
   return reason === 'checkbox' ? '复选框' : reason === 'index' ? '序号' : reason === 'hidden' ? '页面上隐藏' : '操作按钮'
 }
 

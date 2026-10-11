@@ -13,6 +13,7 @@ import {
   type BrowserCommandResult,
   type DownloadStep,
   type ExecutionError,
+  type TableSample,
   type JsonValue,
   type ResolvedUploadFile,
   type RunFileHandle,
@@ -26,6 +27,7 @@ import {
 } from '@cairn/shared'
 import { MapConsumptionService } from '../map/consumption.service.js'
 import { executeTableFileStep } from './table-file-step.js'
+import { externalizeTableSample } from './table-recordset.js'
 import type { ObjectService } from '../objects/object.service.js'
 import type { AiPort, BrowserPort } from './ports.js'
 import { persistResolutionDecision, resolutionError, runResolutionLadder } from './resolution-ladder.js'
@@ -168,6 +170,30 @@ export class BrowserStepExecutor implements StepExecutor {
       }
 
       return this.handleDownloadOutcome(ctx, step, rawResult)
+    }
+
+    // 接口来源的表格提取：在本页已捕获的接口响应里读，不经过定位；超出预览的完整行外置
+    if (commandOutcome.command.type === 'read_network_table') {
+      const rawResult = await this.browser.execute(sessionGrant, commandOutcome.command, signal, evidence)
+      if (!rawResult.ok) {
+        return {
+          kind: 'failed',
+          error: rawResult.error,
+          timedOut: rawResult.error.category === 'TIMEOUT',
+          aborted: rawResult.error.code === 'CANCELLED',
+          diagnostics: rawResult.diagnostics,
+          screenshot: rawResult.screenshot,
+          trace: rawResult.trace,
+        }
+      }
+      const sample = (rawResult.output as { value?: TableSample } | undefined)?.value
+      const out = sample
+        ? await externalizeTableSample({ sample, runId, stepRunId, attemptId, objects: this.objects })
+        : { ok: false as const, error: { code: 'TABLE_NETWORK_READ_EMPTY', category: 'EXECUTOR' as const, retryable: false, safeMessage: '接口读取没有返回记录集' } }
+      if (!out.ok) {
+        return { kind: 'failed', error: out.error, timedOut: false, aborted: false, screenshot: rawResult.screenshot, trace: rawResult.trace }
+      }
+      return { kind: 'success', output: { value: out.sample } as never, screenshot: rawResult.screenshot, trace: rawResult.trace }
     }
 
     if (step.type === 'probe') {
@@ -456,6 +482,9 @@ export class BrowserStepExecutor implements StepExecutor {
     }
 
     if (step.type === 'extract') {
+      if (step.input.as === 'table' && 'source' in step.input && step.input.source === 'network') {
+        return { ok: true, command: { type: 'read_network_table', table: step.input.table } }
+      }
       if (step.input.as === 'table' && 'source' in step.input) {
         return {
           ok: false,

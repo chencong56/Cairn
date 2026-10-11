@@ -74,6 +74,10 @@ export const BROWSER_PARALLEL_SPEC_FILES: readonly string[] = [
     'src/browser/table-adapters/registry.browser.spec.ts',
     'src/browser/table-read-modern-grids.browser.spec.ts',
     'src/browser/table-read-page-info.browser.spec.ts',
+    'src/browser/network-capture.browser.spec.ts',
+    'src/browser/table-read-tree.browser.spec.ts',
+    'src/browser/table-read-status.browser.spec.ts',
+    'src/browser/table-read-crosstab.browser.spec.ts',
 ]
 
 export const BROWSER_SPEC_FILES: readonly string[] = [

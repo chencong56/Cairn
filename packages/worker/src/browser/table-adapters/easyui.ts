@@ -73,6 +73,17 @@ export function easyuiAdapter(h: AdapterHelpers): TableAdapter {
   return {
     shape: 'easyui',
     pagerSelector: '.datagrid-pager',
+    // treegrid：树列里每层一个 span.tree-indent，父节点用 span.tree-hit（tree-expanded / tree-collapsed）代替最后一个缩进位
+    rowLevel: (rowEl: any) => {
+      const indents = rowEl?.querySelectorAll?.('span.tree-indent').length ?? 0
+      const hit = rowEl?.querySelector?.('span.tree-hit')
+      if (!indents && !hit) return null
+      return {
+        level: Math.max(0, indents + (hit ? 1 : 0) - 1),
+        hasChildren: Boolean(hit),
+        ...(hit ? { expanded: hit.classList.contains('tree-expanded') } : {}),
+      }
+    },
     claimSelector: '.datagrid-wrap,.datagrid-view,.datagrid',
     gridSelector: '.datagrid-wrap,.datagrid-view',
     innerPartSelector: 'table.datagrid-btable,table.datagrid-htable',

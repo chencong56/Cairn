@@ -20,6 +20,9 @@ export type Model = {
 }
 export type ModelError = { error: { code: string; message: string } }
 
+/** 树形表格一行的层级：level 从 0 起；hasChildren 有子节点；expanded 只对有子节点的行有意义。 */
+export type RowLevel = { level: number; hasChildren: boolean; expanded?: boolean }
+
 /** 分页条读数（与 shared 的 TablePageInfo 同形；ambiguous 表示有字段因数字矛盾被丢弃）。 */
 export type PageInfoDom = {
   totalRows?: number
@@ -68,5 +71,10 @@ export type TableAdapter = {
   pagerSelector?: string
   /** 隐藏的原始空壳 → 渲染出来的控件根；不适用返回 null。 */
   resolveShell?: (node: any) => any | null
+  /**
+   * 树形表格：从行元素读出控件明确声明的层级（类名 / 结构），不是树形行返回 null。不按文字缩进猜。
+   * 声明了就必须有一致性用例（registry.browser.spec.ts）。没声明时核心按通用的 aria-level 认。
+   */
+  rowLevel?: (rowEl: any) => RowLevel | null
   model: (root: any) => Model | ModelError
 }

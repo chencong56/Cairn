@@ -19,6 +19,7 @@ import {
 import {
   tableReadPlanSchema,
   tableFilePlanSchema,
+  tableNetworkPlanSchema,
   tableExpectRuleSchema,
   type TableReadPlan,
   type TableExpectRule,
@@ -98,6 +99,12 @@ export function stepUsesBrowser(type: string): boolean {
  * 这一步执行时会不会操作页面（决定是否要求现场截图 / Trace）。与 stepUsesBrowser 的区别：
  * 文件来源的提取在浏览器场景里运行，但只读前面下载的文件、不碰页面，它的证据是源文件与读取结果。
  */
+/** 接口来源的表格提取：运行占用期间要捕获本页的接口响应。 */
+export function isNetworkTableExtract(step: { type: string; input?: unknown; disabled?: boolean }): boolean {
+  const input = step.input as { as?: unknown; source?: unknown } | undefined
+  return !step.disabled && step.type === 'extract' && input?.as === 'table' && input.source === 'network'
+}
+
 export function stepTouchesPage(step: { type: string; input?: unknown }): boolean {
   if (!stepUsesBrowser(step.type)) return false
   const input = step.input as { as?: unknown; source?: unknown } | undefined
@@ -266,10 +273,18 @@ export const extractTableFileInputSchema = z.strictObject({
   table: tableFilePlanSchema,
 })
 
+/** 接口来源：读页面自己发出的 JSON 接口响应，不需要页面目标（仍在受管会话里执行，留现场截图）。 */
+export const extractTableNetworkInputSchema = z.strictObject({
+  as: z.literal('table'),
+  source: z.literal('network'),
+  table: tableNetworkPlanSchema,
+})
+
 export const extractInputSchema = z.union([
   extractStandardInputSchema,
   extractTableInputSchema,
   extractTableFileInputSchema,
+  extractTableNetworkInputSchema,
 ])
 export type ExtractInput = z.infer<typeof extractInputSchema>
 

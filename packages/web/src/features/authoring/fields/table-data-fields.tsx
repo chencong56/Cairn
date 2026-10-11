@@ -43,11 +43,27 @@ import {
   setRootSelector,
   tableInputFromDetected,
   tablePlanState,
+  createPlaceholderNetworkPlan,
+  setTreeLayout,
+  TREE_SCOPE_LABEL,
+  crosstabLayerNames,
+  setCrosstabColumnDim,
+  setCrosstabLayout,
+  setCrosstabRowDims,
+  setCrosstabValueName,
 } from './table-plan-edit'
+import { requestNetworkPicker } from './network-picker-request'
+
+const CHART_LIB_LABEL: Record<'echarts' | 'chartjs' | 'highcharts' | 'other', string> = {
+  echarts: 'ECharts',
+  chartjs: 'Chart.js',
+  highcharts: 'Highcharts',
+  other: '图表库',
+}
 
 type ExtractTableStep = Extract<Step, { type: 'extract' }>
 /** 页面来源的表格提取输入（文件来源见 table-file-fields）。 */
-type TableInput = Exclude<Extract<ExtractInput, { as: 'table' }>, { source: 'file' }>
+type TableInput = Exclude<Extract<ExtractInput, { as: 'table' }>, { source: 'file' | 'network' }>
 
 /** 「表格 / 列表数据」提取：点一下、看预览、确认。高级设置折叠在最下面。 */
 export function TableDataFields({
@@ -68,6 +84,7 @@ export function TableDataFields({
   const [preview, setPreview] = useState<TableSample | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [failure, setFailure] = useState<{ message: string; feedback?: string } | null>(null)
+  const [chart, setChart] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   // 数据检查要用最近一次预览（候选值 / 按预览提示结果）
   useEffect(() => {
@@ -102,7 +119,7 @@ export function TableDataFields({
   }
 
   // 列勾选 / 类型等改动后，防抖刷新预览
-  const planKey = plan ? JSON.stringify([plan.columns, plan.rows, plan.readiness, plan.limits]) : ''
+  const planKey = plan ? JSON.stringify([plan.columns, plan.rows, plan.readiness, plan.limits, plan.layout]) : ''
   const lastPreviewKey = useRef(planKey)
   useEffect(() => {
     if (!plan || state !== 'ready' || !observe.livePage) return
@@ -120,9 +137,14 @@ export function TableDataFields({
       setDetected(d)
       setPreview(d.sample)
       setFailure(null)
-      lastPreviewKey.current = JSON.stringify([d.plan.columns, d.plan.rows, d.plan.readiness, d.plan.limits])
+      lastPreviewKey.current = JSON.stringify([d.plan.columns, d.plan.rows, d.plan.readiness, d.plan.limits, d.plan.layout])
       onChange({ ...step, input: tableInputFromDetected(d) } as Step)
       if (observe.canHighlight) void observe.highlightTarget(d.plan.target, { silent: true })
+      return
+    }
+    if (observation.chart) {
+      setFailure(null)
+      setChart(CHART_LIB_LABEL[observation.chart.lib])
       return
     }
     setFailure({
@@ -131,8 +153,15 @@ export function TableDataFields({
     })
   }
 
+  /** 图表的数字不在页面上：改读接口返回的数据，并直接打开“选择接口”。 */
+  const switchToNetwork = () => {
+    requestNetworkPicker(step.id)
+    onChange({ ...step, input: { as: 'table', source: 'network', table: createPlaceholderNetworkPlan() } } as Step)
+  }
+
   const startPick = () => {
     setFailure(null)
+    setChart(null)
     observe.beginTablePick((observation) => apply(observation))
   }
 
@@ -153,7 +182,22 @@ export function TableDataFields({
     : null
 
   const summary = coverageSummary(preview)
+  /** 认出了层级（或已经按树形读）：才出现“读法 / 读取范围”。 */
+  const treeCapable = plan?.layout !== undefined || detected?.plan.layout?.mode === 'tree' || Boolean(preview?.rowMeta)
+  /** 像交叉表（或已经按交叉表读）：读法里出现“交叉表”，并给一条建议。 */
+  const crossHint = detected?.crosstabHint
+  const crossLayout = plan?.layout?.mode === 'crosstab' ? plan.layout : null
+  const crosstabMode = crossLayout !== null
+  const crosstabCapable = crosstabMode || Boolean(crossHint)
   const alternatives = detected ? scopeAlternatives(detected) : {}
+
+  /** 切到交叉表读法：按建议（或现有勾选）取前 N 列作行维度，列维度层名先占位。 */
+  const switchToCrosstab = () => {
+    if (!plan) return
+    const dims = crossHint?.rowDims ?? plan.columns.length
+    const withRows = setCrosstabRowDims(plan, detected?.columns ?? [], dims)
+    commit(setCrosstabLayout(withRows, { columnDims: crosstabLayerNames(crossHint?.depth ?? 1) }))
+  }
 
   return (
     <div className='space-y-3'>
@@ -192,6 +236,16 @@ export function TableDataFields({
         </div>
       </div>
 
+      {chart ? (
+        <div className='space-y-2 rounded-md border border-sky-300 bg-sky-50 px-2.5 py-2 text-xs text-sky-900' data-testid='chart-guide'>
+          <p>这是一个图表（{chart}），图表里的数字画在图上、不在页面文字里，没法在页面上读。</p>
+          <p className='text-sky-800/80'>图表的数据来自页面背后的查询接口，可以改为读取接口返回的数据。</p>
+          <Button type='button' size='sm' disabled={disabled} onClick={switchToNetwork}>
+            改为读取接口返回的数据
+          </Button>
+        </div>
+      ) : null}
+
       {failure ? (
         <div className='space-y-2 rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-xs'>
           <p className='text-destructive'>{failure.message}</p>
@@ -208,6 +262,110 @@ export function TableDataFields({
             ) : null}
           </div>
           {failure.feedback ? <p className='text-muted-foreground'>反馈内容包含页面文本，发送前请自行确认。</p> : null}
+        </div>
+      ) : null}
+
+      {state === 'ready' && crossHint && !crosstabMode ? (
+        <div className='space-y-2 rounded-md border border-sky-300 bg-sky-50 px-2.5 py-2 text-xs text-sky-900' data-testid='crosstab-hint'>
+          <p>这张表像交叉表，按交叉表读更方便检查：前 {crossHint.rowDims} 列是行维度，列头有 {crossHint.depth} 层。</p>
+          <Button type='button' size='sm' disabled={disabled} onClick={switchToCrosstab}>
+            按交叉表读
+          </Button>
+        </div>
+      ) : null}
+
+      {state === 'ready' && plan && (treeCapable || crosstabCapable) ? (
+        <div className='space-y-2'>
+          <div className='flex flex-wrap items-center gap-x-3 gap-y-2 text-xs' data-testid='table-read-mode'>
+            <span className='flex items-center gap-1.5'>
+              读法
+              <span role='group' aria-label='读法' className='inline-flex overflow-hidden rounded-md border'>
+                {(['flat', 'tree', ...(crosstabCapable ? (['crosstab'] as const) : [])] as const).map((mode) => {
+                  const current = plan.layout?.mode === 'tree' || plan.layout?.mode === 'crosstab' ? plan.layout.mode : 'flat'
+                  const on = mode === current
+                  return (
+                    <button
+                      key={mode}
+                      type='button'
+                      aria-pressed={on}
+                      disabled={disabled}
+                      className={on ? 'bg-primary px-2.5 py-1 text-primary-foreground' : 'px-2.5 py-1 hover:bg-muted'}
+                      onClick={() => {
+                        if (on) return
+                        if (mode === 'tree') commit(setTreeLayout(plan, 'all'))
+                        else if (mode === 'crosstab') switchToCrosstab()
+                        else commit(setTreeLayout(plan, null))
+                      }}
+                    >
+                      {mode === 'tree' ? '树形' : mode === 'crosstab' ? '交叉表' : '普通'}
+                    </button>
+                  )
+                })}
+              </span>
+            </span>
+            {plan.layout?.mode === 'tree' ? (
+              <span className='flex items-center gap-1.5'>
+                读取范围
+                <Select value={plan.layout.scope} disabled={disabled} onValueChange={(v) => commit(setTreeLayout(plan, v as 'all' | 'top' | 'leaf'))}>
+                  <SelectTrigger className='h-7 w-auto min-w-32' aria-label='读取范围'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(['all', 'top', 'leaf'] as const).map((scope) => (
+                      <SelectItem key={scope} value={scope}>
+                        {TREE_SCOPE_LABEL[scope]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </span>
+            ) : null}
+          </div>
+          {crossLayout ? (
+            <div className='space-y-1.5 text-xs' data-testid='crosstab-config'>
+              <div className='flex flex-wrap items-center gap-1.5'>
+                <span>前</span>
+                <Input
+                  aria-label='行维度列数'
+                  className='h-7 w-14'
+                  type='number'
+                  min={1}
+                  max={detected?.columns.filter((c) => !c.excludedReason).length || plan.columns.length}
+                  defaultValue={plan.columns.length}
+                  disabled={disabled}
+                  onBlur={(event) => {
+                    const n = Number(event.target.value.trim())
+                    if (event.target.value.trim() !== '' && Number.isFinite(n)) commit(setCrosstabRowDims(plan, detected?.columns ?? [], n))
+                    else event.target.value = String(plan.columns.length)
+                  }}
+                />
+                <span>列是行维度，其余列是数值列；预览里会看到逆透视后的长表。</span>
+              </div>
+              {crossLayout.columnDims.map((name, i) => (
+                <div key={i} className='flex flex-wrap items-center gap-1.5'>
+                  <span>列头第 {i + 1} 层叫</span>
+                  <Input
+                    aria-label={`列头第 ${i + 1} 层的名字`}
+                    className='h-7 w-28'
+                    defaultValue={name}
+                    disabled={disabled}
+                    onBlur={(event) => commit(setCrosstabColumnDim(plan, i, event.target.value))}
+                  />
+                </div>
+              ))}
+              <div className='flex flex-wrap items-center gap-1.5'>
+                <span>数值叫</span>
+                <Input
+                  aria-label='数值列的名字'
+                  className='h-7 w-24'
+                  defaultValue={crossLayout.value.name}
+                  disabled={disabled}
+                  onBlur={(event) => commit(setCrosstabValueName(plan, event.target.value))}
+                />
+                <span>（数字；空格当 0）</span>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

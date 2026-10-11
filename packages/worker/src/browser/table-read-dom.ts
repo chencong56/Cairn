@@ -10,14 +10,15 @@
  * ExtJS 4–6、layui、Element UI el-table、FineReport 冻结表）；版本差异靠手工指定与页面结构反馈迭代。
  */
 
-import type { AdapterHelpers, Model, ModelCol, ModelError, ModelRow, PageInfoDom, TableAdapter } from './table-adapters/types.js'
+import type { AdapterHelpers, Model, ModelCol, ModelError, ModelRow, PageInfoDom, RowLevel, TableAdapter } from './table-adapters/types.js'
 import { makeHelpers } from './table-adapters/helpers.js'
 import { makePageInfoReader } from './table-adapters/page-info.js'
+import { makeStatusReader, type StatusReader } from './table-adapters/status.js'
 import { makeValueParsers, type ValueParsers } from '@cairn/table-file'
 import { ADAPTER_FACTORIES } from './table-adapters/registry.js'
 
-export type TableShape = 'native' | 'aria' | 'easyui' | 'jqgrid' | 'extjs' | 'layui' | 'elementui' | 'finereport' | 'aggrid' | 'antd' | 'handsontable' | 'cards' | 'keyvalue' | 'listgrid'
-export type ReadKind = 'table' | 'cards' | 'keyvalue'
+export type TableShape = 'native' | 'aria' | 'easyui' | 'jqgrid' | 'extjs' | 'layui' | 'elementui' | 'finereport' | 'aggrid' | 'antd' | 'handsontable' | 'cards' | 'keyvalue' | 'listgrid' | 'status'
+export type ReadKind = 'table' | 'cards' | 'keyvalue' | 'status'
 
 export type DomColumnSpec = {
   key: string
@@ -29,6 +30,8 @@ export type DomColumnSpec = {
   valueType: 'text' | 'number' | 'boolean' | 'date'
   sensitive?: boolean
   scaleUnits?: boolean
+  /** 读法：缺省读文字；tone / percent 读格里状态组件的语义 / 百分比；order 是第几项。 */
+  read?: 'text' | 'tone' | 'percent' | 'order'
 }
 
 export type ReadTableArgs = {
@@ -43,6 +46,10 @@ export type ReadTableArgs = {
   loadingSelector?: string
   emptyMeansNone?: boolean
   totalRow?: { columnKey: string; equals: string }
+  /** 树形读取：按层级读，scope 选全部已展开的行 / 只取顶层 / 只取最底层。 */
+  tree?: { scope: 'all' | 'top' | 'leaf' }
+  /** 交叉表读取：columns 是行维度，其余可见列是数值列；整行文字矩阵与表头路径交回 Node 侧逆透视。 */
+  crosstab?: boolean
 }
 
 export type DomField = {
@@ -52,7 +59,10 @@ export type DomField = {
   status: 'ok' | 'missing' | 'error' | 'masked'
 }
 
-export type DomRow = { values: Record<string, DomField>; rawDigest: string }
+/** 树形读取时一行的层级：parentIndex 是父行在读出的 rows 里的位置；path 是祖先与自身首列文字。 */
+export type DomTreeRow = { level: number; hasChildren: boolean; expanded?: boolean; parentIndex?: number; path: string }
+
+export type DomRow = { values: Record<string, DomField>; rawDigest: string; tree?: DomTreeRow }
 
 export type ReadTableResult =
   | {
@@ -70,6 +80,10 @@ export type ReadTableResult =
       colCount: number
       /** 分页条读数（找到分页条且读出至少一项才有）。 */
       pageInfo?: PageInfoDom
+      /** 树形读取：有子节点但没展开的节点数（它们的子行没读到）。 */
+      treeCollapsed?: number
+      /** 交叉表读取：数值列的表头路径（与矩阵列对齐）及每个数据 / 合计行的文字矩阵（与 rows / summaryRows 对齐）。 */
+      crosstab?: { colPaths: string[]; matrix: string[][]; summaryMatrix: string[][] }
     }
   | { ok: false; code: string; message: string }
 
@@ -84,9 +98,12 @@ export type DetectedColumn = {
   source: 'header' | 'index'
   valueType: 'text' | 'number' | 'boolean' | 'date'
   numericKind?: 'integer' | 'decimal'
-  excludedReason?: 'checkbox' | 'index' | 'action' | 'hidden'
+  excludedReason?: 'checkbox' | 'index' | 'action' | 'hidden' | 'derived'
   /** 表头为空或重名，只能按第几列取。 */
   indexOnly?: boolean
+  /** 派生列 / 状态区域列的读法与显示名。 */
+  read?: 'tone' | 'percent' | 'order'
+  label?: string
 }
 
 export type DetectCandidate = {
@@ -109,6 +126,10 @@ export type DetectResult =
         hasHeader: boolean
         headerMode: 'auto' | 'none'
         columns: DetectedColumn[]
+        /** 认出了控件声明的层级（树形表格）。 */
+        tree?: boolean
+        /** 像交叉表：建议前几列作行维度、列头有几层（不自动改读法）。 */
+        crosstabHint?: { rowDims: number; depth: number }
       }
       alternatives: DetectCandidate[]
     }
@@ -130,6 +151,7 @@ export function tableDomCore(
   adapters: TableAdapter[],
   readPageInfo: (root: any, pagerSelector?: string) => PageInfoDom | undefined,
   values: ValueParsers,
+  status: StatusReader,
 ): any {
   // ---------------------------------------------------------------- 通用辅助
   const { doc, win, clean, textOf, stripSort, roleOf, isHidden, attrSel, leafPath, PAGER_RE, EMPTY_RE, PAGER_SEL, pagerNear, TOTAL_RE, CHECKBOX_SEL } = h
@@ -549,7 +571,28 @@ export function tableDomCore(
     return first
   }
 
+  // ---------------------------------------------------------------- 状态区域：一组标签 / 徽标 / 进度 / 步骤 / 告警，每个一行
+  const statusModel = (root: any): Model | ModelError => {
+    const items = status.regionItems(root)
+    if (items.length === 0) {
+      return { error: { code: 'TABLE_SHAPE_UNSUPPORTED', message: '这个区域里没有认得的状态组件（标签、徽标、进度、步骤、告警）' } }
+    }
+    return {
+      shape: 'status',
+      cols: ['文字', '语义', '进度', '序号'].map((leaf) => ({ leaf, path: leaf })),
+      hasHeader: true,
+      dataRows: items.map((it) => ({ el: it, cells: [it, it, it, it] })),
+      summaryRows: [],
+      excluded: { mergedRows: 0, paginationRows: 0, footerRows: 0 },
+      hasPagination: false,
+      isBusy: false,
+      emptyNote: false,
+      renderedRowEls: items,
+    }
+  }
+
   const buildModel = (root: any, hint: { header: 'auto' | 'first_row' | 'none'; rowSelector?: string; kind?: ReadKind }): Model | ModelError => {
+    if (hint.kind === 'status') return statusModel(root)
     if (hint.kind === 'keyvalue') return keyvalueModel(root)
     if (hint.kind === 'cards') return cardsModel(root, hint.rowSelector)
     const shape = shapeOf(root)
@@ -583,6 +626,20 @@ export function tableDomCore(
     const outsideText = Math.max(0, textOf(scroller).length - textOf(root).length)
     return scroller.scrollHeight > rowsHeight * 1.5 + 150 && outsideText < 50
   }
+
+  // ---------------------------------------------------------------- 树形层级
+  // 只认控件明确声明的层级：适配器的 rowLevel，或通用的 aria-level / aria-expanded；不按文字缩进猜
+  const levelOfRow = (shape: string, rowEl: any): RowLevel | null => {
+    const declared = adapters.find((a) => a.shape === shape)?.rowLevel?.(rowEl)
+    if (declared) return declared
+    const raw = rowEl?.getAttribute?.('aria-level')
+    if (!raw || !/^\d+$/.test(raw)) return null
+    const exp = rowEl.getAttribute('aria-expanded')
+    const known = exp === 'true' || exp === 'false'
+    return { level: Math.max(0, Number(raw) - 1), hasChildren: known, ...(known ? { expanded: exp === 'true' } : {}) }
+  }
+  /** 行真的显示在页面上（没展开的子行常常只是 display:none 地藏在 DOM 里）。 */
+  const rowRendered = (node: any): boolean => Boolean(node) && !isHidden(node) && (node.getClientRects?.().length ?? 1) > 0
 
   // ---------------------------------------------------------------- 值解析（与导出文件读取共用，见 table-adapters/values.ts）
   const { toHalf, parseDate, fieldFromText, inferType } = values
@@ -643,7 +700,7 @@ export function tableDomCore(
       colIndexOf.push(hits[0] as number)
     }
 
-    const readRow = (row: ModelRow): DomRow => {
+    const readRow = (row: ModelRow, at = 0): DomRow => {
       const values: Record<string, DomField> = {}
       const digest: string[] = []
       args.columns.forEach((spec, i) => {
@@ -652,13 +709,39 @@ export function tableDomCore(
           digest.push(`${spec.key}:masked`)
           return
         }
+        if (spec.read === 'order') {
+          values[spec.key] = { value: at + 1, decimalValue: String(at + 1), status: 'ok' }
+          digest.push(`${spec.key}:${at + 1}`)
+          return
+        }
+        // 状态组件：语义只按官方类名的映射表认，认不出记为读不出（“未识别”）；百分比读进度条
+        if (spec.read === 'tone' || spec.read === 'percent') {
+          const host = spec.selector ? row.el?.querySelector?.(spec.selector) : row.cells[colIndexOf[i] as number]
+          const comp = status.statusIn(host)
+          let field: DomField
+          if (spec.read === 'tone') {
+            const tone = comp ? status.toneOf(comp) : null
+            field = !comp
+              ? { value: null, status: 'missing' }
+              : tone === 'unknown'
+                ? { value: null, rawText: `未识别的状态样式：${cellText(comp) || '（无文字）'}`, status: 'error' }
+                : { value: tone, rawText: cellText(comp), status: 'ok' }
+          } else {
+            const p = status.percentOf(comp ?? host)
+            field = p === null ? { value: null, status: 'missing' } : { value: p, decimalValue: String(p), status: 'ok' }
+          }
+          values[spec.key] = field
+          digest.push(`${spec.key}:${field.status}:${field.value}`)
+          return
+        }
         let raw = ''
         if (spec.selector) {
           const found = row.el?.querySelector?.(spec.selector)
           raw = found ? cellText(found) : ''
         } else {
           const cell = row.cells[colIndexOf[i] as number]
-          raw = cell ? cellText(cell) : ''
+          // 状态项的文字取标题 / 消息，不带步骤序号之类的图标文字
+          raw = cell ? (model.shape === 'status' ? status.labelOf(cell) : cellText(cell)) : ''
         }
         const { field, digest: part } = fieldFromText(spec, raw)
         values[spec.key] = field
@@ -673,12 +756,17 @@ export function tableDomCore(
       const at = args.columns.findIndex((c) => c.key === args.totalRow?.columnKey)
       manualCol = at >= 0 ? (colIndexOf[at] as number) : -1
     }
-    const structuredShape = model.shape === 'cards' || model.shape === 'keyvalue'
+    const structuredShape = model.shape === 'cards' || model.shape === 'keyvalue' || model.shape === 'status'
     const isTotal = (row: ModelRow): boolean => {
       if (structuredShape) return false
       if (args.totalRow && manualCol >= 0) {
         const cell = row.cells[manualCol]
         if (cell && cellText(cell) === args.totalRow.equals) return true
+      }
+      // 交叉表：行维度可能纵向合并，第一格常是普通维度值，「合计 / 小计」落在后面某一层行头上
+      if (args.crosstab) {
+        const dimTexts = colIndexOf.filter((i) => i >= 0).map((i) => cellText(row.cells[i] ?? null))
+        return dimTexts.some((t) => TOTAL_RE.test(t))
       }
       const firstTexts = row.cells.slice(0, 3).map((c) => (c ? cellText(c) : '')).filter(Boolean)
       return firstTexts.length > 0 && TOTAL_RE.test(firstTexts[0] as string)
@@ -692,8 +780,79 @@ export function tableDomCore(
         movedTotals++
       } else dataRows.push(row)
     }
-    const rows = dataRows.slice(0, Math.max(1, args.maxRows)).map(readRow)
-    const summaryRows = summary.slice(0, 5).map(readRow)
+    // 树形：按层级读。藏着没显示的子行不算读到的数据；按范围筛行；算出父行位置与层级路径；数一数没展开的节点
+    let readable = dataRows
+    let treeRows: DomTreeRow[] | undefined
+    let treeCollapsed: number | undefined
+    if (args.tree) {
+      const first = args.columns[0]
+      const firstText = (row: ModelRow): string => {
+        if (!first || first.sensitive) return '••••'
+        if (first.selector) {
+          const found = row.el?.querySelector?.(first.selector)
+          return found ? cellText(found) : ''
+        }
+        const cell = row.cells[colIndexOf[0] as number]
+        return cell ? cellText(cell) : ''
+      }
+      type Node = { row: ModelRow; meta: RowLevel; path: string; parent?: number }
+      const nodes: Node[] = []
+      const stack: Array<{ level: number; text: string; at: number }> = []
+      for (const row of dataRows) {
+        if (!rowRendered(row.el)) continue
+        const meta = levelOfRow(model.shape, row.el) ?? { level: 0, hasChildren: false }
+        while (stack.length > 0 && (stack[stack.length - 1] as { level: number }).level >= meta.level) stack.pop()
+        const text = firstText(row)
+        const parent = stack.length > 0 ? (stack[stack.length - 1] as { at: number }).at : undefined
+        nodes.push({ row, meta, path: [...stack.map((x) => x.text), text].join(' / '), ...(parent !== undefined ? { parent } : {}) })
+        stack.push({ level: meta.level, text, at: nodes.length - 1 })
+      }
+      const top = nodes.reduce((m, n) => Math.min(m, n.meta.level), Number.POSITIVE_INFINITY)
+      const scope = args.tree.scope
+      const keptAt = nodes.map((_, i) => i).filter((i) => {
+        const n = nodes[i] as Node
+        return scope === 'top' ? n.meta.level === top : scope === 'leaf' ? !n.meta.hasChildren : true
+      })
+      const outAt = new Map(keptAt.map((at, i) => [at, i]))
+      treeCollapsed = nodes.filter((n) => n.meta.hasChildren && n.meta.expanded === false).length
+      readable = keptAt.map((at) => (nodes[at] as Node).row)
+      treeRows = keptAt.map((at) => {
+        const n = nodes[at] as Node
+        const parentOut = n.parent !== undefined ? outAt.get(n.parent) : undefined
+        return {
+          level: n.meta.level,
+          hasChildren: n.meta.hasChildren,
+          ...(n.meta.hasChildren && n.meta.expanded !== undefined ? { expanded: n.meta.expanded } : {}),
+          ...(parentOut !== undefined ? { parentIndex: parentOut } : {}),
+          path: n.path,
+        }
+      })
+    }
+    // 交叉表：行维度（args.columns）之外的可见列都是数值列；整行文字矩阵与表头路径交回 Node 侧逆透视
+    let cross: { colPaths: string[]; matrix: string[][]; summaryMatrix: string[][] } | undefined
+    if (args.crosstab) {
+      const rowDimCols = new Set(colIndexOf.filter((i) => i >= 0))
+      const valueCols = cols.map((c, i) => ({ c, i })).filter(({ c, i }) => !rowDimCols.has(i) && !c.hidden && !c.special).map(({ i }) => i)
+      if (valueCols.length === 0) {
+        return { ok: false, code: 'TABLE_COLUMN_NOT_FOUND', message: '行维度之外没有可读取的数值列，这张表不能按交叉表读；请减少行维度列数，或改回普通读法' }
+      }
+      const textsOf = (row: ModelRow): string[] => valueCols.map((i) => (row.cells[i] ? cellText(row.cells[i]) : ''))
+      const sliced = readable.slice(0, Math.max(1, args.maxRows))
+      const summarySlice = summary.slice(0, Math.max(5, args.maxRows))
+      cross = {
+        colPaths: valueCols.map((i) => cols[i]?.path ?? ''),
+        matrix: sliced.map(textsOf),
+        summaryMatrix: summarySlice.map(textsOf),
+      }
+    }
+    const rows = readable.slice(0, Math.max(1, args.maxRows)).map((row, i) => {
+      const read = readRow(row, i)
+      const tree = treeRows?.[i]
+      // 矩阵文字并入摘要：两次读取对比才看得出数值格的变化
+      const digest = cross ? `${read.rawDigest}|m:${(cross.matrix[i] || []).join('~')}` : read.rawDigest
+      return tree ? { ...read, tree, rawDigest: `${digest}|${tree.level}:${tree.expanded ?? '-'}` } : { ...read, rawDigest: digest }
+    })
+    const summaryRows = summary.slice(0, args.crosstab ? Math.max(5, args.maxRows) : 5).map((row) => readRow(row))
 
     let emptyVerified = model.emptyNote || Boolean(args.emptyMeansNone)
     const parent = rootEl.parentElement
@@ -709,13 +868,15 @@ export function tableDomCore(
       emptyVerified,
       hasPagination: model.hasPagination,
       virtualScroll: Boolean(model.virtualHint) || virtualScrollSuspected(rootEl, model.renderedRowEls),
-      headerDigest: cols.map((c) => c.leaf).join('|'),
-      totalDataRows: dataRows.length,
+      headerDigest: `${cols.map((c) => c.leaf).join('|')}${cross ? `#${cross.colPaths.join('|')}` : ''}`,
+      totalDataRows: readable.length,
       rows,
       summaryRows,
       excluded: { ...model.excluded, footerRows: model.excluded.footerRows + movedTotals },
       colCount: cols.length,
       ...(pageInfo ? { pageInfo } : {}),
+      ...(treeCollapsed !== undefined ? { treeCollapsed } : {}),
+      ...(cross ? { crosstab: cross } : {}),
     } satisfies ReadTableResult
   }
 
@@ -835,7 +996,7 @@ export function tableDomCore(
     let root: any = gridRoot
     let candidates: Array<{ t: any; i: number; score: number; rowCount: number; colCount: number }> = []
     let best: (typeof candidates)[number] | null = null
-    let structured: { root: any; kind: 'cards' | 'keyvalue'; inner?: any } | null = null
+    let structured: { root: any; kind: 'cards' | 'keyvalue' | 'status'; inner?: any } | null = null
     if (!root) {
       const chain: any[] = []
       if (args.forceRoot) {
@@ -859,8 +1020,11 @@ export function tableDomCore(
           const asKv = keyvalueModel(el)
           if (!('error' in asCards) && asCards.dataRows.length >= 2) structured = { root: el, kind: 'cards' }
           else if (!('error' in asKv)) structured = { root: el, kind: 'keyvalue' }
+          else if (status.regionItems(el).length > 0) structured = { root: el, kind: 'status' }
         } else {
-          structured = findStructured(el)
+          // 点在状态组件（标签、徽标、进度、步骤、告警）上：认成一组状态
+          const region = status.findRegion(el)
+          structured = region ? { root: region.root, kind: 'status' } : findStructured(el)
         }
         let listRoot: any = null
         if (!structured) {
@@ -935,6 +1099,63 @@ export function tableDomCore(
       }
     }
 
+    if (model.shape === 'status') {
+      // 状态区域：固定的四列（有进度的才给“进度”）
+      const hasPct = model.dataRows.some((r) => status.percentOf(r.el) !== null)
+      colDetected.splice(
+        0,
+        colDetected.length,
+        { index: 0, key: 'text', name: '文字', source: 'header', valueType: 'text' },
+        { index: 1, key: 'tone', name: '语义', source: 'header', valueType: 'text', read: 'tone' },
+        ...(hasPct ? [{ index: 2, key: 'percent', name: '进度', source: 'header' as const, valueType: 'number' as const, numericKind: 'decimal' as const, read: 'percent' as const }] : []),
+        { index: 3, key: 'order', name: '序号', source: 'header', valueType: 'number', numericKind: 'integer', read: 'order' },
+      )
+    } else if (model.shape !== 'keyvalue') {
+      // 某列的格里有状态组件：在它后面给出“语义”“百分比”两个派生列（默认不勾）
+      const withDerived: DetectedColumn[] = []
+      for (const dc of colDetected) {
+        withDerived.push(dc)
+        if (dc.excludedReason) continue
+        const comps = sampleRows.map((r) => status.statusIn(r.cells[dc.index])).filter(Boolean)
+        if (comps.length === 0) continue
+        const base = {
+          index: dc.index,
+          name: dc.name,
+          source: dc.source,
+          ...(dc.field ? { field: dc.field } : {}),
+          ...(dc.groupPath ? { groupPath: dc.groupPath } : {}),
+          ...(dc.indexOnly ? { indexOnly: true } : {}),
+          excludedReason: 'derived' as const,
+        }
+        withDerived.push({ ...base, key: `${dc.key}_tone`, label: `「${dc.name}」的语义`.slice(0, 64), read: 'tone', valueType: 'text' })
+        if (comps.some((c) => status.percentOf(c) !== null)) {
+          withDerived.push({ ...base, key: `${dc.key}_pct`, label: `「${dc.name}」的百分比`.slice(0, 64), read: 'percent', valueType: 'number', numericKind: 'decimal' })
+        }
+      }
+      colDetected.splice(0, colDetected.length, ...withDerived)
+    }
+
+    // 像交叉表：数值区多级列头且样本格大多像数字 → 建议按交叉表读（只给建议，不自动改读法）
+    let crosstabHint: { rowDims: number; depth: number } | undefined
+    if (!structured) {
+      const depthOf = (c: DetectedColumn): number => (c.groupPath ? c.groupPath.split(' / ').length : 1)
+      const keptCols = colDetected.filter((c) => !c.excludedReason)
+      const multi = keptCols.filter((c) => depthOf(c) >= 2)
+      if (multi.length >= 2) {
+        const numericish = (c: DetectedColumn): boolean => {
+          const texts = sampleRows.map((r) => r.cells[c.index]).filter(Boolean).map((cell) => textOf(cell)).filter(Boolean)
+          return texts.length > 0 && inferType(texts).valueType === 'number'
+        }
+        if (multi.filter(numericish).length >= Math.ceil(multi.length * 0.7)) {
+          const firstMulti = keptCols.findIndex((c) => depthOf(c) >= 2)
+          crosstabHint = {
+            rowDims: Math.max(1, firstMulti),
+            depth: Math.min(4, multi.reduce((m, c) => Math.max(m, depthOf(c)), 2)),
+          }
+        }
+      }
+    }
+
     const sel = selectorFor(root)
     const baseScore = gridRoot ? 10 : structured ? 6 : best && root === best.t ? best.score : 6
     const mk = (t: any, level: 'inner' | 'outer' | 'chosen', sc: number, rowCount: number, colCount: number): DetectCandidate => {
@@ -966,7 +1187,20 @@ export function tableDomCore(
             .map((c) => mk(c.t, c.i < (best as NonNullable<typeof best>).i ? 'inner' : 'outer', c.score, c.rowCount, c.colCount))
     return {
       ok: true,
-      chosen: { ...chosen, shape: model.shape, hasHeader: model.hasHeader, headerMode: model.hasHeader ? 'auto' : 'none', columns: colDetected },
+      chosen: {
+        ...chosen,
+        shape: model.shape,
+        hasHeader: model.hasHeader,
+        headerMode: model.hasHeader ? 'auto' : 'none',
+        columns: colDetected,
+        ...(model.dataRows.some((r) => {
+          const m = levelOfRow(model.shape, r.el)
+          return Boolean(m && (m.level > 0 || m.hasChildren))
+        })
+          ? { tree: true }
+          : {}),
+        ...(crosstabHint ? { crosstabHint } : {}),
+      },
       alternatives,
     } satisfies DetectResult
   }
@@ -995,7 +1229,8 @@ const ENTRY_SOURCE = `(el, req) => {
   const adapters = [${ADAPTER_FACTORIES.map((f) => `(${f.toString()})(h)`).join(',')}];
   const readPageInfo = (${makePageInfoReader.toString()})(h);
   const values = (${makeValueParsers.toString()})();
-  return (${tableDomCore.toString()})(el, req, h, adapters, readPageInfo, values);
+  const status = (${makeStatusReader.toString()})(h);
+  return (${tableDomCore.toString()})(el, req, h, adapters, readPageInfo, values, status);
 }`
 
 /**

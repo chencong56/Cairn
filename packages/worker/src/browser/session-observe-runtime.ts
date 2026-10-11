@@ -48,7 +48,10 @@ import {
   type JsonValue,
   MAX_STRUCTURE_SNAPSHOT_CHARS,
   stepRunFor,
-  type SessionGrant
+  type SessionGrant,
+  type NetworkListObservation,
+  type NetworkInspectObservation,
+  type NetworkReadObservation,
 } from '@cairn/shared'
 import { getAriaSnapshot } from './aria-snapshot.js'
 import { discoverTablesOnPage, sampleTableOnPage } from './table-observe.js'
@@ -59,6 +62,7 @@ import { resolveObserveGrant } from './observe-grant'
 import { refreshScreencastIfStale, startScreencast } from './screencast'
 import { pageRefFor, type ManagedPageEntry } from './page-identity'
 import { type LiveHandle, type SessionManagerContext } from './session-live.js'
+import { observeNetwork } from './session-observe-network.js'
 
 export async function sampleMapConditions(this: SessionManagerContext, 
     grant: SessionGrant,
@@ -179,7 +183,7 @@ export async function describeHoldPage(this: SessionManagerContext, runId: strin
     }
   }
 
-export async function observeRun(this: SessionManagerContext, input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation | TableDetectObservation> {
+export async function observeRun(this: SessionManagerContext, input: { runId: string; actorId: string; op: ObserveOperation }): Promise<TargetObservation | StructureObservation | TableObservation | TableDiscoveryObservation | TableDetectObservation | NetworkListObservation | NetworkInspectObservation | NetworkReadObservation> {
     const { session, live, run } = await this.requireLiveAuthSession(input.runId)
     const detail = await loadRunDetail(this.dbHandle, input.runId)
     const sessionAuthoring = !detail && session?.status === 'OPEN'
@@ -226,7 +230,7 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
         const detected = await detectTable(entry.page, detectInput, { locate, pick: pickOnPage }, { runId: input.runId, pageRef })
         return detected.outcome === 'FOUND'
           ? { outcome: 'FOUND' as const, page: { pageRef, url, title }, detected: detected.detected, source: 'managed' as const }
-          : { outcome: 'NOT_FOUND' as const, page: { pageRef, url, title }, reason: detected.reason, source: 'managed' as const }
+          : { outcome: 'NOT_FOUND' as const, page: { pageRef, url, title }, reason: detected.reason, ...(detected.chart ? { chart: detected.chart } : {}), source: 'managed' as const }
       }
       const planParsed = tableReadPlanSchema.safeParse(input.op.plan)
       if (!planParsed.success) {
@@ -270,6 +274,10 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
         sample,
         source: 'managed' as const,
       }
+    }
+
+    if (input.op.op === 'network') {
+      return observeNetwork.call(this, { op: input.op, live, page: entry.page, pageRef, url, ...(title ? { title } : {}), runId: input.runId })
     }
 
     if (input.op.op === 'structure') {

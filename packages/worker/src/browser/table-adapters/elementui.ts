@@ -84,6 +84,17 @@ export function elementuiAdapter(h: AdapterHelpers): TableAdapter {
   return {
     shape: 'elementui',
     pagerSelector: '.el-pagination',
+    // 树形数据：行带 el-table__row--level-N；父行有展开箭头（--expanded 表示已展开），叶子是占位。没展开的子行 display:none
+    rowLevel: (rowEl: any) => {
+      const m = /(?:^|\s)el-table__row--level-(\d+)(?:\s|$)/.exec(String(rowEl?.className ?? ''))
+      if (!m) return null
+      const icon = rowEl.querySelector('.el-table__expand-icon')
+      return {
+        level: Number(m[1]),
+        hasChildren: Boolean(icon),
+        ...(icon ? { expanded: icon.classList.contains('el-table__expand-icon--expanded') } : {}),
+      }
+    },
     claimSelector: '.el-table',
     gridSelector: '.el-table',
     model,

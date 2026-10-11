@@ -1,9 +1,10 @@
 import { newUuid } from '@/lib/uuid'
-import { DEFAULT_TABLE_TIMEZONE, describeTablePredicate, expectedPageRows, type OutcomeContract, type TableCondition, type TableExpectRule, type TablePageInfo, type TablePredicate } from '@cairn/shared'
+import { DEFAULT_TABLE_TIMEZONE, TABLE_STATUS_TONES, TABLE_STATUS_TONE_LABEL, describeTablePredicate, expectedPageRows, type OutcomeContract, type TableCondition, type TableExpectRule, type TablePageInfo, type TablePredicate } from '@cairn/shared'
 
 export type { TableExpectRule }
 
-export type ColumnType = 'text' | 'number' | 'date' | 'boolean'
+/** tone＝状态语义列（读的是标签 / 进度等组件的语义，取值是固定的几种）。 */
+export type ColumnType = 'text' | 'number' | 'date' | 'boolean' | 'tone'
 export type CheckColumn = {
   key: string
   label: string
@@ -15,18 +16,21 @@ export type CheckColumn = {
 }
 export const columnTypeOf = (col: Pick<CheckColumn, 'numeric' | 'valueType'> | undefined): ColumnType =>
   col?.valueType ?? (col?.numeric ? 'number' : 'text')
-export type CheckKind = 'table' | 'cards' | 'keyvalue'
+export type CheckKind = 'table' | 'cards' | 'keyvalue' | 'status'
 
 /** 各形态下的叫法：表格是“行”，卡片是“张”，键值信息只有一行、不说“每一行”。 */
 export function everyPrefix(kind: CheckKind): string {
-  return kind === 'cards' ? '每张卡片的' : kind === 'keyvalue' ? '' : '每一行的'
+  return kind === 'cards' ? '每张卡片的' : kind === 'keyvalue' ? '' : kind === 'status' ? '每一项的' : '每一行的'
 }
 export function anyPrefix(kind: CheckKind): string {
-  return kind === 'cards' ? '至少有一张卡片的' : kind === 'keyvalue' ? '' : '至少有一行的'
+  return kind === 'cards' ? '至少有一张卡片的' : kind === 'keyvalue' ? '' : kind === 'status' ? '至少有一项的' : '至少有一行的'
 }
 export function countNoun(kind: CheckKind): { subject: string; unit: string } {
-  return kind === 'cards' ? { subject: '卡片共有', unit: '张' } : { subject: '表里共有的行数', unit: '行' }
+  return kind === 'cards' ? { subject: '卡片共有', unit: '张' } : kind === 'status' ? { subject: '状态共有', unit: '项' } : { subject: '表里共有的行数', unit: '行' }
 }
+
+/** 语义下拉的选项（不让用户手填英文代号）。 */
+export const TONE_OPTIONS = TABLE_STATUS_TONES.map((t) => ({ value: t, label: TABLE_STATUS_TONE_LABEL[t] }))
 
 export type CheckTemplate =
   | 'row_count'
@@ -38,6 +42,9 @@ export type CheckTemplate =
   | 'row_lookup'
   | 'page_total'
   | 'page_consistency'
+  | 'record_sets_match'
+  | 'tree_rollup_match'
+  | 'crosstab_total_match'
 
 export type TemplateOption = { value: CheckTemplate; label: string; example: string }
 
@@ -57,20 +64,111 @@ export const PAGE_TEMPLATE_OPTIONS: TemplateOption[] = [
   { value: 'page_consistency', label: '本页条数与分页一致', example: '例：本页读到的行数与分页显示一致，发现漏行' },
 ]
 
+/** 与另一份数据比对：只有本步之前还有别的“一组数据”提取步骤时出现。 */
+export const COMPARE_TEMPLATE_OPTION: TemplateOption = {
+  value: 'record_sets_match',
+  label: '与另一份数据一致',
+  example: '例：页面表格与接口返回按编号逐行一致',
+}
+
+/** 树形检查：只有读法是树形、读取范围是全部已展开的行时出现。 */
+export const TREE_TEMPLATE_OPTION: TemplateOption = {
+  value: 'tree_rollup_match',
+  label: '父行等于子行之和',
+  example: '例：每个区域的收入等于其下城市之和',
+}
+
+/** 交叉表检查：只有读法是交叉表时出现（合计格 / 小计格已从数据行里分离出来）。 */
+export const CROSSTAB_TEMPLATE_OPTION: TemplateOption = {
+  value: 'crosstab_total_match',
+  label: '合计格等于明细之和',
+  example: '例：华东小计等于各城市之和，总计等于各小计之和',
+}
+
+/** 本步之前、可以拿来比对的另一份数据（另一个读取一组数据的提取步骤）。 */
+export type OtherRecordSet = { key: string; stepId: string; stepName: string; columns: CheckColumn[] }
+
 /**
  * 该形态下可选的检查模板。键值信息只有一条记录：只给“某项满足条件”。
- * 分页检查只在表格、且预览里读到了总条数（或足以算出本页应有行数）时出现。
+ * 分页检查只在表格、且预览里读到了总条数（或足以算出本页应有行数）时出现；
+ * “与另一份数据一致”只在本步之前还有别的一组数据时出现。
  */
-export function templatesFor(kind: CheckKind, pageInfo?: TablePageInfo | null): TemplateOption[] {
+export function templatesFor(
+  kind: CheckKind,
+  pageInfo?: TablePageInfo | null,
+  others: readonly OtherRecordSet[] = [],
+  /** 读法是树形且读取范围是全部已展开的行。 */
+  tree = false,
+  /** 读法是交叉表。 */
+  crosstab = false,
+): TemplateOption[] {
   const paging =
     kind === 'table' && pageInfo
       ? PAGE_TEMPLATE_OPTIONS.filter((t) => (t.value === 'page_total' ? pageInfo.totalRows !== undefined : expectedPageRows(pageInfo) !== null))
       : []
-  return [...baseTemplatesFor(kind), ...paging]
+  const compare = kind !== 'keyvalue' && others.length > 0 ? [COMPARE_TEMPLATE_OPTION] : []
+  const rollup = kind === 'table' && tree ? [TREE_TEMPLATE_OPTION] : []
+  const cross = kind === 'table' && crosstab ? [CROSSTAB_TEMPLATE_OPTION] : []
+  return [...baseTemplatesFor(kind), ...cross, ...paging, ...rollup, ...compare]
+}
+
+/** 列名配对用的规整：去空白、括号里的单位、大小写；常见字段名（英文整词、中文按结尾，如“站点名称”）视为同一个。 */
+const SYNONYMS: Array<RegExp> = [
+  /^(id|no|code)$|(编号|代码|编码)$/,
+  /^(name|title)$|(名称|标题)$/,
+  /^(qty|quantity|count|num)$|(数量|个数)$/,
+  /^(amount|money|price)$|金额$/,
+  /^(status|state)$|状态$/,
+  /^(date|day|time)$|(日期|时间)$/,
+  /^(region|area)$|(区域|地区)$/,
+]
+function normName(label: string): string {
+  const base = label.toLowerCase().replace(/[（(][^）)]*[）)]/g, '').replace(/[\s_\-:：]/g, '')
+  const i = SYNONYMS.findIndex((re) => re.test(base))
+  return i >= 0 ? `#${i}` : base
+}
+
+/** 按列名把本表的列与另一份的列配对（规整后相同才配）。 */
+export function pairColumns(mine: readonly CheckColumn[], theirs: readonly CheckColumn[]): Array<{ column: string; otherColumn: string }> {
+  const used = new Set<string>()
+  const pairs: Array<{ column: string; otherColumn: string }> = []
+  for (const c of mine) {
+    const match = theirs.find((o) => !used.has(o.key) && (normName(o.label) === normName(c.label) || normName(o.key) === normName(c.label)))
+    if (match) {
+      used.add(match.key)
+      pairs.push({ column: c.key, otherColumn: match.key })
+    }
+  }
+  return pairs
+}
+
+/** 新建“与另一份数据一致”的默认规则：第一对配上的列作键，其余配上的列都比对。 */
+export function defaultCompareRule(columns: readonly CheckColumn[], other: OtherRecordSet): TableExpectRule | null {
+  const mine = columns.filter((c) => !c.sensitive)
+  const theirs = other.columns.filter((c) => !c.sensitive)
+  if (mine.length === 0 || theirs.length === 0) return null
+  const pairs = pairColumns(mine, theirs)
+  const key = pairs[0] ?? { column: mine[0]!.key, otherColumn: theirs[0]!.key }
+  const rest = pairs.filter((p) => p.column !== key.column)
+  const compare = rest.length > 0 ? rest : [{ column: (mine.find((c) => c.key !== key.column) ?? mine[0]!).key, otherColumn: (theirs.find((c) => c.key !== key.otherColumn) ?? theirs[0]!).key }]
+  return {
+    rule: 'record_sets_match',
+    otherKey: other.key,
+    key,
+    columns: compare.map((p) => ({ ...p, precision: 'display' as const })),
+  }
 }
 
 function baseTemplatesFor(kind: CheckKind): TemplateOption[] {
   if (kind === 'keyvalue') return [{ value: 'all_rows', label: '某一项满足条件', example: '例：「状态」是“运行中”' }]
+  if (kind === 'status') {
+    return [
+      { value: 'row_count', label: '共有多少项', example: '例：至少有 1 项' },
+      { value: 'all_rows', label: '每一项都满足', example: '例：每一项的「语义」都不是“错误”' },
+      { value: 'any_row', label: '至少有一项满足', example: '例：至少有一项的「语义」是“进行中”' },
+      { value: 'row_lookup', label: '找到某一项，再检查它', example: '例：文字是“财务复核”的那一步，语义是“成功”' },
+    ]
+  }
   if (kind === 'cards') {
     return TEMPLATE_OPTIONS.filter((t) => t.value !== 'total_row_match').map((t) =>
       t.value === 'row_count'
@@ -122,6 +220,9 @@ export const ROW_PREDICATE_OPS = [
 
 function predicateText(p: { op: string; value?: unknown }): string {
   if (p.op.startsWith('date_')) return describeTablePredicate(p as TablePredicate)
+  if (typeof p.value === 'string' && (TABLE_STATUS_TONES as readonly string[]).includes(p.value)) {
+    return `${p.op === 'neq' ? '不是' : '是'}「${TABLE_STATUS_TONE_LABEL[p.value as (typeof TABLE_STATUS_TONES)[number]]}」`
+  }
   if (p.op === 'is_empty' || p.op === 'is_not_empty') return PREDICATE_TEXT[p.op] ?? p.op
   if (p.op === 'starts_with') return `以「${String(p.value)}」开头`
   if (p.op === 'ends_with') return `以「${String(p.value)}」结尾`
@@ -202,7 +303,9 @@ const EMPTY_OPS = [
 /** 某类列上可选的条件。找行（where）不提供“为空”，要检查（expect）才提供。 */
 export function predicateOptionsFor(type: ColumnType, side: 'where' | 'expect'): Array<{ op: TablePredicate['op']; label: string }> {
   const base =
-    type === 'number'
+    type === 'tone'
+      ? [{ op: 'eq', label: '是' } as const, { op: 'neq', label: '不是' } as const]
+      : type === 'number'
       ? [...NUMBER_OPS]
       : type === 'boolean'
         ? [{ op: 'eq', label: '等于' } as const, { op: 'neq', label: '不等于' } as const]
@@ -215,6 +318,7 @@ export function defaultPredicate(col: CheckColumn | undefined, side: 'where' | '
   if (type === 'date') return side === 'expect' ? predicateFromDateMode('yesterday', { op: 'is_not_empty' }) : predicateFromDateMode('date_on', { op: 'is_not_empty' })
   if (type === 'number') return normalizePredicate({ op: side === 'expect' ? 'neq' : 'eq', value: 0 }, col)
   if (type === 'boolean') return { op: 'eq', value: true }
+  if (type === 'tone') return { op: 'eq', value: 'success' }
   return side === 'expect' ? { op: 'is_not_empty' } : { op: 'eq', value: '' }
 }
 
@@ -284,6 +388,12 @@ export function sentenceOf(rule: TableExpectRule, labelOf: (key: string) => stri
       return `分页显示的总条数${COMPARE_LABEL[rule.op]} ${rule.value} 条`
     case 'page_consistency':
       return '本页读到的行数与分页显示一致'
+    case 'tree_rollup_match':
+      return `每个父行的「${labelOf(rule.column)}」等于其下一级之和${rule.precision === 'exact' ? '（精确比较）' : ''}`
+    case 'crosstab_total_match':
+      return `每个合计 / 小计格等于它汇总范围内明细之和${rule.precision === 'exact' ? '（精确比较）' : ''}`
+    case 'record_sets_match':
+      return `与「${rule.otherKey}」按「${labelOf(rule.key.column)}」逐行一致（比对${rule.columns.map((c) => `「${labelOf(c.column)}」`).join('、')}）`
     case 'row_expression':
       return rule.quantifier === 'all' ? `${kind === 'cards' ? '每张卡片' : '每一行'}都满足自定义条件（高级）` : `至少有${kind === 'cards' ? '一张卡片' : '一行'}满足自定义条件（高级）`
   }
@@ -312,6 +422,12 @@ export function defaultRule(template: CheckTemplate, columns: readonly CheckColu
       return { rule: 'page_total', op: 'gt', value: 0 }
     case 'page_consistency':
       return { rule: 'page_consistency' }
+    case 'record_sets_match':
+      return null
+    case 'tree_rollup_match':
+      return firstNumber ? { rule: 'tree_rollup_match', column: firstNumber.key, precision: 'display' } : null
+    case 'crosstab_total_match':
+      return { rule: 'crosstab_total_match', precision: 'display' }
     case 'row_lookup': {
       if (!first) return null
       const usable = columns.filter((c) => !c.sensitive)

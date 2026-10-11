@@ -52,6 +52,8 @@ export type LiveHandle = {
   pagesRevision: number
   pageDiscovery?: { dispose: () => void }
   authObserver?: { dispose: () => void }
+  /** 编写期“选择接口”对话框打开后临时捕获本会话的接口响应；空闲自动停止。 */
+  networkCapture?: import('./network-capture.js').NetworkCapture
 }
 
 export type RunAuthState = {

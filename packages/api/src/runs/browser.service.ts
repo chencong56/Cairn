@@ -37,6 +37,9 @@ import {
   parseWorkerEndpoints,
   structureObservationSchema,
   tableDiscoveryObservationSchema,
+  networkInspectObservationSchema,
+  networkListObservationSchema,
+  networkReadObservationSchema,
   tableDetectObservationSchema,
   tableObservationSchema,
   targetObservationSchema,
@@ -196,6 +199,12 @@ export class BrowserService {
     const schema =
       parsed.op === 'structure'
         ? structureObservationSchema
+        : parsed.op === 'network'
+          ? parsed.subOp === 'inspect'
+            ? networkInspectObservationSchema
+            : parsed.subOp === 'read'
+              ? networkReadObservationSchema
+              : networkListObservationSchema
         : parsed.op === 'table'
           ? parsed.subOp === 'discover'
             ? tableDiscoveryObservationSchema

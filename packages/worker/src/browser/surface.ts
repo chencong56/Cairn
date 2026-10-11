@@ -144,6 +144,13 @@ export async function executeOnPage(
   if (pageClosed(page)) {
     return failOutcome('SURFACE_LOST', { outcome: 'SURFACE_LOST', candidatesTried: [] })
   }
+  // 接口来源读的是会话层捕获的响应，由会话层（runSurfaceCommand）处理，不在页面上执行
+  if (command.type === 'read_network_table') {
+    return {
+      ok: false,
+      error: { code: 'UNEXPECTED_NETWORK_TABLE_PATH', category: 'EXECUTOR', retryable: false, safeMessage: '接口来源的读取须经会话层执行' },
+    }
+  }
 
   let diagnostics: ResolverDiagnostics = { outcome: 'FOUND', candidatesTried: [] }
   try {

@@ -2,6 +2,7 @@ import { appendRunEvents, conflict, getSessionById, recordInlineLogEvidence, set
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  isNetworkTableExtract,
   isPageHealthKind,
   pageRequestEntriesOf,
   isSideEffectBrowserCommand,
@@ -30,6 +31,8 @@ import {
 import { executeOnPage } from './surface'
 import { handoffMessage } from './managed-helpers'
 import { PageHealthCollector, pageHealthKnownOrigins } from './page-health-collector.js'
+import { NetworkCapture } from './network-capture.js'
+import { readNetworkTable } from './network-table.js'
 import { createManagedPage, pageRefFor, pickPopupHandoff, type ManagedPageEntry } from './page-identity'
 import { type LiveHandle, type SessionManagerContext } from './session-live.js'
 import {
@@ -475,8 +478,21 @@ export function startPageHealthForLease(this: SessionManagerContext, leaseId: st
     this.pageHealthByLease.set(leaseId, collector)
   }
 
+/** 场景里有接口来源的提取步骤时，运行占用期间捕获本会话的接口响应（只监听）；没有就不捕获。 */
+export function startNetworkCaptureForLease(this: SessionManagerContext, leaseId: string, sessionId: string, run: RunSnapshot): void {
+    this.networkCaptureByLease.get(leaseId)?.dispose()
+    this.networkCaptureByLease.delete(leaseId)
+    if (!run.steps.some((step) => isNetworkTableExtract(step))) return
+    const context = this.lives.get(sessionId)?.handle.context
+    if (!context || typeof context.on !== 'function') return
+    const capture = new NetworkCapture(context as never)
+    capture.attach()
+    this.networkCaptureByLease.set(leaseId, capture)
+  }
+
 export async function startTracingForLease(this: SessionManagerContext, leaseId: string, sessionId: string, run: RunSnapshot): Promise<void> {
     startPageHealthForLease.call(this, leaseId, sessionId, run)
+    startNetworkCaptureForLease.call(this, leaseId, sessionId, run)
     const policy = resolveEvidencePolicy(run.evidencePolicy)
     if (policy.trace === 'off') {
       this.tracingByLease.set(leaseId, false)
@@ -499,6 +515,8 @@ export async function startTracingForLease(this: SessionManagerContext, leaseId:
 export async function stopTracingForLease(this: SessionManagerContext, leaseId: string, sessionId: string | undefined): Promise<void> {
     this.pageHealthByLease.get(leaseId)?.dispose()
     this.pageHealthByLease.delete(leaseId)
+    this.networkCaptureByLease.get(leaseId)?.dispose()
+    this.networkCaptureByLease.delete(leaseId)
     const enabled = this.tracingByLease.get(leaseId)
     this.tracingByLease.delete(leaseId)
     if (!enabled || !sessionId) return
@@ -530,6 +548,27 @@ export async function runSurfaceCommand(this: SessionManagerContext,
     signal?: AbortSignal,
     evidence?: BrowserCommandEvidence,
   ): Promise<BrowserCommandResult> {
+    if (command.type === 'read_network_table') {
+      const capture = this.networkCaptureByLease.get(grant.leaseId)
+      if (!capture) {
+        return {
+          ok: false,
+          error: { code: 'TABLE_NETWORK_CAPTURE_OFF', category: 'EXECUTOR', retryable: false, safeMessage: '本次运行没有开启接口捕获，读不到接口返回的数据' },
+        }
+      }
+      const read = await readNetworkTable(capture, page, command.table, {
+        runId: evidence?.runId ?? this.leaseToRun.get(grant.leaseId) ?? grant.sessionId,
+        stepRunId: evidence?.stepRunId,
+        attemptId: evidence?.attemptId,
+      }, signal)
+      if (!read.ok) {
+        return {
+          ok: false,
+          error: { code: read.code, category: read.code === 'CANCELLED' ? 'CANCELLED' : 'VALIDATION', retryable: false, safeMessage: read.message },
+        }
+      }
+      return { ok: true, output: { value: read.sample } as never }
+    }
     if (command.type !== 'click' || command.pageAfter !== 'popup') {
       return executeOnPage(page, command, signal, evidence)
     }

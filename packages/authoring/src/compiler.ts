@@ -26,6 +26,9 @@ import {
   type TargetDescriptor,
   isTablePlanUnconfigured,
   validateTableExpectRuleAgainstPlan,
+  tablePlanCheckColumns,
+  validateCrosstabPlan,
+  type TableExpectRule,
 } from '@cairn/shared'
 import { parse as parseYaml } from 'yaml'
 
@@ -90,7 +93,7 @@ function locatorSteps(step: Step): Extract<Step, { input: { target?: unknown } }
   if (
     step.type === 'click' ||
     step.type === 'fill' ||
-    (step.type === 'extract' && !('source' in step.input && step.input.source === 'file')) ||
+    (step.type === 'extract' && !('source' in step.input)) ||
     step.type === 'assert' ||
     step.type === 'select' ||
     step.type === 'keyboard' ||
@@ -577,12 +580,19 @@ function addTableCheckDiagnostics(
     const rule = entry.rule.expect.rule
     const kind = plan.protocol === 'table.read@2' ? plan.kind : undefined
     let message: string | null = null
-    if (rule.rule === 'total_row_match' && (kind === 'cards' || kind === 'keyvalue')) {
-      message = '卡片和详情信息没有合计行，不能做“各行相加等于合计行”'
-    } else if ((rule.rule === 'page_total' || rule.rule === 'page_consistency') && kind === 'keyvalue') {
-      message = '详情信息没有分页，不能做分页检查'
+    if (rule.rule === 'total_row_match' && (kind === 'cards' || kind === 'keyvalue' || kind === 'status')) {
+      message = '卡片、详情信息和状态没有合计行，不能做“各行相加等于合计行”'
+    } else if ((rule.rule === 'page_total' || rule.rule === 'page_consistency') && (kind === 'keyvalue' || kind === 'status')) {
+      message = '详情信息和状态没有分页，不能做分页检查'
+    } else if (rule.rule === 'record_sets_match') {
+      message = recordSetsMatchProblem(document, source.id, rule)
+    } else if (rule.rule === 'tree_rollup_match' && !(plan.protocol === 'table.read@2' && plan.layout?.mode === 'tree' && plan.layout.scope === 'all')) {
+      message = '“父行等于子行之和”要求读法是树形、读取范围是全部已展开的行'
+    } else if (rule.rule === 'crosstab_total_match' && !(plan.protocol === 'table.read@2' && plan.layout?.mode === 'crosstab')) {
+      message = '“合计格等于明细之和”要求读法是交叉表'
     } else {
-      const checked = validateTableExpectRuleAgainstPlan(rule, plan.columns)
+      // 树形读取时“层级路径”也可以作为条件
+      const checked = validateTableExpectRuleAgainstPlan(rule, plan.protocol === 'table.read@2' ? tablePlanCheckColumns(plan) : plan.columns)
       if (!checked.valid) message = checked.message
     }
     if (message) {
@@ -595,6 +605,32 @@ function addTableCheckDiagnostics(
       )
     }
   }
+}
+
+/** 与另一份数据一致：另一份必须是本步之前、未停用的“一组数据”提取步骤，两边引用的列都要在各自的读取计划里。 */
+function recordSetsMatchProblem(
+  document: ScenarioDocument,
+  sourceStepId: string,
+  rule: Extract<TableExpectRule, { rule: 'record_sets_match' }>,
+): string | null {
+  const sourceIndex = document.steps.findIndex((step) => step.id === sourceStepId)
+  const source = document.steps[sourceIndex]
+  if (source?.type === 'extract' && source.input.as === 'table') {
+    const own = validateTableExpectRuleAgainstPlan(rule, source.input.table.columns)
+    if (!own.valid) return own.message
+  }
+  const otherIndex = document.steps.findIndex(
+    (step) => !step.disabled && step.type === 'extract' && step.input.as === 'table' && step.outputKey === rule.otherKey,
+  )
+  const other = document.steps[otherIndex]
+  if (!other || other.type !== 'extract' || other.input.as !== 'table' || otherIndex >= sourceIndex) {
+    return `要比对的另一份数据「${rule.otherKey}」不是本步之前某个读取一组数据的提取步骤的输出`
+  }
+  const otherColumns = other.input.table.columns
+  for (const key of [rule.key.otherColumn, ...rule.columns.map((c) => c.otherColumn)]) {
+    if (!otherColumns.some((c) => c.key === key)) return `另一份数据「${rule.otherKey}」没有列「${key}」`
+  }
+  return null
 }
 
 function synthesizedOutcomeEntries(document: ScenarioDocument): OutcomeManifestEntry[] {
@@ -708,6 +744,16 @@ function addTargetResolutionDiagnostics(
       add(diagnostics, 'SCENARIO_TABLE_UNCONFIGURED', release ? 'error' : 'warning',
         `步骤「${step.name}」还没有选择要读取的表格，请在受管画面上点一下表格`,
         { stepId: step.id, fieldPath: ['input', 'table'] })
+      return
+    }
+    // 读法自检（如交叉表的行列维度重名）：配置错了在这里拦下，不用等到运行
+    if (step.input.table.protocol === 'table.read@2') {
+      const layout = validateCrosstabPlan(step.input.table)
+      if (!layout.valid) {
+        add(diagnostics, 'SCENARIO_TABLE_LAYOUT_INVALID', release ? 'error' : 'warning',
+          `步骤「${step.name}」的读法配置有误：${layout.message}`,
+          { stepId: step.id, fieldPath: ['input', 'table'] })
+      }
     }
     return
   }

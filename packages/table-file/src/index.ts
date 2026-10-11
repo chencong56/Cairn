@@ -16,6 +16,16 @@ import { listXlsxSheets, readXlsx } from './xlsx.js'
 export { detectFileFormat, decodeText } from './format.js'
 export { makeValueParsers, type ValueField, type ValueParsers, type ValueSpec } from './values.js'
 export type { FileDetectedColumn } from './records.js'
+export {
+  fieldFromJson,
+  outlineJson,
+  readJsonTable,
+  resolveJsonPath,
+  suggestJsonTables,
+  type JsonOutlineNode,
+  type JsonTableBody,
+  type JsonTableSuggestion,
+} from './json.js'
 
 /** 解析时多留的行：表头、标题、合计行都在数据行之外。 */
 const ROW_HEADROOM = 200

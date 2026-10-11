@@ -2,7 +2,9 @@ import { Trash2 } from 'lucide-react'
 import { DatePredicateFields } from './date-predicate-fields'
 import { RowLookupFields } from './row-lookup-fields'
 import { useTableSample } from './table-sample-store'
-import { expectedPageRows, type OutcomeContract, type Step, type TableExpectRule, type TablePageInfo } from '@cairn/shared'
+import { expectedPageRows, isTablePlanUnconfigured, tablePlanCheckColumns, type OutcomeContract, type Step, type TableExpectRule, type TablePageInfo, type TablePredicate } from '@cairn/shared'
+import { ToneDot } from './tone-dot'
+import { useResolutionSource } from '../resolution-source'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -26,6 +28,8 @@ import {
   templatesFor,
   type CheckKind,
   buildTableCheck,
+  TONE_OPTIONS,
+  defaultCompareRule,
   defaultRule,
   normalizeRule,
   sentenceOf,
@@ -34,6 +38,7 @@ import {
   type CheckColumn,
   type CheckTemplate,
   type CompareOp,
+  type OtherRecordSet,
   type TableCheckContract,
 } from './table-checks-model'
 
@@ -52,30 +57,47 @@ export function checkKindOf(step: ExtractTableStep): CheckKind {
 
 export function checkColumnsOf(step: ExtractTableStep): CheckColumn[] {
   if (step.input.as !== 'table') return []
-  return step.input.table.columns.map((c) => ({
+  // 树形读取时“层级路径”也能作为条件
+  const columns = step.input.table.protocol === 'table.read@2' ? tablePlanCheckColumns(step.input.table) : step.input.table.columns
+  return columns.map((c) => ({
     key: c.key,
     label: ('label' in c && c.label ? c.label : c.name) as string,
     numeric: c.valueType === 'number',
-    valueType: c.valueType,
+    valueType: c.read === 'tone' ? ('tone' as const) : c.valueType,
     ...(c.numericKind ? { numericKind: c.numericKind } : {}),
     ...('sensitive' in c && c.sensitive ? { sensitive: true } : {}),
   }))
+}
+
+/** 本步之前、读取一组数据且已配置好的提取步骤：可以作为“另一份数据”来比对。 */
+function otherRecordSetsBefore(steps: readonly Step[], stepId: string): OtherRecordSet[] {
+  const index = steps.findIndex((s) => s.id === stepId)
+  if (index < 0) return []
+  return steps
+    .slice(0, index)
+    .filter(
+      (s): s is ExtractTableStep =>
+        s.type === 'extract' && !s.disabled && s.input.as === 'table' && Boolean(s.outputKey) && !isTablePlanUnconfigured(s.input.table),
+    )
+    .map((s) => ({ key: s.outputKey!, stepId: s.id, stepName: s.name, columns: checkColumnsOf(s) }))
 }
 
 function ColumnSelect({
   value,
   columns,
   disabled,
+  label,
   onChange,
 }: {
   value: string
   columns: readonly CheckColumn[]
   disabled?: boolean
+  label?: string
   onChange: (key: string) => void
 }) {
   return (
     <Select value={value} disabled={disabled} onValueChange={onChange}>
-      <SelectTrigger className='h-8 w-auto min-w-24'>
+      <SelectTrigger className='h-8 w-auto min-w-24' aria-label={label}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -141,11 +163,140 @@ function NumberInput({
   )
 }
 
+/** 状态语义的条件：是 / 不是 / 为空 / 不为空，值从六种语义里选（不让用户手填英文）。 */
+export function ToneFields({ predicate, disabled, onChange }: { predicate: TablePredicate; disabled?: boolean; onChange: (next: TablePredicate) => void }) {
+  const value = 'value' in predicate && typeof predicate.value === 'string' ? predicate.value : 'success'
+  const needsValue = predicate.op === 'eq' || predicate.op === 'neq'
+  return (
+    <>
+      <Select
+        value={predicate.op}
+        disabled={disabled}
+        onValueChange={(op) => onChange(op === 'is_empty' || op === 'is_not_empty' ? { op } : { op: op as 'eq' | 'neq', value })}
+      >
+        <SelectTrigger className='h-8 w-auto min-w-20' aria-label='条件'>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value='eq'>是</SelectItem>
+          <SelectItem value='neq'>不是</SelectItem>
+          <SelectItem value='is_empty'>为空</SelectItem>
+          <SelectItem value='is_not_empty'>不为空</SelectItem>
+        </SelectContent>
+      </Select>
+      {needsValue ? (
+        <Select value={value} disabled={disabled} onValueChange={(v) => onChange({ op: predicate.op as 'eq' | 'neq', value: v })}>
+          <SelectTrigger className='h-8 w-auto min-w-20' aria-label='语义'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TONE_OPTIONS.map((t) => (
+              <SelectItem key={t.value} value={t.value}>
+                <ToneDot tone={t.value} />
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : null}
+    </>
+  )
+}
+
+/** 与另一份数据一致：选另一份 → 键列配对 → 比对的列配对（按列名自动配好，可改）。 */
+function CompareFields({
+  rule,
+  columns,
+  others,
+  disabled,
+  onChange,
+}: {
+  rule: Extract<TableExpectRule, { rule: 'record_sets_match' }>
+  columns: readonly CheckColumn[]
+  others: readonly OtherRecordSet[]
+  disabled?: boolean
+  onChange: (next: TableExpectRule) => void
+}) {
+  const other = others.find((o) => o.key === rule.otherKey)
+  const theirs = other?.columns ?? []
+  const setPair = (i: number, patch: Partial<{ column: string; otherColumn: string }>) =>
+    onChange({ ...rule, columns: rule.columns.map((c, j) => (j === i ? { ...c, ...patch } : c)) })
+  return (
+    <div className='w-full space-y-1.5' data-testid='compare-fields'>
+      <div className='flex flex-wrap items-center gap-1.5'>
+        <span>与</span>
+        <Select
+          value={rule.otherKey}
+          disabled={disabled}
+          onValueChange={(key) => {
+            const next = others.find((o) => o.key === key)
+            const rebuilt = next ? defaultCompareRule(columns, next) : null
+            if (rebuilt) onChange(rebuilt)
+          }}
+        >
+          <SelectTrigger className='h-8 w-auto min-w-28' aria-label='另一份数据'>
+            <SelectValue placeholder='选择另一份数据' />
+          </SelectTrigger>
+          <SelectContent>
+            {others.map((o) => (
+              <SelectItem key={o.key} value={o.key}>
+                「{o.stepName}」的输出 {o.key}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span>按</span>
+        <ColumnSelect label='本表的键列' value={rule.key.column} columns={columns} disabled={disabled} onChange={(column) => onChange({ ...rule, key: { ...rule.key, column } })} />
+        <span>=</span>
+        <ColumnSelect label='另一份的键列' value={rule.key.otherColumn} columns={theirs} disabled={disabled || !other} onChange={(otherColumn) => onChange({ ...rule, key: { ...rule.key, otherColumn } })} />
+        <span>逐行对上</span>
+      </div>
+      {!other ? (
+        <p className='text-caption text-destructive'>另一份数据「{rule.otherKey}」已不在本步之前，请重新选择。</p>
+      ) : null}
+      {rule.columns.map((pair, i) => (
+        <div key={i} className='flex flex-wrap items-center gap-1.5'>
+          <span className='text-muted-foreground'>比对</span>
+          <ColumnSelect label={`本表的比对列 ${i + 1}`} value={pair.column} columns={columns} disabled={disabled} onChange={(column) => setPair(i, { column })} />
+          <span>=</span>
+          <ColumnSelect label={`另一份的比对列 ${i + 1}`} value={pair.otherColumn} columns={theirs} disabled={disabled || !other} onChange={(otherColumn) => setPair(i, { otherColumn })} />
+          <Button
+            type='button'
+            size='icon'
+            variant='ghost'
+            aria-label={`去掉比对列 ${i + 1}`}
+            disabled={disabled || rule.columns.length <= 1}
+            onClick={() => onChange({ ...rule, columns: rule.columns.filter((_, j) => j !== i) })}
+            className='size-7 text-muted-foreground'
+          >
+            <Trash2 className='size-3.5' />
+          </Button>
+        </div>
+      ))}
+      <Button
+        type='button'
+        size='sm'
+        variant='outline'
+        className='h-7'
+        disabled={disabled || !other || rule.columns.length >= columns.length}
+        onClick={() => {
+          const used = new Set(rule.columns.map((c) => c.column))
+          const next = columns.find((c) => c.key !== rule.key.column && !used.has(c.key)) ?? columns[0]
+          if (next && theirs[0]) onChange({ ...rule, columns: [...rule.columns, { column: next.key, otherColumn: theirs[0].key, precision: 'display' }] })
+        }}
+      >
+        再比对一列
+      </Button>
+    </div>
+  )
+}
+
 function RuleFields({
   rule,
   columns,
   kind,
   pageInfo,
+  others = [],
   disabled,
   onChange,
 }: {
@@ -154,6 +305,8 @@ function RuleFields({
   kind: CheckKind
   /** 预览读到的分页信息（用于说明“本页应有多少行”的依据）。 */
   pageInfo?: TablePageInfo | null
+  /** 本步之前可以比对的另一份数据。 */
+  others?: readonly OtherRecordSet[]
   disabled?: boolean
   onChange: (next: TableExpectRule) => void
 }) {
@@ -174,6 +327,7 @@ function RuleFields({
       const needsValue = p.op !== 'is_empty' && p.op !== 'is_not_empty'
       const numeric = columns.find((c) => c.key === rule.column)?.numeric === true
       const isDate = columnTypeOf(columns.find((c) => c.key === rule.column)) === 'date'
+      const isTone = columnTypeOf(columns.find((c) => c.key === rule.column)) === 'tone'
       const setOp = (op: (typeof ROW_PREDICATE_OPS)[number]) => {
         if (op === 'is_empty' || op === 'is_not_empty') return onChange({ ...rule, predicate: { op } })
         if (op === 'gt' || op === 'gte' || op === 'lt' || op === 'lte') {
@@ -189,10 +343,13 @@ function RuleFields({
           <ColumnSelect value={rule.column} columns={columns} disabled={disabled} onChange={(column) => {
             const next = columns.find((c) => c.key === column)
             const nextDate = columnTypeOf(next) === 'date'
-            // 日期列与其他列的条件不通用：跨类型切换时换成该列的默认条件
-            onChange({ ...rule, column, ...(nextDate !== isDate ? { predicate: nextDate ? defaultPredicate(next, 'expect') : { op: 'is_not_empty' as const } } : {}) })
+            const nextTone = columnTypeOf(next) === 'tone'
+            // 日期列、语义列与其他列的条件不通用：跨类型切换时换成该列的默认条件
+            onChange({ ...rule, column, ...(nextDate !== isDate || nextTone !== isTone ? { predicate: nextDate || nextTone ? defaultPredicate(next, 'expect') : { op: 'is_not_empty' as const } } : {}) })
           }} />
-          {isDate ? (
+          {isTone ? (
+            <ToneFields predicate={p} disabled={disabled} onChange={(predicate) => onChange({ ...rule, predicate })} />
+          ) : isDate ? (
             <DatePredicateFields predicate={p} column={rule.column} side='expect' sample={null} disabled={disabled} onChange={(predicate) => onChange({ ...rule, predicate })} />
           ) : (
           <Select value={p.op} disabled={disabled} onValueChange={(v) => setOp(v as (typeof ROW_PREDICATE_OPS)[number])}>
@@ -208,7 +365,7 @@ function RuleFields({
             </SelectContent>
           </Select>
           )}
-          {needsValue && !isDate ? (
+          {needsValue && !isDate && !isTone ? (
             <Input
               aria-label='比较的值'
               className='h-8 w-36'
@@ -296,6 +453,26 @@ function RuleFields({
         </span>
       )
     }
+    case 'record_sets_match':
+      return <CompareFields rule={rule} columns={columns} others={others} disabled={disabled} onChange={onChange} />
+    case 'tree_rollup_match':
+      return (
+        <>
+          <span>每个父行的</span>
+          <ColumnSelect label='要核对的数字列' value={rule.column} columns={numberColumns} disabled={disabled} onChange={(column) => onChange({ ...rule, column })} />
+          <span>等于其下一级之和</span>
+        </>
+      )
+    case 'crosstab_total_match':
+      return (
+        <>
+          <span>每个合计 / 小计格等于它汇总范围内明细之和</span>
+          <Label className='flex items-center gap-1.5 text-caption font-normal'>
+            <Checkbox checked={rule.precision === 'exact'} disabled={disabled} onCheckedChange={(v) => onChange({ ...rule, precision: v === true ? 'exact' : 'display' })} />
+            精确比较（默认按合计格显示的小数位）
+          </Label>
+        </>
+      )
     case 'row_lookup':
       return null
     case 'row_expression':
@@ -318,13 +495,17 @@ export function TableChecksEditor({
   const columns = checkColumnsOf(step)
   const kind = checkKindOf(step)
   const sample = useTableSample(step.id)
+  const { steps } = useResolutionSource()
+  const others = otherRecordSetsBefore(steps ?? [], step.id)
+  const treeAll = step.input.as === 'table' && step.input.table.protocol === 'table.read@2' && step.input.table.layout?.mode === 'tree' && step.input.table.layout.scope === 'all'
+  const crosstab = step.input.as === 'table' && step.input.table.protocol === 'table.read@2' && step.input.table.layout?.mode === 'crosstab'
   const labelOf = (key: string) => columns.find((c) => c.key === key)?.label ?? key
   const outputKey = step.outputKey
   const replace = (next: TableCheckContract) => onChange(checks.map((c) => (c.id === next.id ? next : c)))
 
   const add = (template: CheckTemplate) => {
     if (!outputKey) return
-    const rule = defaultRule(template, columns)
+    const rule = template === 'record_sets_match' ? (others[0] ? defaultCompareRule(columns, others[0]) : null) : defaultRule(template, columns)
     if (!rule) return
     onChange([...checks, buildTableCheck(outputKey, normalizeRule(rule, columns), labelOf, 'MUST', undefined, kind)])
   }
@@ -341,7 +522,7 @@ export function TableChecksEditor({
             <SelectValue placeholder='添加检查' />
           </SelectTrigger>
           <SelectContent>
-            {templatesFor(kind, sample?.pageInfo).map((t) => (
+            {templatesFor(kind, sample?.pageInfo, others, treeAll, crosstab).map((t) => (
               <SelectItem key={t.value} value={t.value} textValue={t.label}>
                 <span className='flex flex-col items-start'>
                   <span>{t.label}</span>
@@ -379,6 +560,7 @@ export function TableChecksEditor({
                     columns={columns}
                     kind={kind}
                     pageInfo={sample?.pageInfo}
+                    others={others}
                     disabled={disabled}
                     onChange={(next) => replace(withRule(check, normalizeRule(next, columns), labelOf, kind))}
                   />

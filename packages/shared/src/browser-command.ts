@@ -6,7 +6,7 @@ import { objectContentTypeSchema, objectDigestSchema, objectKeySchema } from './
 import { pageAfterSchema } from './managed-browser.js'
 import { locatorCandidateSchema, targetDescriptorSchema } from './target-descriptor.js'
 import { healingPatchSchema } from './healer.js'
-import { tableReadPlanSchema } from './table-acceptance.js'
+import { tableNetworkPlanSchema, tableReadPlanSchema } from './table-acceptance.js'
 import { jsonValueSchema, utcInstantSchema } from './wire.js'
 
 export const RESOLVER_OUTCOMES = [
@@ -222,6 +222,11 @@ export const browserCommandSchema = z.discriminatedUnion('type', [
         minBytes: z.number().int().optional(),
       })
       .optional(),
+  }),
+  /** 接口来源的表格提取：在本页已捕获的接口响应里按计划找、读成记录集（不操作页面，只留现场截图）。 */
+  z.strictObject({
+    type: z.literal('read_network_table'),
+    table: tableNetworkPlanSchema,
   }),
   z.strictObject({
     type: z.literal('probe'),
