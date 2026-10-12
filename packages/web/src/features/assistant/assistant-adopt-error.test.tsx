@@ -57,7 +57,7 @@ function buildTurn(result: AssistantTurn['result'], question: string): Assistant
     clientTurnId: 'client-adopt-error-1',
     parentTurnId: null,
     question,
-    capabilityId: 'scenario.author',
+    capabilityId: 'scenario.propose-step',
     status: 'COMPLETED',
     deadlineAt: '2026-10-09T00:01:00.000Z',
     result,
