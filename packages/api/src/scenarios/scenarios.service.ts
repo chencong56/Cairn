@@ -39,6 +39,7 @@ import {
 } from '@cairn/db'
 import {
   FACTORY_PLATFORM_CONFIG,
+  pageHealthSeedFromPlatform,
   type AiPathInsightsQuery,
   type AcceptKnowledgeProposalBody,
   type ApplyRecordingImportBody,
@@ -111,13 +112,9 @@ export class ScenariosService {
     )
   }
 
-  /** 新建场景默认带页面接口 / 脚本错误约束（平台开关，默认开）及平台默认忽略清单。 */
+  /** 新建场景按平台开关分别带页面接口 / 脚本错误约束，及平台默认忽略清单。 */
   private async pageHealthDefaults() {
-    const invariants = (await this.currentConfig()).document.runtimeInvariants
-    return {
-      pageHealthGuards: invariants?.defaultPageHealthGuards !== false,
-      pageHealthIgnore: invariants?.pageHealthDefaultIgnore ?? [],
-    }
+    return pageHealthSeedFromPlatform((await this.currentConfig()).document.runtimeInvariants)
   }
 
   list(query?: ScenarioListQuery, actorId?: string) {
@@ -169,7 +166,7 @@ export class ScenariosService {
         runAccountId: body.runAccountId,
         actor: { id: actor.id },
         executableTypes: await this.runtimeTypes(),
-        // 新建场景默认带页面接口 / 脚本错误约束（平台开关，默认开；存量场景不回填）。
+        // 新建场景按平台开关分别带页面接口 / 脚本错误约束（存量场景不回填）。
         ...(await this.pageHealthDefaults()),
       })
     } catch (error) {

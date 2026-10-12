@@ -162,11 +162,18 @@ export function createRuntimeInvariant(kind: RuntimeInvariantKind, id: string): 
 /** 新建场景默认带上的页面接口 / 脚本错误约束（默认 SHOULD + continue，只记警告）。 */
 export function defaultPageHealthInvariants(
   newId: () => string,
-  options: { networkIgnore?: readonly string[] } = {},
+  options: { networkIgnore?: readonly string[]; includeNetwork?: boolean; includeScript?: boolean } = {},
 ): RuntimeInvariant[] {
-  const network = createRuntimeInvariant('network_health', newId())
+  const includeNetwork = options.includeNetwork ?? true
+  const includeScript = options.includeScript ?? true
   const ignore = (options.networkIgnore ?? []).slice(0, 50)
-  return [ignore.length > 0 ? { ...network, network: { ignore } } : network, createRuntimeInvariant('script_errors', newId())]
+  const entries: RuntimeInvariant[] = []
+  if (includeNetwork) {
+    const network = createRuntimeInvariant('network_health', newId())
+    entries.push(ignore.length > 0 ? { ...network, network: { ignore } } : network)
+  }
+  if (includeScript) entries.push(createRuntimeInvariant('script_errors', newId()))
+  return entries
 }
 
 export type RuntimeInvariantWindow = {
@@ -535,15 +542,50 @@ export function joinRuntimeInvariantEvaluations(
 
 export const FACTORY_RUNTIME_INVARIANT_DEFAULTS = {
   allowEachStepProbe: false,
-  defaultPageHealthGuards: true,
+  defaultNetworkHealthGuard: true,
+  defaultScriptErrorsGuard: false,
   /** 新建场景时写进「页面接口」约束的默认忽略清单（匹配规则同约束里的忽略地址）。 */
   pageHealthDefaultIgnore: ['/favicon.ico'] as string[],
 } as const
 
-export const platformRuntimeInvariantDefaultsSchema = z.strictObject({
-  allowEachStepProbe: z.boolean(),
-  /** 新建场景时默认带上页面接口 / 脚本错误两条约束（存量场景不回填）。 */
-  defaultPageHealthGuards: z.boolean().default(true),
-  pageHealthDefaultIgnore: z.array(z.string().trim().min(1).max(256)).max(50).default(['/favicon.ico']),
-})
+/** 旧修订里的总开关：false 则两条都关；true / 缺省按出厂（接口开、脚本关）。新字段已在时以新字段为准。 */
+function migrateLegacyPageHealthGuardFlag(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const raw = value as Record<string, unknown>
+  if (!('defaultPageHealthGuards' in raw)) return value
+  const { defaultPageHealthGuards, ...rest } = raw
+  const legacyOff = defaultPageHealthGuards === false
+  return {
+    ...rest,
+    defaultNetworkHealthGuard: rest.defaultNetworkHealthGuard ?? !legacyOff,
+    defaultScriptErrorsGuard: rest.defaultScriptErrorsGuard ?? false,
+  }
+}
+
+export const platformRuntimeInvariantDefaultsSchema = z.preprocess(
+  migrateLegacyPageHealthGuardFlag,
+  z.strictObject({
+    allowEachStepProbe: z.boolean(),
+    /** 新建场景时默认带上「页面接口不得报错」（存量场景不回填）。 */
+    defaultNetworkHealthGuard: z.boolean().default(true),
+    /** 新建场景时默认带上「页面脚本不得出现未捕获异常」（存量场景不回填）。第三方脚本噪音多，默认关。 */
+    defaultScriptErrorsGuard: z.boolean().default(false),
+    pageHealthDefaultIgnore: z.array(z.string().trim().min(1).max(256)).max(50).default(['/favicon.ico']),
+  }),
+)
 export type PlatformRuntimeInvariantDefaults = z.infer<typeof platformRuntimeInvariantDefaultsSchema>
+
+/** 从平台配置取出新建场景应注入的页面健康约束。 */
+export function pageHealthSeedFromPlatform(
+  invariants?: PlatformRuntimeInvariantDefaults | null,
+): {
+  pageHealthNetwork: boolean
+  pageHealthScript: boolean
+  pageHealthIgnore: readonly string[]
+} {
+  return {
+    pageHealthNetwork: invariants?.defaultNetworkHealthGuard !== false,
+    pageHealthScript: invariants?.defaultScriptErrorsGuard === true,
+    pageHealthIgnore: invariants?.pageHealthDefaultIgnore ?? [],
+  }
+}

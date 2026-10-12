@@ -3854,6 +3854,7 @@ export {
   runtimeInvariantManifestSchema,
   createRuntimeInvariant,
   defaultPageHealthInvariants,
+  pageHealthSeedFromPlatform,
   authValidityViolated,
   isNavigationBoundaryError,
   redactErrorSurfaceText,

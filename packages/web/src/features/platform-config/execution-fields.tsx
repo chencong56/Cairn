@@ -103,13 +103,26 @@ export function ExecutionFields({ canWrite }: { canWrite: boolean }) {
             )}
           />
           <FormField
-            name='runtimeInvariants.defaultPageHealthGuards'
+            name='runtimeInvariants.defaultNetworkHealthGuard'
             render={({ field }) => (
               <SwitchRow
-                label='新建场景默认检查页面接口与脚本错误'
-                help='只对新建的场景生效，已有场景不会被改动；每个场景仍可单独删除或调整这两条约束。'
+                label='新建场景默认检查页面接口报错'
+                help='只对新建的场景生效，已有场景不会被改动；每个场景仍可单独删除或调整这条约束。'
                 warning='违规只记为警告，不会让运行失败，也不会触发消息推送。'
                 checked={field.value ?? true}
+                disabled={!canWrite}
+                onCheckedChange={field.onChange}
+              />
+            )}
+          />
+          <FormField
+            name='runtimeInvariants.defaultScriptErrorsGuard'
+            render={({ field }) => (
+              <SwitchRow
+                label='新建场景默认检查页面脚本未捕获异常'
+                help='只对新建的场景生效，已有场景不会被改动。地图、统计等第三方脚本常会冒未捕获异常，所以默认关闭。'
+                warning='违规只记为警告，不会让运行失败，也不会触发消息推送。'
+                checked={field.value ?? false}
                 disabled={!canWrite}
                 onCheckedChange={field.onChange}
               />

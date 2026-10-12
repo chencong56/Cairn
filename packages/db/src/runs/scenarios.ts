@@ -1062,8 +1062,10 @@ export async function createScenarioWithVersion(
     actor: AuditActor
     compileMode?: 'save' | 'release'
     executableTypes?: readonly string[]
-    /** 新建场景默认带页面接口 / 脚本错误约束。由 API 按平台开关传入；缺省不带（存量与直接调用方不受影响）。 */
-    pageHealthGuards?: boolean
+    /** 新建场景默认带「页面接口不得报错」。由 API 按平台开关传入；缺省不带。 */
+    pageHealthNetwork?: boolean
+    /** 新建场景默认带「页面脚本不得出现未捕获异常」。由 API 按平台开关传入；缺省不带。 */
+    pageHealthScript?: boolean
     /** 写进默认「页面接口」约束的忽略清单（平台默认忽略清单）。 */
     pageHealthIgnore?: readonly string[]
   },
@@ -1080,10 +1082,16 @@ export async function createScenarioWithVersion(
     resolution,
   })
   if ((input.compileMode ?? 'release') === 'release') throwIfBlocked(compiled)
-  // 新建场景默认带页面接口 / 脚本错误约束（由调用方按平台开关决定；存量场景不回填）。
-  const seededAuthoring: ScenarioAuthoringDocumentV2 | undefined = input.pageHealthGuards
-    ? { ...normalizeAuthoringDocument(compiled.definition), runtimeInvariants: defaultPageHealthInvariants(newId, { networkIgnore: input.pageHealthIgnore }) }
-    : undefined
+  // 新建场景默认带页面健康约束（由调用方按平台开关分别决定；存量场景不回填）。
+  const pageHealthInvariants = defaultPageHealthInvariants(newId, {
+    includeNetwork: input.pageHealthNetwork === true,
+    includeScript: input.pageHealthScript === true,
+    networkIgnore: input.pageHealthIgnore,
+  })
+  const seededAuthoring: ScenarioAuthoringDocumentV2 | undefined =
+    pageHealthInvariants.length > 0
+      ? { ...normalizeAuthoringDocument(compiled.definition), runtimeInvariants: pageHealthInvariants }
+      : undefined
 
   const id = newId()
   const versionId = newId()

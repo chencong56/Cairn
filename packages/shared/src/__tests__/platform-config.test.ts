@@ -481,15 +481,66 @@ describe('平台配置契约', () => {
     expect('moduleQuality' in legacy).toBe(false)
   })
 
-  it('旧修订没有 runtimeInvariants 时补出厂关闭逐步探测、默认开启页面健康约束', () => {
+  it('旧修订没有 runtimeInvariants 时补出厂关闭逐步探测、默认只开接口约束', () => {
     const { runtimeInvariants: _ignored, ...legacy } = FACTORY_PLATFORM_CONFIG
     const parsed = platformConfigDocumentSchema.parse(legacy)
-    expect(parsed.runtimeInvariants).toEqual({ allowEachStepProbe: false, defaultPageHealthGuards: true, pageHealthDefaultIgnore: ['/favicon.ico'] })
-    // 旧修订只有 allowEachStepProbe 时，新开关也按默认开启补齐
+    expect(parsed.runtimeInvariants).toEqual({
+      allowEachStepProbe: false,
+      defaultNetworkHealthGuard: true,
+      defaultScriptErrorsGuard: false,
+      pageHealthDefaultIgnore: ['/favicon.ico'],
+    })
     expect(
       platformConfigDocumentSchema.parse({ ...legacy, runtimeInvariants: { allowEachStepProbe: true } }).runtimeInvariants,
-    ).toEqual({ allowEachStepProbe: true, defaultPageHealthGuards: true, pageHealthDefaultIgnore: ['/favicon.ico'] })
+    ).toEqual({
+      allowEachStepProbe: true,
+      defaultNetworkHealthGuard: true,
+      defaultScriptErrorsGuard: false,
+      pageHealthDefaultIgnore: ['/favicon.ico'],
+    })
     expect('runtimeInvariants' in legacy).toBe(false)
+  })
+
+  it('旧总开关 defaultPageHealthGuards 拆成两条：false 都关，true 只开接口', () => {
+    const { runtimeInvariants: _ignored, ...legacy } = FACTORY_PLATFORM_CONFIG
+    expect(
+      platformConfigDocumentSchema.parse({
+        ...legacy,
+        runtimeInvariants: { allowEachStepProbe: false, defaultPageHealthGuards: false },
+      }).runtimeInvariants,
+    ).toEqual({
+      allowEachStepProbe: false,
+      defaultNetworkHealthGuard: false,
+      defaultScriptErrorsGuard: false,
+      pageHealthDefaultIgnore: ['/favicon.ico'],
+    })
+    expect(
+      platformConfigDocumentSchema.parse({
+        ...legacy,
+        runtimeInvariants: { allowEachStepProbe: false, defaultPageHealthGuards: true },
+      }).runtimeInvariants,
+    ).toEqual({
+      allowEachStepProbe: false,
+      defaultNetworkHealthGuard: true,
+      defaultScriptErrorsGuard: false,
+      pageHealthDefaultIgnore: ['/favicon.ico'],
+    })
+    expect(
+      platformConfigDocumentSchema.parse({
+        ...legacy,
+        runtimeInvariants: {
+          allowEachStepProbe: false,
+          defaultPageHealthGuards: false,
+          defaultNetworkHealthGuard: true,
+          defaultScriptErrorsGuard: true,
+        },
+      }).runtimeInvariants,
+    ).toEqual({
+      allowEachStepProbe: false,
+      defaultNetworkHealthGuard: true,
+      defaultScriptErrorsGuard: true,
+      pageHealthDefaultIgnore: ['/favicon.ico'],
+    })
   })
 
   it('旧修订没有 alerting 时补出厂规则（仅版本不一致默认开启）', () => {

@@ -223,6 +223,12 @@ describe('PlatformConfigPage', () => {
     await expect
       .element(screen.getByRole('switch', { name: '开放知识分析' }))
       .not.toBeChecked()
+    await expect
+      .element(screen.getByRole('switch', { name: '新建场景默认检查页面接口报错' }))
+      .toBeChecked()
+    await expect
+      .element(screen.getByRole('switch', { name: '新建场景默认检查页面脚本未捕获异常' }))
+      .not.toBeChecked()
   })
 
   it('告警已彻底收敛至统一的通知模块，平台配置不再呈现告警标签页', async () => {

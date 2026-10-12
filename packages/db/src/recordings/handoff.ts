@@ -43,7 +43,7 @@ export async function createScenarioFromRecordingHandoff(
   recordingDraftId: string,
   body: CreateScenarioHandoffBody,
   actor: AuditActor,
-  options: { pageHealthGuards?: boolean; pageHealthIgnore?: readonly string[] } = {},
+  options: { pageHealthNetwork?: boolean; pageHealthScript?: boolean; pageHealthIgnore?: readonly string[] } = {},
 ): Promise<{ scenario: ScenarioDetailDto; receipt: RecordingImportReceipt }> {
   createScenarioHandoffBodySchema.parse(body)
 
@@ -163,9 +163,14 @@ export async function createScenarioFromRecordingHandoff(
       normalizerVersion = composed.normalizerVersion
     }
 
-    // 新建场景默认带页面接口 / 脚本错误约束（由调用方按平台开关决定）。
-    if (options.pageHealthGuards && !authoringDoc.runtimeInvariants?.length) {
-      authoringDoc = { ...authoringDoc, runtimeInvariants: defaultPageHealthInvariants(newId, { networkIgnore: options.pageHealthIgnore }) }
+    // 新建场景默认带页面健康约束（由调用方按平台开关分别决定）。
+    const pageHealthInvariants = defaultPageHealthInvariants(newId, {
+      includeNetwork: options.pageHealthNetwork === true,
+      includeScript: options.pageHealthScript === true,
+      networkIgnore: options.pageHealthIgnore,
+    })
+    if (pageHealthInvariants.length > 0 && !authoringDoc.runtimeInvariants?.length) {
+      authoringDoc = { ...authoringDoc, runtimeInvariants: pageHealthInvariants }
     }
 
     const expanded = await expandWithLoader(txDb, draftRow.targetId, authoringDoc, 'preview', true)

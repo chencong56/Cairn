@@ -1,3 +1,4 @@
+2026-10-13--平台「新建场景默认检查页面接口与脚本错误」拆成两个开关：接口默认开、脚本默认关（第三方脚本噪音多）；旧总开关 false 仍两条都关，true 按新出厂只开接口。无迁移
 2026-10-12--iframe 跳转后点选/抽表不再因 src 与落地 URL 不一致报 SURFACE_LOST：记录落地 path、匹配同时认 iframe.src，url 对不上时仅唯一 selector/name 可回退；点选外层表带上同一 framePath。无迁移
 2026-10-12--场景集「浏览场景库大面板」改为搜索分词、跨关键词组合勾选、全选当前结果并一次加入；快捷添加浮层仍单条加入。无迁移
 2026-10-12--远端开发组件改到 shsnc-gs1：`cairn-dev-pg` / Redis / RustFS 跑在 `/home/cairn/{pg,rustfs}`，`.env.remote` 经 Tailscale `100.64.0.8` 的 25432 / 26380 / 19031 接入，账号密码沿用原 `.env.remote.secrets`。无业务迁移

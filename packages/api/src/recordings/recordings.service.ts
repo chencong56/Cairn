@@ -29,7 +29,7 @@ import type {
   RecordingDraftListQuery,
   UpdateRecordingExclusionsBody,
 } from '@cairn/shared'
-import { hasPermission } from '@cairn/shared'
+import { hasPermission, pageHealthSeedFromPlatform } from '@cairn/shared'
 import { forbidden } from '@cairn/db'
 import type { Request, Response } from 'express'
 import { DB_HANDLE } from '../db/db.module'
@@ -162,9 +162,8 @@ export class RecordingsService {
     try {
       const platform = await getPlatformConfig(this.db)
       const result = await createScenarioFromRecordingHandoff(this.db, recordingDraftId, body, actor, {
-        // 新建场景默认带页面接口 / 脚本错误约束（平台开关，默认开）。
-        pageHealthGuards: platform?.document.runtimeInvariants?.defaultPageHealthGuards !== false,
-        pageHealthIgnore: platform?.document.runtimeInvariants?.pageHealthDefaultIgnore ?? [],
+        // 新建场景按平台开关分别带页面接口 / 脚本错误约束。
+        ...pageHealthSeedFromPlatform(platform?.document.runtimeInvariants),
       })
       await this.publishHint(recordingDraftId)
       return result

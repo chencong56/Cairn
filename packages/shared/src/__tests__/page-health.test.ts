@@ -15,6 +15,7 @@ import {
   createRuntimeInvariant,
   defaultPageHealthInvariants,
   deriveRuntimeInvariantResults,
+  pageHealthSeedFromPlatform,
   runtimeInvariantSchema,
 } from '../runtime-invariant.js'
 import { assembleRunOutput } from '../run-output.js'
@@ -31,6 +32,30 @@ describe('页面健康：契约与默认', () => {
     }
     expect(() => runtimeInvariantSchema.parse({ ...createRuntimeInvariant('script_errors', id(2)), network: {} })).toThrow()
     expect(defaultPageHealthInvariants(() => id(3))).toHaveLength(2)
+    expect(defaultPageHealthInvariants(() => id(4), { includeNetwork: true, includeScript: false }).map((item) => item.kind)).toEqual([
+      'network_health',
+    ])
+    expect(defaultPageHealthInvariants(() => id(5), { includeNetwork: false, includeScript: true }).map((item) => item.kind)).toEqual([
+      'script_errors',
+    ])
+    expect(defaultPageHealthInvariants(() => id(6), { includeNetwork: false, includeScript: false })).toEqual([])
+    expect(pageHealthSeedFromPlatform(undefined)).toEqual({
+      pageHealthNetwork: true,
+      pageHealthScript: false,
+      pageHealthIgnore: [],
+    })
+    expect(
+      pageHealthSeedFromPlatform({
+        allowEachStepProbe: false,
+        defaultNetworkHealthGuard: false,
+        defaultScriptErrorsGuard: true,
+        pageHealthDefaultIgnore: ['/ping'],
+      }),
+    ).toEqual({
+      pageHealthNetwork: false,
+      pageHealthScript: true,
+      pageHealthIgnore: ['/ping'],
+    })
   })
 
   it('默认不含图片和字体，4xx 与 5xx 都算', () => {

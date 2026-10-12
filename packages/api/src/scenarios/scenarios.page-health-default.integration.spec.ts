@@ -75,18 +75,17 @@ describe('新建场景默认带页面接口 / 脚本错误约束（真实库）'
     )
   }
 
-  it('默认开启：草稿与首个发布版本都带 network_health + script_errors，均为 SHOULD + continue', async () => {
+  it('默认只带 network_health（SHOULD + continue），不带 script_errors；忽略清单写进接口约束', async () => {
     const target = await createTarget()
     const created = await scenarios.create({ targetId: target.id, name: '默认带约束', steps: [navigate()] }, actor)
     const detail = await scenarios.get(created.id)
     const draft = invariantsOf(detail.draft?.document)
     const published = invariantsOf(detail.published?.authoringDocument)
     for (const list of [draft, published]) {
-      expect(list.map((item) => item.kind).sort()).toEqual(['network_health', 'script_errors'])
+      expect(list.map((item) => item.kind)).toEqual(['network_health'])
       expect(list.every((item) => item.severity === 'SHOULD' && item.onViolation === 'continue' && item.evaluateAt === 'each_step')).toBe(true)
     }
-    expect(draft.map((item) => item.id).sort()).toEqual(published.map((item) => item.id).sort())
-    // 平台默认忽略清单写进「页面接口」约束
+    expect(draft.map((item) => item.id)).toEqual(published.map((item) => item.id))
     expect(draft.find((item) => item.kind === 'network_health')?.network?.ignore).toEqual(['/favicon.ico'])
   })
 
@@ -110,7 +109,11 @@ describe('新建场景默认带页面接口 / 脚本错误约束（真实库）'
     const existing = await getPlatformConfig(handle)
     const document = {
       ...FACTORY_PLATFORM_CONFIG,
-      runtimeInvariants: { ...FACTORY_PLATFORM_CONFIG.runtimeInvariants, defaultPageHealthGuards: false },
+      runtimeInvariants: {
+        ...FACTORY_PLATFORM_CONFIG.runtimeInvariants,
+        defaultNetworkHealthGuard: false,
+        defaultScriptErrorsGuard: false,
+      },
     }
     if (existing) {
       await updatePlatformConfig(handle, {
@@ -124,6 +127,31 @@ describe('新建场景默认带页面接口 / 脚本错误约束（真实库）'
     }
     const after = await scenarios.create({ targetId: target.id, name: '关闭后', steps: [navigate()] }, actor)
     expect(invariantsOf((await scenarios.get(after.id)).draft?.document)).toEqual([])
-    expect(invariantsOf((await scenarios.get(before.id)).draft?.document)).toHaveLength(2)
+    expect(invariantsOf((await scenarios.get(before.id)).draft?.document).map((item) => item.kind)).toEqual(['network_health'])
+  })
+
+  it('只开脚本开关时新建场景只带 script_errors', async () => {
+    const existing = await getPlatformConfig(handle)
+    const document = {
+      ...FACTORY_PLATFORM_CONFIG,
+      runtimeInvariants: {
+        ...FACTORY_PLATFORM_CONFIG.runtimeInvariants,
+        defaultNetworkHealthGuard: false,
+        defaultScriptErrorsGuard: true,
+      },
+    }
+    if (existing) {
+      await updatePlatformConfig(handle, {
+        expectedRevision: existing.revision,
+        document,
+        reason: '只开脚本默认约束',
+        actor: { id: actor.id },
+      })
+    } else {
+      await getOrCreatePlatformConfig(handle, { document, reason: '只开脚本默认约束' })
+    }
+    const target = await createTarget()
+    const created = await scenarios.create({ targetId: target.id, name: '只带脚本', steps: [navigate()] }, actor)
+    expect(invariantsOf((await scenarios.get(created.id)).draft?.document).map((item) => item.kind)).toEqual(['script_errors'])
   })
 })
