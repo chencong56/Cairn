@@ -2,7 +2,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import type { PlatformSessionScheduling, RunPlacement, RunStatus } from '@cairn/shared'
 import type { Db } from '../client.js'
 import { clockNow, databaseNow, schemaFor } from '../native.js'
-import { accountDisplayName, manualControlLive } from './manual-control.js'
+import { accountDisplayName, manualControlLive, resolveClaimerActorId } from './manual-control.js'
 import {
   assignMinFreeSlot,
   decideAccountSessionClaim,
@@ -47,6 +47,7 @@ export async function evaluateRunSessionEligibility(
   const [worker] = input.roles
     ? [{ roles: input.roles }]
     : await db.select({ roles: workers.roles }).from(workers).where(eq(workers.id, input.workerId)).limit(1)
+  const claimerActorId = await resolveClaimerActorId(db, { kind: 'RUN', runId: input.run.id })
   const decision = await decideAccountSessionClaim(db, {
     key,
     lives,
@@ -58,6 +59,7 @@ export async function evaluateRunSessionEligibility(
     holderRoles: worker?.roles,
     purpose: 'EXECUTION',
     pickIdle: 'oldest',
+    claimerActorId,
   })
   if (decision.action === 'reuse') {
     return { eligible: true, fallback: false, facts: empty }

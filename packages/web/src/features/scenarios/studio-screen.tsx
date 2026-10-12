@@ -48,7 +48,9 @@ import {
 import {
   canCancelOperation,
   describeOccupancyBy,
+  describeQueuedTrialWait,
   findFollowableOperation,
+  findLiveManualHold,
   instanceOccupancyText,
   isInstanceIdle,
   pickViewInstance,
@@ -232,6 +234,7 @@ export function StudioScreen({
   const isFinished = Boolean(run && isFinishedRunStatus(run.status))
   // 本页试跑还在排队时不切到运行画面：继续显示当前实例，并说明在等什么。
   const ownRunQueued = Boolean(run && ['QUEUED', 'SCHEDULED'].includes(run.status))
+  const queuedHold = ownRunQueued ? findLiveManualHold(accountDetail, myId) : null
   const showRunLive = isLiveState && !(ownRunQueued && sessionOpen && sessionViewId)
   // 实例被别人的运行占用：只读围观，不给手动操作与调试入口。
   const occupiedByOtherRun = Boolean(occupyingRunId && occupyingRunId !== runId)
@@ -743,10 +746,14 @@ export function StudioScreen({
               </Alert>
             ) : null}
             {ownRunQueued ? (
-              <Alert variant='info' className='mx-3 mt-2'>
+              <Alert variant={queuedHold ? 'warning' : 'info'} className='mx-3 mt-2'>
                 <AlertDescription>
-                  你的试跑在排队，等当前实例空出来后自动开始
-                  {run?.placement?.waitReason ? `：${WAIT_REASON_COPY[run.placement.waitReason] ?? run.placement.waitReason}` : '。'}
+                  {describeQueuedTrialWait({
+                    hold: queuedHold,
+                    waitReasonCopy: run?.placement?.waitReason
+                      ? (WAIT_REASON_COPY[run.placement.waitReason] ?? run.placement.waitReason)
+                      : undefined,
+                  })}
                 </AlertDescription>
               </Alert>
             ) : null}

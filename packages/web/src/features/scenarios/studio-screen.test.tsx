@@ -731,6 +731,33 @@ describe('StudioScreen Component', () => {
       await expect.element(screen.getByText(/Bob 的运行 占用，只读观看/)).toBeInTheDocument()
     })
 
+    it('本人手动操作导致试跑排队时说明还没开始，并指向退出操作', async () => {
+      observation.run = {
+        id: RUN_ID,
+        status: 'QUEUED',
+        placement: { state: 'owner_required', waitReason: 'SESSION_IN_MANUAL_CONTROL' },
+      } as RunDetailDto
+      sessionMocks.fetchAccountSession.mockResolvedValue({
+        ...openSession,
+        instances: [
+          instanceOf('inst-1', 1, {
+            manualControl: {
+              actorId: 'u1',
+              actorName: '测试',
+              expiresAt: new Date(Date.now() + 30_000).toISOString(),
+            },
+          }),
+        ],
+      })
+      const screen = await renderScreen({
+        runId: RUN_ID,
+        targetId: TARGET_ID,
+        targetAccountId: ACCOUNT_ID,
+      })
+      await expect.element(screen.getByText(/试跑还没开始/)).toBeInTheDocument()
+      await expect.element(screen.getByText(/退出操作/)).toBeInTheDocument()
+    })
+
     it('并发模式下没有空闲实例且未到上限时出现「新开实例」，点击发起 newInstance 准备', async () => {
       observation.run = null
       sessionMocks.requestAccountSessionOperation.mockClear()

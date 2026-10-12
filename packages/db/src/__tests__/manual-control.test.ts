@@ -13,7 +13,9 @@ import {
   assertRunDebugOwner,
   claimSessionUse,
   computeRunPlacement,
+  evaluateRunSessionEligibility,
   heartbeatAuthControl,
+  readSessionScheduling,
   cancelSessionOperation,
   claimSessionOperation,
   createRunWithSnapshot,
@@ -446,6 +448,26 @@ describe.each(DRIVERS)('%s 受管会话共享观看与手动操作互斥（P0）
         maxLifetimeSeconds: 3600,
       })
       expect(claimed.ok).toBe(false)
+    })
+
+    it('MC18 调度资格：本人持有时可以领取，他人持有时不行', async () => {
+      const accountId = await makeAccount('mc18')
+      const worker = await seedWorker('mc18')
+      const session = await openSession(accountId, worker)
+      await acquire(session, worker, alice)
+      const own = await queueRun(accountId, alice)
+      const other = await queueRun(accountId, bob)
+      const scheduling = (await readSessionScheduling(handle.db)).scheduling
+      const judge = (runId: string, createdAt: string) =>
+        evaluateRunSessionEligibility(handle.db, {
+          run: { id: runId, createdAt: new Date(createdAt), targetId, targetAccountId: accountId },
+          workerId: worker.workerId,
+          instanceId: worker.instanceId,
+          maxSessions: 8,
+          scheduling,
+        })
+      expect(await judge(own.detail.id, own.detail.createdAt)).toMatchObject({ eligible: true })
+      expect(await judge(other.detail.id, other.detail.createdAt)).toMatchObject({ eligible: false })
     })
 
     it('MC14 concurrent：一个实例被手动操作时，他人运行改用新建的实例，不等待', async () => {

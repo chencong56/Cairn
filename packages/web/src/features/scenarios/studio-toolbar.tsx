@@ -174,9 +174,11 @@ export function StudioToolbar({
   }
 
   // 试跑运行态判定
+  const isTrialQueued = Boolean(trialRun && ['QUEUED', 'SCHEDULED'].includes(trialRun.status))
   const isTrialRunning = Boolean(
     trialRun && ['QUEUED', 'RUNNING', 'RECOVERING', 'WAITING_FOR_AUTH', 'HOLDING'].includes(trialRun.status),
   )
+  const trialLiveLabel = isTrialQueued ? '试跑排队中' : '试跑中…'
   const canCancelTrial = canCancelTrialProp ?? Boolean(onCancelTrial)
   const [isCancelHovered, setIsCancelHovered] = useState(false)
 
@@ -453,7 +455,7 @@ export function StudioToolbar({
                 onClick={onCancelTrial}
                 onMouseEnter={() => setIsCancelHovered(true)}
                 onMouseLeave={() => setIsCancelHovered(false)}
-                title='试跑执行中，点击可中止'
+                title={isTrialQueued ? '试跑还在排队，尚未开始执行；点击可中止' : '试跑执行中，点击可中止'}
               >
                 {cancellingTrial ? (
                   <>
@@ -468,7 +470,7 @@ export function StudioToolbar({
                 ) : (
                   <>
                     <Loader2 className='size-3.5 animate-spin text-primary' />
-                    <span>试跑中…</span>
+                    <span>{trialLiveLabel}</span>
                   </>
                 )}
               </Button>
@@ -478,10 +480,10 @@ export function StudioToolbar({
                 variant='outline'
                 className='h-8 px-2.5 text-label text-muted-foreground gap-1.5'
                 disabled
-                title='试跑执行中…'
+                title={isTrialQueued ? '试跑还在排队，尚未开始执行' : '试跑执行中…'}
               >
                 <Loader2 className='size-3.5 animate-spin text-primary' />
-                <span>试跑中…</span>
+                <span>{trialLiveLabel}</span>
               </Button>
             )
           ) : canTrial ? (

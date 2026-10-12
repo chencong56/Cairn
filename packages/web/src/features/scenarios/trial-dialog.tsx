@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { newUuid } from '@/lib/uuid'
 import { useQuery } from '@tanstack/react-query'
-import { runInputSchema, type RunDetailDto, type ScenarioInputDecl } from '@cairn/shared'
+import { hasPermission, runInputSchema, type RunDetailDto, type ScenarioInputDecl } from '@cairn/shared'
 import { toast } from 'sonner'
 import { ApiRequestError } from '@/lib/api-client'
 import { fetchScenarioCapabilities, trialScenario } from '@/lib/scenarios-api'
+import { fetchAccountSession } from '@/lib/sessions-api'
+import { useAuthStore } from '@/stores/auth-store'
 import { CAPTURE_MODE_LABELS } from '@/features/platform-config/labels'
 import { AccountSessionHint } from '@/features/runs/account-session-hint'
 import { unusableAccountCopy, unusableAccountReason } from '@/features/runs/target-account'
 import { RunAccountField, effectiveRunAccount, useRunAccountChoice } from '@/features/runs/run-account-field'
+import { findLiveManualHold } from './studio-instances'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -84,6 +88,10 @@ export function TrialDialog({
   onCreated,
   onConflict,
 }: TrialDialogProps) {
+  const myId = useAuthStore((state) => state.auth.user?.id ?? null)
+  const canReadSession = useAuthStore((state) =>
+    hasPermission(state.auth.user?.permissions ?? [], 'session:read'),
+  )
   const accountChoice = useRunAccountChoice({ targetId, scenarioRunAccountId, enabled: open })
   const accounts = accountChoice.accountsQuery
   const capabilities = useQuery({
@@ -99,7 +107,24 @@ export function TrialDialog({
   const accountItems = accountChoice.accounts
   const usableAccounts = accountChoice.usable
   const effectiveAccount = effectiveRunAccount(accountChoice, targetAccountId)
+  const sessionQuery = useQuery({
+    queryKey: ['account-session', targetId, effectiveAccount?.id],
+    queryFn: () => fetchAccountSession(targetId, effectiveAccount!.id),
+    enabled: open && canReadSession && Boolean(effectiveAccount),
+  })
+  const hold = findLiveManualHold(sessionQuery.data, myId)
   const emptyAccountReason = accounts.isPending ? undefined : unusableAccountReason(accountItems)
+  const startLabel = hold?.mine
+    ? pauseBeforeStepId
+      ? '结束操作并运行到此步'
+      : '结束操作并开始试跑'
+    : hold
+      ? pauseBeforeStepId
+        ? '排队并运行到此步'
+        : '排队并开始试跑'
+      : pauseBeforeStepId
+        ? '开始断点试跑'
+        : '开始试跑'
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [failure, setFailure] = useState<{ message: string; diagnostics: string[] } | null>(null)
@@ -147,6 +172,19 @@ export function TrialDialog({
             ) : (
               <AccountSessionHint targetId={targetId} account={effectiveAccount} />
             )}
+            {hold?.mine ? (
+              <Alert variant='info'>
+                <AlertDescription>
+                  你正在这个浏览器里手动操作。开始试跑后会结束手动操作，步骤会接管这个画面。
+                </AlertDescription>
+              </Alert>
+            ) : hold ? (
+              <Alert variant='warning'>
+                <AlertDescription>
+                  {hold.actorName ?? '其他人'} 正在这个浏览器里手动操作。现在开始的话，试跑会排队，等对方结束后自动开始。
+                </AlertDescription>
+              </Alert>
+            ) : null}
             {usableAccounts.length === 0 && emptyAccountReason ? (
               <p className='text-label text-muted-foreground'>{unusableAccountCopy(emptyAccountReason)}</p>
             ) : null}
@@ -236,7 +274,7 @@ export function TrialDialog({
                 .finally(() => setSaving(false))
             }}
           >
-            {pauseBeforeStepId ? '开始断点试跑' : '开始试跑'}
+            {startLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

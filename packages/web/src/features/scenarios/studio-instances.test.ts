@@ -3,7 +3,9 @@ import type { AccountSessionDetail } from '@cairn/shared'
 import {
   canCancelOperation,
   describeOccupancyBy,
+  describeQueuedTrialWait,
   findFollowableOperation,
+  findLiveManualHold,
   instanceOccupancyText,
   isInstanceIdle,
   pickViewInstance,
@@ -148,5 +150,24 @@ describe('占用说明', () => {
     expect(
       instanceOccupancyText(instance('c', { pendingDestructive: { operationId: 'o', kind: 'CLOSE', requestedByName: 'Bob' } }), 'me'),
     ).toBe('Bob 已请求重建')
+  })
+  it('findLiveManualHold 区分本人、他人和过期操作权', () => {
+    const live = instance('a', {
+      manualControl: { actorId: 'me', actorName: '我', expiresAt: new Date(Date.now() + 30_000).toISOString() },
+    })
+    const other = instance('b', {
+      manualControl: { actorId: 'u2', actorName: 'Bob', expiresAt: new Date(Date.now() + 30_000).toISOString() },
+    })
+    const expired = instance('c', {
+      manualControl: { actorId: 'me', actorName: '我', expiresAt: new Date(Date.now() - 1000).toISOString() },
+    })
+    expect(findLiveManualHold(detail([live]), 'me')).toEqual({ mine: true, actorName: '我' })
+    expect(findLiveManualHold(detail([other]), 'me')).toEqual({ mine: false, actorName: 'Bob' })
+    expect(findLiveManualHold(detail([expired]), 'me')).toBeNull()
+  })
+  it('describeQueuedTrialWait 本人持有时指向退出操作', () => {
+    expect(describeQueuedTrialWait({ hold: { mine: true, actorName: '我' } })).toContain('退出操作')
+    expect(describeQueuedTrialWait({ hold: { mine: false, actorName: 'Bob' } })).toContain('Bob')
+    expect(describeQueuedTrialWait({ hold: null, waitReasonCopy: '会话已达上限。' })).toContain('会话已达上限')
   })
 })

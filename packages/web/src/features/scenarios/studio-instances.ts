@@ -44,6 +44,40 @@ export function instanceOccupancyText(instance: StudioInstance, myId?: string | 
   return '空闲'
 }
 
+export type LiveManualHold = { mine: boolean; actorName: string | null }
+
+/** 账号里正在生效的手动操作：本人还是别人。过期的操作权不算。 */
+export function findLiveManualHold(
+  detail: Pick<AccountSessionDetail, 'instances'> | undefined,
+  myId?: string | null,
+  nowMs = Date.now(),
+): LiveManualHold | null {
+  const held = (detail?.instances ?? []).find((item) => {
+    if (!item.manualControl) return false
+    const expires = Date.parse(item.manualControl.expiresAt)
+    return Number.isFinite(expires) ? expires > nowMs : true
+  })
+  if (!held?.manualControl) return null
+  return {
+    mine: Boolean(myId && held.manualControl.actorId === myId),
+    actorName: held.manualControl.actorName,
+  }
+}
+
+export function describeQueuedTrialWait(input: {
+  hold: LiveManualHold | null
+  waitReasonCopy?: string
+}): string {
+  if (input.hold?.mine) {
+    return '试跑还没开始。你正在这个浏览器里手动操作；点画面上的「退出操作」，或稍等系统接管后会自动开始。'
+  }
+  if (input.hold) {
+    return `试跑还没开始。${input.hold.actorName ?? '其他人'} 正在手动操作，结束后会自动开始。`
+  }
+  if (input.waitReasonCopy) return `你的试跑在排队，等当前实例空出来后自动开始：${input.waitReasonCopy}`
+  return '你的试跑在排队，等当前实例空出来后自动开始。'
+}
+
 export function isInstanceIdle(instance: StudioInstance): boolean {
   return (
     instance.status === 'OPEN' &&
