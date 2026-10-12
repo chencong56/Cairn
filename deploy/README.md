@@ -1,124 +1,59 @@
 # deploy
 
-本机用 Podman 起 PostgreSQL 16、RustFS（S3 对象存储）与 Redis，给 `pnpm env:use local` 用。远端 shsnc-ah3 是 Docker + RustFS，见 `docs/deploy/2026-09-10-shsnc-ah3-infra.md`（未入库）。
-
-凭据与远端一致，只有地址不同：库和 S3 都听 `127.0.0.1`，端口仍是 `5432` / `9021` / `9022`。
-
-> 本机容器运行时是 podman 5.8.2，没有 docker。编排走 `podman compose`（底层是 Docker Compose 5）。
-
-## 一次启动
+日常只记两条：
 
 ```bash
-# 若还没有 deploy/.env：从 example 复制，并填上与远端相同的库口令 / S3 密钥
-cp deploy/.env.example deploy/.env
+# 切本机进程连哪套组件（合并画像、迁开发库、拉起热重载）
+pnpm dev:env use local
+pnpm dev:env use remote
+pnpm dev:env status|check|restart|down
 
-pnpm infra:up        # 等价于 podman compose -f deploy/compose.yml up -d
-pnpm infra:status
-pnpm env:use local   # 让仓库根 .env 指向本机画像
-pnpm db:migrate      # schema cairn 仍由迁移创建，不在 compose 里预建
+# 远端专用开发组件：第一次或挂了之后
+./deploy/cairn dev-infra up
+./deploy/cairn dev-infra status
 ```
 
-Postgres 数据目录在仓库根 `.data/postgres`（已 gitignore）；RustFS 数据在命名卷 `cairn-rustfs-data`（项目目录在 macOS 共享挂载上时 bind mount 权限不足，RustFS 也不支持 FUSE）。`down` 默认保留数据。
-
-## 端口与账号
-
-| 服务 | 容器 | 本机地址 | 账号 |
-| --- | --- | --- | --- |
-| PostgreSQL | `cairn-postgres` | `127.0.0.1:5432` | 与远端相同的 `cairn` / 库名 `cairn` |
-| RustFS S3 | `cairn-rustfs` | `http://127.0.0.1:9021` | 与远端相同的 Access Key / Secret Key |
-| RustFS 控制台 | `cairn-rustfs` | `http://127.0.0.1:9022` | 同上 |
-
-桶 `cairn-evidence` 由 `cairn-rustfs-init` 在 RustFS healthy 后创建（幂等）。S3 客户端必须 `forcePathStyle: true`。
-
-## 常用命令
+发布环境（ah2 / ah3 / ah4）走同一条命令，读 `deploy/targets/cluster.conf`，不进 `pnpm`：
 
 ```bash
-./scripts/infra.sh start             # 一键启动所有容器（Postgres, Redis, RustFS）并等待就绪
-./scripts/infra.sh stop              # 一键停止所有容器（保留 .data 数据卷）
-./scripts/infra.sh restart           # 一键重启所有容器并等待就绪
-./scripts/infra.sh status            # 查看各容器状态与健康探活
-./scripts/infra.sh logs [服务]       # 查看容器日志（例如 logs redis 100）
-./scripts/infra.sh clean-test-dbs    # 扫描并清理历史测试遗留的孤儿数据库
-
-# 对应 npm/pnpm 便捷指令：
-pnpm infra:start                     # 等价于 ./scripts/infra.sh start (别名: pnpm infra:up)
-pnpm infra:stop                      # 等价于 ./scripts/infra.sh stop (别名: pnpm infra:down)
-pnpm infra:restart                   # 一键重启容器组件
-pnpm infra:status                    # 查看运行状态
-pnpm infra:logs                      # 跟踪日志
-pnpm infra:clean-test-dbs            # 一键清理测试残留孤儿数据库
+./deploy/cairn release --dry-run
+./deploy/cairn release
+./deploy/cairn status
+./deploy/cairn rollback
+./deploy/cairn logs api
+./deploy/cairn restart api
+./deploy/cairn migrate
 ```
 
-需要清盘时再 `podman compose -f deploy/compose.yml down -v`（或 `./scripts/infra.sh down`），并手动删 `.data/postgres`（`down -v` 会一并删除 RustFS 命名卷）。
+不要把本机 API / Worker 接到发布栈（`15432` / `16380` / `9031`）。`package.json` 不加 `deploy` / `release`。
 
-数据库后端配置、受控迁移和运行观察提示通道见[数据库配置与受控迁移](database-backends.md)。当前只支持部署 PostgreSQL（默认用 LISTEN/NOTIFY）；MySQL 迁移链已冻结，仅为历史实例保留。
+## 配置在哪
 
-## Worker 内部入口与控制面入口
-
-两条链路分开，即使都用 Nginx 也不能混成注册服务：
-
-```text
-浏览器 ──► 控制面 Nginx / VIP ──► API
-API ──HTTPS + HMAC──► 每 Worker 专用 TLS 入口 ──同机 loopback HTTP──► Worker
-```
-
-Worker 配置广告入口后会向数据库自注册其内部通信地址（`internalBaseUrl`），API 优先使用该地址；没有广告入口时可使用 API 配置的 `CAIRN_WORKER_ENDPOINTS` 映射。跨机、跨容器网络或经由反向代理时，应设置 API 可访问的 `CAIRN_WORKER_ADVERTISE_URL`（支持 HTTP 与 HTTPS，由具体部署架构与用户需求自主决定）。Worker 进程默认监听 `127.0.0.1:$CAIRN_WORKER_INTERNAL_PORT`。
-
-### 单机按角色拆分 Worker
-
-本机进程脚本可将 `executor`、`scheduler`、`analyst`、`maintenance` 启为四个独立进程。默认 `./scripts/dev.sh start` 和 `./scripts/stack.sh start` 仍使用原来的单 Worker，`CAIRN_WORKER_ROLES=all`。角色模式与单 Worker 不能同时启动；切换时先停旧模式：
-
-```bash
-# 功能开发：保留 API / Web 的热重载进程，仅切换 Worker
-./scripts/dev.sh stop worker
-./scripts/dev.sh start worker-roles
-./scripts/dev.sh status
-pnpm check:stack
-
-# 回到单 Worker
-./scripts/dev.sh stop worker-roles
-./scripts/dev.sh start worker
-
-# 验证已编译产物时，用 stack.sh 的同名目标；启动前先完成 Worker 构建
-pnpm --filter @cairn/worker build
-./scripts/stack.sh start worker-roles
-```
-
-`start|stop|restart|status|clean|logs` 都支持 `worker-roles` 和单角色目标（如 `worker-executor`、`worker-maintenance`）；`all` / `backend` 会沿用正在运行的 Worker 模式。开发角色模式只运行一个共享 TypeScript watch，四个 Node 进程分别热重启。角色 PID 和日志分别写在 `.run/worker-<角色>.pid`、`logs/worker-<角色>.log`。`pnpm check:stack` 自动识别本机角色进程，并逐个验证签名节点健康；少一个角色或有节点卡顿降级都会在结果中反映。
-
-| 角色 | 默认 Worker ID | 默认 loopback 端口 |
+| 文件 | 进仓库 | 写什么 |
 | --- | --- | --- |
-| `executor` | `local-worker-executor` | `8092` |
-| `scheduler` | `local-worker-scheduler` | `8093` |
-| `analyst` | `local-worker-analyst` | `8094` |
-| `maintenance` | `local-worker-maintenance` | `8095` |
+| `.env.local` / `.env.remote` | 是 | 本机进程连哪：host、端口、桶 |
+| `.env.*.secrets` | 否 | 六个密钥 |
+| `deploy/targets/dev-infra.conf` | 是 | gs1 开发组件：SSH、reach、绑定、端口、桶；数据在 `/home/cairn` |
+| `deploy/targets/cluster.conf` | 是 | 发布拓扑：主机、角色、compose、restart、探活 |
+| `deploy/dev-infra/.env` | 否 | 开发组件密钥；`dev-infra up` 按清单补端口 |
+| 各机 `cluster/deploy/.env` | 否 | 发布栈密钥；`release` 只改 `CAIRN_BUILD_VERSION`，不拉回 Mac |
 
-多主机共用数据库时，每台主机设置不同的 `CAIRN_WORKER_ROLE_ID_PREFIX`，或分别配置 `CAIRN_WORKER_EXECUTOR_ID` 等四个 ID；也可用对应的 `CAIRN_WORKER_EXECUTOR_PORT` 等变量改端口。ID 与端口在同一实例组内必须唯一。每个角色继承同一份数据库与密钥配置。本机角色脚本在未配置广告入口时默认登记各自的 loopback 地址；API 也为默认角色 ID 与端口提供本机映射，以便路由已有会话。跨主机、跨容器时必须分别设置 `CAIRN_WORKER_EXECUTOR_ADVERTISE_URL` 等四个 API 可达的独立入口，不能使用默认 loopback 地址。若单 Worker 配置了 `CAIRN_WORKER_ADVERTISE_URL`，角色模式也必须分别设置这些入口，避免多个节点广告同一个地址。应用迁移和正式多主机部署仍按现有升级流程执行。
+改开发组件端口：改 `dev-infra.conf`，再 `./deploy/cairn dev-infra up`，然后 `pnpm dev:env use remote`。
 
-代理须保留内部签名头和原始请求体，关闭 SSE 缓冲，超时不短于连接 3s / 响应头 10s / 认证 POST 30s。不要把多个 Worker 随机负载均衡到同一个广告 origin，也不要关闭证书校验。HMAC 密钥继续走 `CAIRN_INTERNAL_AUTH_SECRET`，不要写进广告 URL。
+加执行节点：只改 `cluster.conf` 加一个 `[host.…]`。
 
-排查：治理页「执行节点」看登记是否 READY、心跳是否新鲜、`routeAvailability`；库内入口无效或过期时 API 不会改去猜另一个地址。控制面入口只解决浏览器到 API，Worker 专用入口失败不要先改 CORS。
+## 目录
 
-## 升级注意：锁步部署与发布号守卫（`0156_worker_roles_release` 起）
+| 路径 | 干什么 |
+| --- | --- |
+| `cairn` | 对外唯一命令 |
+| `targets/` | 清单 |
+| `dev-infra/` | 远端开发组件编排 |
+| `compose.yml` | 本机 Podman 组件，只服务 `use local` |
+| `cluster/` | 发布栈正在用的 compose / nginx，不要当日常入口 |
+| `images/` | 底座镜像 Dockerfile，稀有 |
+| `lib/` | 内部脚本，不要直接跑 |
 
-API 与 Worker 必须同版本整组升级，**不为新旧 Worker 混跑做兼容**：Worker 不再声明协议能力（`workers.protocol_capabilities` 已删除），登记时只写显式角色 `roles`（`CAIRN_WORKER_ROLES` 解析结果）与发布号 `release`（`CAIRN_BUILD_VERSION`）。下文各节里「Worker 须声明某协议 / 未声明不领取」的说法只适用于当时的旧版本。
+本机组件：`pnpm infra:up` 或 `dev:env use local`。清盘见 `./scripts/infra.sh`。数据库说明见 [database-backends.md](database-backends.md)。
 
-发布号守卫：在线控制台实例的 `CAIRN_BUILD_VERSION` 都是 R、而某个 Worker 的不是 R 时，该 Worker 跑完手头运行后不再领新运行，治理页「执行节点」标出「版本不一致」，出厂告警「执行节点与控制台版本不一致」（默认开启）持续 5 分钟后触发，`pnpm check:stack` 判 `STACK_UNHEALTHY`。控制台之间版本本身不一致（控制台滚动升级中）时不拦；`CAIRN_BUILD_VERSION` 为空（本机开发）时守卫不生效。推荐顺序：迁移 → API → Worker → Web；先升 Worker 也不会失败，只是新 Worker 在控制台升级完成前暂不领取。守卫只在 API 与 Worker 的 `CAIRN_BUILD_VERSION` 随代码发布更新时才有效。
-
-## 升级注意：会话占用协议 `session-occupancy@2`
-
-含 `0032_session_occupancy`（MySQL 为 `0016_session_occupancy`）的版本把认证等待占用迁入 `session_leases` 用途租约，并要求 Worker 声明协议能力 `session-occupancy@2`。这是会话管理中唯一的破坏性迁移，**不能新旧二进制混跑**。
-
-升级前：停止发放新 Run，等待 ACTIVE 执行租约与 `auth_hold_*` 占用排空（`WAITING_FOR_AUTH` 须完成、取消或超时），再部署新 API 与 Worker。未声明该能力的 Worker 不能进入 READY。LOST 和未确认停止的实例不会为升级自动放键。存量 Profile 目录首次加载按 `revision=1` 登记当前节点，不跨节点合并。回退时若已存在 `MAINTENANCE` / `AUTH_WAIT` 行或 `SESSION_OPERATION` 主体，拒绝启动旧二进制。
-
-## 升级注意：动作模块调用与快照协议 `snapshot.moduleManifest@1`
-
-含 `0044_scenario_action_module_refs`（MySQL 为 `0028_scenario_action_module_refs`）的版本给场景编写文档加上 V2 节点（可含动作模块调用）、`scenario_versions.authoring_document` / `module_manifest` 与 `scenario_module_refs` 引用索引。
-
-上线顺序：迁移 → Worker → API → Web。Worker 先部署到声明 `snapshot.moduleManifest@1` 的版本；未声明的 Worker 不会领取快照带 `moduleManifest` 的 Run，不含模块调用的 Run 照常领取。
-
-**一旦保存过含模块调用的 V2 草稿，就不能把 API 降级到不认识 V2 的版本**：旧 API 无法解析该草稿，也会拒绝写入。回退只回退二进制，不要删列——`authoring_document`、`module_manifest` 与 `scenario_module_refs` 对旧版本是多余字段，留着不影响运行。被场景版本引用的模块版本受外键 `restrict` 保护，不能物理删除。
-
-## 升级注意：产品角色
-
-含 `0018_product_roles`（MySQL 为 `0004_product_roles`）的版本会把系统角色收成「管理员 / 编写者 / 执行者 / 只读」。已有 `operator` 账号**不会**自动补挂编写者，升级后只能跑、不能改目标或场景，也看不见用户 / 角色 / 审计。这是预期降权，不是故障。若该用户仍要编写，由管理员在用户页补挂「编写者」。新建控制台账号默认是编写者。
+`release` 只重建清单 `restart` 里的应用容器，不碰 `cairn-pg` / Redis / 对象存储。回滚只拨产物指针，不回滚数据库。

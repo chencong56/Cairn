@@ -1,0 +1,356 @@
+#!/usr/bin/env bash
+# 对外只留这一条。内部步骤在 deploy/lib/，不要直接跑那些脚本。
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/.." && pwd)
+# shellcheck source=lib/target.sh
+. "$HERE/lib/target.sh"
+# shellcheck source=lib/release.sh
+. "$HERE/lib/release.sh"
+
+die() {
+  echo "$1" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+用法:
+  ./deploy/cairn release [--dry-run] [--drain] [--target cluster]
+  ./deploy/cairn status [--target cluster]
+  ./deploy/cairn rollback [rev]
+  ./deploy/cairn logs [api|nginx|cairn-executor|...]
+  ./deploy/cairn restart api|worker|nginx|...
+  ./deploy/cairn migrate
+  ./deploy/cairn dev-infra up|status|down
+  ./deploy/cairn bootstrap          # 稀有：首次装机
+  ./deploy/cairn build-base [tag]   # 稀有：底座镜像
+
+日常切本机进程：pnpm dev:env use local|remote
+发布只读 deploy/targets/<name>.conf，不进 pnpm。
+EOF
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "缺少命令 $1"
+}
+
+is_publish_port() {
+  case "$1" in
+    15432|16380|9031|9032) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+secret_fingerprint() {
+  awk -F= '$1=="CAIRN_DB_PASSWORD" || $1=="CAIRN_S3_ACCESS_KEY" || $1=="CAIRN_S3_SECRET_KEY" { print }' "$1" | sort | shasum -a 256 | awk '{ print $1 }'
+}
+
+upsert_kv() {
+  local file="$1" key="$2" value="$3" tmp
+  umask 077
+  tmp=$(mktemp)
+  if [ -f "$file" ] && grep -q "^${key}=" "$file"; then
+    awk -v k="$key" -v v="$value" '
+      BEGIN { re = "^" k "=" }
+      $0 ~ re { print k "=" v; next }
+      { print }
+    ' "$file" > "$tmp"
+  else
+    if [ -f "$file" ]; then
+      cat "$file" > "$tmp"
+      printf '\n' >> "$tmp"
+    fi
+    printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  fi
+  mv "$tmp" "$file"
+}
+
+read_kv() {
+  awk -v want="$2" '
+    {
+      eq = index($0, "=")
+      if (eq < 1) next
+      if (substr($0, 1, eq - 1) == want) {
+        print substr($0, eq + 1)
+        exit
+      }
+    }
+  ' "$1"
+}
+
+ensure_dev_infra_env() {
+  local file="$HERE/dev-infra/.env"
+  umask 077
+  if [ ! -f "$file" ]; then
+    local db_password s3_access s3_secret
+    db_password=$(openssl rand -base64 24 | tr -d '/+=\n')
+    s3_access="CAIRNDEV$(openssl rand -hex 6 | tr '[:lower:]' '[:upper:]')"
+    s3_secret=$(openssl rand -base64 32 | tr -d '/+=\n')
+    cat > "$file" <<EOF
+CAIRN_DB_USER=cairn
+CAIRN_DB_PASSWORD=${db_password}
+CAIRN_DB_NAME=cairn
+CAIRN_S3_ACCESS_KEY=${s3_access}
+CAIRN_S3_SECRET_KEY=${s3_secret}
+CAIRN_S3_REGION=us-east-1
+EOF
+    chmod 600 "$file"
+    echo "已生成本机 deploy/dev-infra/.env（不入库）"
+  fi
+  upsert_kv "$file" CAIRN_S3_BUCKET "$BUCKET"
+  upsert_kv "$file" BIND_ADDR "$BIND"
+  upsert_kv "$file" DEV_PG_PORT "$PG_PORT"
+  upsert_kv "$file" DEV_REDIS_PORT "$REDIS_PORT"
+  upsert_kv "$file" DEV_S3_PORT "$S3_PORT"
+  upsert_kv "$file" DEV_S3_CONSOLE_PORT "$S3_CONSOLE_PORT"
+  chmod 600 "$file"
+}
+
+sync_remote_public() {
+  local public="$REPO/.env.remote"
+  [ -f "$public" ] || die "找不到 $public"
+  upsert_kv "$public" CAIRN_DB_HOST "$REACH"
+  upsert_kv "$public" CAIRN_DB_PORT "$PG_PORT"
+  upsert_kv "$public" CAIRN_S3_ENDPOINT "http://${REACH}:${S3_PORT}"
+  upsert_kv "$public" CAIRN_S3_BUCKET "$BUCKET"
+  upsert_kv "$public" CAIRN_REDIS_URL "redis://${REACH}:${REDIS_PORT}"
+}
+
+sync_remote_secrets() {
+  local src="$HERE/dev-infra/.env"
+  local dest="$REPO/.env.remote.secrets"
+  [ -f "$src" ] || die "找不到 $src"
+  if [ ! -f "$dest" ]; then
+    cp "$REPO/.env.secrets.example" "$dest"
+    chmod 600 "$dest"
+  fi
+  local key val
+  for key in CAIRN_DB_PASSWORD CAIRN_S3_ACCESS_KEY CAIRN_S3_SECRET_KEY; do
+    val=$(read_kv "$src" "$key")
+    [ -n "$val" ] || die "deploy/dev-infra/.env 缺少 $key"
+    upsert_kv "$dest" "$key" "$val"
+  done
+  chmod 600 "$dest"
+  echo "已把开发组件库口令 / S3 密钥写入 .env.remote.secrets（不入库，不回显）"
+}
+
+probe_tcp() {
+  local host="$1" port="$2"
+  python3 - "$host" "$port" <<'PY'
+import socket, sys
+host, port = sys.argv[1], int(sys.argv[2])
+s = socket.socket()
+s.settimeout(2)
+try:
+    s.connect((host, port))
+    print("ok")
+except Exception:
+    print("fail")
+    sys.exit(1)
+finally:
+    s.close()
+PY
+}
+
+load_dev_infra() {
+  CONF="$HERE/targets/dev-infra.conf"
+  CLUSTER_CONF="$HERE/targets/cluster.conf"
+  COMPOSE="$HERE/dev-infra/compose.yml"
+  LOCAL_ENV="$HERE/dev-infra/.env"
+  target_assert_readable "$CONF" || exit 1
+  target_assert_readable "$CLUSTER_CONF" || exit 1
+  target_assert_disjoint "$CONF" "$CLUSTER_CONF" || exit 1
+  target_has_hosts "$CONF" || die "$CONF 没有 [host.*]"
+  [ -f "$COMPOSE" ] || die "找不到 $COMPOSE"
+  HOST_ID=$(target_host_ids "$CONF" | head -n 1)
+  SSH=$(target_host_kv "$CONF" "$HOST_ID" ssh)
+  REACH=$(target_host_kv "$CONF" "$HOST_ID" reach)
+  REMOTE_ROOT=$(target_kv "$CONF" remote_root)
+  BIND=$(target_kv "$CONF" bind)
+  PG_PORT=$(target_kv "$CONF" pg_port)
+  REDIS_PORT=$(target_kv "$CONF" redis_port)
+  S3_PORT=$(target_kv "$CONF" s3_port)
+  S3_CONSOLE_PORT=$(target_kv "$CONF" s3_console_port)
+  BUCKET=$(target_kv "$CONF" bucket)
+  [ -n "$SSH" ] || die "清单缺 ssh"
+  [ -n "$REACH" ] || die "清单缺 reach"
+  [ -n "$REMOTE_ROOT" ] || die "清单缺 remote_root"
+  [ -n "$BIND" ] || die "清单缺 bind"
+  [ -n "$PG_PORT" ] && [ -n "$REDIS_PORT" ] && [ -n "$S3_PORT" ] && [ -n "$S3_CONSOLE_PORT" ] || die "清单缺端口"
+  [ -n "$BUCKET" ] || die "清单缺 bucket"
+  case "$REMOTE_ROOT" in
+    *cluster*) die "dev-infra remote_root 不能落在 cluster 目录" ;;
+  esac
+  local port
+  for port in "$PG_PORT" "$REDIS_PORT" "$S3_PORT" "$S3_CONSOLE_PORT"; do
+    if is_publish_port "$port"; then
+      die "清单端口 $port 是发布口，拒绝继续"
+    fi
+  done
+}
+
+remote() {
+  ssh -o BatchMode=yes -o ConnectTimeout=15 "$SSH" "$@"
+}
+
+dev_infra_up() {
+  require_cmd ssh
+  require_cmd scp
+  require_cmd openssl
+  require_cmd python3
+  load_dev_infra
+  ensure_dev_infra_env
+
+  echo "▶ 核对发布栈容器启动时间（up 前后应相同）"
+  BEFORE=$(remote 'docker inspect -f "{{.Name}} {{.State.StartedAt}}" cairn-pg cairn-redis cairn-rustfs2 cairn-api cairn-postgres cairn-rustfs 2>/dev/null | sort')
+
+  remote "mkdir -p '$REMOTE_ROOT/pg' '$REMOTE_ROOT/rustfs'"
+  scp -q "$COMPOSE" "$SSH:$REMOTE_ROOT/compose.yml"
+
+  if remote "test -f '$REMOTE_ROOT/.env'"; then
+    remote_fp=$(remote "awk -F= '\$1==\"CAIRN_DB_PASSWORD\" || \$1==\"CAIRN_S3_ACCESS_KEY\" || \$1==\"CAIRN_S3_SECRET_KEY\" { print }' '$REMOTE_ROOT/.env' | sort | sha256sum | awk '{print \$1}'")
+    local_fp=$(secret_fingerprint "$LOCAL_ENV")
+    if [ "$remote_fp" != "$local_fp" ]; then
+      die "本机与远端的开发组件密钥不一致。不覆盖远端密钥。对齐后再跑。"
+    fi
+  fi
+  scp -q "$LOCAL_ENV" "$SSH:$REMOTE_ROOT/.env"
+  remote "chmod 600 '$REMOTE_ROOT/.env'"
+  echo "已同步 compose 与开发组件 .env（密钥已有则不轮换）"
+
+  echo "▶ 在 $SSH 启动 cairn-dev-* （不碰发布栈）"
+  remote "cd '$REMOTE_ROOT' && docker compose -f compose.yml --env-file .env up -d"
+
+  echo "▶ 等待 postgres / redis / rustfs 健康"
+  local i=0 unhealthy=1 statuses=""
+  while [ "$i" -lt 30 ]; do
+    statuses=$(remote "docker inspect -f '{{.State.Health.Status}}' cairn-dev-pg cairn-dev-redis cairn-dev-rustfs 2>/dev/null" || true)
+    unhealthy=$(printf '%s\n' "$statuses" | awk '$1 != "healthy" { c++ } END { print c+0 }')
+    if [ -n "$statuses" ] && [ "$unhealthy" = "0" ]; then
+      break
+    fi
+    i=$((i + 1))
+    sleep 2
+  done
+  if [ "$unhealthy" != "0" ]; then
+    printf '%s\n' "$statuses" >&2
+    die "开发组件未在 60s 内全部 healthy"
+  fi
+  remote "cd '$REMOTE_ROOT' && docker compose -f compose.yml ps"
+
+  echo "▶ 本机经 Tailscale 探 $REACH"
+  probe_tcp "$REACH" "$PG_PORT" >/dev/null || die "本机不通 $REACH:$PG_PORT"
+  probe_tcp "$REACH" "$REDIS_PORT" >/dev/null || die "本机不通 $REACH:$REDIS_PORT"
+  probe_tcp "$REACH" "$S3_PORT" >/dev/null || die "本机不通 $REACH:$S3_PORT"
+  echo "  数据库    $REACH:$PG_PORT  可达"
+  echo "  Redis     $REACH:$REDIS_PORT  可达"
+  echo "  对象存储  $REACH:$S3_PORT  可达"
+
+  AFTER=$(remote 'docker inspect -f "{{.Name}} {{.State.StartedAt}}" cairn-pg cairn-redis cairn-rustfs2 cairn-api cairn-postgres cairn-rustfs 2>/dev/null | sort')
+  if [ "$BEFORE" != "$AFTER" ]; then
+    echo "发布栈 StartedAt 在本次 up 后变了：" >&2
+    echo "$BEFORE" >&2
+    echo "---" >&2
+    echo "$AFTER" >&2
+    die "开发组件启动影响了发布栈，已停止后续写本机画像"
+  fi
+  echo "  发布栈    启动时间未变"
+
+  sync_remote_public
+  sync_remote_secrets
+  echo "已把 .env.remote 指到 $REACH:$PG_PORT / :$REDIS_PORT / :$S3_PORT 桶 $BUCKET"
+  echo "下一步：pnpm dev:env use remote"
+}
+
+dev_infra_status() {
+  require_cmd ssh
+  require_cmd python3
+  load_dev_infra
+  echo "目标    dev-infra"
+  echo "SSH     $SSH"
+  echo "reach   $REACH"
+  echo "root    $REMOTE_ROOT"
+  echo
+  remote "docker ps -a --filter name=cairn-dev- --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+  echo
+  if probe_tcp "$REACH" "$PG_PORT" >/dev/null; then echo "本机 TCP  $REACH:$PG_PORT  可达"; else echo "本机 TCP  $REACH:$PG_PORT  不通"; fi
+  if probe_tcp "$REACH" "$REDIS_PORT" >/dev/null; then echo "本机 TCP  $REACH:$REDIS_PORT  可达"; else echo "本机 TCP  $REACH:$REDIS_PORT  不通"; fi
+  if probe_tcp "$REACH" "$S3_PORT" >/dev/null; then echo "本机 TCP  $REACH:$S3_PORT  可达"; else echo "本机 TCP  $REACH:$S3_PORT  不通"; fi
+}
+
+dev_infra_down() {
+  require_cmd ssh
+  load_dev_infra
+  echo "▶ 停止 cairn-dev-* ，保留 $REMOTE_ROOT 数据目录"
+  remote "cd '$REMOTE_ROOT' && docker compose -f compose.yml --env-file .env down"
+  echo "已停止。数据在 $REMOTE_ROOT/pg 与 $REMOTE_ROOT/rustfs"
+}
+
+command=${1:-}
+[ $# -gt 0 ] && shift
+
+if [ "$command" = "-h" ] || [ "$command" = "--help" ] || [ -z "$command" ]; then
+  usage
+  exit 0
+fi
+
+CAIRN_TARGET="${CAIRN_TARGET:-cluster}"
+CAIRN_DRY_RUN=0
+CAIRN_DRAIN=0
+ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --target)
+      [ $# -ge 2 ] || die "--target 需要名称"
+      CAIRN_TARGET="$2"
+      shift 2
+      ;;
+    --dry-run)
+      CAIRN_DRY_RUN=1
+      shift
+      ;;
+    --drain)
+      CAIRN_DRAIN=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --*)
+      die "未知参数 $1"
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+sub=${ARGS[0]:-}
+
+if [ "$command" = "dev-infra" ]; then
+  case "$sub" in
+    up) dev_infra_up ;;
+    status) dev_infra_status ;;
+    down) dev_infra_down ;;
+    *) usage; exit 1 ;;
+  esac
+  exit 0
+fi
+
+case "$command" in
+  release) do_release ;;
+  status) do_cluster_status ;;
+  rollback) do_rollback "$sub" ;;
+  logs) do_logs "$sub" ;;
+  restart) do_restart_named "$sub" ;;
+  migrate) do_migrate_only ;;
+  bootstrap) do_bootstrap ;;
+  build-base) do_build_base "$sub" ;;
+  *)
+    usage
+    die "未知命令 $command。发布用 ./deploy/cairn release，不要改跑 lib 下的脚本。"
+    ;;
+esac

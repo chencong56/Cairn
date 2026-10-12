@@ -7,6 +7,7 @@ import {
   canExecuteRun,
   hasPermission,
   allSuiteMembers,
+  type ScenarioDto,
   type SuiteDocument,
   type SuiteMember,
   type SuiteStage,
@@ -35,11 +36,57 @@ import { SuiteHeader } from './components/suite-header'
 import { PipelineWorkspace } from './components/pipeline-workspace'
 import { SuiteInspector } from './components/suite-inspector'
 
-function nextMemberId(members: SuiteMember[]) {
-  let index = members.length + 1
-  const used = new Set(members.map((item) => item.memberId))
+function allocateMemberId(used: Set<string>) {
+  let index = used.size + 1
   while (used.has(`m${index}`)) index += 1
-  return `m${index}`
+  const id = `m${index}`
+  used.add(id)
+  return id
+}
+
+const SUITE_SCENARIO_PAGE_LIMIT = 100
+const SUITE_SCENARIO_MAX_PAGES = 10
+
+async function fetchActiveScenariosForSuite(targetId: string): Promise<{ items: ScenarioDto[] }> {
+  const items: ScenarioDto[] = []
+  let cursor: string | undefined
+  for (let page = 0; page < SUITE_SCENARIO_MAX_PAGES; page += 1) {
+    const result = await fetchScenarios({
+      targetId,
+      status: 'active',
+      limit: SUITE_SCENARIO_PAGE_LIMIT,
+      cursor,
+    })
+    items.push(...result.items)
+    if (!result.nextCursor) break
+    cursor = result.nextCursor
+  }
+  return { items }
+}
+
+function buildSuiteMembers(
+  scenarioIds: string[],
+  catalog: ScenarioDto[] | undefined,
+  existing: SuiteMember[],
+  startOrdinal: number,
+): SuiteMember[] {
+  const used = new Set(existing.map((item) => item.memberId))
+  const created: SuiteMember[] = []
+  let ordinal = startOrdinal
+  for (const scenarioId of scenarioIds) {
+    const scenario = catalog?.find((item) => item.id === scenarioId)
+    if (!scenario?.latestVersionId) continue
+    created.push({
+      memberId: allocateMemberId(used),
+      ordinal,
+      scenarioId: scenario.id,
+      scenarioVersionId: scenario.latestVersionId,
+      displayName: undefined,
+      input: {},
+    })
+    ordinal += 1
+  }
+  return created
 }
 
 function newIdempotencyKey() {
@@ -67,8 +114,8 @@ export function SuiteDetailPage() {
     enabled: Boolean(query.data?.targetId),
   })
   const scenarios = useQuery({
-    queryKey: ['scenarios', { targetId: query.data?.targetId, limit: 100 }],
-    queryFn: () => fetchScenarios({ targetId: query.data!.targetId, status: 'active', limit: 100 }),
+    queryKey: ['scenarios', { targetId: query.data?.targetId, scope: 'suite-picker' }],
+    queryFn: () => fetchActiveScenariosForSuite(query.data!.targetId),
     enabled: Boolean(query.data?.targetId),
   })
   const targetAccounts = useQuery({
@@ -215,21 +262,20 @@ export function SuiteDetailPage() {
   }, [selectedEntity, document.stages])
 
   // Flat mode member handlers
+  function addMembersFlat(scenarioIds: string[]) {
+    const created = buildSuiteMembers(
+      scenarioIds,
+      scenarios.data?.items,
+      allSuiteMembers(document),
+      document.members.length,
+    )
+    if (created.length === 0) return
+    setDocument({ ...document, members: [...document.members, ...created] })
+    setSelectedEntity({ type: 'member', memberId: created[0]!.memberId })
+  }
+
   function addMemberFlat(scenarioId: string) {
-    const scenario = scenarios.data?.items.find((item) => item.id === scenarioId)
-    if (!scenario?.latestVersionId) return
-    const allMembers = allSuiteMembers(document)
-    const newId = nextMemberId(allMembers)
-    const member: SuiteMember = {
-      memberId: newId,
-      ordinal: document.members.length,
-      scenarioId: scenario.id,
-      scenarioVersionId: scenario.latestVersionId,
-      displayName: undefined,
-      input: {},
-    }
-    setDocument({ ...document, members: [...document.members, member] })
-    setSelectedEntity({ type: 'member', memberId: newId })
+    addMembersFlat([scenarioId])
   }
 
   function moveMemberFlat(index: number, delta: number) {
@@ -262,26 +308,26 @@ export function SuiteDetailPage() {
   }
 
   // Stage mode handlers
-  function addMemberToStage(stageIndex: number, scenarioId: string) {
-    const scenario = scenarios.data?.items.find((item) => item.id === scenarioId)
-    if (!scenario?.latestVersionId || !document.stages) return
-    const allMembers = allSuiteMembers(document)
+  function addMembersToStage(stageIndex: number, scenarioIds: string[]) {
+    if (!document.stages) return
     const stage = document.stages[stageIndex]
     if (!stage) return
-    const newId = nextMemberId(allMembers)
-    const member: SuiteMember = {
-      memberId: newId,
-      ordinal: stage.members.length,
-      scenarioId: scenario.id,
-      scenarioVersionId: scenario.latestVersionId,
-      displayName: undefined,
-      input: {},
-    }
-    const nextStages = document.stages.map((s, idx) =>
-      idx === stageIndex ? { ...s, members: [...s.members, member] } : s,
+    const created = buildSuiteMembers(
+      scenarioIds,
+      scenarios.data?.items,
+      allSuiteMembers(document),
+      stage.members.length,
+    )
+    if (created.length === 0) return
+    const nextStages = document.stages.map((item, idx) =>
+      idx === stageIndex ? { ...item, members: [...item.members, ...created] } : item,
     )
     setDocument({ ...document, stages: nextStages })
-    setSelectedEntity({ type: 'member', memberId: newId, stageIndex })
+    setSelectedEntity({ type: 'member', memberId: created[0]!.memberId, stageIndex })
+  }
+
+  function addMemberToStage(stageIndex: number, scenarioId: string) {
+    addMembersToStage(stageIndex, [scenarioId])
   }
 
   function moveMemberInStage(stageIndex: number, memberIndex: number, delta: number) {
@@ -486,7 +532,14 @@ export function SuiteDetailPage() {
             isStageMode={isStageMode}
             canWrite={canWrite}
             scenarioNames={scenarioNames}
-            availableScenarios={(scenarios.data?.items ?? []).filter((s) => s.latestVersionId).map((s) => ({ ...s, latestVersionId: s.latestVersionId ?? undefined }))}
+            availableScenarios={(scenarios.data?.items ?? [])
+              .filter((item) => item.latestVersionId)
+              .map((item) => ({
+                id: item.id,
+                name: item.name,
+                latestVersionId: item.latestVersionId ?? undefined,
+                latestVersionNo: item.latestVersionNo,
+              }))}
             targetAccounts={targetAccounts.data?.items ?? []}
             targetId={suite.targetId}
             selectedMemberId={selectedEntity.type === 'member' ? selectedEntity.memberId : null}
@@ -514,10 +567,12 @@ export function SuiteDetailPage() {
             onUpdateStageConcurrency={updateStageConcurrency}
             onUpdateStageFailurePolicy={updateStageFailurePolicy}
             onAddMemberToStage={addMemberToStage}
+            onAddMembersToStage={addMembersToStage}
             onUpdateMemberInStage={updateMemberInStage}
             onMoveMemberInStage={moveMemberInStage}
             onRemoveMemberFromStage={removeMemberFromStage}
             onAddMemberFlat={addMemberFlat}
+            onAddMembersFlat={addMembersFlat}
             onUpdateMemberFlat={updateMemberFlat}
             onMoveMemberFlat={moveMemberFlat}
             onRemoveMemberFlat={removeMemberFlat}

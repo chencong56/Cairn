@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { alignText, keysOf } from '../use-env.mjs'
+import { alignPublicAndSecrets, alignText, keysOf, secretKeysIn } from './env-profile.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -31,13 +31,15 @@ test('alignText 报告缺键与多键', () => {
   assert.deepEqual(extra, ['C'])
 })
 
-test('环境画像与 .env.example 键集完全一致（含注释项）', () => {
+test('公开画像 ∪ 密钥 与 .env.example 键集完全一致，且公开文件无密钥键', () => {
   const exampleText = readFileSync(join(root, '.env.example'), 'utf8')
+  const secretsExample = readFileSync(join(root, '.env.secrets.example'), 'utf8')
   for (const profile of ['.env.local', '.env.remote']) {
     const file = join(root, profile)
-    // 画像文件本地生成、不入库；CI 环境没有时跳过，本地与切换闸门兜底。
     if (!existsSync(file)) continue
-    const { missing, extra } = alignText(exampleText, readFileSync(file, 'utf8'))
+    const publicText = readFileSync(file, 'utf8')
+    assert.deepEqual(secretKeysIn(publicText), [], `${profile} 含密钥键`)
+    const { missing, extra } = alignPublicAndSecrets(exampleText, publicText, secretsExample)
     assert.deepEqual(
       { missing, extra },
       { missing: [], extra: [] },

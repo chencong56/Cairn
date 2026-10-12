@@ -3,6 +3,7 @@ import { RESOLVED_ATTRIBUTE, sanitizeLocatorLabel, type LocatorCandidate, type T
 import type { Page } from './runtime'
 import { locatorForCandidate, resolveFramePath, scopeForAnchor } from './runtime'
 import { generateCandidateFromElement } from './reverse-locator'
+import { frameStepsFromHops, type FrameHop } from './frame-identity'
 import { locate } from './surface'
 
 const DEFAULT_LOCATE_MS = 8_000
@@ -19,6 +20,7 @@ type PickedElement = {
   tag?: string
   box?: { x: number; y: number; width: number; height: number }
   framePath: Array<{ urlPattern?: string; name?: string; selector?: string }>
+  frameHops?: FrameHop[]
   anchor?: { withinText: string; scope: 'row' | 'nearest' }
   enclosingTable?: TargetDescriptor
 }
@@ -59,7 +61,7 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
   const url = page.url()
   const title = await page.title().catch(() => undefined)
   const token = randomUUID()
-  const picked = await page
+  const pickedRaw = await page
     .evaluate(
       ({ x, y, token, resolvedAttr }) => {
         type DomNode = { nodeType: number; textContent: string | null }
@@ -175,7 +177,8 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
             cssFragile: !id && !name && !semantic,
             tag,
             box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-            framePath: framePathOf(el),
+            framePath: [],
+            frameHops: frameHopsOf(el),
             anchor: nearestAnchor(el, text),
             ...(enclosingTable ? { enclosingTable } : {}),
           }
@@ -294,22 +297,29 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
           return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
         }
 
-        function framePathOf(el: DomElement): Array<{ urlPattern?: string; name?: string; selector?: string }> {
-          const frames: Array<{ urlPattern?: string; name?: string; selector?: string }> = []
+        function frameHopsOf(el: DomElement): Array<{ name?: string; src?: string; href?: string; selector?: string }> {
+          const hops: Array<{ name?: string; src?: string; href?: string; selector?: string }> = []
           let win: DomWindow | null = el.ownerDocument.defaultView
-          while (win && win !== win.parent && frames.length < 4) {
+          while (win && win !== win.parent && hops.length < 4) {
             const frameEl = win.frameElement
             const name = (frameEl ? attr(frameEl, 'name') : '') || win.name
-            const src = (frameEl ? attr(frameEl, 'src') : '') || win.location.href
+            const src = frameEl ? attr(frameEl, 'src') : ''
+            let href = ''
+            try {
+              href = win.location.href
+            } catch {
+              href = ''
+            }
             const selector = frameEl && attr(frameEl, 'id') ? `#${cssIdent(attr(frameEl, 'id'))}` : undefined
-            frames.unshift({
+            hops.unshift({
               ...(name ? { name } : {}),
-              ...(src ? { urlPattern: src.slice(0, 512) } : {}),
+              ...(src ? { src } : {}),
+              ...(href ? { href } : {}),
               ...(selector ? { selector } : {}),
             })
             win = win.parent
           }
-          return frames
+          return hops
         }
 
         function nearestAnchor(el: DomElement, selfText: string): { withinText: string; scope: 'row' | 'nearest' } | undefined {
@@ -325,6 +335,7 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
       { x, y, token, resolvedAttr: RESOLVED_ATTRIBUTE },
     )
     .catch(() => null)
+  const picked = pickedRaw ? materializePicked(pickedRaw) : null
 
   let reverseCandidate: LocatorCandidate | undefined
   try {
@@ -391,6 +402,18 @@ export async function pickOnPage(page: Page, x: number, y: number): Promise<Targ
       ...observation.diagnostics,
       framePathResolved: [...(observation.diagnostics.framePathResolved ?? []), 'fragile-css'],
     },
+  }
+}
+
+function materializePicked(picked: PickedElement): PickedElement {
+  const framePath = frameStepsFromHops(picked.frameHops ?? [])
+  const enclosingTable = picked.enclosingTable
+    ? { ...picked.enclosingTable, framePath }
+    : undefined
+  return {
+    ...picked,
+    framePath,
+    ...(enclosingTable ? { enclosingTable } : {}),
   }
 }
 

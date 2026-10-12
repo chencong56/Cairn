@@ -307,8 +307,13 @@ describe('SuiteDetailPage 左右双栏流水线工作台 UI 验收', () => {
 
     await expect.element(page.getByText('选择场景加入场景集')).toBeVisible()
     await expect.element(page.getByText('风控拦截场景')).toBeVisible()
+    await expect.element(page.getByRole('button', { name: '加入所选 (0)' })).toBeDisabled()
 
+    await page.getByRole('checkbox', { name: '选择 风控拦截场景' }).click()
     await page.screenshot({ path: '__screenshots__/split-view-picker-preview.png' })
+    await page.getByRole('button', { name: '加入所选 (1)' }).click()
+    await expect.element(page.getByRole('button', { name: '加入所选 (1)' })).not.toBeInTheDocument()
+    await expect.element(page.getByTitle('关联场景: 风控拦截场景')).toBeVisible()
   })
 
   it('Apple Design 交互验收：ScenarioQuickPicker 智能快捷添加与右侧上下文检视器联动', async () => {

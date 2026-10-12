@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StageCard } from './stage-card'
 import { MemberNode } from './member-node'
-import { MemberPickerDialog } from './member-picker-dialog'
+import { MemberPickerDialog, type PickerScenario } from './member-picker-dialog'
 import { ScenarioQuickPicker } from './scenario-quick-picker'
 
 export function PipelineWorkspace({
@@ -29,10 +29,12 @@ export function PipelineWorkspace({
   onUpdateStageConcurrency,
   onUpdateStageFailurePolicy,
   onAddMemberToStage,
+  onAddMembersToStage,
   onUpdateMemberInStage,
   onMoveMemberInStage,
   onRemoveMemberFromStage,
   onAddMemberFlat,
+  onAddMembersFlat,
   onUpdateMemberFlat,
   onMoveMemberFlat,
   onRemoveMemberFlat,
@@ -42,7 +44,7 @@ export function PipelineWorkspace({
   isStageMode: boolean
   canWrite: boolean
   scenarioNames: Map<string, string>
-  availableScenarios: Array<{ id: string; name: string; latestVersionId?: string }>
+  availableScenarios: PickerScenario[]
   targetAccounts: Array<{ id: string; displayName: string; username: string | null; identityKind?: string | null }>
   targetId: string
   selectedMemberId?: string | null
@@ -58,10 +60,12 @@ export function PipelineWorkspace({
   onUpdateStageConcurrency: (index: number, val: number) => void
   onUpdateStageFailurePolicy: (index: number, policy: 'continue' | 'stop') => void
   onAddMemberToStage: (stageIndex: number, scenarioId: string) => void
+  onAddMembersToStage: (stageIndex: number, scenarioIds: string[]) => void
   onUpdateMemberInStage: (stageIndex: number, memberIndex: number, updater: (m: SuiteMember) => SuiteMember) => void
   onMoveMemberInStage: (stageIndex: number, memberIndex: number, delta: number) => void
   onRemoveMemberFromStage: (stageIndex: number, memberIndex: number) => void
   onAddMemberFlat: (scenarioId: string) => void
+  onAddMembersFlat: (scenarioIds: string[]) => void
   onUpdateMemberFlat: (memberIndex: number, updater: (m: SuiteMember) => SuiteMember) => void
   onMoveMemberFlat: (memberIndex: number, delta: number) => void
   onRemoveMemberFlat: (memberIndex: number) => void
@@ -169,6 +173,7 @@ export function PipelineWorkspace({
                 onMoveStage={(delta) => onMoveStage(stageIndex, delta)}
                 onRemoveStage={() => onRemoveStage(stageIndex)}
                 onAddMember={(scenarioId) => onAddMemberToStage(stageIndex, scenarioId)}
+                onAddMembers={(scenarioIds) => onAddMembersToStage(stageIndex, scenarioIds)}
                 onUpdateMember={(memberIndex, updater) => onUpdateMemberInStage(stageIndex, memberIndex, updater)}
                 onMoveMember={(memberIndex, delta) => onMoveMemberInStage(stageIndex, memberIndex, delta)}
                 onRemoveMember={(memberIndex) => onRemoveMemberFromStage(stageIndex, memberIndex)}
@@ -234,8 +239,9 @@ export function PipelineWorkspace({
           open={flatPickerOpen}
           onOpenChange={setFlatPickerOpen}
           availableScenarios={availableScenarios}
+          currentMemberScenarioIds={document.members.map((member) => member.scenarioId)}
           title='选择场景加入场景集'
-          onSelectScenario={onAddMemberFlat}
+          onSelectScenarios={onAddMembersFlat}
         />
       ) : null}
     </div>

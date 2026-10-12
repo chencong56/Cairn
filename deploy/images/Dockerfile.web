@@ -1,5 +1,5 @@
 # Cairn Web 入口镜像：静态产物 + Nginx（SPA 回退、/api 反代、SSE 保护）
-# 构建：docker build -f deploy/cluster/Dockerfile.web -t cairn-web:<tag> .
+# 构建：docker build -f deploy/images/Dockerfile.web -t cairn-web:<tag> .
 FROM node:24-bookworm-slim AS builder
 WORKDIR /repo
 RUN corepack enable

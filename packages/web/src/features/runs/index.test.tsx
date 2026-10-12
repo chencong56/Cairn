@@ -59,9 +59,32 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
     ...actual,
     getRouteApi: () => ({ useSearch: () => routeSearch }),
     useNavigate: () => navigateMock,
-    Link: ({ children }: { children: React.ReactNode }) => (
-      <a href='#'>{children}</a>
-    ),
+    Link: ({
+      children,
+      to,
+      params,
+      className,
+      title,
+    }: {
+      children: React.ReactNode
+      to?: string
+      params?: Record<string, string>
+      className?: string
+      title?: string
+    }) => {
+      const href =
+        typeof to === 'string'
+          ? Object.entries(params ?? {}).reduce(
+              (path, [key, value]) => path.replace(`$${key}`, value),
+              to
+            )
+          : '#'
+      return (
+        <a href={href} className={className} title={title}>
+          {children}
+        </a>
+      )
+    },
   }
 })
 
@@ -282,6 +305,11 @@ describe('RunsPage', () => {
     const queuedRow = [...document.querySelectorAll('tbody tr')].find(
       (row) => row.textContent?.includes('下单巡检')
     )
+    const queuedCells = [...(queuedRow?.querySelectorAll('td') ?? [])].map(
+      (node) => node.textContent ?? ''
+    )
+    expect(queuedCells[1]).toBe('—')
+    expect(queuedCells[2]).toBe('—')
     expect(queuedRow?.querySelectorAll('td')[5]?.textContent).toBe('—')
     await expect
       .element(screen.getByRole('combobox', { name: '业务结果筛选' }))
@@ -434,13 +462,53 @@ describe('RunsPage', () => {
       .toBeInTheDocument()
   })
 
-  it('在场景名称下方展示 outputSummary 一句话业务结论', async () => {
+  it('在场景名称下方展示带具体事实的业务结论', async () => {
     signIn(['run:read'])
     const screen = await renderPage()
 
     await expect
       .element(screen.getByText('巡检发现 1 项登录超时异常'))
       .toBeInTheDocument()
+  })
+
+  it('列表不展示运行短码，场景名称进入本次运行', async () => {
+    signIn(['run:read'])
+    const screen = await renderPage()
+
+    await expect.element(screen.getByText('下单巡检')).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('#44444444')
+    const nameLink = [...document.querySelectorAll('a')].find(
+      (node) => node.textContent === '下单巡检'
+    )
+    expect(nameLink?.getAttribute('href')).toBe(
+      '/runs/44444444-4444-4444-8444-444444444444'
+    )
+  })
+
+  it('终态未评价显示在业务结果列，不重复保底结论', async () => {
+    mocks.fetchRuns.mockResolvedValue({
+      items: [
+        summary({
+          status: 'SUCCEEDED',
+          scenarioName: '很长很长很长很长很长很长的巡检场景名称',
+          outcomeStatus: 'NOT_EVALUATED',
+          evidenceStatus: 'COMPLETE',
+          outputSummary: '流程执行完成，但业务结果未评价。',
+        }),
+      ],
+    })
+    signIn(['run:read'])
+    const screen = await renderPage()
+
+    await expect.element(screen.getByText('未评价')).toBeInTheDocument()
+    expect(
+      screen.getByText('流程执行完成，但业务结果未评价。').elements()
+    ).toHaveLength(0)
+    const nameLink = [...document.querySelectorAll('a')].find((node) =>
+      node.textContent?.includes('很长很长')
+    )
+    expect(nameLink?.className).toContain('line-clamp-2')
+    expect(nameLink?.className).toContain('break-words')
   })
 
   it('无 report:read 权限时隐藏报告列与有报告筛选按钮', async () => {

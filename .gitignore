@@ -54,10 +54,16 @@ docs/targets/
 # ── 环境与密钥 ────────────────────────────────
 .env
 .env.*
-# 只放行模板。填好的 deploy/.env、仓库根 .env / .env.local / .env.remote 都不入库。
+# 公开画像入库；生效文件与密钥不入库。
 !/.env.example
+!/.env.secrets.example
+!/.env.local
+!/.env.remote
 !/deploy/.env.example
+!/deploy/dev-infra/.env.example
+!/deploy/cluster/.env.example
 deploy/.env
+deploy/dev-infra/.env
 *.pem
 *.key
 *.p12

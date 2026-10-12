@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { MemberNode } from './member-node'
-import { MemberPickerDialog } from './member-picker-dialog'
+import { MemberPickerDialog, type PickerScenario } from './member-picker-dialog'
 import { ScenarioQuickPicker } from './scenario-quick-picker'
 import { cn } from '@/lib/utils'
 
@@ -36,6 +36,7 @@ export function StageCard({
   onMoveStage,
   onRemoveStage,
   onAddMember,
+  onAddMembers,
   onUpdateMember,
   onMoveMember,
   onRemoveMember,
@@ -46,7 +47,7 @@ export function StageCard({
   totalStages: number
   canWrite: boolean
   scenarioNames: Map<string, string>
-  availableScenarios: Array<{ id: string; name: string; latestVersionId?: string }>
+  availableScenarios: PickerScenario[]
   targetAccounts: Array<{ id: string; displayName: string; username: string | null; identityKind?: string | null }>
   targetId: string
   selectedMemberId?: string | null
@@ -60,6 +61,7 @@ export function StageCard({
   onMoveStage: (delta: number) => void
   onRemoveStage: () => void
   onAddMember: (scenarioId: string) => void
+  onAddMembers: (scenarioIds: string[]) => void
   onUpdateMember: (memberIndex: number, updater: (m: SuiteMember) => SuiteMember) => void
   onMoveMember: (memberIndex: number, delta: number) => void
   onRemoveMember: (memberIndex: number) => void
@@ -281,8 +283,9 @@ export function StageCard({
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         availableScenarios={availableScenarios}
+        currentMemberScenarioIds={stage.members.map((member) => member.scenarioId)}
         title={`选择场景加入 Stage ${stage.ordinal + 1} (${stage.name})`}
-        onSelectScenario={onAddMember}
+        onSelectScenarios={onAddMembers}
       />
     </div>
   )

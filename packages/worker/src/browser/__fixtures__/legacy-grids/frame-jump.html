@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>跳转页</title>
+<script>
+  const params = new URLSearchParams(location.search)
+  const to = params.get('to') || '/frame-inner.html'
+  location.replace(to)
+</script>
+</head>
+<body><p>正在跳转…</p></body>
+</html>

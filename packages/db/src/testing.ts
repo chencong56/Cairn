@@ -28,26 +28,48 @@ const CONNECT_TIMEOUT_MS = 10_000
  * 调用，worker 继承环境变量，之后无论 `process.loadEnvFile` 还是各测试自读 env，看到的都是测试端口。
  *
  * - 本地未配 CAIRN_TEST_DB_PORT：明确失败，不回退到开发库；
- * - 测试端口与开发库端口相同：明确失败；
- * - CI（`CI` 环境变量）未配：沿用 CAIRN_DB_PORT，CI 的库本来就是一次性、隔离的。
+ * - 测试库 host:port 与开发库相同：明确失败；
+ * - 非 CI：host 钉到 CAIRN_TEST_DB_HOST（缺省 127.0.0.1），避免 remote 画像把测试打到远端；
+ * - CI（`CI` 环境变量）未配测试端口：沿用 CAIRN_DB_* ，CI 的库本来就是一次性、隔离的。
  */
-function pinTestDbPort(): void {
-  if (process.env.CAIRN_TEST_DB_PINNED === '1') return
-  const testPort = process.env.CAIRN_TEST_DB_PORT?.trim()
+export function applyTestDbPin(
+  env: NodeJS.ProcessEnv = process.env,
+  options: { ci?: boolean } = {},
+): NodeJS.ProcessEnv {
+  if (env.CAIRN_TEST_DB_PINNED === '1') return env
+  const ci = options.ci ?? Boolean(env.CI)
+  const testPort = env.CAIRN_TEST_DB_PORT?.trim()
   if (!testPort) {
-    if (process.env.CI) return
+    if (ci) return env
     throw new Error(
       '集成测试必须连测试专用 PostgreSQL，但未配置 CAIRN_TEST_DB_PORT（见 .env.example）。\n' +
         '启动：pnpm infra:up（会同时启动 cairn-postgres-test）。不会回退到开发库。',
     )
   }
-  if (testPort === String(process.env.CAIRN_DB_PORT ?? '')) {
-    throw new Error(
-      `CAIRN_TEST_DB_PORT（${testPort}）与开发库端口 CAIRN_DB_PORT 相同，测试会写进开发库，已拒绝。`,
-    )
+  if (ci) {
+    if (testPort === String(env.CAIRN_DB_PORT ?? '')) {
+      throw new Error(
+        `CAIRN_TEST_DB_PORT（${testPort}）与开发库端口 CAIRN_DB_PORT 相同，测试会写进开发库，已拒绝。`,
+      )
+    }
+    env.CAIRN_DB_PORT = testPort
+    env.CAIRN_TEST_DB_PINNED = '1'
+    return env
   }
-  process.env.CAIRN_DB_PORT = testPort
-  process.env.CAIRN_TEST_DB_PINNED = '1'
+  const testHost = env.CAIRN_TEST_DB_HOST?.trim() || '127.0.0.1'
+  const origin = `${env.CAIRN_DB_HOST ?? ''}:${env.CAIRN_DB_PORT ?? ''}`
+  const pinned = `${testHost}:${testPort}`
+  if (pinned === origin) {
+    throw new Error(`测试库 ${pinned} 与开发库相同，测试会写进开发库，已拒绝。`)
+  }
+  env.CAIRN_DB_HOST = testHost
+  env.CAIRN_DB_PORT = testPort
+  env.CAIRN_TEST_DB_PINNED = '1'
+  return env
+}
+
+function pinTestDbPort(): void {
+  applyTestDbPin(process.env)
 }
 
 /**

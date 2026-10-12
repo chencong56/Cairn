@@ -12,13 +12,11 @@ import {
   RUN_STATUSES,
   TERMINAL_RUN_STATUSES,
   isFinishedRunStatus,
-  type OutcomeStatus,
   type RunStatus,
   type RunSummaryDto,
 } from '@cairn/shared'
 import { Plus, Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { copyToClipboard } from '@/lib/clipboard'
 import { ApiRequestError } from '@/lib/api-client'
 import {
   cancelRun,
@@ -68,6 +66,7 @@ import {
 import type { RunsPageSearch } from '@/routes/_authenticated/runs/index'
 import { CatalogName } from './catalog-name'
 import { RunCreateDialog } from './create-dialog'
+import { listFacingRunOutputSummary } from './list-output-summary'
 import {
   RUN_EVIDENCE_STATUS_LABELS,
   RUN_REPORT_STATUS_LABELS,
@@ -600,6 +599,11 @@ export function RunsPage() {
                       !isFinishedRunStatus(item.status) &&
                       item.status !== 'NEEDS_REVIEW'
                     const canDeleteRun = isTerminal && canDelete
+                    const outputSummary = listFacingRunOutputSummary(
+                      item.outputSummary,
+                      item.status,
+                      item.outcomeStatus
+                    )
                     return (
                       <TableRow key={item.id}>
                         <TableCell>
@@ -608,17 +612,7 @@ export function RunsPage() {
                           </StatusBadge>
                         </TableCell>
                         <TableCell>
-                          {item.outcomeStatus !== 'NOT_EVALUATED' ? (
-                            <StatusBadge
-                              tone={runOutcomeStatusTone(item.outcomeStatus)}
-                            >
-                              {
-                                RUN_OUTCOME_STATUS_LABELS[
-                                  item.outcomeStatus as OutcomeStatus
-                                ]
-                              }
-                            </StatusBadge>
-                          ) : null}
+                          <RunOutcomeCell item={item} />
                         </TableCell>
                         <TableCell>
                           {item.evidenceStatus === 'COMPLETE' ||
@@ -633,7 +627,11 @@ export function RunsPage() {
                             >
                               {RUN_EVIDENCE_STATUS_LABELS[item.evidenceStatus]}
                             </StatusBadge>
-                          ) : null}
+                          ) : (
+                            <span className='text-label text-muted-foreground'>
+                              —
+                            </span>
+                          )}
                         </TableCell>
                         {canReadReports ? (
                           <TableCell>
@@ -677,50 +675,33 @@ export function RunsPage() {
                             )}
                           </TableCell>
                         ) : null}
-                        <TableCell className='max-w-[240px] sm:max-w-xs md:max-w-sm'>
-                          <div className='flex flex-col gap-0.5'>
-                            <div className='flex items-center gap-1.5'>
-                              <CatalogName
-                                name={item.scenarioName}
-                                deleted={item.scenarioDeleted}
+                        <TableCell className='min-w-[10rem] max-w-[18rem] overflow-hidden whitespace-normal'>
+                          <div className='min-w-0'>
+                            <CatalogName
+                              name={item.scenarioName}
+                              deleted={item.scenarioDeleted}
+                            >
+                              <Link
+                                to='/runs/$runId'
+                                params={{ runId: item.id }}
+                                className='line-clamp-2 min-w-0 break-words font-medium text-primary [overflow-wrap:anywhere] hover:underline'
+                                title={item.scenarioName}
                               >
-                                <Link
-                                  to='/scenarios/$scenarioId'
-                                  params={{ scenarioId: item.scenarioId }}
-                                  className='font-medium text-primary hover:underline'
-                                >
-                                  {item.scenarioName}
-                                </Link>
-                              </CatalogName>
+                                {item.scenarioName}
+                              </Link>
+                            </CatalogName>
+                            {outputSummary ? (
                               <span
-                                className='inline-flex items-center rounded border border-border-divider bg-muted/60 px-1 py-0.5 font-mono text-label text-muted-foreground hover:bg-muted cursor-pointer select-all'
-                                title={`完整运行编号：${item.id}（点击复制）`}
-                                onClick={async (e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  const ok = await copyToClipboard(item.id)
-                                  if (ok) {
-                                    toast.success(`已复制运行编号：${item.id}`)
-                                  } else {
-                                    toast.error('复制失败，请手动复制')
-                                  }
-                                }}
-                              >
-                                #{item.id.slice(0, 8)}
-                              </span>
-                            </div>
-                            {item.outputSummary ? (
-                              <span
-                                className='text-label text-muted-foreground truncate'
-                                title={item.outputSummary}
+                                className='mt-0.5 line-clamp-2 break-words text-label text-muted-foreground [overflow-wrap:anywhere]'
+                                title={outputSummary}
                                 data-testid='run-output-summary-cell'
                               >
-                                {item.outputSummary}
+                                {outputSummary}
                               </span>
                             ) : null}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className='min-w-[7rem] max-w-[12rem] overflow-hidden whitespace-normal'>
                           <CatalogName
                             name={item.targetName}
                             deleted={item.targetDeleted}
@@ -728,7 +709,8 @@ export function RunsPage() {
                             <Link
                               to='/targets/$targetId'
                               params={{ targetId: item.targetId }}
-                              className='text-primary hover:underline'
+                              className='line-clamp-2 min-w-0 break-words text-primary [overflow-wrap:anywhere] hover:underline'
+                              title={item.targetName}
                             >
                               {item.targetName}
                             </Link>
@@ -854,6 +836,24 @@ export function RunsPage() {
       />
     </>
   )
+}
+
+function RunOutcomeCell({ item }: { item: RunSummaryDto }) {
+  if (item.outcomeStatus !== 'NOT_EVALUATED') {
+    return (
+      <StatusBadge tone={runOutcomeStatusTone(item.outcomeStatus)}>
+        {RUN_OUTCOME_STATUS_LABELS[item.outcomeStatus]}
+      </StatusBadge>
+    )
+  }
+  if (isFinishedRunStatus(item.status)) {
+    return (
+      <StatusBadge tone={runOutcomeStatusTone(item.outcomeStatus)}>
+        未评价
+      </StatusBadge>
+    )
+  }
+  return <span className='text-label text-muted-foreground'>—</span>
 }
 
 export { RunsNavTabs, type RunViewTab } from './runs-nav-tabs'

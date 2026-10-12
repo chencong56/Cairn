@@ -33,6 +33,7 @@ import {
 } from './captcha/index.js'
 import { generateTotp } from './totp.js'
 import { SessionLeaseError } from './session-error.js'
+import { frameUrlPatternHits } from './frame-identity.js'
 
 const occupancy = new AsyncLocalStorage<SessionGrant>()
 
@@ -938,6 +939,9 @@ export async function resolveFramePath(
  * iframe 会先 attach 再导航，中间那段窗口里 `frame.url()` 是空串，按 urlPattern 一次快照就是 0 匹配。
  * 定位候选那层本来就有等待窗口（`countCandidate`），FramePath 没有等于把「还没加载完」判成「Frame 已失效」。
  * 匹配到多个不等待：那是 Descriptor 写得不够准，多等不会变清晰。
+ *
+ * urlPattern 对当前 URL 或 iframe.src（跳转后属性常仍是入口地址）任一命中即可。
+ * url 对不上时，只有 selector / name 在父文档里唯一命中才放行，避免进错并列 iframe。
  */
 async function waitForChildFrame(parent: Frame, step: FrameStep, deadline: number): Promise<Frame> {
   for (;;) {
@@ -955,28 +959,88 @@ async function waitForChildFrame(parent: Frame, step: FrameStep, deadline: numbe
 async function frameMatches(frame: Frame, step: FrameStep): Promise<boolean> {
   const url = frame.url()
   const name = frame.name()
-  if (step.urlPattern && !url.includes(step.urlPattern)) return false
   if (step.name && name !== step.name) return false
-  if (step.selector) {
-    let element
-    try {
-      element = await frame.frameElement()
-      const hit = await element.evaluate((el, sel) => {
-        const root = el.ownerDocument
-        if (!root) return false
-        return Array.from(root.querySelectorAll(sel)).includes(el)
-      }, step.selector)
-      if (!hit) return false
-    } catch (error) {
-      if (isSurfaceLost(error)) {
-        throw new SurfaceLostError(error instanceof Error ? error.message : 'Frame 已失效')
-      }
-      return false
-    } finally {
-      await element?.dispose().catch(() => undefined)
+
+  let element
+  try {
+    element = await frame.frameElement()
+  } catch (error) {
+    if (isSurfaceLost(error)) {
+      throw new SurfaceLostError(error instanceof Error ? error.message : 'Frame 已失效')
     }
   }
-  return Boolean(step.urlPattern || step.name || step.selector)
+
+  try {
+    let srcAttr = ''
+    let srcProp = ''
+    if (element) {
+      try {
+        const srcs = await element.evaluate((el) => {
+          const attr = el.getAttribute('src') ?? ''
+          const prop = 'src' in el && typeof (el as { src?: unknown }).src === 'string' ? (el as { src: string }).src : ''
+          return { attr, prop }
+        })
+        srcAttr = srcs.attr
+        srcProp = srcs.prop
+      } catch (error) {
+        if (isSurfaceLost(error)) {
+          throw new SurfaceLostError(error instanceof Error ? error.message : 'Frame 已失效')
+        }
+      }
+    }
+    const urlOk = !step.urlPattern || frameUrlPatternHits(step.urlPattern, url, srcAttr, srcProp)
+    let selectorHit = false
+    let selectorUnique = false
+    if (step.selector) {
+      if (!element) return false
+      try {
+        const matched = await element.evaluate((el, sel) => {
+          const root = el.ownerDocument
+          if (!root) return { hit: false, unique: false }
+          const all = Array.from(root.querySelectorAll(sel))
+          const hit = all.includes(el)
+          return { hit, unique: hit && all.length === 1 }
+        }, step.selector)
+        selectorHit = matched.hit
+        selectorUnique = matched.unique
+      } catch (error) {
+        if (isSurfaceLost(error)) {
+          throw new SurfaceLostError(error instanceof Error ? error.message : 'Frame 已失效')
+        }
+        return false
+      }
+      if (!selectorHit) return false
+    }
+
+    if (urlOk) return Boolean(step.urlPattern || step.name || step.selector)
+    if (step.selector) return selectorUnique
+    if (step.name) return await nameUniquelyMatches(frame, name, element)
+    return false
+  } finally {
+    await element?.dispose().catch(() => undefined)
+  }
+}
+
+async function nameUniquelyMatches(
+  frame: Frame,
+  name: string,
+  element: Awaited<ReturnType<Frame['frameElement']>> | undefined,
+): Promise<boolean> {
+  if (element) {
+    return element.evaluate((el, expected) => {
+      const root = el.ownerDocument
+      if (!root) return false
+      const hits = Array.from(root.querySelectorAll('iframe, frame')).filter((node) => {
+        const item = node as { getAttribute: (name: string) => string | null; name?: unknown }
+        const named = item.getAttribute('name') || ('name' in item ? String(item.name ?? '') : '')
+        return named === expected
+      })
+      return hits.length === 1 && hits[0] === el
+    }, name)
+  }
+  const parent = frame.parentFrame()
+  if (!parent) return false
+  return parent.childFrames().filter((child) => child.name() === name).length === 1
 }
 
 function frameLabel(frame: Frame, step: FrameStep): string {

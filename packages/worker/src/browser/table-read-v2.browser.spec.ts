@@ -384,6 +384,24 @@ describe('table.read@2 识别 × 点选', { timeout: 120_000 }, () => {
     await page.close()
   })
 
+  it('iframe src 跳转到表：识别、回放读取都不丢 Frame', async ({ skip }) => {
+    if (!available) skip()
+    const page = await browser!.newPage()
+    await page.goto(`${base}/frame-jump-outer.html`)
+    await page.frameLocator('#jump-frame').locator('#orders tbody td').first().waitFor()
+    const box = await page.frameLocator('#jump-frame').locator('#orders tbody td').first().boundingBox()
+    expect(box).toBeTruthy()
+    const result = await detectTable(page, { kind: 'point', x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }, deps)
+    expect(result.outcome).toBe('FOUND')
+    if (result.outcome !== 'FOUND') return
+    expect(result.detected.plan.target.framePath.length).toBeGreaterThan(0)
+    expect(result.detected.plan.target.framePath[0]?.urlPattern).toBe('/frame-inner.html')
+    expect(result.detected.sample.rows.map((r) => valueOf(r, 'col_1'))).toEqual(['A001', 'A002'])
+    const again = await run(page, result.detected.plan)
+    expect(again.rowCount).toBe(2)
+    await page.close()
+  })
+
   it('iframe 的 id 以数字开头（老系统常见）：frame 路径里的选择器要转义，读取仍能找到表', async ({ skip }) => {
     if (!available) skip()
     const page = await browser!.newPage()

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>落地带 token</title>
+<script>
+  if (!/(?:^|[?&])token=/.test(location.search)) {
+    location.replace(`${location.pathname}?token=first-seed`)
+  }
+</script>
+</head>
+<body>
+<table id="orders">
+  <thead><tr><th>订单号</th><th>金额</th></tr></thead>
+  <tbody>
+    <tr><td>A001</td><td>100.50</td></tr>
+    <tr><td>A002</td><td>200.00</td></tr>
+  </tbody>
+</table>
+</body>
+</html>

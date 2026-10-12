@@ -1,5 +1,5 @@
 # Cairn API 镜像（兼作迁移镜像：node_modules/@cairn/db/dist/bin/migrate-cli.js）
-# 构建：docker build -f deploy/cluster/Dockerfile.api -t cairn-api:<tag> .
+# 构建：docker build -f deploy/images/Dockerfile.api -t cairn-api:<tag> .
 FROM node:24-bookworm-slim AS builder
 WORKDIR /repo
 RUN corepack enable

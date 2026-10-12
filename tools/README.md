@@ -12,7 +12,9 @@
 | `check-menu-reconciliation.mjs` | `pnpm check:menus` | 菜单目录、助手导览与侧栏单源对账；读 `packages/shared/dist`，改了菜单契约需先构建 |
 | `check-spec-governance.mjs` | `pnpm check:specs` | 活跃方案 ≤ 15 篇、已闭环方案须归档；`docs/spec/` 不进仓库，只在本机手动跑，不进 `pnpm check` / CI |
 | `check-stack.mjs` | `pnpm check:stack` | 本机 api / worker / web 进程探活；不启动进程，也不进 CI |
-| `use-env.mjs` | `pnpm env:use local\|remote`、`pnpm env:status` | 开发连接画像：`.env.local` / `.env.remote` 与 `.env.example` 键集必须对齐（注释形态的可选项也算键，差异只允许取值与是否启用）；`.env` 只是当前生效指针 |
+| `use-env.mjs` | `pnpm env:use local\|remote`、`pnpm env:status` | 底层合并：公开画像 ∪ 密钥文件对齐 `.env.example` 后写出 `.env`。日常用 `pnpm dev:env` |
+| `dev-env.mjs` | `pnpm dev:env use local\|remote`、`status`/`check`/`restart`/`down` | 日常开发画像：合并配置、拒绝发布端口、起停本机热重载进程并探活。`restart` 会按当前画像重合并公开文件 + 密钥后再拉起 |
+| `../deploy/cairn` | `./deploy/cairn release\|status\|rollback`；`dev-infra up\|status\|down` | 发布读 `deploy/targets/cluster.conf`。开发组件另起。都不是 pnpm 脚本 |
 | `probe-demonstration-files.mjs` | `node tools/probe-demonstration-files.mjs` | 本机 Web／API／对象存储的 JSON、YAML 文件导入、图片审查、参数／成功条件回填与单步重教；含 390px 窄屏检查 |
 | `verify-changed.mjs` | `pnpm verify:changed` | 智能分层验证：根据改动影响半径智能选择 L1 局部验证或 L2 全量升级，提示 L3 专项领域测试；支持 `--dry-run` 与 `--files`；`--related` 为 L0 内循环档（见下表） |
 
@@ -70,18 +72,33 @@ PostgreSQL 迁移前缀必须连续且唯一，只写 PG 一份；`mysql/`、`sq
 
 ## 开发连接画像
 
-本机 Postgres 和远程开发机是两套连接，不是环境档位的业务分支。约定：
+本机组件和远端**专用开发组件**是两套连接，不是发布环境。`remote` 禁止指向 shsnc-ah 集群的 `15432` / `16380` / `9031`。
 
 | 文件 | 角色 |
 | --- | --- |
 | `.env.example` | 入库模板，键集的唯一事实源 |
-| `.env.local` | 本机库 + 本地对象存储（不入库） |
-| `.env.remote` | 远程库 + 远程对象存储（不入库） |
-| `.env` | 当前生效文件；api / worker / 迁移 / 集成测试只读它 |
+| `.env.secrets.example` | 入库的密钥键清单，值为空 |
+| `.env.local` / `.env.remote` | 公开画像（入库）：host、端口、CORS。禁止出现密钥键 |
+| `.env.local.secrets` / `.env.remote.secrets` | 密钥（不入库） |
+| `.env` | `pnpm dev:env use` 合并写出的生效文件（不入库）；api / worker / 迁移只读它 |
 
-`pnpm env:use local` 把 `.env` 指到 `.env.local`（符号链接）。改连接改画像文件，不要直接改 `.env`。`pnpm env:status` 只打印 host / driver，不回显口令。
+日常：
 
-本机 PostgreSQL / RustFS 由 `pnpm infra:up` 启动，说明见 [`deploy/README.md`](../deploy/README.md)。
+```bash
+pnpm dev:env use local
+pnpm dev:env use remote
+pnpm dev:env check
+pnpm dev:env down
+```
+
+`use` 会停本机进程、合并配置、迁当前画像的开发库、再拉起热重载。不要直接改 `.env`。`pnpm env:use` 只做合并，不启停。
+
+本机组件由 `use local` 带起。远端专用组件第一次：
+
+```bash
+./deploy/cairn dev-infra up
+pnpm dev:env use remote
+```
 
 ## 集成测试与数据库
 

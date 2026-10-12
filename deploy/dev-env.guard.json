@@ -1,0 +1,19 @@
+{
+  "publish": [
+    {
+      "name": "cluster-pg",
+      "hosts": ["192.168.3.203", "100.64.0.4", "shsnc-ah3"],
+      "ports": [15432]
+    },
+    {
+      "name": "cluster-redis",
+      "hosts": ["192.168.3.203", "100.64.0.4", "shsnc-ah3"],
+      "ports": [16380]
+    },
+    {
+      "name": "cluster-rustfs",
+      "hosts": ["192.168.3.203", "100.64.0.4", "shsnc-ah3"],
+      "ports": [9031, 9032]
+    }
+  ]
+}

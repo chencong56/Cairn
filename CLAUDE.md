@@ -8,6 +8,9 @@
 
 识途构建 AI+RPA可观测场景执行平台。确定性 Step 与 AI Step 可混编；手工、调试、试跑与调度共用运行生命周期、上下文、会话和证据体系。
 
+### 开发连接与发布隔离
+
+本机开发进程只连本机组件或专用开发组件；不得把本机 API / Worker 接到发布环境的库、缓存或对象存储。日常切换走 `pnpm dev:env`；发布更新走 `deploy/` 独立命令，不进 `pnpm`。
 
 ### 执行分层
 
@@ -96,5 +99,7 @@ Run 进度通过 SSE 推送，断线后补读持久化事实；不以高频轮�
 | 技术版本、启动与部署 | 各包 `package.json`、`pnpm-lock.yaml`、[部署说明](deploy/README.md)、[数据库支持范围](deploy/database-backends.md) |
 | 工程检查 | [仓库命令](package.json)、[依赖边界](tools/check-deps.mjs)、[架构检查](tools/check-invariants.mjs) |
 | 本机服务启停与探活 | 开发默认 [scripts/dev.sh](scripts/dev.sh)；产物验收 [scripts/stack.sh](scripts/stack.sh)；[进程探活](tools/README.md#本机进程探活)（`pnpm check:stack`） |
+| 开发画像切换 | [开发连接画像](tools/README.md#开发连接画像)：`pnpm dev:env use local\|remote` |
+| 开发画像切换 | [开发连接画像](tools/README.md#开发连接画像)：`pnpm dev:env use local\|remote` |
 | 新增 db 迁移 | [领取迁移号](tools/README.md#领取迁移号)；先跑 `pnpm db:new-migration <name>`（只生成 PG 一份），不要手写序号或 `logicalVersion` |
 | 外部目标联调 | [目标清单](docs/targets/README.md) |

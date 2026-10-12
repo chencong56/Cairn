@@ -1,0 +1,106 @@
+# gs1 专用开发组件。与发布栈零交集：新项目名、新容器、新端口、新数据目录。
+# 不跑 API / Worker / Nginx / 迁移。表结构由本机 pnpm db:migrate 跟本机代码走。
+# 数据与配置在宿主 /home/cairn/{pg,rustfs,compose.yml,.env}。
+# 端口必须绑 0.0.0.0，本机经 Tailscale 访问。
+# 不要加入 cairn-net，不要占用 15432 / 16380 / 9031 / 9032。
+name: cairn-dev
+
+networks:
+  cairn-dev-net:
+    name: cairn-dev-net
+
+services:
+  cairn-dev-pg:
+    image: postgres:16
+    container_name: cairn-dev-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CAIRN_DB_USER}
+      POSTGRES_PASSWORD: ${CAIRN_DB_PASSWORD}
+      POSTGRES_DB: ${CAIRN_DB_NAME}
+      TZ: Asia/Shanghai
+    ports:
+      - "${BIND_ADDR}:${DEV_PG_PORT}:5432"
+    volumes:
+      - ./pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - cairn-dev-net
+
+  cairn-dev-redis:
+    image: redis:7-alpine
+    container_name: cairn-dev-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${BIND_ADDR}:${DEV_REDIS_PORT}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - cairn-dev-net
+
+  cairn-dev-rustfs:
+    # 与 ah3 发布栈 rustfs2 同一 digest，避免再拉一份。
+    image: rustfs/rustfs@sha256:b7014e0ce2bc703c1316b3ef760e29dfae61fe4a50d1a66fa89638e0f8ea211f
+    container_name: cairn-dev-rustfs
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_ACCESS_KEY: ${CAIRN_S3_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${CAIRN_S3_SECRET_KEY}
+      RUSTFS_OBS_LOGGER_LEVEL: info
+    ports:
+      - "${BIND_ADDR}:${DEV_S3_PORT}:9000"
+      - "${BIND_ADDR}:${DEV_S3_CONSOLE_PORT}:9001"
+    volumes:
+      - ./rustfs:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - cairn-dev-net
+
+  cairn-dev-bucket-init:
+    image: rustfs/rustfs@sha256:b7014e0ce2bc703c1316b3ef760e29dfae61fe4a50d1a66fa89638e0f8ea211f
+    container_name: cairn-dev-bucket-init
+    user: "0:0"
+    restart: "no"
+    depends_on:
+      cairn-dev-rustfs:
+        condition: service_healthy
+    environment:
+      S3_ACCESS_KEY: ${CAIRN_S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${CAIRN_S3_SECRET_KEY}
+      S3_REGION: ${CAIRN_S3_REGION}
+      CAIRN_S3_BUCKET: ${CAIRN_S3_BUCKET}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        code=$$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+          --aws-sigv4 "aws:amz:$$S3_REGION:s3" --user "$$S3_ACCESS_KEY:$$S3_SECRET_KEY" \
+          "http://cairn-dev-rustfs:9000/$$CAIRN_S3_BUCKET")
+        if [ "$$code" != "200" ] && [ "$$code" != "409" ]; then
+          echo "建桶失败 HTTP $$code" >&2
+          exit 1
+        fi
+        echo "bucket ready: $$CAIRN_S3_BUCKET"
+    networks:
+      - cairn-dev-net
