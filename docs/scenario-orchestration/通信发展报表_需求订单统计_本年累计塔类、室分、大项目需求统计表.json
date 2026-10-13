@@ -1,0 +1,196 @@
+{
+  "scenarioId": "085e05f8-5ae6-401e-8223-18f70fed8b34",
+  "name": "通信发展报表/需求订单统计/本年累计塔类、室分、大项目需求统计表",
+  "status": "active",
+  "purpose": "user",
+  "revision": 1,
+  "document": {
+    "nodes": [
+      {
+        "kind": "step",
+        "step": {
+          "id": "dab08a05-97c6-482c-8240-573396f25c68",
+          "name": "打开页面",
+          "type": "navigate",
+          "input": {
+            "url": "http://bi-new.tower0788.cn:18181/ctbass/frameIndex.do?show_logout=true&open_priv_id=10100010&open_priv_name=%E6%8A%A5%E8%A1%A8%E4%B8%AD%E5%BF%83&open_svc_addr=%2Fctb_thematic_web%2FtowerSkip%2FgoReportMgt%3Fflag%3Dundefined%26type_id%3Dundefined"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b2000002-0000-4000-8000-000000000001",
+          "name": "等待报表中心页面渲染",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 8000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a1000001-0000-4000-8000-000000000001",
+          "name": "展开通信发展报表",
+          "type": "ai_action",
+          "input": {
+            "operation": "tap",
+            "targetDescription": "在左侧「报表中心」报表树中，点击一级分类节点「通信发展报表」，把它展开"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b2000002-0000-4000-8000-000000000002",
+          "name": "等待子分类加载",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 4000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a1000001-0000-4000-8000-000000000002",
+          "name": "选择需求订单统计",
+          "type": "ai_action",
+          "input": {
+            "operation": "tap",
+            "targetDescription": "在左侧报表树中，点击「通信发展报表」展开后出现的子节点「需求订单统计」，选中它"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b2000002-0000-4000-8000-000000000003",
+          "name": "等待报表列表加载",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 4000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a1000001-0000-4000-8000-000000000003",
+          "name": "打开本年累计塔类、室分、大项目需求统计表",
+          "type": "ai_action",
+          "input": {
+            "operation": "tap",
+            "targetDescription": "在右侧报表列表中找到报表名称「本年累计塔类、室分、大项目需求统计表」并点击打开它。当前分类的报表分多页，若本页没有就翻到下一页再找"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b2000002-0000-4000-8000-000000000004",
+          "name": "等待报表页面加载",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 10000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a1000001-0000-4000-8000-000000000004",
+          "name": "点击查询",
+          "type": "ai_action",
+          "input": {
+            "operation": "tap",
+            "targetDescription": "报表页中部有一块查询条件区（含若干条件字段），该区域下方有一个粉红色的「查询」按钮，点击它执行查询。注意：页面最顶部搜索框右边还有一个红色的「一键查询」按钮，那是全局搜索，绝对不要点它。只点查询条件区下方那个「查询」按钮。"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b2000002-0000-4000-8000-000000000005",
+          "name": "等待查询结果",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 10000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b5d4a73e-9ba6-4719-ad4f-6cfa1efca06f",
+          "name": "校验报表有无数据",
+          "type": "ai_assert",
+          "input": {
+            "instruction": "报表「本年累计塔类、室分、大项目需求统计表」查询后，页面上的数据表格中有数据行则通过；若表格为空、总条数为 0，或出现错误/异常提示则报异常。"
+          },
+          "effectType": "READ_ONLY"
+        },
+        "outcomes": [
+          {
+            "id": "13c59142-23d4-4b2c-b485-c7ee2bfad1bc",
+            "rule": {
+              "kind": "ai",
+              "instruction": "报表「本年累计塔类、室分、大项目需求统计表」查询后，页面上的数据表格中有数据行则通过；若表格为空、总条数为 0，或出现错误/异常提示则报异常。"
+            },
+            "scope": "step",
+            "meaning": "报表「本年累计塔类、室分、大项目需求统计表」查询结果中有数据行",
+            "severity": "MUST",
+            "provenance": "manual",
+            "onViolation": "continue"
+          }
+        ]
+      }
+    ],
+    "inputs": [],
+    "schemaVersion": 1,
+    "runtimeInvariants": [
+      {
+        "id": "01a116ff-25d3-738d-957d-c8734ed4819b",
+        "kind": "network_health",
+        "meaning": "页面接口不得报错",
+        "network": {
+          "ignore": [
+            "/favicon.ico"
+          ],
+          "requestFailed": false,
+          "statusClasses": [
+            "5xx"
+          ]
+        },
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      },
+      {
+        "id": "01a116ff-25d3-738d-957d-ccdf7306b1f4",
+        "kind": "script_errors",
+        "meaning": "页面脚本不得出现未捕获异常",
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      }
+    ],
+    "authoringSchemaVersion": 2
+  }
+}

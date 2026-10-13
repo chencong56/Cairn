@@ -1,0 +1,257 @@
+{
+  "scenarioId": "01a116c9-c341-7660-93d1-6962d3253966",
+  "name": "横向对标（广东）-营收管理指标统计表",
+  "status": "active",
+  "purpose": "user",
+  "revision": 10,
+  "document": {
+    "nodes": [
+      {
+        "kind": "step",
+        "step": {
+          "id": "0217e56b-a7fa-450a-86c2-74b0ad0b7630",
+          "name": "打开页面",
+          "type": "navigate",
+          "input": {
+            "url": "http://eipxcuat.tower0788.cn:9000/eip/index"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "96b4adcd-97c6-47a4-85bc-4021c1eb6748",
+          "name": "等待页面打开",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 4000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "1b55a24a-0683-4800-b35c-ca6f982bd4a9",
+          "name": "点击数据展示",
+          "type": "click",
+          "input": {
+            "target": {
+              "anchor": {
+                "scope": "nearest",
+                "withinText": "工作邮箱公文起草工单起草运营管理数据展示流程管理财务报账通讯录"
+              },
+              "semantic": "文本为「数据展示」的元素",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "数据展示"
+                },
+                {
+                  "by": "css",
+                  "value": "#CHNTBASS2_SJZS"
+                }
+              ]
+            },
+            "pageAfter": "popup"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b3000003-0000-4000-8000-000000000001",
+          "name": "等待运营数据展示系统打开",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 10000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a3000003-0000-4000-8000-000000000001",
+          "name": "转到运营数据展示系统主页",
+          "type": "ai_action",
+          "input": {
+            "instruction": "确认当前显示的是「运营数据展示系统」主页（地址含 bassweb）。若当前还停在中国铁塔 EIP 门户页面，就切换到刚打开的「数据展示」新标签页/新窗口，让它成为当前显示的页面。已经在运营数据展示系统主页则保持原状，不要点击任何内容。"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b3000003-0000-4000-8000-000000000002",
+          "name": "等待主页模块加载",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 8000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a3000003-0000-4000-8000-000000000002",
+          "name": "找到主页横向对标模块",
+          "type": "ai_action",
+          "input": {
+            "distance": 1500,
+            "direction": "down",
+            "operation": "scroll",
+            "targetDescription": "在主页上找到标题为「横向对标」的模块（一个展示各省份对比数据的卡片或表格区域），向下滚动，直到「横向对标」模块整体完整可见。不要点击模块里任何数据。"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b3000003-0000-4000-8000-000000000003",
+          "name": "等待模块数据加载",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 5000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a3000003-0000-4000-8000-000000000003",
+          "name": "回滚到横向对标模块顶部",
+          "type": "ai_action",
+          "input": {
+            "distance": 1500,
+            "direction": "up",
+            "operation": "scroll",
+            "targetDescription": "「横向对标」模块（标题为「横向对标」，下面是各省份按应收推送收入排序的排行列表）"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b3000003-0000-4000-8000-000000000004",
+          "name": "等待滚动到位",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 4000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a3000003-0000-4000-8000-000000000006",
+          "name": "继续回滚露出广东",
+          "type": "ai_action",
+          "input": {
+            "distance": 1500,
+            "direction": "up",
+            "operation": "scroll",
+            "targetDescription": "「横向对标」模块，继续向上滚动，直到排行榜第 1 位的省份「广东」出现在视野里"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "a3000003-0000-4000-8000-000000000005",
+          "name": "点击广东对应的数据",
+          "type": "ai_action",
+          "input": {
+            "operation": "tap",
+            "targetDescription": "「横向对标」模块是一个按「应收推送收入」排列的省份排行列表。找到标签为「广东」的那一行，点击该行对应的数据金额数值，打开它的详情。请按省份名「广东」定位，不要依赖它在列表中的位次；不要点标题「横向对标」，不要点其他省份。"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b3000003-0000-4000-8000-000000000006",
+          "name": "等待营收管理指标统计表弹出",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 10000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "b5d4a73e-9ba6-4719-ad4f-6cfa1efca06f",
+          "name": "判断统计表是否有数据",
+          "type": "ai_assert",
+          "input": {
+            "instruction": "点击广东数据后应弹出「营收管理指标统计表」。若弹出了该统计表且表中有数据行则通过；若弹窗没有出现、统计表为空或数据为 0 条，或出现错误/异常提示则报异常。"
+          },
+          "effectType": "READ_ONLY"
+        },
+        "outcomes": [
+          {
+            "id": "75f46bdd-e177-4206-9c1a-6f77853300c7",
+            "rule": {
+              "kind": "ai",
+              "instruction": "点击广东数据后应弹出「营收管理指标统计表」。若弹出了该统计表且表中有数据行则通过；若弹窗没有出现、统计表为空或数据为 0 条，或出现错误/异常提示则报异常。"
+            },
+            "scope": "step",
+            "meaning": "营收管理指标统计表已弹出且表中有数据行",
+            "severity": "MUST",
+            "provenance": "manual",
+            "onViolation": "continue"
+          }
+        ]
+      }
+    ],
+    "inputs": [],
+    "schemaVersion": 1,
+    "runtimeInvariants": [
+      {
+        "id": "01a116c9-c340-7755-b2e3-933f87320100",
+        "kind": "network_health",
+        "meaning": "页面接口不得报错",
+        "network": {
+          "ignore": [
+            "/favicon.ico"
+          ],
+          "requestFailed": false,
+          "statusClasses": [
+            "5xx"
+          ]
+        },
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      },
+      {
+        "id": "01a116c9-c341-7660-93d1-65b90ffc9307",
+        "kind": "script_errors",
+        "meaning": "页面脚本不得出现未捕获异常",
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      }
+    ],
+    "authoringSchemaVersion": 2
+  }
+}

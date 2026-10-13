@@ -266,7 +266,15 @@ describe('table.read@2 识别 × 点选', { timeout: 120_000 }, () => {
     available = await isChromiumAvailableCached()
     if (!available) return
     server = createServer(async (req, res) => {
-      const name = (req.url ?? '/').split('?')[0]!.replace(/^\/+/, '')
+      const [rawPath, rawQuery = ''] = (req.url ?? '/').split('?')
+      const name = rawPath!.replace(/^\/+/, '')
+      // 老门户跳板：frameTab.do 收下参数就 302 到真实页，iframe 的 src 属性停在跳板地址。
+      if (name === 'frameTab.do') {
+        const cct = new URLSearchParams(rawQuery).get('cct') ?? '/frame-inner.html'
+        res.writeHead(302, { Location: cct.startsWith('/') && !cct.startsWith('//') ? cct : '/frame-inner.html' })
+        res.end()
+        return
+      }
       try {
         const body = await readFile(join(FIXTURES, name))
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -426,6 +434,43 @@ describe('table.read@2 识别 × 点选', { timeout: 120_000 }, () => {
     const picked = await pickOnPage(page, box!.x + box!.width / 2, box!.y + box!.height / 2)
     expect(Date.now() - started).toBeLessThan(5000)
     expect(picked.outcome).not.toBe('NOT_FOUND')
+    await page.close()
+  })
+
+  it('跳板 iframe 加载后 302：FramePath 记重定向后的地址，否则提取等满超时报找不到表', async ({ skip }) => {
+    if (!available) skip()
+    const page = await browser!.newPage()
+    await page.goto(`${base}/redirect-shell.html`)
+    const box = await page.frameLocator('iframe').locator('#orders tbody td').first().boundingBox()
+    if (!box) throw new Error('跳板页里没认出表')
+    const result = await detectTable(
+      page,
+      { kind: 'point', x: box.x + box.width / 2, y: box.y + box.height / 2 },
+      deps,
+    )
+    expect(result.outcome).toBe('FOUND')
+    if (result.outcome !== 'FOUND') return
+    const [step] = result.detected.plan.target.framePath
+    expect(step?.urlPattern).toContain('/frame-inner.html')
+    expect(step?.urlPattern).not.toContain('/frameTab.do')
+    const again = await run(page, result.detected.plan)
+    expect(again.rows.map((r) => valueOf(r, 'col_1'))).toEqual(['A001', 'A002'])
+    await page.close()
+  })
+
+  it('升级前存下的 FramePath：urlPattern 停在重定向前，有身份判据时仍认得出 frame', async ({ skip }) => {
+    if (!available) skip()
+    const page = await browser!.newPage()
+    await page.goto(`${base}/redirect-shell.html`)
+    const located = await locate(
+      page,
+      {
+        framePath: [{ urlPattern: '/frameTab.do?cct=/frame-inner.html', selector: 'iframe' }],
+        candidates: [{ by: 'css', value: '#orders' }],
+      },
+      5_000,
+    )
+    expect(located.kind).toBe('found')
     await page.close()
   })
 })

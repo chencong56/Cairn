@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>跳板门户（frameTab.do 会 302 走）</title></head>
+<body>
+<h1>报表中心</h1>
+<!-- 跳板页：iframe 的 src 停在 frameTab.do，服务端 302 到 cct 指向的真实页，
+     所以 iframe 的 src 属性和 frame.url() 永远不是一个地址。 -->
+<iframe src="/frameTab.do?cct=/frame-inner.html" width="900" height="400"></iframe>
+</body>
+</html>

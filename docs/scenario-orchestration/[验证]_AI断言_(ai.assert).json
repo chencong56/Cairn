@@ -1,0 +1,28 @@
+{
+  "scenarioId": "01a12101-30ee-7796-a30e-c2c6e27be590",
+  "name": "[验证] AI断言 (ai.assert)",
+  "status": "active",
+  "purpose": "module_verification",
+  "revision": 3,
+  "document": {
+    "nodes": [
+      {
+        "kind": "module",
+        "name": "AI断言",
+        "moduleId": "01a120e9-074a-763d-9cfa-0f728d35c858",
+        "moduleDraft": {
+          "moduleId": "01a120e9-074a-763d-9cfa-0f728d35c858",
+          "revision": 5,
+          "contentDigest": "1558ae5780c8ac68052055b533ca3eab5a784d523f9635f5a5c01c70b0ef103b"
+        },
+        "invocationId": "01a12114-0db8-734e-8c24-3edc8b4349d6",
+        "inputBindings": {},
+        "outputBindings": {},
+        "implementationKey": "default"
+      }
+    ],
+    "inputs": [],
+    "schemaVersion": 1,
+    "authoringSchemaVersion": 2
+  }
+}

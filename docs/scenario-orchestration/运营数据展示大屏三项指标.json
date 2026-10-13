@@ -1,0 +1,247 @@
+{
+  "scenarioId": "01a11be5-0616-7399-8cad-1923abd3ac68",
+  "name": "运营数据展示大屏三项指标",
+  "status": "active",
+  "purpose": "user",
+  "revision": 8,
+  "document": {
+    "nodes": [
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000001",
+          "name": "打开页面",
+          "type": "navigate",
+          "input": {
+            "url": "http://eipxcuat.tower0788.cn:9000/eip/index"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000002",
+          "name": "点击数据展示",
+          "type": "click",
+          "input": {
+            "target": {
+              "anchor": {
+                "scope": "nearest",
+                "withinText": "工作邮箱公文起草工单起草运营管理数据展示流程管理财务报账通讯录"
+              },
+              "semantic": "文本为「数据展示」的元素",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "数据展示"
+                },
+                {
+                  "by": "css",
+                  "value": "#CHNTBASS2_SJZS"
+                }
+              ]
+            },
+            "pageAfter": "popup"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000003",
+          "name": "等待运营数据展示系统打开",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 10000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000004",
+          "name": "确认进入运营数据展示系统",
+          "type": "ai_action",
+          "input": {
+            "operation": "tap",
+            "targetDescription": "确认当前显示的是「运营数据展示系统」。若当前还停在中国铁塔 EIP 门户，就切换到刚打开的「数据展示」新窗口/新标签页，让它成为当前显示的页面。已经在运营数据展示系统则保持原状，不要点击任何内容。"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000005",
+          "name": "等待系统主页加载",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 8000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000006",
+          "name": "点击个人操作台",
+          "type": "ai_action",
+          "input": {
+            "operation": "tap",
+            "targetDescription": "在运营数据展示系统顶部导航栏，点击「个人操作台」标签（房子图标旁边的文字「个人操作台」）。不要点「报表中心」，不要点「应用专题」。"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000007",
+          "name": "等待个人操作台打开",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 5000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000008",
+          "name": "选择项目经理操作台",
+          "type": "ai_action",
+          "input": {
+            "instruction": "当前页面上有标题为「我的专属操作台」的弹窗，列出「客户经理操作台」「增长操作台」「区域经理操作台」「项目经理操作台」四行，每行右侧有「设为主界面」开关，弹窗底部有「取消」和「确认更改」两个按钮。请点击第四行的「项目经理操作台」文字，使项目经理操作台生效并进入大屏页面。不要点「取消」，不要点其它操作台，不要再点顶部的「个人操作台」标签。"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000009",
+          "name": "等待大屏页面弹出",
+          "type": "wait",
+          "input": {
+            "kind": "time",
+            "durationMs": 12000
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000011",
+          "name": "定位塔类站址共享率",
+          "type": "ai_extract",
+          "input": {
+            "instruction": "在运营数据展示系统大屏页面的左侧上方，找到「塔类站址共享率」，读取它对应的百分比数值。这是一个百分比。不要取在网站址数。",
+            "outputSchema": {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "塔类站址共享率",
+                  "type": "string",
+                  "required": true
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000012",
+          "name": "定位项目流程模块批复个数",
+          "type": "ai_extract",
+          "input": {
+            "instruction": "在运营数据展示系统大屏页面找到「项目流程」模块，读取该模块中的批复个数（批复相关的数量）。不要取订单跟踪模块的数字。",
+            "outputSchema": {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "项目流程批复个数",
+                  "type": "string",
+                  "required": true
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000013",
+          "name": "定位订单跟踪模块待承接需求个数",
+          "type": "ai_extract",
+          "input": {
+            "instruction": "在运营数据展示系统大屏页面找到「订单跟踪」模块，读取该模块中的「待承接需求」个数。不要取项目流程模块的数字。",
+            "outputSchema": {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "订单跟踪待承接需求个数",
+                  "type": "string",
+                  "required": true
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "d4000004-0000-4000-8000-000000000014",
+          "name": "校验三项指标均已定位",
+          "type": "ai_assert",
+          "input": {
+            "instruction": "确认当前是运营数据展示系统大屏页面，并且三项指标都能读到且不是空值：塔类站址共享率、项目流程模块批复个数、订单跟踪模块待承接需求个数。三项都可见且有数值则通过；任一项缺失、为空或页面不是大屏则报异常。"
+          },
+          "effectType": "READ_ONLY"
+        }
+      }
+    ],
+    "inputs": [],
+    "schemaVersion": 1,
+    "runtimeInvariants": [
+      {
+        "id": "d4000004-0000-4000-8000-000000000090",
+        "kind": "network_health",
+        "meaning": "页面接口不得报错",
+        "network": {
+          "ignore": [
+            "/favicon.ico"
+          ]
+        },
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      },
+      {
+        "id": "d4000004-0000-4000-8000-000000000091",
+        "kind": "script_errors",
+        "meaning": "页面脚本不得出现未捕获异常",
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      }
+    ],
+    "authoringSchemaVersion": 2
+  }
+}

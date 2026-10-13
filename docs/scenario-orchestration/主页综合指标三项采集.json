@@ -1,0 +1,147 @@
+{
+  "scenarioId": "01a11c2e-fef1-76d0-8477-982fd29b6111",
+  "name": "主页综合指标三项采集",
+  "status": "active",
+  "purpose": "user",
+  "revision": 5,
+  "document": {
+    "nodes": [
+      {
+        "kind": "step",
+        "step": {
+          "id": "e5000005-0000-4000-8000-000000000001",
+          "name": "打开页面",
+          "type": "navigate",
+          "input": {
+            "url": "http://eipxcuat.tower0788.cn:9000/eip/index"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e5000005-0000-4000-8000-000000000006",
+          "name": "采集起租站址数",
+          "type": "ai_extract",
+          "input": {
+            "instruction": "先观察当前页面，找一找有没有综合指标区，里面应该有「起租站址数」（单位：站）、「平均每站租户数」（单位：户/站）、「塔类租户数」（单位：户）三项，每项有当前值和增长值。如果找到了就读取「起租站址数」的当前值和增长值；如果整页都没有这些指标，就不要编造，对应字段留空。同时把页面上你实际看到的所有指标名称（含所属模块标题）写进「页面可见指标清单」。 输出 JSON 的键名必须与 outputSchema 里的字段名逐字相同，不要在键名末尾添加问号或任何符号（字段名后面的问号只表示该项可选，可以省略该字段或留空）。",
+            "outputSchema": {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "起租站址数_当前值",
+                  "type": "string",
+                  "required": false
+                },
+                {
+                  "name": "起租站址数_增长值",
+                  "type": "string",
+                  "required": false
+                },
+                {
+                  "name": "页面可见指标清单",
+                  "type": "string",
+                  "required": true
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e5000005-0000-4000-8000-000000000007",
+          "name": "采集平均每站租户数",
+          "type": "ai_extract",
+          "input": {
+            "instruction": "在运营数据展示系统主页的综合指标区找到「平均每站租户数」，单位是「户/站」。读取它的当前值和增长值（增长值可能带正负号或涨跌箭头）。不要读「起租站址数」或「塔类租户数」的数字，不要把单位（户/站）当成数值。 输出 JSON 的键名必须与 outputSchema 里的字段名逐字相同，不要在键名末尾添加问号或任何符号（字段名后面的问号只表示该项可选，可以省略该字段或留空）。",
+            "outputSchema": {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "平均每站租户数_当前值",
+                  "type": "string",
+                  "required": true
+                },
+                {
+                  "name": "平均每站租户数_增长值",
+                  "type": "string",
+                  "required": true
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e5000005-0000-4000-8000-000000000008",
+          "name": "采集塔类租户数",
+          "type": "ai_extract",
+          "input": {
+            "instruction": "在运营数据展示系统主页的综合指标区找到「塔类租户数」，单位是「户」。读取它的当前值和增长值（增长值可能带正负号或涨跌箭头）。注意不要和「净增租户数」混淆，只取「塔类租户数」。不要把单位（户）当成数值。 输出 JSON 的键名必须与 outputSchema 里的字段名逐字相同，不要在键名末尾添加问号或任何符号（字段名后面的问号只表示该项可选，可以省略该字段或留空）。",
+            "outputSchema": {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "塔类租户数_当前值",
+                  "type": "string",
+                  "required": true
+                },
+                {
+                  "name": "塔类租户数_增长值",
+                  "type": "string",
+                  "required": true
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e5000005-0000-4000-8000-000000000009",
+          "name": "判断当前值和增长值是否有数据",
+          "type": "ai_assert",
+          "input": {
+            "instruction": "确认主页综合指标区三项指标的当前值和增长值都有数据：起租站址数（站）、平均每站租户数（户/站）、塔类租户数（户）。共 6 个数值（3 个当前值 + 3 个增长值）都可见、非空、是数值则通过。任一值缺失、为空、显示为「-」「--」「暂无数据」，或页面不是主页综合指标区则报异常。"
+          },
+          "effectType": "READ_ONLY"
+        }
+      }
+    ],
+    "inputs": [],
+    "schemaVersion": 1,
+    "runtimeInvariants": [
+      {
+        "id": "e5000005-0000-4000-8000-000000000090",
+        "kind": "network_health",
+        "meaning": "页面接口不得报错",
+        "network": {
+          "ignore": [
+            "/favicon.ico"
+          ]
+        },
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      },
+      {
+        "id": "e5000005-0000-4000-8000-000000000091",
+        "kind": "script_errors",
+        "meaning": "页面脚本不得出现未捕获异常",
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      }
+    ],
+    "authoringSchemaVersion": 2
+  }
+}
