@@ -186,7 +186,7 @@ export const PURE_SPEC_FILES: readonly string[] = [
   'src/engine/engine.control-flow.spec.ts',
   'src/engine/error-surface.spec.ts',
   'src/browser/page-health-collector.spec.ts',
-  'src/browser/page-wait-collector.spec.ts',
+  'src/engine/page-wait-collector.spec.ts',
   'src/engine/page-health.spec.ts',
   'src/engine/resolution-ladder.spec.ts',
   'src/engine/step-executor-registry.spec.ts',

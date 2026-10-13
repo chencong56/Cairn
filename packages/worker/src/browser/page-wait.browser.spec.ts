@@ -4,7 +4,7 @@ import { chromium, type Browser, type BrowserContext } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { executeOnPage } from './surface.js'
 import { withTestOccupancy } from './test-occupancy.js'
-import { runWithPageWaitCollector, type PageWaitSink } from './page-wait-collector.js'
+import { runWithPageWaitCollector, type PageWaitSink } from '../engine/page-wait-collector.js'
 
 function recordingSink() {
   const reasons: string[] = []

@@ -49,7 +49,7 @@ import type {
   StepExecutionOutcome,
   StepExecutor,
 } from './step-executor.js'
-import { PageWaitCollector, runWithPageWaitCollector } from '../browser/page-wait-collector.js'
+import { PageWaitCollector, runWithPageWaitCollector } from './page-wait-collector.js'
 
 const MIME_BY_EXT: Record<string, string> = {
   '.pdf': 'application/pdf',

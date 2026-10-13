@@ -38,7 +38,7 @@ import {
 import { sampleTableOnPage } from './table-observe.js'
 import { sampleTableV2 } from './table-read-v2.js'
 import { candidateTries, errorForOutcome, pickResolvedCandidate } from './resolver'
-import { currentPageWaitCollector, timePageWait } from './page-wait-collector.js'
+import { currentPageWaitCollector, timePageWait } from '../engine/page-wait-collector.js'
 import { isPageLevelAssertExpect, isTableReadPlanV2, redactAuthUrl, safeDownloadFileName, sanitizeAriaSnapshot } from '@cairn/shared'
 import { matchAriaSnapshot } from './aria-match.js'
 

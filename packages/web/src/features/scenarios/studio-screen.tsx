@@ -343,7 +343,7 @@ export function StudioScreen({
   const noExecutor =
     currentWaitReason === 'NO_ELIGIBLE_WORKER' || currentWaitReason === 'WORKER_PROTOCOL_MISSING'
   const trialWaitReason = run?.placement?.waitReason ?? null
-  const trialNoExecutor = trialWaitReason === 'NO_ELIGIBLE_WORKER' || trialWaitReason === 'WORKER_PROTOCOL_MISSING'
+  const trialNoExecutor = trialWaitReason === 'NO_ELIGIBLE_WORKER'
 
   const currentAction = resolveStudioConnectAction({
     sessionDetail: session,

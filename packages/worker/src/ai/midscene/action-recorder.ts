@@ -10,7 +10,7 @@ import {
 } from '@cairn/shared'
 import { appendAiTaskEvent, type DbHandle } from '@cairn/db'
 import { inspectElementCandidate } from '../../browser/element-candidate-inspector.js'
-import { currentPageWaitCollector } from '../../browser/page-wait-collector.js'
+import { currentPageWaitCollector } from '../../engine/page-wait-collector.js'
 
 export interface ActionRecorderOptions {
   page: Page

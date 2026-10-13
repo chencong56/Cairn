@@ -35,6 +35,7 @@ import {
 import {
   DEFAULT_EXECUTOR_VERSIONS,
   computeContextVersion,
+  isPageWaitEvidence,
   PLACEMENT_YIELD_CODES,
   SESSION_CONFIG_ERROR_CODES,
   runSnapshotSchema,
@@ -443,7 +444,10 @@ describe('ExecutionEngine × BrowserPort（L1）', { timeout: 60_000 }, () => {
     expect(after.stepRuns[0]?.attempts[0]?.status).toBe('FAILED')
     const evidence = await listRunEvidence(handle.db, created.detail.id)
     expect(evidence.items.some((item) => item.type === 'error')).toBe(true)
-    expect(evidence.items.find((item) => item.type === 'log')?.payload).toEqual({
+    // page_wait 也落 type=log 证据，断言诊断日志时要排除它
+    expect(
+      evidence.items.find((item) => item.type === 'log' && !isPageWaitEvidence(item.payload))?.payload,
+    ).toEqual({
       outcome: 'NOT_FOUND',
       candidatesTried: [{ index: 0, by: 'text', value: '查询', matches: 0 }],
       framePathResolved: ['main'],

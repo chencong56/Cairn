@@ -43,7 +43,7 @@ import {
 import { detectFabrication } from './midscene/extract.js'
 import type { OpenAiLike } from './midscene/model-client.js'
 import { ActionRecorder } from './midscene/action-recorder.js'
-import { PageWaitCollector, runWithPageWaitCollector } from '../browser/page-wait-collector.js'
+import { PageWaitCollector, runWithPageWaitCollector } from '../engine/page-wait-collector.js'
 import { AI_PORT, type AiLocateResult, type AiPort } from '../engine/ports.js'
 import {
   createDirectOpenAiClient,

@@ -178,9 +178,7 @@ export function StudioToolbar({
   const isTrialRunning = Boolean(
     trialRun && ['QUEUED', 'RUNNING', 'RECOVERING', 'WAITING_FOR_AUTH', 'HOLDING'].includes(trialRun.status),
   )
-  const trialNoExecutor =
-    trialRun?.placement?.waitReason === 'NO_ELIGIBLE_WORKER' ||
-    trialRun?.placement?.waitReason === 'WORKER_PROTOCOL_MISSING'
+  const trialNoExecutor = trialRun?.placement?.waitReason === 'NO_ELIGIBLE_WORKER'
   const trialLiveLabel = trialNoExecutor ? '没有执行节点' : isTrialQueued ? '试跑排队中' : '试跑中…'
   const canCancelTrial = canCancelTrialProp ?? Boolean(onCancelTrial)
   const [isCancelHovered, setIsCancelHovered] = useState(false)

@@ -30,7 +30,7 @@ import {
   pageHasSensitiveContent,
 } from './runtime'
 import { executeOnPage } from './surface'
-import { timePageWait } from './page-wait-collector.js'
+import { timePageWait } from '../engine/page-wait-collector.js'
 import { handoffMessage } from './managed-helpers'
 import { PageHealthCollector, pageHealthKnownOrigins } from './page-health-collector.js'
 import { NetworkCapture } from './network-capture.js'
