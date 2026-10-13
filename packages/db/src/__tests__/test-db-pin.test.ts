@@ -3,7 +3,7 @@ import { applyTestDbPin } from '../testing.js'
 
 describe('applyTestDbPin', () => {
   it('非 CI 把 host 钉到本机测试库，不沿用远端 CAIRN_DB_HOST', () => {
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       CAIRN_DB_HOST: '100.64.0.4',
       CAIRN_DB_PORT: '5432',
       CAIRN_TEST_DB_HOST: '127.0.0.1',
