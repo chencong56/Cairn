@@ -26,6 +26,7 @@ const sessionMocks = vi.hoisted(() => ({
   fetchSessionOperation: vi.fn().mockResolvedValue(null),
   fetchAccountSessionEvents: vi.fn().mockResolvedValue({ items: [] }),
   cancelSessionOperation: vi.fn().mockResolvedValue({}),
+  retrySessionAutoLogin: vi.fn().mockResolvedValue({}),
 }))
 
 vi.mock('@/features/sessions/use-session-observation', () => ({
@@ -53,6 +54,7 @@ vi.mock('@/lib/sessions-api', () => ({
   fetchSessionOperation: (...args: unknown[]) => sessionMocks.fetchSessionOperation(...args),
   fetchAccountSessionEvents: (...args: unknown[]) => sessionMocks.fetchAccountSessionEvents(...args),
   cancelSessionOperation: (...args: unknown[]) => sessionMocks.cancelSessionOperation(...args),
+  retrySessionAutoLogin: (...args: unknown[]) => sessionMocks.retrySessionAutoLogin(...args),
   observeSession: vi.fn(),
   detectTableOnSession: vi.fn(),
   sampleTableOnSession: vi.fn(),
@@ -310,6 +312,50 @@ describe('StudioScreen Component', () => {
     await expect.element(screen.getByRole('link', { name: '查看会话详情' })).toBeInTheDocument()
   })
 
+  it('没有执行节点时会话准备写「没有可用的执行节点」，不写排队中', async () => {
+    observation.run = null
+    sessionMocks.fetchAccountSession.mockResolvedValue({
+      ...openSession,
+      session: null,
+      status: 'unprepared',
+      currentOperation: {
+        id: 'op-prepare-noworker',
+        kind: 'PREPARE',
+        status: 'QUEUED',
+        reusedRunId: null,
+        waitReason: 'NO_ELIGIBLE_WORKER',
+        requestedBy: { id: 'u1', name: '测试' },
+      },
+    })
+    sessionMocks.requestAccountSessionOperation.mockResolvedValue({
+      operationId: 'op-prepare-noworker',
+      created: true,
+      reusedRunId: null,
+    })
+    sessionMocks.fetchSessionOperation.mockResolvedValue({
+      id: 'op-prepare-noworker',
+      status: 'QUEUED',
+      waitReason: 'NO_ELIGIBLE_WORKER',
+      queueDeadlineAt: new Date(Date.now() + 180000).toISOString(),
+      createdAt: new Date().toISOString(),
+    })
+
+    const screen = await renderScreen({
+      targetId: TARGET_ID,
+      targetAccountId: ACCOUNT_ID,
+    })
+
+    await screen.getByRole('button', { name: '连接受管会话' }).click()
+
+    await expect.element(screen.getByRole('heading', { name: '没有可用的执行节点' })).toBeInTheDocument()
+    await expect.element(screen.getByText('无法开始', { exact: true })).toBeInTheDocument()
+    await expect.element(screen.getByText(/没有在线的执行节点，排队不会开始/)).toBeInTheDocument()
+    await expect.element(screen.getByRole('link', { name: '查看执行节点' })).toBeInTheDocument()
+    await expect.element(screen.getByRole('button', { name: '取消准备' })).toBeInTheDocument()
+    expect(screen.getByText('排队等待调度').elements()).toHaveLength(0)
+    expect(screen.getByText('排队中').elements()).toHaveLength(0)
+  })
+
   it('操作进入 WAITING_FOR_AUTH 时自动切出 BrowserView 并展示人工验证引导', async () => {
     observation.run = null
     sessionMocks.fetchAccountSession.mockResolvedValue({
@@ -338,7 +384,39 @@ describe('StudioScreen Component', () => {
 
     await expect.element(screen.getByText('会话实时画面')).toBeInTheDocument()
     await expect.element(screen.getByText(/需要人工辅助验证/)).toBeInTheDocument()
-    await expect.element(screen.getByText(/请在下方画面中点击「取得控制权」/)).toBeInTheDocument()
+    await expect.element(screen.getByText(/可以再发起一次自动登录/)).toBeInTheDocument()
+    await expect.element(screen.getByText(/点「完成认证」只核验/)).toBeInTheDocument()
+    await expect.element(screen.getByRole('button', { name: '再自动登录' })).toBeInTheDocument()
+  })
+
+  it('等待认证时可以再发起自动登录', async () => {
+    observation.run = null
+    sessionMocks.fetchAccountSession.mockResolvedValue({
+      ...openSession,
+      session: null,
+      status: 'maintenance',
+      lastAuthError: 'CAPTCHA_REQUIRED',
+      occupancy: {
+        purpose: 'AUTH_WAIT',
+        occupyingRunId: null,
+        occupyingOperationId: 'op-auth-wait',
+      },
+      currentOperation: {
+        id: 'op-auth-wait',
+        kind: 'PREPARE',
+        status: 'WAITING_FOR_AUTH',
+        reusedRunId: null,
+        requestedBy: { id: 'u1', name: '测试' },
+      },
+    })
+
+    const screen = await renderScreen({
+      targetId: TARGET_ID,
+      targetAccountId: ACCOUNT_ID,
+    })
+
+    await screen.getByRole('button', { name: '再自动登录' }).click()
+    expect(sessionMocks.retrySessionAutoLogin).toHaveBeenCalledWith('op-auth-wait')
   })
 
   it('在准备中点击取消准备会调用 cancelSessionOperation', async () => {
@@ -756,6 +834,25 @@ describe('StudioScreen Component', () => {
       })
       await expect.element(screen.getByText(/试跑还没开始/)).toBeInTheDocument()
       await expect.element(screen.getByText(/退出操作/)).toBeInTheDocument()
+    })
+
+    it('试跑因没有执行节点卡住时不说会自动开始，并给出节点入口', async () => {
+      observation.run = {
+        id: RUN_ID,
+        status: 'QUEUED',
+        placement: { state: 'claimable', waitReason: 'NO_ELIGIBLE_WORKER' },
+      } as RunDetailDto
+      sessionMocks.fetchAccountSession.mockResolvedValue(openSession)
+      const screen = await renderScreen({
+        runId: RUN_ID,
+        targetId: TARGET_ID,
+        targetAccountId: ACCOUNT_ID,
+      })
+      await expect.element(screen.getByText(/没有可用的执行节点/)).toBeInTheDocument()
+      await expect.element(screen.getByText(/不会被领取/)).toBeInTheDocument()
+      await expect.element(screen.getByRole('link', { name: '查看这条试跑' })).toBeInTheDocument()
+      await expect.element(screen.getByRole('link', { name: '查看执行节点' })).toBeInTheDocument()
+      expect(screen.getByText(/自动开始/).elements()).toHaveLength(0)
     })
 
     it('并发模式下没有空闲实例且未到上限时出现「新开实例」，点击发起 newInstance 准备', async () => {

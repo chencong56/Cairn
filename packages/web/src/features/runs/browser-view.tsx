@@ -118,6 +118,7 @@ export type BrowserTransport = {
   releaseAuthControl: typeof runReleaseAuthControl
   closeManagedPage?: typeof runCloseManagedPage
   resumeRunAuth: (id: string, body: { token?: string }) => Promise<unknown>
+  retryAutoLogin?: (id: string, body?: { token?: string }) => Promise<unknown>
   subscribeBrowserFrames: typeof runSubscribeBrowserFrames
 }
 const runTransport: BrowserTransport = {
@@ -169,6 +170,7 @@ export function BrowserView({
     inputAuthControl,
     releaseAuthControl,
     resumeRunAuth,
+    retryAutoLogin,
     subscribeBrowserFrames,
   } = transport
   const observe = useAuthoringObserve()
@@ -759,6 +761,29 @@ export function BrowserView({
       .finally(() => setBusy(false))
   }
 
+  const handleRetryAutoLogin = () => {
+    if (!retryAutoLogin) return
+    setAuthError(null)
+    setBusy(true)
+    void retryAutoLogin(runId, { token: token ?? undefined })
+      .then(() => {
+        setToken(null)
+        setAuthError(null)
+        toast.success('自动登录已成功')
+        onRunChanged?.()
+      })
+      .catch((error) => {
+        const msg =
+          error instanceof ApiRequestError
+            ? error.message
+            : '自动登录仍未成功，可再试一次或改为手动登录'
+        setAuthError(msg)
+        toast.error(msg)
+        onRunChanged?.()
+      })
+      .finally(() => setBusy(false))
+  }
+
   const handleRelease = () => {
     if (wheelTimer.current !== null) {
       window.clearTimeout(wheelTimer.current)
@@ -1131,7 +1156,20 @@ export function BrowserView({
       ) : null}
       {waiting && canControl && !controlling ? (
         <div className='mt-4 flex flex-wrap gap-2'>
+          {sessionMode && retryAutoLogin ? (
+            <Button
+              disabled={
+                busy ||
+                Boolean(meta?.authControl?.actorId && !meta.authControl.heldByViewer)
+              }
+              onClick={handleRetryAutoLogin}
+            >
+              {busy ? <Loader2 className='size-3.5 mr-1.5 animate-spin' /> : null}
+              {busy ? '正在自动登录…' : '再自动登录'}
+            </Button>
+          ) : null}
           <Button
+            variant={sessionMode && retryAutoLogin ? 'outline' : 'default'}
             disabled={
               busy ||
               Boolean(
@@ -1142,7 +1180,12 @@ export function BrowserView({
           >
             {acquireError ? '重试处理登录' : '处理登录'}
           </Button>
-          {meta?.viewMode === 'readonly' && !acquireError ? (
+          {sessionMode && retryAutoLogin && !acquireError ? (
+            <p className='self-center text-small text-muted-foreground'>
+              可再自动登录，或处理登录后在画面中手动完成
+            </p>
+          ) : null}
+          {meta?.viewMode === 'readonly' && !acquireError && !(sessionMode && retryAutoLogin) ? (
             <p className='self-center text-small text-muted-foreground'>
               只读观看中，点击「处理登录」后才能输入
             </p>
@@ -1156,6 +1199,9 @@ export function BrowserView({
             <p className='self-center text-small text-muted-foreground'>
               由其他用户处理登录
             </p>
+          ) : null}
+          {authError ? (
+            <p className='w-full text-small text-destructive font-medium mt-1'>{authError}</p>
           ) : null}
         </div>
       ) : null}
@@ -1177,6 +1223,11 @@ export function BrowserView({
               刷新登录页
             </Button>
           ) : null}
+          {sessionMode && retryAutoLogin ? (
+            <Button variant='outline' disabled={busy} onClick={handleRetryAutoLogin}>
+              再自动登录
+            </Button>
+          ) : null}
           <Button
             disabled={busy}
             onClick={() => {
@@ -1188,7 +1239,7 @@ export function BrowserView({
                   setAuthError(null)
                   toast.success(
                     sessionMode
-                      ? '已完成认证'
+                      ? '已确认登录成功'
                       : '已确认目标系统登录，等待再次领取'
                   )
                   onRunChanged?.()
@@ -1197,7 +1248,7 @@ export function BrowserView({
                   const msg =
                     error instanceof ApiRequestError
                       ? error.message
-                      : '尚未检测到登录成功，请在页面中确认并提交'
+                      : '尚未检测到登录成功，请在画面中完成登录后再核验'
                   setAuthError(msg)
                   toast.error(msg)
                 })
@@ -1221,6 +1272,11 @@ export function BrowserView({
           >
             放弃控制
           </Button>
+          {sessionMode ? (
+            <p className='w-full text-small text-muted-foreground'>
+              「完成认证」只核验当前页是否已经登录成功，不会替你填写账号。请先在画面中完成登录或验证码，再点核验。
+            </p>
+          ) : null}
           {authError ? (
             <p className='w-full text-small text-destructive font-medium mt-1'>{authError}</p>
           ) : null}

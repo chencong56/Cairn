@@ -211,7 +211,7 @@ export function describeOperationBanner(input: {
     const tail = [position, timeout].filter(Boolean).join(' · ')
     if (tail) lines.push(tail)
     return {
-      headline: `${kind} · 排队中`,
+      headline: attention ? `${kind} · 无法开始` : `${kind} · 排队中`,
       lines,
       tone: attention ? 'warning' : 'info',
       expired: false,

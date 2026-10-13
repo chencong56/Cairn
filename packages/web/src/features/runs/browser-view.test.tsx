@@ -470,6 +470,42 @@ describe('BrowserView', () => {
     )
     await expect.element(screen.getByRole('button', { name: '处理登录' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '整理页面' }).elements()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: '再自动登录' }).elements()).toHaveLength(0)
+  })
+
+  it('会话等待认证时可以再自动登录，完成认证只做核验', async () => {
+    const retryAutoLogin = vi.fn().mockResolvedValue({ ok: true })
+    signIn(['session:read', 'session:view', 'session:control'])
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const screen = await render(
+      <QueryClientProvider client={client}>
+        <BrowserView
+          runId={meta.runId}
+          runStatus="WAITING_FOR_AUTH"
+          sessionMode
+          transport={{
+            fetchManagedBrowser: mocks.fetchManagedBrowser,
+            acquireAuthControl: mocks.acquireAuthControl,
+            heartbeatAuthControl: mocks.heartbeatAuthControl,
+            inputAuthControl: mocks.inputAuthControl,
+            releaseAuthControl: mocks.releaseAuthControl,
+            resumeRunAuth: mocks.resumeRunAuth,
+            retryAutoLogin,
+            subscribeBrowserFrames: mocks.subscribeBrowserFrames,
+          }}
+        />
+      </QueryClientProvider>,
+    )
+    await expect.element(screen.getByRole('button', { name: '再自动登录' })).toBeInTheDocument()
+    await expect.element(screen.getByRole('button', { name: '处理登录' })).toBeInTheDocument()
+    await expect.element(screen.getByText(/可再自动登录，或处理登录后在画面中手动完成/)).toBeInTheDocument()
+    await screen.getByRole('button', { name: '再自动登录' }).click()
+    await vi.waitFor(() => expect(retryAutoLogin).toHaveBeenCalledWith(meta.runId, { token: undefined }))
+
+    retryAutoLogin.mockClear()
+    await screen.getByRole('button', { name: '处理登录' }).click()
+    await expect.element(screen.getByRole('button', { name: '完成认证' })).toBeInTheDocument()
+    await expect.element(screen.getByText(/只核验当前页是否已经登录成功/)).toBeInTheDocument()
   })
 
   it('会话模式非等待认证时支持手动操作接管、画面点击与退出', async () => {

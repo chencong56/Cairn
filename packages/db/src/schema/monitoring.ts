@@ -12,6 +12,7 @@ import type {
   WorkerStatus,
   AiCallIntent,
   AiCallRoute,
+  PageWaitReason,
 } from '@cairn/shared'
 import { newId } from '../id.js'
 import { cairnSchema } from './console.js'
@@ -81,6 +82,8 @@ export const scenarioAiCalls = cairnSchema.table(
     errorCode: text('error_code'),
     intent: text('intent').$type<AiCallIntent>(),
     route: text('route').$type<AiCallRoute>(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -138,4 +141,27 @@ export type ApiInstanceRow = typeof apiInstances.$inferSelect
 export type ObjectStoreProbeRow = typeof objectStoreProbes.$inferSelect
 export type MonitorSampleRow = typeof monitorSamples.$inferSelect
 export type ScenarioAiCallRow = typeof scenarioAiCalls.$inferSelect
+
+export const scenarioPageWaits = cairnSchema.table(
+  'scenario_page_waits',
+  {
+    id: uuid('id').primaryKey().$defaultFn(newId),
+    evidenceId: uuid('evidence_id').notNull(),
+    runId: uuid('run_id').notNull(),
+    stepRunId: uuid('step_run_id').notNull(),
+    attemptId: uuid('attempt_id').notNull(),
+    reason: text('reason').notNull().$type<PageWaitReason>(),
+    durationMs: integer('duration_ms').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    endedAt: timestamp('ended_at', { withTimezone: true }).notNull(),
+    url: text('url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('scenario_page_waits_evidence_unique').on(t.evidenceId),
+    index('scenario_page_waits_run_idx').on(t.runId),
+    index('scenario_page_waits_attempt_idx').on(t.attemptId),
+  ],
+)
+export type ScenarioPageWaitRow = typeof scenarioPageWaits.$inferSelect
 export type MonitoringAlertRow = typeof monitoringAlerts.$inferSelect

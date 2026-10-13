@@ -3,6 +3,7 @@ import {
   loadRunDetail,
   loadRunLoopState,
   loadRunRow,
+  loadLiveDurationComponents,
   loadRunStepStates,
   markRunCancelled,
   startAttempt,
@@ -786,6 +787,13 @@ export async function runExecutor(
       scopePath: input.scopePath,
       loadStepStates: (scope?: string | null) =>
         loadRunStepStates(this.handle, input.runId, scope === undefined ? input.scopePath : scope),
+      loadDurationComponents: (query) =>
+        loadLiveDurationComponents(this.handle, input.runId, {
+          sourceStepId: query.sourceStepId,
+          runTotal: query.runTotal,
+          excludeStepId: query.excludeStepId,
+          scopePath: query.runTotal ? null : query.scopePath === undefined ? input.scopePath : query.scopePath,
+        }),
     })
 
     // 执行器可能把中止收成一个普通失败结果返回（AI SDK 会把 abort 包成自己的错误）。

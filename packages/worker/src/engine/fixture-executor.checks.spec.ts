@@ -224,6 +224,51 @@ describe('check_duration runTotal 的账本口径（二期复查）', () => {
     expect(requestedScopes).toEqual([undefined])
   })
 
+  it('component=page 无采集结果为无法判定，不把未测写成 0', async () => {
+    const executor = new FixtureStepExecutor()
+    const step: Step = {
+      id: '01912345-6789-7abc-def0-1234567890c1',
+      name: '检查页面耗时',
+      type: 'check_duration',
+      effectType: 'READ_ONLY',
+      input: { sourceStepId: SOURCE_STEP_ID, op: 'lte', valueMs: 1_000, component: 'page' },
+    }
+    const missing = await executor.execute(ctxFor(step, {}, {}))
+    expect(missing.kind).toBe('failed')
+    if (missing.kind === 'failed') expect(missing.error.code).toBe('DURATION_UNAVAILABLE')
+
+    const undetermined = await executor.execute(
+      ctxFor(step, {}, { loadDurationComponents: async () => ({ wall: 800, model: 0, page: null }) }),
+    )
+    expect(undetermined.kind).toBe('failed')
+    if (undetermined.kind === 'failed') expect(undetermined.error.code).toBe('DURATION_UNAVAILABLE')
+
+    const pass = await executor.execute(
+      ctxFor(step, {}, { loadDurationComponents: async () => ({ wall: 800, model: 0, page: 400 }) }),
+    )
+    expect(pass.kind).toBe('success')
+    if (pass.kind === 'success') expect(pass.output).toMatchObject({ actual: 400, expected: { component: 'page' } })
+  })
+
+  it('component=model 读现场模型时长', async () => {
+    const executor = new FixtureStepExecutor()
+    const step: Step = {
+      id: '01912345-6789-7abc-def0-1234567890c2',
+      name: '检查模型耗时',
+      type: 'check_duration',
+      effectType: 'READ_ONLY',
+      input: { sourceStepId: SOURCE_STEP_ID, op: 'lte', valueMs: 500, component: 'model' },
+    }
+    const fail = await executor.execute(
+      ctxFor(step, {}, { loadDurationComponents: async () => ({ wall: 2_000, model: 800, page: 0 }) }),
+    )
+    expect(fail.kind).toBe('failed')
+    if (fail.kind === 'failed') {
+      expect(fail.error.code).toBe('ASSERT_FAILED')
+      expect(fail.output).toMatchObject({ actual: 800 })
+    }
+  })
+
   it('重试尝试下全程耗时从首次尝试起算（含被丢弃的早期失败尝试）', async () => {
     const executor = new FixtureStepExecutor()
     const checkStep: Step = {

@@ -13,6 +13,8 @@ import {
   loadAuthProfileRevision,
   markSessionOperationWaitingForAuth,
   occupyAutoLoginBudget,
+  occupancyGrantFromLease,
+  findAuthWaitLeaseForOperation,
   abandonSessionKeepAlive,
   readLiveSessionAuth,
   recordAutoLoginOutcome,
@@ -41,6 +43,7 @@ import {
   type FrozenAuthVerification,
   isSessionMaintenanceKind,
   classifyLoginWaitReason,
+  describeAuthIssue,
   isUnrecoverableLoginWait,
   planAuthEnsure,
   shouldSubmitStoredCredentials,
@@ -219,6 +222,62 @@ export async function verifyOccupiedOwner(this: SessionManagerContext, ownerId: 
 
 const inFlightCompleteAuth = new Set<string>()
 
+async function commitOccupiedAuthIfAuthenticated(
+  ctx: SessionManagerContext,
+  ownerId: string,
+  observation: AuthObservation,
+  extras?: { page?: { url?: () => string }; urlBefore?: string },
+): Promise<void> {
+  const operation = await getSessionOperation(ctx.dbHandle, ownerId)
+  if (!operation || !isSessionMaintenanceKind(operation.kind)) return
+  if (observation.authState !== 'AUTHENTICATED') {
+    throw conflict('AUTH_STILL_REQUIRED', '尚未检测到登录成功，请在画面中完成登录后再核验')
+  }
+  const sessionId = ctx.liveSessionIdForOwner(ownerId)
+  const session = sessionId ? await getSessionById(ctx.dbHandle, sessionId) : null
+  const live = sessionId ? ctx.lives.get(sessionId) : undefined
+  if (live) {
+    live.autoInputClosed = false
+    live.inputAccepting = false
+  }
+  if (session && observation.identityState !== 'MISMATCH') {
+    const page = extras?.page
+    const urlAfter = page && typeof page.url === 'function' ? page.url() : ''
+    const target = await loadTargetForExecution(ctx.dbHandle, operation.targetId).catch(() => null)
+    await ctx.settleOccupiedLanding({
+      session,
+      trigger: 'after_login',
+      alreadyOpenedEntry: target
+        ? openedEntryDuringVerify(extras?.urlBefore ?? '', urlAfter, target.entryUrl)
+        : false,
+      operationId: operation.id,
+    })
+    const leaseId = [...ctx.leaseToRun.entries()].find(([, mapped]) => mapped === ownerId)?.[0]
+    await captureSessionSnapshot(
+      ctx,
+      session,
+      leaseId
+        ? {
+            kind: 'lease',
+            leaseId,
+            workerId: ctx.options.workerId,
+          }
+        : {
+            kind: 'owner',
+            workerId: ctx.options.workerId,
+          },
+    ).catch(() => undefined)
+  }
+  await ctx.finishMaintenance(
+    operation.id,
+    { targetId: operation.targetId, targetAccountId: operation.targetAccountId },
+    'SUCCEEDED',
+    { type: 'auth.verified', sessionId: session?.id, generation: session?.generation },
+  )
+  const leaseId = [...ctx.leaseToRun.entries()].find(([, mapped]) => mapped === ownerId)?.[0]
+  if (leaseId) await ctx.release(leaseId, 'auth_completed').catch(() => undefined)
+}
+
 export async function completeOccupiedAuth(this: SessionManagerContext, 
     ownerId: string,
     _input?: { actorId: string; token?: string },
@@ -245,59 +304,166 @@ export async function completeOccupiedAuth(this: SessionManagerContext,
         }
       }
 
-      const operation = await getSessionOperation(this.dbHandle, ownerId)
-      if (operation && isSessionMaintenanceKind(operation.kind)) {
-        if (observation.authState !== 'AUTHENTICATED') {
-          throw conflict('AUTH_STILL_REQUIRED', '尚未检测到登录成功，请在页面中确认并提交')
-        }
-        const session = sessionId ? await getSessionById(this.dbHandle, sessionId) : null
-        const live = sessionId ? this.lives.get(sessionId) : undefined
-        if (live) {
-          live.autoInputClosed = false
-          live.inputAccepting = false
-        }
-        if (session && observation.identityState !== 'MISMATCH') {
-          const urlAfter = page && typeof page.url === 'function' ? page.url() : ''
-          const target = await loadTargetForExecution(this.dbHandle, operation.targetId).catch(() => null)
-          await this.settleOccupiedLanding({
-            session,
-            page,
-            trigger: 'after_login',
-            alreadyOpenedEntry: target
-              ? openedEntryDuringVerify(urlBefore, urlAfter, target.entryUrl)
-              : false,
-            operationId: operation.id,
-          })
-          const leaseId = [...this.leaseToRun.entries()].find(([, mapped]) => mapped === ownerId)?.[0]
-          await captureSessionSnapshot(
-            this,
-            session,
-            leaseId
-              ? {
-                  kind: 'lease',
-                  leaseId,
-                  workerId: this.options.workerId,
-                }
-              : {
-                  kind: 'owner',
-                  workerId: this.options.workerId,
-                },
-          ).catch(() => undefined)
-        }
-        await this.finishMaintenance(
-          operation.id,
-          { targetId: operation.targetId, targetAccountId: operation.targetAccountId },
-          'SUCCEEDED',
-          { type: 'auth.verified', sessionId: session?.id, generation: session?.generation },
-        )
-        const leaseId = [...this.leaseToRun.entries()].find(([, mapped]) => mapped === ownerId)?.[0]
-        if (leaseId) await this.release(leaseId, 'auth_completed').catch(() => undefined)
-      }
+      await commitOccupiedAuthIfAuthenticated(this, ownerId, observation, { page, urlBefore })
       return observation
     } finally {
       inFlightCompleteAuth.delete(ownerId)
     }
   }
+
+async function attemptUserRetryAutoLogin(
+  ctx: SessionManagerContext,
+  session: SessionRecord,
+  operation: { id: string; kind: string; targetId: string; targetAccountId: string },
+  live: LiveHandle,
+): Promise<{ ok: true } | { ok: false; code: string }> {
+  const account = await loadAccountForExecution(ctx.dbHandle, operation.targetAccountId)
+  if (account?.identityKind === 'visitor') return { ok: false, code: 'SESSION_VISITOR_NO_AUTH' }
+  const target = await loadTargetForExecution(ctx.dbHandle, operation.targetId)
+  if (!target) return { ok: false, code: 'SESSION_TARGET_MISSING' }
+  const credential = await ctx.resolveAccountSecrets(operation.targetAccountId, { password: true, totp: true })
+  if (!credential?.password) return { ok: false, code: 'AUTH_CREDENTIAL_MISSING' }
+  const loginCredential = {
+    username: credential.username,
+    password: credential.password,
+    totpSecret: credential.totpSecret,
+  }
+
+  const liveAuth = await readLiveSessionAuth(ctx.dbHandle)
+  const loginTarget = applySessionAuthToTarget(
+    {
+      entryUrl: target.entryUrl,
+      loginUrl: target.loginUrl,
+      loginFields: target.loginFields,
+      loginLeaveTimeoutMs: target.loginLeaveTimeoutMs,
+      captchaMode: target.captchaMode,
+      captcha: target.captcha,
+    },
+    liveAuth.sessionAuth,
+  )
+  const lease = await findAuthWaitLeaseForOperation(ctx.dbHandle, operation.id)
+  if (!lease) return { ok: false, code: 'AUTH_HOLD_UNBOUND' }
+
+  let authenticated = false
+  let submit: LoginWaitSubmitState = 'not_attempted'
+  const login = await runWithOccupancy(occupancyGrantFromLease(lease), async () => {
+    const verification = await freezeAuthVerificationForRun(ctx.dbHandle, {
+      targetId: operation.targetId,
+      targetAccountId: operation.targetAccountId,
+      loginFields: target.loginFields,
+      platformRevision: liveAuth.revision,
+      sessionAuth: liveAuth.sessionAuth,
+    })
+    return verification.capability === 'LEGACY' || !verification.profileRevision
+      ? await attemptLoginWithCredentials(live.handle, loginTarget, loginCredential)
+      : await attemptLoginCredentials(
+          live.handle,
+          loginTarget,
+          loginCredential,
+          verification.loginTimeoutMs,
+        )
+  })
+  authenticated = login.authenticated
+  submit = login.submit
+
+  await recordAutoLoginOutcome(ctx.dbHandle, {
+    targetAccountId: operation.targetAccountId,
+    result: authenticated ? 'success' : submit === 'credential_failed' ? 'credential' : 'verify_failed',
+    sessionAuth: liveAuth.sessionAuth,
+  }).catch(() => undefined)
+
+  if (authenticated) return { ok: true }
+  const page = ctx.ensureRunPage(live, operation.id).page
+  const pageUrl = typeof page.url === 'function' ? page.url() : ''
+  return {
+    ok: false,
+    code: classifyLoginWaitReason({
+      pageUrl,
+      submitted: submit !== 'not_attempted',
+      submit,
+    }),
+  }
+}
+
+export async function retryOccupiedAutoLogin(
+  this: SessionManagerContext,
+  ownerId: string,
+  input?: { actorId: string; token?: string },
+): Promise<AuthObservation> {
+  if (inFlightCompleteAuth.has(ownerId)) {
+    throw conflict('VERIFICATION_IN_FLIGHT', '登录核验正在进行中，请稍候')
+  }
+  inFlightCompleteAuth.add(ownerId)
+  try {
+    const operation = await getSessionOperation(this.dbHandle, ownerId)
+    if (!operation || !isSessionMaintenanceKind(operation.kind)) {
+      throw conflict('AUTH_VALIDATION_NOT_FOUND', '会话操作不存在')
+    }
+    if (operation.status !== 'WAITING_FOR_AUTH') {
+      throw conflict('AUTH_INPUT_REJECTED', '只有等待认证时才能再次自动登录')
+    }
+    if (typeof operation.kindParams?.reusedRunId === 'string') {
+      throw conflict('SESSION_OPERATION_CONFLICT', '该操作挂在运行的认证等待上，请到运行页处理')
+    }
+    const sessionId = this.liveSessionIdForOwner(ownerId)
+    const live = sessionId ? this.lives.get(sessionId) : undefined
+    const session = sessionId ? await getSessionById(this.dbHandle, sessionId) : null
+    if (!live || !session) throw conflict('SESSION_NOT_CLAIMABLE', '验收会话尚未就绪')
+
+    live.inputAccepting = false
+    live.autoInputClosed = true
+    if (input?.token && input.actorId) {
+      await this.releaseRunAuthControl({
+        runId: ownerId,
+        actor: { id: input.actorId },
+        token: input.token,
+      }).catch(() => undefined)
+    }
+
+    await appendSessionEvent(this.dbHandle, {
+      key: { targetId: operation.targetId, targetAccountId: operation.targetAccountId },
+      type: 'auth.attempt_started',
+      sessionId: session.id,
+      generation: session.generation,
+      operationId: operation.id,
+      payload: { origin: 'USER', kind: 'retry' },
+    }).catch(() => undefined)
+
+    const login = await attemptUserRetryAutoLogin(this, session, operation, live)
+    if (!login.ok) {
+      await setSessionAuthSummary(this.dbHandle, {
+        sessionId: session.id,
+        ...this.ownerScope(),
+        authState: session.authState ?? 'UNKNOWN',
+        identityState: session.identityState ?? 'UNVERIFIED',
+        lastAuthError: login.code,
+        authProfileRevision: session.authProfileRevision ?? null,
+        observedTier: session.observedTier ?? null,
+        recordSuccess: false,
+      }).catch(() => undefined)
+      await appendSessionEvent(this.dbHandle, {
+        key: { targetId: operation.targetId, targetAccountId: operation.targetAccountId },
+        type: 'operation.waiting_for_auth',
+        sessionId: session.id,
+        generation: session.generation,
+        operationId: operation.id,
+        payload: { kind: operation.kind, reason: login.code },
+      }).catch(() => undefined)
+      throw conflict(
+        login.code,
+        describeAuthIssue(login.code) ?? '自动登录仍未成功，可再试一次或改为手动登录',
+      )
+    }
+
+    const page = this.ensureRunPage(live, ownerId).page
+    const urlBefore = typeof page.url === 'function' ? page.url() : ''
+    const observation = await this.verifyOccupiedOwner(ownerId)
+    await commitOccupiedAuthIfAuthenticated(this, ownerId, observation, { page, urlBefore })
+    return observation
+  } finally {
+    inFlightCompleteAuth.delete(ownerId)
+  }
+}
 
 function borrowedAuthWaitOwner(input: {
   reusedRunId: string | null

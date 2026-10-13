@@ -3,9 +3,12 @@ import {
   DURATION_UNCLASSIFIED_TOLERANCE,
   SCENARIO_CHECKS_NODE_KEY,
   checkNodeKey,
+  composeAttemptDuration,
+  defaultRunComposition,
   moduleNodeKey,
   moduleStepNodeKey,
   stepNodeKey,
+  type DurationCompositionIncompleteReason,
   type DurationIncompleteReason,
   type DurationNodeKind,
   type DurationResolutionLevel,
@@ -49,8 +52,27 @@ export interface DurationCalculatorInput {
   attempts: ReadonlyArray<{ stepRunId: string; id: string; startedAt: Date; finishedAt: Date | null }>
   decisions: ReadonlyArray<{ attemptId: string; decisionKind: string }>
   snapshot: Pick<RunSnapshot, 'steps' | 'moduleManifest' | 'candidateGroups' | 'outcomeManifest'> | null
+  /** 已完成或失败的模型调用；attemptId 为空的不计入节点，只在运行级标 model_unassigned。 */
+  aiCalls?: ReadonlyArray<DurationAiCallInput>
+  /** 页面等待区间。collector_ready 只作采集标记。 */
+  pageWaits?: ReadonlyArray<DurationPageWaitInput>
   /** 运行未完结时现算用的截止时刻；完结运行忽略。 */
   asOf?: Date
+}
+
+export interface DurationAiCallInput {
+  attemptId: string | null
+  durationMs: number | null
+  startedAt: Date | null
+  endedAt: Date | null
+  phase: 'completed' | 'failed'
+}
+
+export interface DurationPageWaitInput {
+  attemptId: string
+  startedAt: Date
+  endedAt: Date
+  reason: string
 }
 
 export interface DurationCalculatorOutput {
@@ -241,6 +263,14 @@ interface NodeAccumulator {
     windowStart: number | null
     windowEnd: number | null
     maxResolution: DurationResolutionLevel | null
+    modelMs: number
+    modelCallCount: number
+    pageMs: number | null
+    overlapMs: number | null
+    residualMs: number
+    pageWaitCount: number
+    pagePartial: boolean
+    reasons: DurationCompositionIncompleteReason[]
   }
 }
 
@@ -281,7 +311,23 @@ function computeNodes(input: DurationCalculatorInput, end: Date | null): NodeDur
         kind,
         name,
         ordinal,
-        own: { activeMs: 0, attemptCount: 0, iterationCount: 0, status: null, windowStart: null, windowEnd: null, maxResolution: null },
+        own: {
+          activeMs: 0,
+          attemptCount: 0,
+          iterationCount: 0,
+          status: null,
+          windowStart: null,
+          windowEnd: null,
+          maxResolution: null,
+          modelMs: 0,
+          modelCallCount: 0,
+          pageMs: null,
+          overlapMs: 0,
+          residualMs: 0,
+          pageWaitCount: 0,
+          pagePartial: false,
+          reasons: [],
+        },
       }
       nodes.set(nodeKey, node)
     } else if (ordinal < node.ordinal) {
@@ -290,6 +336,25 @@ function computeNodes(input: DurationCalculatorInput, end: Date | null): NodeDur
     return node
   }
   const nameOf = (stepId: string, fallback: string | null) => fallback ?? stepNames.get(stepId)?.name ?? stepId
+  const callsByAttempt = new Map<string, DurationAiCallInput[]>()
+  for (const call of input.aiCalls ?? []) {
+    if (call.phase !== 'completed' && call.phase !== 'failed') continue
+    if (!call.attemptId) continue
+    const list = callsByAttempt.get(call.attemptId) ?? []
+    list.push(call)
+    callsByAttempt.set(call.attemptId, list)
+  }
+  const waitsByAttempt = new Map<string, DurationPageWaitInput[]>()
+  const markedAttempts = new Set<string>()
+  for (const wait of input.pageWaits ?? []) {
+    if (wait.reason === 'collector_ready') {
+      markedAttempts.add(wait.attemptId)
+      continue
+    }
+    const list = waitsByAttempt.get(wait.attemptId) ?? []
+    list.push(wait)
+    waitsByAttempt.set(wait.attemptId, list)
+  }
 
   /** 普通步骤或模块内部步骤的节点（必要时一并建立模块调用父节点）。 */
   const baseNode = (stepId: string, name: string, ordinal: number): NodeAccumulator => {
@@ -321,10 +386,16 @@ function computeNodes(input: DurationCalculatorInput, end: Date | null): NodeDur
     node.own.status = worseStatus(node.own.status, stepRun.status)
     const attempts = attemptsByStepRun.get(stepRun.id) ?? []
     if (attempts.length > 0) node.own.iterationCount += 1
+    let marked = 0
+    let unmarked = 0
+    let measuredPage = 0
+    let overlapSum = 0
+    let overlapNull = false
     for (const attempt of attempts) {
       const finishedAt = attempt.finishedAt ?? end
       node.own.attemptCount += 1
-      if (finishedAt) node.own.activeMs += Math.max(0, ms(attempt.startedAt, finishedAt))
+      const activeMs = finishedAt ? Math.max(0, ms(attempt.startedAt, finishedAt)) : 0
+      node.own.activeMs += activeMs
       const start = attempt.startedAt.getTime()
       node.own.windowStart = node.own.windowStart === null ? start : Math.min(node.own.windowStart, start)
       if (finishedAt) {
@@ -332,6 +403,42 @@ function computeNodes(input: DurationCalculatorInput, end: Date | null): NodeDur
         node.own.windowEnd = node.own.windowEnd === null ? finish : Math.max(node.own.windowEnd, finish)
       }
       node.own.maxResolution = higherResolution(node.own.maxResolution, resolutionByAttempt.get(attempt.id) ?? null)
+      const pageMarked = markedAttempts.has(attempt.id)
+      const slices = composeAttemptDuration({
+        activeMs,
+        modelCalls: (callsByAttempt.get(attempt.id) ?? []).map((call) => ({
+          durationMs: call.durationMs,
+          startedAt: call.startedAt ? call.startedAt.getTime() : null,
+          endedAt: call.endedAt ? call.endedAt.getTime() : null,
+        })),
+        pageMarked,
+        pageIntervals: (waitsByAttempt.get(attempt.id) ?? []).map((wait) => ({
+          start: wait.startedAt.getTime(),
+          end: wait.endedAt.getTime(),
+        })),
+      })
+      node.own.modelMs += slices.modelMs
+      node.own.modelCallCount += slices.modelCallCount
+      node.own.pageWaitCount += slices.pageWaitCount
+      node.own.residualMs += slices.residualMs
+      node.own.reasons.push(...slices.reasons)
+      if (pageMarked) {
+        marked += 1
+        measuredPage += slices.pageMs ?? 0
+        if (slices.overlapMs === null) overlapNull = true
+        else overlapSum += slices.overlapMs
+      } else {
+        unmarked += 1
+      }
+    }
+    if (marked === 0) {
+      node.own.pageMs = null
+      node.own.overlapMs = 0
+      node.own.pagePartial = false
+    } else {
+      node.own.pageMs = measuredPage
+      node.own.overlapMs = overlapNull ? null : overlapSum
+      node.own.pagePartial = unmarked > 0
     }
   }
 
@@ -358,6 +465,10 @@ function computeNodes(input: DurationCalculatorInput, end: Date | null): NodeDur
       if (span?.end != null) windowEnd = windowEnd === null ? span.end : Math.max(windowEnd, span.end)
     }
     spans.set(node.nodeKey, { start: windowStart, end: windowEnd })
+    const activeMs = node.own.activeMs + kids.reduce((sum, kid) => sum + kid.activeMs, 0)
+    const reasons = uniqueReasons([...node.own.reasons, ...kids.flatMap((kid) => kid.compositionIncompleteReasons)])
+    const pageAgg = aggregatePageMs([node.own.pageMs, ...kids.map((kid) => kid.pageMs)])
+    const overlapParts = [node.own.overlapMs, ...kids.map((kid) => kid.overlapMs)]
     const facts: NodeDurationFacts = {
       nodeKey: node.nodeKey,
       parentKey: node.parentKey,
@@ -367,7 +478,7 @@ function computeNodes(input: DurationCalculatorInput, end: Date | null): NodeDur
       status: synthetic
         ? kids.reduce<StepRunStatus | null>((acc, kid) => worseStatus(acc, kid.status), null) ?? 'PENDING'
         : node.own.status ?? 'PENDING',
-      activeMs: node.own.activeMs + kids.reduce((sum, kid) => sum + kid.activeMs, 0),
+      activeMs,
       windowMs: windowStart !== null && windowEnd !== null ? Math.max(0, windowEnd - windowStart) : null,
       // 汇总节点（模块调用、场景级检查）：次数 = 迭代数 + 各子节点重试之和，保证任何节点都满足「尝试数 − 迭代数 = 重试数」。
       // 不能直接累加子节点尝试数，否则三个各跑一次的内部步骤会被读成「重试 2 次」。
@@ -376,6 +487,15 @@ function computeNodes(input: DurationCalculatorInput, end: Date | null): NodeDur
       maxResolution: synthetic
         ? kids.reduce<DurationResolutionLevel | null>((acc, kid) => higherResolution(acc, kid.maxResolution), null)
         : node.own.maxResolution,
+      modelMs: node.own.modelMs + kids.reduce((sum, kid) => sum + kid.modelMs, 0),
+      pageMs: pageAgg.pageMs,
+      overlapMs: overlapParts.some((value) => value === null) ? null : overlapParts.reduce<number>((sum, value) => sum + (value ?? 0), 0),
+      residualMs: node.own.residualMs + kids.reduce((sum, kid) => sum + kid.residualMs, 0),
+      modelCallCount: node.own.modelCallCount + kids.reduce((sum, kid) => sum + kid.modelCallCount, 0),
+      pageWaitCount: node.own.pageWaitCount + kids.reduce((sum, kid) => sum + kid.pageWaitCount, 0),
+      pagePartial: node.own.pagePartial || kids.some((kid) => kid.pagePartial) || pageAgg.partial,
+      compositionComplete: reasons.length === 0,
+      compositionIncompleteReasons: reasons,
     }
     result.set(node.nodeKey, facts)
     return facts
@@ -388,11 +508,42 @@ function syntheticIterations(kids: readonly NodeDurationFacts[]): number {
   return kids.reduce((max, kid) => Math.max(max, kid.iterationCount), 0)
 }
 
+function uniqueReasons(items: readonly DurationCompositionIncompleteReason[]): DurationCompositionIncompleteReason[] {
+  return [...new Set(items)]
+}
+
+function unassignedModelReasons(input: DurationCalculatorInput): DurationCompositionIncompleteReason[] {
+  return (input.aiCalls ?? []).some((call) => (call.phase === 'completed' || call.phase === 'failed') && !call.attemptId)
+    ? ['model_unassigned']
+    : []
+}
+
+function aggregatePageMs(values: readonly (number | null)[]): { pageMs: number | null; partial: boolean } {
+  const measured = values.filter((value): value is number => value !== null)
+  if (measured.length === 0) return { pageMs: null, partial: false }
+  return { pageMs: measured.reduce((sum, value) => sum + value, 0), partial: measured.length !== values.length }
+}
+
+function runCompositionOf(nodes: readonly NodeDurationFacts[], extra: readonly DurationCompositionIncompleteReason[]) {
+  const top = nodes.filter((node) => node.parentKey === null)
+  const pageAgg = aggregatePageMs(top.map((node) => node.pageMs))
+  const overlaps = top.map((node) => node.overlapMs)
+  return {
+    modelMs: top.reduce((sum, node) => sum + node.modelMs, 0),
+    pageMs: pageAgg.pageMs,
+    overlapMs: overlaps.some((value) => value === null) ? null : overlaps.reduce<number>((sum, value) => sum + (value ?? 0), 0),
+    residualMs: top.reduce((sum, node) => sum + node.residualMs, 0),
+    pagePartial: pageAgg.partial || top.some((node) => node.pagePartial),
+    compositionIncompleteReasons: uniqueReasons([...extra, ...top.flatMap((node) => node.compositionIncompleteReasons)]),
+  }
+}
+
 export function computeRunDurationFacts(input: DurationCalculatorInput): DurationCalculatorOutput {
   const { run } = input
   const finished = FINISHED.has(run.status) && run.finishedAt !== null
   const end = finished ? run.finishedAt : (input.asOf ?? null)
   const nodes = computeNodes(input, end)
+  const composition = runCompositionOf(nodes, unassignedModelReasons(input))
   const base: Omit<RunDurationFacts, 'totalMs' | 'activeMs' | 'authWaitMs' | 'requeueMs' | 'reviewMs' | 'holdMs' | 'unclassifiedMs' | 'queueMs' | 'overheadMs' | 'workerLost' | 'complete' | 'incompleteReason'> = {
     runId: run.id,
     targetId: run.targetId,
@@ -404,12 +555,13 @@ export function computeRunDurationFacts(input: DurationCalculatorInput): Duratio
     status: run.status,
     finishedAt: finished ? run.finishedAt!.toISOString() : null,
     calcVersion: DURATION_FACTS_CALC_VERSION,
+    ...composition,
   }
   const empty = { activeMs: null, authWaitMs: null, requeueMs: null, reviewMs: null, holdMs: null, unclassifiedMs: null, overheadMs: null }
 
   if (!run.startedAt) {
     return {
-      facts: { ...base, ...empty, totalMs: null, queueMs: null, workerLost: false, complete: false, incompleteReason: 'not_started' },
+      facts: { ...base, ...empty, ...defaultRunComposition(), ...composition, totalMs: null, queueMs: null, workerLost: false, complete: false, incompleteReason: 'not_started' },
       nodes,
     }
   }

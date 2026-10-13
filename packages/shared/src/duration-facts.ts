@@ -13,6 +13,8 @@ import { entityIdSchema, utcInstantSchema } from './wire.js'
  * - 开跑前排队 = startedAt − createdAt，不计入总耗时。
  * - 运行开销 = 执行耗时 − 顶层节点执行耗时之和（钳为 ≥ 0）。
  * - 节点执行耗时 = 该节点在本次运行内全部 attempt 时长之和（含重试）。
+ * - 执行耗时再拆：模型 ∪ 页面 ∪ 其余；重叠单独记账，不从执行耗时里减两次。
+ *   模型 ∪ 页面 ∪ 其余；重叠单独记账。无采集标记时 pageMs = null，不把未测量写成 0。
  *
  * 精度边界：事件时间取写入进程的本机时钟，起止时间取数据库时钟；时间线只用运行事件一个来源，
  * 负区间钳为 0。执行节点失联到被回收之前仍是 RUNNING（最长一个租约周期），以 workerLost 标记提示。
@@ -31,8 +33,9 @@ export const suiteRunTriggerSourceSchema = z.enum(SUITE_RUN_TRIGGER_SOURCES)
 /**
  * 计算规则版本。口径变化时 +1，事实作业会重算事件仍在的运行；事件已清理的运行保留运行级事实、只刷新节点事实。
  * 2：汇总节点（模块调用、场景级检查）的尝试数改为「迭代数 + 子节点重试之和」。
+ * 3：节点与运行补模型 / 页面 / 重叠 / 其余。P1 起有采集标记才写 pageMs（含 0）。
  */
-export const DURATION_FACTS_CALC_VERSION = 2
+export const DURATION_FACTS_CALC_VERSION = 3
 
 /** 未归类误差超过 max(绝对值, 总耗时 × 比例) 即判事实不完整。 */
 export const DURATION_UNCLASSIFIED_TOLERANCE = Object.freeze({ absoluteMs: 1_000, ratio: 0.02 })
@@ -55,6 +58,17 @@ export const DURATION_INCOMPLETE_REASONS = [
 ] as const
 export type DurationIncompleteReason = (typeof DURATION_INCOMPLETE_REASONS)[number]
 export const durationIncompleteReasonSchema = z.enum(DURATION_INCOMPLETE_REASONS)
+
+/** 步骤分段不完整：不影响运行级 complete，只说明模型 / 页面拆不开。 */
+export const DURATION_COMPOSITION_INCOMPLETE_REASONS = [
+  'model_duration_missing',
+  'model_interval_missing',
+  'model_unassigned',
+  'page_interval_missing',
+  'overlap_exceeds_active',
+] as const
+export type DurationCompositionIncompleteReason = (typeof DURATION_COMPOSITION_INCOMPLETE_REASONS)[number]
+export const durationCompositionIncompleteReasonSchema = z.enum(DURATION_COMPOSITION_INCOMPLETE_REASONS)
 
 /** 场景级检查合并成的顶层节点。 */
 export const SCENARIO_CHECKS_NODE_KEY = 'scenario_checks'
@@ -96,6 +110,14 @@ export const runDurationFactsSchema = z.strictObject({
   unclassifiedMs: z.number().int().nullable(),
   queueMs: msSchema.nullable(),
   overheadMs: msSchema.nullable(),
+  /** 顶层节点模型耗时之和；不含运行开销。 */
+  modelMs: msSchema.default(0),
+  /** 顶层节点页面等待之和；无采集标记则为 null，不写成 0。 */
+  pageMs: msSchema.nullable().default(null),
+  overlapMs: msSchema.nullable().default(0),
+  residualMs: msSchema.default(0),
+  pagePartial: z.boolean().default(false),
+  compositionIncompleteReasons: z.array(durationCompositionIncompleteReasonSchema).default([]),
   workerLost: z.boolean(),
   complete: z.boolean(),
   incompleteReason: durationIncompleteReasonSchema.nullable(),
@@ -115,8 +137,241 @@ export const nodeDurationFactsSchema = z.strictObject({
   attemptCount: z.number().int().nonnegative(),
   iterationCount: z.number().int().nonnegative(),
   maxResolution: durationResolutionLevelSchema.nullable(),
+  modelMs: msSchema.default(0),
+  pageMs: msSchema.nullable().default(null),
+  overlapMs: msSchema.nullable().default(0),
+  residualMs: msSchema.default(0),
+  modelCallCount: z.number().int().nonnegative().default(0),
+  pageWaitCount: z.number().int().nonnegative().default(0),
+  pagePartial: z.boolean().default(false),
+  compositionComplete: z.boolean().default(true),
+  compositionIncompleteReasons: z.array(durationCompositionIncompleteReasonSchema).default([]),
 })
 export type NodeDurationFacts = z.infer<typeof nodeDurationFactsSchema>
+
+export function defaultNodeComposition(activeMs = 0): Pick<
+  NodeDurationFacts,
+  | 'modelMs'
+  | 'pageMs'
+  | 'overlapMs'
+  | 'residualMs'
+  | 'modelCallCount'
+  | 'pageWaitCount'
+  | 'pagePartial'
+  | 'compositionComplete'
+  | 'compositionIncompleteReasons'
+> {
+  return {
+    modelMs: 0,
+    pageMs: null,
+    overlapMs: 0,
+    residualMs: activeMs,
+    modelCallCount: 0,
+    pageWaitCount: 0,
+    pagePartial: false,
+    compositionComplete: true,
+    compositionIncompleteReasons: [],
+  }
+}
+
+export function defaultRunComposition(): Pick<
+  RunDurationFacts,
+  'modelMs' | 'pageMs' | 'overlapMs' | 'residualMs' | 'pagePartial' | 'compositionIncompleteReasons'
+> {
+  return {
+    modelMs: 0,
+    pageMs: null,
+    overlapMs: 0,
+    residualMs: 0,
+    pagePartial: false,
+    compositionIncompleteReasons: [],
+  }
+}
+
+/** 执行耗时拆成互斥切片：modelOnly + overlap + pageOnly + residual = active。无页面时 overlap = 0。 */
+export function composeActiveDuration(input: {
+  activeMs: number
+  modelMs: number
+  pageMs: number | null
+  overlapMs: number | null
+}): Pick<NodeDurationFacts, 'modelMs' | 'pageMs' | 'overlapMs' | 'residualMs'> {
+  const modelMs = Math.max(0, Math.round(input.modelMs))
+  if (input.pageMs === null) {
+    return { modelMs, pageMs: null, overlapMs: 0, residualMs: Math.max(0, input.activeMs - modelMs) }
+  }
+  const pageMs = Math.max(0, Math.round(input.pageMs))
+  if (input.overlapMs === null) {
+    return { modelMs, pageMs, overlapMs: null, residualMs: Math.max(0, input.activeMs - Math.max(modelMs, pageMs)) }
+  }
+  const overlapMs = Math.max(0, Math.round(input.overlapMs))
+  return {
+    modelMs,
+    pageMs,
+    overlapMs,
+    residualMs: Math.max(0, input.activeMs - (modelMs + pageMs - overlapMs)),
+  }
+}
+
+export type ExclusiveDurationSlices = {
+  mode: 'two' | 'four' | 'undetermined'
+  modelOnly: number
+  overlap: number
+  pageOnly: number
+  residual: number
+}
+
+/** 条上的互斥切片。无页面时只有模型 | 其余；重叠未测时不画条。 */
+export function exclusiveSlicesOf(input: {
+  modelMs: number
+  pageMs: number | null
+  overlapMs: number | null
+  residualMs: number
+}): ExclusiveDurationSlices {
+  if (input.pageMs === null) {
+    return { mode: 'two', modelOnly: input.modelMs, overlap: 0, pageOnly: 0, residual: input.residualMs }
+  }
+  if (input.overlapMs === null) {
+    return { mode: 'undetermined', modelOnly: input.modelMs, overlap: 0, pageOnly: input.pageMs, residual: input.residualMs }
+  }
+  return {
+    mode: 'four',
+    modelOnly: Math.max(0, input.modelMs - input.overlapMs),
+    overlap: input.overlapMs,
+    pageOnly: Math.max(0, input.pageMs - input.overlapMs),
+    residual: input.residualMs,
+  }
+}
+
+export interface DurationInterval {
+  start: number
+  end: number
+}
+
+function normalizedIntervals(intervals: readonly DurationInterval[]): DurationInterval[] {
+  return intervals
+    .map((item) => ({ start: item.start, end: item.end }))
+    .filter((item) => item.end > item.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+}
+
+/** 区间并集时长（毫秒）。 */
+export function unionIntervalMs(intervals: readonly DurationInterval[]): number {
+  const ordered = normalizedIntervals(intervals)
+  if (ordered.length === 0) return 0
+  let total = 0
+  let start = ordered[0]!.start
+  let end = ordered[0]!.end
+  for (const next of ordered.slice(1)) {
+    if (next.start > end) {
+      total += end - start
+      start = next.start
+      end = next.end
+    } else if (next.end > end) {
+      end = next.end
+    }
+  }
+  return total + (end - start)
+}
+
+/** 两组区间交集时长（毫秒）。 */
+export function intersectIntervalMs(left: readonly DurationInterval[], right: readonly DurationInterval[]): number {
+  const a = normalizedIntervals(left)
+  const b = normalizedIntervals(right)
+  let i = 0
+  let j = 0
+  let total = 0
+  while (i < a.length && j < b.length) {
+    const start = Math.max(a[i]!.start, b[j]!.start)
+    const end = Math.min(a[i]!.end, b[j]!.end)
+    if (end > start) total += end - start
+    if (a[i]!.end < b[j]!.end) i += 1
+    else j += 1
+  }
+  return total
+}
+
+export interface AttemptCompositionInput {
+  activeMs: number
+  modelCalls: ReadonlyArray<{ durationMs: number | null; startedAt: number | null; endedAt: number | null }>
+  /** 该 attempt 是否写过采集标记。未标记不得把页面写成 0。 */
+  pageMarked: boolean
+  pageIntervals: readonly DurationInterval[]
+}
+
+export interface AttemptComposition {
+  modelMs: number
+  pageMs: number | null
+  overlapMs: number | null
+  residualMs: number
+  modelCallCount: number
+  pageWaitCount: number
+  reasons: DurationCompositionIncompleteReason[]
+}
+
+/** 单次 attempt 的模型 / 页面互斥切片。节点对多次 attempt 求和。 */
+export function composeAttemptDuration(input: AttemptCompositionInput): AttemptComposition {
+  const reasons: DurationCompositionIncompleteReason[] = []
+  const modelIntervals: DurationInterval[] = []
+  let modelMs = 0
+  let modelCallCount = 0
+  let modelIntervalMissing = false
+  for (const call of input.modelCalls) {
+    if (call.durationMs == null) {
+      reasons.push('model_duration_missing')
+      continue
+    }
+    const duration = Math.max(0, Math.round(call.durationMs))
+    modelMs += duration
+    modelCallCount += 1
+    if (call.startedAt != null && call.endedAt != null && call.endedAt > call.startedAt) {
+      modelIntervals.push({ start: call.startedAt, end: call.endedAt })
+    } else if (input.pageMarked && input.pageIntervals.length > 0) {
+      modelIntervalMissing = true
+    }
+  }
+  if (modelIntervalMissing) reasons.push('model_interval_missing')
+
+  if (!input.pageMarked) {
+    return {
+      modelMs,
+      pageMs: null,
+      overlapMs: 0,
+      residualMs: Math.max(0, input.activeMs - modelMs),
+      modelCallCount,
+      pageWaitCount: 0,
+      reasons,
+    }
+  }
+
+  const pageIntervals = normalizedIntervals(input.pageIntervals)
+  const pageMs = unionIntervalMs(pageIntervals)
+  const pageWaitCount = pageIntervals.length
+  if (modelIntervalMissing) {
+    return {
+      modelMs,
+      pageMs,
+      overlapMs: null,
+      residualMs: Math.max(0, input.activeMs - Math.max(modelMs, pageMs)),
+      modelCallCount,
+      pageWaitCount,
+      reasons,
+    }
+  }
+  const modelUnion = modelIntervals.length > 0 ? unionIntervalMs(modelIntervals) : modelMs
+  const overlapMs = intersectIntervalMs(modelIntervals, pageIntervals)
+  const covered = unionIntervalMs([...modelIntervals, ...pageIntervals])
+  const tolerance = Math.max(1_000, input.activeMs * 0.02)
+  if (covered > input.activeMs + tolerance) reasons.push('overlap_exceeds_active')
+  return {
+    modelMs: modelUnion,
+    pageMs,
+    overlapMs,
+    residualMs: Math.max(0, input.activeMs - covered),
+    modelCallCount,
+    pageWaitCount,
+    reasons,
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 差异归因：单次对比、趋势、报告、助手共用同一份计算
@@ -178,6 +433,8 @@ export type DurationAttributionTag =
   | { kind: 'retries'; from: number; to: number }
   | { kind: 'iterations'; from: number; to: number; perIterationDeltaPct: number | null }
   | { kind: 'resolution'; from: DurationResolutionLevel | null; to: DurationResolutionLevel | null }
+  | { kind: 'model'; from: number; to: number }
+  | { kind: 'page'; from: number; to: number }
   | { kind: 'added' }
   | { kind: 'removed' }
 
@@ -248,7 +505,28 @@ function tagsFor(base: NodeDurationFacts | undefined, target: NodeDurationFacts 
   if (base.maxResolution !== target.maxResolution) {
     tags.push({ kind: 'resolution', from: base.maxResolution, to: target.maxResolution })
   }
+  const modelTag = perAttemptCompositionTag('model', base, target)
+  if (modelTag) tags.push(modelTag)
+  const pageTag = perAttemptCompositionTag('page', base, target)
+  if (pageTag) tags.push(pageTag)
   return tags
+}
+
+/** 单次尝试的模型 / 页面变化才标分段标签，避免重试把累计模型耗时误判成变慢。 */
+function perAttemptCompositionTag(
+  kind: 'model' | 'page',
+  base: NodeDurationFacts,
+  target: NodeDurationFacts,
+): DurationAttributionTag | null {
+  const baseValue = kind === 'model' ? base.modelMs : base.pageMs
+  const targetValue = kind === 'model' ? target.modelMs : target.pageMs
+  if (baseValue === null || targetValue === null) return null
+  const basePer = base.attemptCount > 0 ? baseValue / base.attemptCount : 0
+  const targetPer = target.attemptCount > 0 ? targetValue / target.attemptCount : 0
+  const perDelta = targetPer - basePer
+  const totalDelta = targetValue - baseValue
+  if (Math.abs(perDelta) < Math.max(500, Math.abs(totalDelta) * 0.3)) return null
+  return { kind, from: Math.round(basePer), to: Math.round(targetPer) }
 }
 
 /** 对比两侧耗时事实，给出总差值分解与逐节点差值、归因标签。 */
@@ -341,6 +619,10 @@ export function describeDurationTag(tag: DurationAttributionTag): string {
         : `迭代 ${tag.from}→${tag.to} 次，单次 ${tag.perIterationDeltaPct >= 0 ? '+' : ''}${tag.perIterationDeltaPct}%`
     case 'resolution':
       return `${tag.from ? RESOLUTION_LABELS[tag.from] : '未定位'}→${tag.to ? RESOLUTION_LABELS[tag.to] : '未定位'}`
+    case 'model':
+      return `单次模型 ${formatDurationShort(tag.from)}→${formatDurationShort(tag.to)}`
+    case 'page':
+      return `单次页面 ${formatDurationShort(tag.from)}→${formatDurationShort(tag.to)}`
     case 'added':
       return '新增节点'
     case 'removed':

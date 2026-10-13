@@ -110,7 +110,7 @@ export const SESSION_MAINTENANCE_ERROR_MESSAGES: Record<SessionMaintenanceErrorC
   OPERATION_QUEUE_EXPIRED: '维护操作排队已过期',
   AUTH_PROFILE_REQUIRED: '尚未发布并通过验收的主动检测规则，无法做主动核验、续登或认证保活',
   SESSION_KEEPALIVE_ABANDONED: '认证已失效且自动登录不可用，已停止保活巡检',
-  AUTH_STILL_REQUIRED: '尚未检测到登录成功，请在页面中确认并提交',
+  AUTH_STILL_REQUIRED: '尚未检测到登录成功，请在画面中完成登录后再核验',
   UNATTENDED_AUTH_TIMEOUT: '生产无人值守认证等待超时，已快速熔断释放会话',
   AUTH_CREDENTIAL_UNREADABLE: '账号凭据无法读取，请检查主密钥或重新保存凭据',
   AUTH_CREDENTIAL_MISSING: '账号未配置密码，无法自动登录',

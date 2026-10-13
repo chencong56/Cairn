@@ -153,6 +153,14 @@ export function cancelSessionOperation(id: string) {
   return apiFetch(`/api/session-operations/${id}/cancel`, sessionOperationDtoSchema, { method: 'POST' })
 }
 
+export function retrySessionAutoLogin(id: string, body: { token?: string } = {}) {
+  return apiFetch(`/api/session-operations/${id}/retry-auto-login`, z.unknown(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
 async function subscribeSessionStream(
   path: string,
   signal: AbortSignal,
@@ -218,6 +226,12 @@ export function sessionBrowserTransport(kind: 'operation' | 'session'): BrowserT
     closeManagedPage: (id, pageId) =>
       apiFetch(`${base(id)}/browser/pages/${encodeURIComponent(pageId)}/close`, closeManagedPageResponseSchema, post({})),
     resumeRunAuth: (id, body) => apiFetch(`${base(id)}/complete-auth`, z.unknown(), post(body)),
+    ...(kind === 'operation'
+      ? {
+          retryAutoLogin: (id: string, body: { token?: string } = {}) =>
+            apiFetch(`${base(id)}/retry-auto-login`, z.unknown(), post(body)),
+        }
+      : {}),
     subscribeBrowserFrames: (id, input) =>
       subscribeSessionStream(
         `${base(id)}/browser/frames${toQueryString({ pageId: input.pageId })}`,

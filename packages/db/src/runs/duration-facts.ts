@@ -2,6 +2,8 @@ import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, or, type Infer
 import {
   DURATION_FACTS_CALC_VERSION,
   FINISHED_RUN_STATUSES,
+  isAiCallEvidence,
+  isPageWaitEvidence,
   type NodeDurationFacts,
   type RunDurationFacts,
   type RunSnapshot,
@@ -10,7 +12,7 @@ import type { Db } from '../client.js'
 import { markDurationRollupDirty } from './duration-rollup.js'
 import { atomic, clockNow, deleteRows, insertIgnoreRows, schemaFor, updateRows } from '../native.js'
 import type { runDurationFacts as runDurationFactsTable } from '../schema/duration-facts.js'
-import { computeRunDurationFacts, type DurationCalculatorInput, type DurationCalculatorOutput } from './duration-calculator.js'
+import { computeRunDurationFacts, type DurationAiCallInput, type DurationCalculatorInput, type DurationCalculatorOutput, type DurationPageWaitInput } from './duration-calculator.js'
 
 const STATUS_EVENT_TYPES = ['run.status_changed', 'run.auth_wait', 'run.auth_resumed'] as const
 const ATTEMPT_CHUNK = 500
@@ -24,7 +26,7 @@ export function isComparableRun(input: { versionKind: string | null; purpose: st
 async function loadCalculatorInputs(db: Db, runIds: readonly string[], asOf?: Date): Promise<Map<string, DurationCalculatorInput>> {
   const result = new Map<string, DurationCalculatorInput>()
   if (runIds.length === 0) return result
-  const { runs, scenarioVersions, scenarios, runEvents, stepRuns, attempts, resolutionDecisions } = schemaFor(db)
+  const { runs, scenarioVersions, scenarios, runEvents, stepRuns, attempts, resolutionDecisions, scenarioAiCalls, scenarioPageWaits, evidences } = schemaFor(db)
   const runRows = await db
     .select({
       id: runs.id,
@@ -47,7 +49,7 @@ async function loadCalculatorInputs(db: Db, runIds: readonly string[], asOf?: Da
     .where(inArray(runs.id, [...runIds]))
   if (runRows.length === 0) return result
   const ids = runRows.map((row) => row.id)
-  const [events, stepRows, decisions] = await Promise.all([
+  const [events, stepRows, decisions, ledgerRows, pageWaitRows, evidenceRows] = await Promise.all([
     db
       .select({ runId: runEvents.runId, type: runEvents.type, occurredAt: runEvents.occurredAt, sequence: runEvents.sequence, payload: runEvents.payload })
       .from(runEvents)
@@ -69,6 +71,38 @@ async function loadCalculatorInputs(db: Db, runIds: readonly string[], asOf?: Da
       .select({ runId: resolutionDecisions.runId, attemptId: resolutionDecisions.attemptId, decisionKind: resolutionDecisions.decisionKind })
       .from(resolutionDecisions)
       .where(inArray(resolutionDecisions.runId, ids)),
+    db
+      .select({
+        runId: scenarioAiCalls.runId,
+        evidenceId: scenarioAiCalls.evidenceId,
+        attemptId: scenarioAiCalls.attemptId,
+        durationMs: scenarioAiCalls.durationMs,
+        startedAt: scenarioAiCalls.startedAt,
+        endedAt: scenarioAiCalls.endedAt,
+        phase: scenarioAiCalls.phase,
+      })
+      .from(scenarioAiCalls)
+      .where(inArray(scenarioAiCalls.runId, ids)),
+    db
+      .select({
+        runId: scenarioPageWaits.runId,
+        evidenceId: scenarioPageWaits.evidenceId,
+        attemptId: scenarioPageWaits.attemptId,
+        reason: scenarioPageWaits.reason,
+        startedAt: scenarioPageWaits.startedAt,
+        endedAt: scenarioPageWaits.endedAt,
+      })
+      .from(scenarioPageWaits)
+      .where(inArray(scenarioPageWaits.runId, ids)),
+    db
+      .select({
+        id: evidences.id,
+        runId: evidences.runId,
+        attemptId: evidences.attemptId,
+        payload: evidences.payload,
+      })
+      .from(evidences)
+      .where(and(inArray(evidences.runId, ids), eq(evidences.type, 'log'))),
   ])
   const stepRunIds = stepRows.map((row) => row.id)
   const attemptRows: Array<{ stepRunId: string; id: string; startedAt: Date; finishedAt: Date | null }> = []
@@ -82,6 +116,8 @@ async function loadCalculatorInputs(db: Db, runIds: readonly string[], asOf?: Da
     )
   }
   const runOfStepRun = new Map(stepRows.map((row) => [row.id, row.runId]))
+  const aiCallsByRun = groupAiCalls(ledgerRows, evidenceRows)
+  const pageWaitsByRun = groupPageWaits(pageWaitRows, evidenceRows)
   for (const row of runRows) {
     const snapshot = row.snapshot as RunSnapshot | null
     result.set(row.id, {
@@ -107,10 +143,94 @@ async function loadCalculatorInputs(db: Db, runIds: readonly string[], asOf?: Da
       snapshot: snapshot
         ? { steps: snapshot.steps ?? [], moduleManifest: snapshot.moduleManifest, candidateGroups: snapshot.candidateGroups, outcomeManifest: snapshot.outcomeManifest }
         : null,
+      aiCalls: aiCallsByRun.get(row.id) ?? [],
+      pageWaits: pageWaitsByRun.get(row.id) ?? [],
       ...(asOf ? { asOf } : {}),
     })
   }
   return result
+}
+
+function groupAiCalls(
+  ledger: ReadonlyArray<{
+    runId: string
+    evidenceId: string
+    attemptId: string | null
+    durationMs: number | null
+    startedAt: Date | null
+    endedAt: Date | null
+    phase: 'completed' | 'failed'
+  }>,
+  evidence: ReadonlyArray<{ id: string; runId: string; attemptId: string | null; payload: unknown }>,
+): Map<string, DurationAiCallInput[]> {
+  const byRun = new Map<string, DurationAiCallInput[]>()
+  const seen = new Set<string>()
+  const push = (runId: string, call: DurationAiCallInput) => {
+    const list = byRun.get(runId) ?? []
+    list.push(call)
+    byRun.set(runId, list)
+  }
+  for (const row of ledger) {
+    seen.add(`${row.runId}:${row.evidenceId}`)
+    push(row.runId, {
+      attemptId: row.attemptId,
+      durationMs: row.durationMs,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      phase: row.phase,
+    })
+  }
+  for (const row of evidence) {
+    if (seen.has(`${row.runId}:${row.id}`) || !isAiCallEvidence(row.payload)) continue
+    if (row.payload.phase !== 'completed' && row.payload.phase !== 'failed') continue
+    push(row.runId, {
+      attemptId: row.attemptId,
+      durationMs: row.payload.durationMs ?? null,
+      startedAt: row.payload.startedAt ? new Date(row.payload.startedAt) : null,
+      endedAt: row.payload.endedAt ? new Date(row.payload.endedAt) : null,
+      phase: row.payload.phase,
+    })
+  }
+  return byRun
+}
+
+function groupPageWaits(
+  ledger: ReadonlyArray<{
+    runId: string
+    evidenceId: string
+    attemptId: string
+    reason: string
+    startedAt: Date
+    endedAt: Date
+  }>,
+  evidence: ReadonlyArray<{ id: string; runId: string; attemptId: string | null; payload: unknown }>,
+): Map<string, DurationPageWaitInput[]> {
+  const byRun = new Map<string, DurationPageWaitInput[]>()
+  const seen = new Set<string>()
+  const push = (runId: string, wait: DurationPageWaitInput) => {
+    const list = byRun.get(runId) ?? []
+    list.push(wait)
+    byRun.set(runId, list)
+  }
+  for (const row of ledger) {
+    seen.add(`${row.runId}:${row.evidenceId}`)
+    push(row.runId, {
+      attemptId: row.attemptId,
+      reason: row.reason,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+    })
+  }
+  for (const row of evidence) {
+    if (seen.has(`${row.runId}:${row.id}`) || !isPageWaitEvidence(row.payload) || !row.attemptId) continue
+    push(row.runId, {
+      attemptId: row.attemptId,
+      reason: row.payload.reason,
+      startedAt: new Date(row.payload.startedAt),
+      endedAt: new Date(row.payload.endedAt),
+    })
+  }
+  return byRun
 }
 
 function factsRow(output: DurationCalculatorOutput, computedAt: Date) {
@@ -134,6 +254,12 @@ function factsRow(output: DurationCalculatorOutput, computedAt: Date) {
     unclassifiedMs: facts.unclassifiedMs,
     queueMs: facts.queueMs,
     overheadMs: facts.overheadMs,
+    modelMs: facts.modelMs,
+    pageMs: facts.pageMs,
+    overlapMs: facts.overlapMs,
+    residualMs: facts.residualMs,
+    pagePartial: facts.pagePartial,
+    compositionIncompleteReasons: facts.compositionIncompleteReasons,
     workerLost: facts.workerLost,
     complete: facts.complete,
     incompleteReason: facts.incompleteReason,
@@ -159,6 +285,15 @@ function nodeRows(output: DurationCalculatorOutput) {
     attemptCount: node.attemptCount,
     iterationCount: node.iterationCount,
     maxResolution: node.maxResolution,
+    modelMs: node.modelMs,
+    pageMs: node.pageMs,
+    overlapMs: node.overlapMs,
+    residualMs: node.residualMs,
+    modelCallCount: node.modelCallCount,
+    pageWaitCount: node.pageWaitCount,
+    pagePartial: node.pagePartial,
+    compositionComplete: node.compositionComplete,
+    compositionIncompleteReasons: node.compositionIncompleteReasons,
   }))
 }
 
@@ -191,7 +326,15 @@ async function writeFacts(db: Db, output: DurationCalculatorOutput): Promise<Wri
       const bumped = await updateRows(
         tx,
         runDurationFacts,
-        { calcVersion: DURATION_FACTS_CALC_VERSION },
+        {
+          calcVersion: DURATION_FACTS_CALC_VERSION,
+          modelMs: output.facts.modelMs,
+          pageMs: output.facts.pageMs,
+          overlapMs: output.facts.overlapMs,
+          residualMs: output.facts.residualMs,
+          pagePartial: output.facts.pagePartial,
+          compositionIncompleteReasons: output.facts.compositionIncompleteReasons,
+        },
         and(eq(runDurationFacts.runId, output.facts.runId), lt(runDurationFacts.calcVersion, DURATION_FACTS_CALC_VERSION)),
         { runId: runDurationFacts.runId },
       )
@@ -325,6 +468,12 @@ function factsFromRow(row: InferSelectModel<typeof runDurationFactsTable>): RunD
     unclassifiedMs: row.unclassifiedMs,
     queueMs: row.queueMs,
     overheadMs: row.overheadMs,
+    modelMs: row.modelMs,
+    pageMs: row.pageMs,
+    overlapMs: row.overlapMs,
+    residualMs: row.residualMs,
+    pagePartial: row.pagePartial,
+    compositionIncompleteReasons: row.compositionIncompleteReasons ?? [],
     workerLost: row.workerLost,
     complete: row.complete,
     incompleteReason: row.incompleteReason,
@@ -363,6 +512,15 @@ export async function readRunDurationFacts(db: Db, runId: string, options: { asO
         attemptCount: node.attemptCount,
         iterationCount: node.iterationCount,
         maxResolution: node.maxResolution,
+        modelMs: node.modelMs,
+        pageMs: node.pageMs,
+        overlapMs: node.overlapMs,
+        residualMs: node.residualMs,
+        modelCallCount: node.modelCallCount,
+        pageWaitCount: node.pageWaitCount,
+        pagePartial: node.pagePartial,
+        compositionComplete: node.compositionComplete,
+        compositionIncompleteReasons: node.compositionIncompleteReasons ?? [],
       })),
       source: 'stored',
     }

@@ -142,6 +142,8 @@ export const DURATION_INSIGHT_KINDS = [
   'volatile',
   'volume_change',
   'version_change',
+  'model_increase',
+  'page_increase',
 ] as const
 export type DurationInsightKind = (typeof DURATION_INSIGHT_KINDS)[number]
 
@@ -175,6 +177,8 @@ export const DURATION_INSIGHT_LABELS: Readonly<Record<DurationInsightKind, strin
   volatile: '波动大',
   volume_change: '数据量变化',
   version_change: '疑似改动导致',
+  model_increase: '模型变慢',
+  page_increase: '页面变慢',
 })
 
 export const durationInsightSchema = z.object({
@@ -212,6 +216,9 @@ export interface NodeInsightStats {
   assistedRate: DurationComparison
   medianIterations: { current: number | null; base: number | null }
   perIterationP50: { current: number | null; base: number | null }
+  /** 单次尝试的模型 / 页面 P50。未测为 null。 */
+  modelPerAttempt?: DurationComparison
+  pagePerAttempt?: DurationComparison
 }
 
 function pct(value: number): string {
@@ -231,7 +238,7 @@ export function detectScenarioInsights(subject: { scenarioId: string; scenarioNa
   const active = stats.activeP50
   if (active.deltaPct !== null && active.current !== null && active.base !== null) {
     if (active.deltaPct >= rules.slowerPct) {
-      push('slower', `执行耗时 P50 ${formatDurationShort(active.base)} → ${formatDurationShort(active.current)}（${pct(active.deltaPct)}），页面或系统性能变化`)
+      push('slower', `执行耗时 P50 ${formatDurationShort(active.base)} → ${formatDurationShort(active.current)}（${pct(active.deltaPct)}），执行变慢`)
     } else if (active.deltaPct <= rules.fasterPct) {
       push('faster', `执行耗时 P50 ${formatDurationShort(active.base)} → ${formatDurationShort(active.current)}（${pct(active.deltaPct)}）`)
     }
@@ -287,8 +294,18 @@ export function detectNodeInsights(
     }
   }
   const retry = stats.retryRate
-  if (retry.deltaPct !== null && retry.deltaPct >= rules.retryRatePoints && retry.current !== null) {
-    push('retry_increase', `重试率 ${Math.round((retry.base ?? 0) * 100)}% → ${Math.round(retry.current * 100)}%，定位不稳或页面响应慢`)
+  const retryNow = retry.current
+  const retryUp = retry.deltaPct !== null && retry.deltaPct >= rules.retryRatePoints && retryNow !== null
+  if (retryUp && retryNow !== null) {
+    push('retry_increase', `重试率 ${Math.round((retry.base ?? 0) * 100)}% → ${Math.round(retryNow * 100)}%，定位不稳或页面响应慢`)
+  }
+  const modelPer = stats.modelPerAttempt
+  if (modelPer && enoughSamples(modelPer) && modelPer.deltaPct !== null && modelPer.deltaPct >= rules.slowerPct && !(retryUp && modelPer.deltaPct < rules.slowerPct)) {
+    push('model_increase', `单次模型 P50 ${formatDurationShort(modelPer.base ?? 0)} → ${formatDurationShort(modelPer.current ?? 0)}（${pct(modelPer.deltaPct)}），模型变慢`)
+  }
+  const pagePer = stats.pagePerAttempt
+  if (pagePer && enoughSamples(pagePer) && pagePer.deltaPct !== null && pagePer.deltaPct >= rules.slowerPct && !(retryUp && pagePer.deltaPct < rules.slowerPct)) {
+    push('page_increase', `单次页面 P50 ${formatDurationShort(pagePer.base ?? 0)} → ${formatDurationShort(pagePer.current ?? 0)}（${pct(pagePer.deltaPct)}），页面变慢`)
   }
   const assisted = stats.assistedRate
   if (assisted.deltaPct !== null && assisted.deltaPct >= rules.assistRatePoints && assisted.current !== null) {
@@ -307,6 +324,8 @@ const attributionTagSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('retries'), from: z.number(), to: z.number() }),
   z.object({ kind: z.literal('iterations'), from: z.number(), to: z.number(), perIterationDeltaPct: z.number().nullable() }),
   z.object({ kind: z.literal('resolution'), from: resolutionLevelSchema.nullable(), to: resolutionLevelSchema.nullable() }),
+  z.object({ kind: z.literal('model'), from: z.number(), to: z.number() }),
+  z.object({ kind: z.literal('page'), from: z.number(), to: z.number() }),
   z.object({ kind: z.literal('added') }),
   z.object({ kind: z.literal('removed') }),
 ])
@@ -398,6 +417,8 @@ export const durationNodeRowSchema = z.object({
   samples: z.number().int().nonnegative(),
   baseSamples: z.number().int().nonnegative(),
   activeP50: nullableMs,
+  modelP50: nullableMs.default(null),
+  pageP50: nullableMs.default(null),
   activeP95: nullableMs,
   baseP50: nullableMs,
   deltaPct: z.number().nullable(),

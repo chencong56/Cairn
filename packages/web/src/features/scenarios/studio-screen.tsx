@@ -35,6 +35,7 @@ import {
   fetchSessionOperation,
   newSessionIdempotencyKey,
   requestAccountSessionOperation,
+  retrySessionAutoLogin,
   sessionBrowserTransport,
 } from '@/lib/sessions-api'
 import { useSessionObservation } from '@/features/sessions/use-session-observation'
@@ -123,6 +124,7 @@ export function StudioScreen({
   const [connecting, setConnecting] = useState(false)
   const [prepareFailed, setPrepareFailed] = useState(false)
   const [abandoning, setAbandoning] = useState(false)
+  const [retryingAutoLogin, setRetryingAutoLogin] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
   const [pendingOperationId, setPendingOperationId] = useState<string | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -337,6 +339,11 @@ export function StudioScreen({
 
   const currentOpStatus = session?.currentOperation?.status ?? operationQuery.data?.status
   const currentErrorCode = operationQuery.data?.errorCode ?? session?.lastAuthError
+  const currentWaitReason = operationQuery.data?.waitReason ?? session?.currentOperation?.waitReason ?? null
+  const noExecutor =
+    currentWaitReason === 'NO_ELIGIBLE_WORKER' || currentWaitReason === 'WORKER_PROTOCOL_MISSING'
+  const trialWaitReason = run?.placement?.waitReason ?? null
+  const trialNoExecutor = trialWaitReason === 'NO_ELIGIBLE_WORKER' || trialWaitReason === 'WORKER_PROTOCOL_MISSING'
 
   const currentAction = resolveStudioConnectAction({
     sessionDetail: session,
@@ -353,6 +360,7 @@ export function StudioScreen({
     errorCode: currentErrorCode,
     prepareFailed,
     errorMessage: connectError,
+    waitReason: currentWaitReason,
   })
 
   const latestEventSummary = resolveLatestEventSummary(eventsQuery.data?.items, activeOpId)
@@ -362,6 +370,7 @@ export function StudioScreen({
     queueDeadlineAt: operationQuery.data?.queueDeadlineAt,
     createdAt: operationQuery.data?.createdAt,
     nowMs,
+    waitReason: currentWaitReason,
   })
 
   useEffect(() => {
@@ -530,6 +539,22 @@ export function StudioScreen({
       toast.error(err instanceof ApiRequestError ? err.message : '关闭会话失败')
     } finally {
       setAbandoning(false)
+    }
+  }
+
+  async function retryPrepareAutoLogin() {
+    const opId = activeOpId
+    if (!opId || session?.currentOperation?.reusedRunId) return
+    setRetryingAutoLogin(true)
+    try {
+      await retrySessionAutoLogin(opId)
+      toast.success('自动登录已成功')
+      await sessionQuery.refetch()
+    } catch (err) {
+      toast.error(err instanceof ApiRequestError ? err.message : '自动登录仍未成功，可再试一次或改为手动登录')
+      await sessionQuery.refetch()
+    } finally {
+      setRetryingAutoLogin(false)
     }
   }
 
@@ -702,9 +727,20 @@ export function StudioScreen({
                 <AlertDescription className='flex flex-wrap items-center justify-between gap-3'>
                   <div className='text-small'>
                     <span className='font-semibold text-warning-foreground'>需要人工辅助验证：</span>
-                    {describeAuthIssue(session?.lastAuthError) ?? '目标系统需要完成人机验证（滑块/验证码）或登录'}。请在下方画面中点击「取得控制权」完成操作。
+                    {describeAuthIssue(session?.lastAuthError) ?? '目标系统需要完成人机验证（滑块/验证码）或登录'}
+                    。可以再发起一次自动登录，或在下方画面点击「处理登录」手动完成。点「完成认证」只核验当前页是否已经登录成功，不会替你填账号。
                   </div>
                   <div className='flex items-center gap-2'>
+                    {activeOpId && canControlSession && !session?.currentOperation?.reusedRunId && !accountIsVisitor ? (
+                      <Button
+                        size='sm'
+                        className='h-7 text-label'
+                        disabled={retryingAutoLogin}
+                        onClick={() => void retryPrepareAutoLogin()}
+                      >
+                        {retryingAutoLogin ? '正在自动登录…' : '再自动登录'}
+                      </Button>
+                    ) : null}
                     {activeOpId && canCancelPrepare ? (
                       <Button
                         size='sm'
@@ -746,14 +782,31 @@ export function StudioScreen({
               </Alert>
             ) : null}
             {ownRunQueued ? (
-              <Alert variant={queuedHold ? 'warning' : 'info'} className='mx-3 mt-2'>
+              <Alert variant={queuedHold || trialNoExecutor ? 'warning' : 'info'} className='mx-3 mt-2'>
                 <AlertDescription>
                   {describeQueuedTrialWait({
                     hold: queuedHold,
-                    waitReasonCopy: run?.placement?.waitReason
-                      ? (WAIT_REASON_COPY[run.placement.waitReason] ?? run.placement.waitReason)
+                    waitReason: trialWaitReason,
+                    waitReasonCopy: trialWaitReason
+                      ? (WAIT_REASON_COPY[trialWaitReason] ?? trialWaitReason)
                       : undefined,
                   })}
+                  {runId ? (
+                    <>
+                      {' '}
+                      <Link to='/runs/$runId' params={{ runId }} className='font-medium text-link underline'>
+                        查看这条试跑
+                      </Link>
+                    </>
+                  ) : null}
+                  {trialNoExecutor ? (
+                    <>
+                      {' '}
+                      <Link to='/workers' className='font-medium text-link underline'>
+                        查看执行节点
+                      </Link>
+                    </>
+                  ) : null}
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -849,10 +902,12 @@ export function StudioScreen({
                   ? stageInfo.statusTone === 'warning'
                     ? 'bg-warning/10 text-warning'
                     : 'bg-destructive/10 text-destructive'
-                  : 'bg-primary/10 text-primary',
+                  : noExecutor
+                    ? 'bg-warning/10 text-warning'
+                    : 'bg-primary/10 text-primary',
               )}
             >
-              {prepareFailed ? (
+              {prepareFailed || noExecutor ? (
                 <AlertCircle className='size-6' />
               ) : (
                 <Loader2 className='size-6 animate-spin' />
@@ -885,8 +940,9 @@ export function StudioScreen({
                     ? { ...rawStep, title: '无需登录（已跳过）' }
                     : rawStep
                 const isFailed = prepareFailed && stageInfo.failedStepIndex === idx
-                const isDone = !isFailed && stageInfo.stepIndex > idx
-                const isCurrent = !prepareFailed && stageInfo.stepIndex === idx
+                const isBlocked = noExecutor && stageInfo.stepIndex === idx
+                const isDone = !isFailed && !isBlocked && stageInfo.stepIndex > idx
+                const isCurrent = !prepareFailed && !isBlocked && stageInfo.stepIndex === idx
                 return (
                   <div key={step.key} className='flex items-center flex-1 last:flex-none'>
                     <div className='flex flex-col items-center gap-1'>
@@ -895,23 +951,27 @@ export function StudioScreen({
                           'flex size-7 items-center justify-center rounded-full text-caption font-semibold transition-colors',
                           isFailed
                             ? 'bg-destructive text-destructive-foreground ring-4 ring-destructive/20'
-                            : isDone
-                              ? 'bg-success text-success-foreground'
-                              : isCurrent
-                                ? 'bg-primary text-primary-foreground ring-4 ring-primary/20 animate-pulse'
-                                : 'bg-muted text-muted-foreground',
+                              : isBlocked
+                              ? 'bg-warning text-foreground ring-4 ring-warning/20'
+                              : isDone
+                                ? 'bg-success text-success-foreground'
+                                : isCurrent
+                                  ? 'bg-primary text-primary-foreground ring-4 ring-primary/20 animate-pulse'
+                                  : 'bg-muted text-muted-foreground',
                         )}
                       >
-                        {isFailed ? <X className='size-3.5' /> : isDone ? <Check className='size-3.5' /> : idx + 1}
+                        {isFailed || isBlocked ? <X className='size-3.5' /> : isDone ? <Check className='size-3.5' /> : idx + 1}
                       </div>
                       <span
                         className={cn(
                           'text-caption font-medium whitespace-nowrap',
                           isFailed
                             ? 'text-destructive font-semibold'
-                            : isCurrent
-                              ? 'text-foreground font-semibold'
-                              : 'text-muted-foreground',
+                            : isBlocked
+                              ? 'text-warning font-semibold'
+                              : isCurrent
+                                ? 'text-foreground font-semibold'
+                                : 'text-muted-foreground',
                         )}
                       >
                         {step.title}
@@ -936,7 +996,7 @@ export function StudioScreen({
                 <Activity
                   className={cn(
                     'size-3.5 shrink-0',
-                    prepareFailed ? 'text-destructive' : 'text-primary animate-pulse',
+                    prepareFailed || noExecutor ? 'text-destructive' : 'text-primary animate-pulse',
                   )}
                 />
                 <span className='truncate text-left'>最新动态：{latestEventSummary}</span>
@@ -982,6 +1042,11 @@ export function StudioScreen({
                   <XCircle className='size-3.5 mr-1 text-destructive' />
                   取消准备
                 </Button>
+              ) : null}
+              {noExecutor ? (
+                <Link to='/workers' className='text-small font-medium text-link underline'>
+                  查看执行节点
+                </Link>
               ) : null}
               <Link
                 to='/sessions/$targetId/$accountId'

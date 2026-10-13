@@ -30,6 +30,13 @@ export interface StepExecutionContext {
   readonly scopePath?: string
   /** scopePath 传 null 表示取整个 Run 全部 scope 的账本（场景级全程口径）；缺省按当前 scope。 */
   readonly loadStepStates?: (scopePath?: string | null) => Promise<import('@cairn/db').RunStepState[]>
+  /** 分段检查读现场账本，不读事实表。page 无采集标记时为 null。 */
+  readonly loadDurationComponents?: (query: {
+    sourceStepId?: string
+    runTotal?: boolean
+    scopePath?: string | null
+    excludeStepId?: string
+  }) => Promise<{ wall: number | null; model: number | null; page: number | null }>
 }
 
 export type StepExecutionOutcome =

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { BadRequestException } from '@nestjs/common'
+import { BadRequestException, ConflictException } from '@nestjs/common'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as db from '@cairn/db'
 import { DomainError } from '@cairn/db'
@@ -30,6 +30,41 @@ beforeEach(() => {
   )
 })
 afterEach(() => vi.useRealTimers())
+it('独立操作再次自动登录转发到 worker retry-login', async () => {
+  vi.mocked(db.getSessionOperation).mockResolvedValue({
+    id: 'op',
+    kindParams: {},
+  } as never)
+  ;(service as any).resolveOwner = async () => ({
+    ownerId: 'op',
+    status: 'WAITING_FOR_AUTH',
+    session: { id: 's', targetId: 't', generation: 1, ownerWorkerId: 'w' },
+    worker: { instanceId: 'i' },
+    endpoint: 'http://worker',
+  })
+  await service.retryAutoLogin('op', { id: 'actor', permissions: ['session:control'] } as never, {
+    token: 'secret-control-token',
+  })
+  expect(request).toHaveBeenCalledWith(
+    expect.objectContaining({
+      runId: 'op',
+      body: JSON.stringify({ token: 'secret-control-token' }),
+      path: '/internal/managed-browser/auth/retry-login',
+    }),
+  )
+})
+
+it('复用 Run 的操作拒绝再次自动登录', async () => {
+  vi.mocked(db.getSessionOperation).mockResolvedValue({
+    id: 'op',
+    kindParams: { reusedRunId: 'run' },
+  } as never)
+  await expect(
+    service.retryAutoLogin('op', { id: 'actor', permissions: ['session:control'] } as never, {}),
+  ).rejects.toBeInstanceOf(ConflictException)
+  expect(request).not.toHaveBeenCalled()
+})
+
 it('复用 Run 的完成认证保留令牌并解析真实 Run owner', async () => {
   vi.mocked(db.getSessionOperation).mockResolvedValue({
     id: 'op',

@@ -110,7 +110,7 @@ describe('iframe 跳转身份 × 回放定位', { timeout: 60_000 }, () => {
     await page.close()
   })
 
-  it('urlPattern 对不上且 selector 不唯一：SURFACE_LOST', async ({ skip }) => {
+  it('urlPattern 对不上且 selector 不唯一：活页面记 NOT_FOUND', async ({ skip }) => {
     if (!available) skip()
     const page = await open('frame-jump-twin.html')
     await page.locator('#frame-a').waitFor()
@@ -122,7 +122,7 @@ describe('iframe 跳转身份 × 回放定位', { timeout: 60_000 }, () => {
       1_200,
     )
     expect(missed.kind).toBe('miss')
-    if (missed.kind === 'miss') expect(missed.outcome).toBe('SURFACE_LOST')
+    if (missed.kind === 'miss') expect(missed.outcome).toBe('NOT_FOUND')
     await page.close()
   })
 
@@ -144,7 +144,37 @@ describe('iframe 跳转身份 × 回放定位', { timeout: 60_000 }, () => {
     await waitJumpTable(page)
     const missed = await locate(page, target([{ name: 'jump', selector: '#nope' }]), 1_200)
     expect(missed.kind).toBe('miss')
-    if (missed.kind === 'miss') expect(missed.outcome).toBe('SURFACE_LOST')
+    if (missed.kind === 'miss') expect(missed.outcome).toBe('NOT_FOUND')
+    await page.close()
+  })
+
+  it('iframe 先挂上再换 src：等到落地，不把加载中 detach 判成 SURFACE_LOST', async ({ skip }) => {
+    if (!available) skip()
+    const page = await open('frame-delayed-outer.html')
+    const started = Date.now()
+    const found = await locate(
+      page,
+      target([{ urlPattern: '/frame-inner.html', selector: '#goReportMgt' }]),
+      4_000,
+    )
+    expect(found.kind).toBe('found')
+    expect(Date.now() - started).toBeGreaterThan(350)
+    await page.close()
+  })
+
+  it('iframe 还在换 src：预算用尽记 NOT_FOUND，不提前 SURFACE_LOST', async ({ skip }) => {
+    if (!available) skip()
+    const page = await open('frame-delayed-outer.html')
+    const started = Date.now()
+    const missed = await locate(
+      page,
+      target([{ urlPattern: '/frame-inner.html', selector: '#goReportMgt' }]),
+      200,
+    )
+    expect(missed.kind).toBe('miss')
+    if (missed.kind === 'miss') expect(missed.outcome).toBe('NOT_FOUND')
+    expect(Date.now() - started).toBeGreaterThan(150)
+    expect(Date.now() - started).toBeLessThan(1_200)
     await page.close()
   })
 

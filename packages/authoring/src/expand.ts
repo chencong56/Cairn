@@ -186,6 +186,7 @@ export function deriveStepFromOutcomeRule(
           sourceStepId: requireSourceStepId(sourceStepId),
           op: rule.op,
           valueMs: rule.valueMs,
+          ...(rule.component && rule.component !== 'wall' ? { component: rule.component } : {}),
         },
       }
     case 'page_request':
@@ -201,6 +202,7 @@ export function deriveStepFromOutcomeRule(
           runTotal: true,
           op: rule.op,
           valueMs: rule.valueMs,
+          ...(rule.component && rule.component !== 'wall' ? { component: rule.component } : {}),
         },
       }
   }

@@ -29,6 +29,15 @@ export {
 } from './scenarios.js'
 export { reserveAiModelCall, completeAiModelCall } from './ai-budget.js'
 export type { ReserveAiModelCallInput, ReserveAiModelCallResult } from './ai-budget.js'
+export { recordPageWait, listPageWaitsForAttempts, listAiCallsForAttempts } from './page-wait.js'
+export type { RecordPageWaitInput, RecordPageWaitResult } from './page-wait.js'
+export {
+  loadLiveDurationComponents,
+  loadLiveDurationByStepId,
+  liveDurationOf,
+  composeLiveAttempt,
+} from './duration-live.js'
+export type { LiveDurationComponents, LiveDurationQuery } from './duration-live.js'
 export {
   cancelPendingStepRuns,
   countRunsForAccount,

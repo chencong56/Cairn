@@ -602,6 +602,55 @@ describe('StudioToolbar 容器响应式与侧边栏自适应', () => {
     expect(screen.getByRole('button', { name: '试跑中…', exact: true }).elements()).toHaveLength(0)
   })
 
+  it('试跑没有执行节点时顶栏写「没有执行节点」，不写成排队中', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const screen = await render(
+      <QueryClientProvider client={queryClient}>
+        <div style={{ width: '1200px' }}>
+          <StudioToolbar
+            scenario={mockScenario}
+            target={mockTarget}
+            scenarioId={mockScenario.id}
+            revision={1}
+            dirty={false}
+            hasDraftDirty={false}
+            saving={false}
+            publishing={false}
+            canWrite={true}
+            canTrial={true}
+            canStartFormalRun={true}
+            trialDisabledReason={undefined}
+            trialRun={{
+              id: 'run-queued-123',
+              scenarioId: mockScenario.id,
+              status: 'QUEUED',
+              placement: { state: 'claimable', waitReason: 'NO_ELIGIBLE_WORKER' },
+            } as RunDetailDto}
+            canPublish={false}
+            unpublishedDraft={false}
+            compileOk={true}
+            canReadTarget={true}
+            canRecord={true}
+            canDelete={true}
+            disabled={false}
+            onSave={() => {}}
+            onPublish={() => {}}
+            onStartTrial={() => {}}
+            onOpenTrialResult={() => {}}
+            onOpenRun={() => {}}
+            onOpenImport={() => {}}
+            onOpenRename={() => {}}
+            onToggleStatus={() => {}}
+            onOpenRemove={() => {}}
+            onLeave={() => {}}
+          />
+        </div>
+      </QueryClientProvider>,
+    )
+    await expect.element(screen.getByRole('button', { name: '没有执行节点' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '试跑排队中', exact: true }).elements()).toHaveLength(0)
+  })
+
   it('当具备中断权限时，试跑中按钮支持 Hover 切换为「中止试跑」并可点击触发 onCancelTrial', async () => {
     const onCancelTrial = vi.fn()
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

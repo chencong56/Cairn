@@ -43,6 +43,7 @@ import {
 import { detectFabrication } from './midscene/extract.js'
 import type { OpenAiLike } from './midscene/model-client.js'
 import { ActionRecorder } from './midscene/action-recorder.js'
+import { PageWaitCollector, runWithPageWaitCollector } from '../browser/page-wait-collector.js'
 import { AI_PORT, type AiLocateResult, type AiPort } from '../engine/ports.js'
 import {
   createDirectOpenAiClient,
@@ -73,6 +74,14 @@ export function createAiPort(input: {
         grant,
         evidence,
         async (page) => {
+          const collector = new PageWaitCollector({
+            db: input.handle,
+            runId: evidence.runId,
+            stepRunId: evidence.stepRunId,
+            attemptId: evidence.attemptId,
+          })
+          return runWithPageWaitCollector(collector, async () => {
+          await collector.markReady()
           assertAiPage(page.url(), command)
           const pagesBefore = new Set(page.context().pages())
           // 阶段 B 语义树优先分支（PAS-3）：全部准入条件满足时优先尝试无图文本分析
@@ -237,6 +246,7 @@ export function createAiPort(input: {
             }
             await agent.destroy().catch(() => undefined)
           }
+          })
         },
         // 抓图判据必须和取证判据是同一个，否则断言不成立时截图字节压根没被抓下来。
         (result) => evidenceFailed(command.type, result),

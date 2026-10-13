@@ -15,6 +15,8 @@ function row(overrides: Partial<DurationNodeRow>): DurationNodeRow {
     samples: 12,
     baseSamples: 12,
     activeP50: 4_000,
+    modelP50: null,
+    pageP50: null,
     activeP95: 4_500,
     baseP50: 4_000,
     deltaPct: 0,
@@ -47,6 +49,7 @@ describe('耗时节点表', () => {
         childrenQueryKey={['test-children']}
       />,
     )
+    await expect.element(screen.getByText('页面 P50')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '展开子节点' }).elements()).toHaveLength(1)
     expect(fetchChildren).not.toHaveBeenCalled()
 

@@ -179,6 +179,38 @@ describe.each(DRIVERS)('%s 耗时事实作业', { timeout: 60_000 }, (driver) =>
     expect(readout?.facts.activeMs).toBeGreaterThanOrEqual(4_000)
   })
 
+  it('账本模型调用写入节点分段；事件清理后 kept 路径仍补上模型列', async () => {
+    const runId = await finishedRun({ finishedAt: new Date() })
+    const { stepRuns, attempts, scenarioAiCalls, runDurationFacts, runEvents } = schemaFor(handle.db)
+    const [step] = await handle.db.select({ id: stepRuns.id, stepId: stepRuns.stepId }).from(stepRuns).where(eq(stepRuns.runId, runId))
+    const [attempt] = await handle.db.select({ id: attempts.id }).from(attempts).where(eq(attempts.stepRunId, step!.id))
+    await handle.db.insert(scenarioAiCalls).values({
+      evidenceId: newId(),
+      runId,
+      stepRunId: step!.id,
+      attemptId: attempt!.id,
+      purpose: 'scenario_step',
+      phase: 'completed',
+      durationMs: 1_200,
+      startedAt: new Date(),
+      endedAt: new Date(),
+    })
+    await syncRunDurationFacts(handle.db)
+    const first = await readRunDurationFacts(handle.db, runId)
+    expect(first?.facts.modelMs).toBe(1_200)
+    expect(first?.nodes.find((node) => node.nodeKey === `step:${step!.stepId}`)).toMatchObject({
+      modelMs: 1_200,
+      residualMs: first!.nodes.find((node) => node.nodeKey === `step:${step!.stepId}`)!.activeMs - 1_200,
+    })
+
+    await handle.db.delete(runEvents).where(eq(runEvents.runId, runId))
+    await handle.db.update(runDurationFacts).set({ calcVersion: 0, modelMs: 0, residualMs: 0 }).where(eq(runDurationFacts.runId, runId))
+    const kept = await syncRunDurationFacts(handle.db)
+    expect(kept.kept).toBeGreaterThanOrEqual(1)
+    const after = await readRunDurationFacts(handle.db, runId)
+    expect(after?.facts).toMatchObject({ complete: true, activeMs: 10_000, modelMs: 1_200, calcVersion: DURATION_FACTS_CALC_VERSION })
+  })
+
   it('非已发布版本或非 user 用途的场景运行标为不可比', async () => {
     const mapScenario = await createScenarioWithVersion(handle.db, { targetId, name: `地图作业-${newId().slice(0, 6)}`, steps, actor: { id: actorId } })
     const { scenarios } = schemaFor(handle.db)

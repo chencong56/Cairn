@@ -16,6 +16,7 @@ export const scenarioMetricDeclSchema = z
     fromStepDuration: z
       .strictObject({
         stepId: entityIdSchema,
+        component: z.enum(['wall', 'model', 'page']).optional(),
       })
       .optional(),
     fromRunDuration: z.literal(true).optional(),
@@ -163,6 +164,11 @@ export type AssembleRunOutputInput = {
   error?: { safeMessage?: string; message?: string; code?: string } | null
   now?: Date | string
   runStartedAt?: Date | string | null
+  /** 分段指标现算结果。model / page 取不到时不要写成 0。 */
+  durationComponents?: {
+    byStepId?: Readonly<Record<string, { wall?: number | null; model?: number | null; page?: number | null }>>
+    run?: { wall?: number | null; model?: number | null; page?: number | null }
+  }
 }
 
 function truncateString(str: string, maxLen: number): string {
@@ -382,6 +388,11 @@ export function assembleRunOutput(input: AssembleRunOutputInput): RunOutput {
         }
       } else if (decl.fromStepDuration) {
         const targetStepId = decl.fromStepDuration.stepId
+        const component = decl.fromStepDuration.component ?? 'wall'
+        if (component !== 'wall') {
+          const value = input.durationComponents?.byStepId?.[targetStepId]?.[component]
+          if (typeof value === 'number' && Number.isFinite(value)) metrics[decl.key] = value
+        } else {
         const matched = stepRuns.filter((sr) => sr.stepId === targetStepId)
         if (matched.length > 0) {
           const targetSr = matched[matched.length - 1]!
@@ -399,6 +410,7 @@ export function assembleRunOutput(input: AssembleRunOutputInput): RunOutput {
             const durationMs = Math.max(0, new Date(end).getTime() - new Date(start).getTime())
             metrics[decl.key] = durationMs
           }
+        }
         }
       } else if (decl.fromRunDuration) {
         let earliestStart: number | undefined

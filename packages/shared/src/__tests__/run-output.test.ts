@@ -451,6 +451,35 @@ describe('RunOutput Assembly & Fallback (AC02, AC03, AC04, AC05)', () => {
     })
     expect(outputFallback.metrics.duration).toBe(8000)
   })
+
+  it('fromStepDuration.component=page 取不到时不写 0', () => {
+    const outputs = {
+      summaryTemplate: 'ok',
+      metrics: [
+        { key: 'page_ms', name: '页面', fromStepDuration: { stepId: 'step-1', component: 'page' as const } },
+        { key: 'model_ms', name: '模型', fromStepDuration: { stepId: 'step-1', component: 'model' as const } },
+        { key: 'wall_ms', name: '墙钟', fromStepDuration: { stepId: 'step-1' } },
+      ],
+      dataRowFields: [],
+    }
+    const output = assembleRunOutput({
+      definition: { steps: sampleSteps, outputs },
+      stepRuns: [
+        {
+          id: 'sr-1',
+          stepId: 'step-1',
+          startedAt: '2026-09-29T10:00:00.000Z',
+          finishedAt: '2026-09-29T10:00:02.000Z',
+        },
+      ],
+      durationComponents: { byStepId: { 'step-1': { wall: 2_000, model: 800, page: null } } },
+      status: 'SUCCEEDED',
+      outcomeStatus: 'PASS',
+    })
+    expect(output.metrics.page_ms).toBeUndefined()
+    expect(output.metrics.model_ms).toBe(800)
+    expect(output.metrics.wall_ms).toBe(2_000)
+  })
 })
 
 describe('scenarioMetricDeclSchema 来源三选一（二期）', () => {

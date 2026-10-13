@@ -220,6 +220,18 @@ export class BrowserSessionsService {
     return this.forwardJson(operationId, actor, workerInternalPath('/auth/complete'), JSON.stringify(body))
   }
 
+  async retryAutoLogin(operationId: string, actor: RequestAccount, body: { token?: string } = {}) {
+    const row = await getSessionOperation(this.handle, operationId)
+    if (!row) throw new NotFoundException({ code: 'OPERATION_NOT_FOUND', message: '会话操作不存在' })
+    if (typeof row.kindParams?.reusedRunId === 'string') {
+      throw new ConflictException({
+        code: 'SESSION_OPERATION_CONFLICT',
+        message: '该操作挂在运行的认证等待上，请到运行页处理',
+      })
+    }
+    return this.forwardJson(operationId, actor, workerInternalPath('/auth/retry-login'), JSON.stringify(body))
+  }
+
   acquireAuth(operationId: string, body: unknown, actor: RequestAccount) {
     return this.forwardJson(
       operationId,

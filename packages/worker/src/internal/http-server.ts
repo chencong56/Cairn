@@ -9,6 +9,7 @@ import {
   acquireAuthControlBodySchema,
   authControlInputBodySchema,
   authControlTokenBodySchema,
+  retryAutoLoginBodySchema,
   debugActionSchema,
   debugPresenceBodySchema,
   entityIdSchema,
@@ -207,6 +208,10 @@ async function handleRequest(
   }
   if (req.method === 'POST' && url.pathname === workerInternalPath('/auth/complete')) {
     writeJson(res, 200, await ctx.sessions.completeOccupiedAuth(runId, { actorId, ...authControlTokenBodySchema.parse(JSON.parse(raw || '{}')) }))
+    return
+  }
+  if (req.method === 'POST' && url.pathname === workerInternalPath('/auth/retry-login')) {
+    writeJson(res, 200, await ctx.sessions.retryOccupiedAutoLogin(runId, { actorId, ...retryAutoLoginBodySchema.parse(raw ? JSON.parse(raw) : {}) }))
     return
   }
   const pageClosePrefix = workerInternalPath('/pages/')

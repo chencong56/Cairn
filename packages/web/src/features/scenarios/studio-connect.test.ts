@@ -94,6 +94,31 @@ describe('deriveSessionPreparationStage', () => {
     expect(stage.title).toContain('排队')
   })
 
+  it('没有在线执行节点时不写成排队中', () => {
+    const stage = deriveSessionPreparationStage({
+      operationStatus: 'QUEUED',
+      waitReason: 'NO_ELIGIBLE_WORKER',
+    })
+    expect(stage.currentStage).toBe('queued')
+    expect(stage.stepIndex).toBe(0)
+    expect(stage.failedStepIndex).toBe(0)
+    expect(stage.statusTone).toBe('warning')
+    expect(stage.stageBadge).toBe('无法开始')
+    expect(stage.title).toBe('没有可用的执行节点')
+    expect(stage.detail).toContain('不会被领取')
+    expect(stage.title).not.toContain('排队')
+  })
+
+  it('在线节点版本不支持时同样不写成排队中', () => {
+    const stage = deriveSessionPreparationStage({
+      operationStatus: 'QUEUED',
+      waitReason: 'WORKER_PROTOCOL_MISSING',
+    })
+    expect(stage.title).toBe('没有可用的执行节点')
+    expect(stage.stageBadge).toBe('无法开始')
+    expect(stage.statusTone).toBe('warning')
+  })
+
   it('运行中且包含自动登录事件时映射到 authenticating 阶段', () => {
     const stage = deriveSessionPreparationStage({
       operationStatus: 'RUNNING',
@@ -189,6 +214,17 @@ describe('resolveLatestEventSummary', () => {
 })
 
 describe('formatOperationTimeout', () => {
+  it('没有执行节点时不写排队倒计时', () => {
+    const timeout = formatOperationTimeout({
+      status: 'QUEUED',
+      waitReason: 'NO_ELIGIBLE_WORKER',
+      queueDeadlineAt: new Date(1700000000000 + 150000).toISOString(),
+      nowMs: 1700000000000,
+    })
+    expect(timeout.hint).toBe('没有在线的执行节点，排队不会开始')
+    expect(timeout.remainingSeconds).toBeNull()
+  })
+
   it('QUEUED 状态下根据 queueDeadlineAt 计算剩余排队倒计时', () => {
     const now = 1700000000000
     const deadline = new Date(now + 150000).toISOString() // 2分30秒后

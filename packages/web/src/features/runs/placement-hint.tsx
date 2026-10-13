@@ -11,16 +11,25 @@ export function PlacementHint({
   targetId?: string | null
   accountId?: string | null
 }) {
-  if (placement.state === 'not_applicable' || placement.state === 'claimed' || placement.state === 'claimable') {
+  if (placement.state === 'not_applicable' || placement.state === 'claimed') {
+    return null
+  }
+  if (placement.state === 'claimable' && placement.waitReason !== 'NO_ELIGIBLE_WORKER') {
     return null
   }
   const copy =
-    placement.waitReason != null ? WAIT_REASON_COPY[placement.waitReason] : PLACEMENT_COPY[placement.state]
+    placement.waitReason != null
+      ? WAIT_REASON_COPY[placement.waitReason]
+      : placement.state === 'claimable'
+        ? null
+        : PLACEMENT_COPY[placement.state]
   if (!copy) return null
   return (
     <p
       className={
-        placement.state === 'session_lost' || placement.waitReason === 'SESSION_LOST'
+        placement.state === 'session_lost' ||
+        placement.waitReason === 'SESSION_LOST' ||
+        placement.waitReason === 'NO_ELIGIBLE_WORKER'
           ? 'mt-2 text-body text-status-warning-foreground'
           : 'mt-2 text-body text-muted-foreground'
       }

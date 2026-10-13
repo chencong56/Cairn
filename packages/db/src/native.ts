@@ -467,6 +467,8 @@ export const indexedTextLimits: Record<string, number> = {
   'scenario_ai_calls.model': 256,
   'scenario_ai_calls.phase': 16,
   'scenario_ai_calls.error_code': 64,
+  'scenario_page_waits.reason': 32,
+  'scenario_page_waits.url': 512,
   'repair_candidates.candidate_id': 64,
   'repair_candidates.status': 32,
   'ai_task_events.agent_instance_id': 64,

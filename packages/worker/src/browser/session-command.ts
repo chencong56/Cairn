@@ -25,10 +25,12 @@ import {
   OccupancyRequiredError,
   closePage,
   waitForPopupsFrom,
+  waitForAdoptedPageReady,
   screenshotPage,
   pageHasSensitiveContent,
 } from './runtime'
 import { executeOnPage } from './surface'
+import { timePageWait } from './page-wait-collector.js'
 import { handoffMessage } from './managed-helpers'
 import { PageHealthCollector, pageHealthKnownOrigins } from './page-health-collector.js'
 import { NetworkCapture } from './network-capture.js'
@@ -541,6 +543,83 @@ export function pageForGrant(this: SessionManagerContext, grant: SessionGrant) {
     return current ?? live.runPages.get(grant.leaseId) ?? live.lastPage ?? live.handle.basePage
   }
 
+async function completePopupHandoff(
+  manager: SessionManagerContext,
+  grant: SessionGrant,
+  popped: Page[],
+  evidence: BrowserCommandEvidence | undefined,
+): Promise<BrowserCommandResult> {
+  const sessionId = manager.leaseToSession.get(grant.leaseId) ?? grant.sessionId
+  const live = manager.lives.get(sessionId)
+  const runId = manager.leaseToRun.get(grant.leaseId) ?? evidence?.runId
+  if (!live || !runId) {
+    return {
+      ok: false,
+      error: {
+        code: 'PAGE_HANDOFF_NO_POPUP',
+        category: 'EXECUTOR',
+        retryable: false,
+        safeMessage: '页面交接缺少会话上下文',
+      },
+    }
+  }
+  const urls = await Promise.all(
+    popped.map(async (item) => ({
+      page: item,
+      url:
+        item.url() ||
+        (await timePageWait(
+          'load_state',
+          () =>
+            item
+              .waitForLoadState('domcontentloaded')
+              .then(() => item.url())
+              .catch(() => ''),
+          () => item.url(),
+        )),
+    })),
+  )
+  const decided = pickPopupHandoff(urls)
+  if (!decided.ok) {
+    return {
+      ok: false,
+      error: {
+        code: decided.code,
+        // 点击已经发出，交接结果未知：必须进核查，禁止当普通 EXECUTOR 失败重放点击。
+        category: 'UNKNOWN',
+        retryable: false,
+        safeMessage: handoffMessage(decided.code),
+      },
+    }
+  }
+  await decided.page.bringToFront().catch(() => undefined)
+  const fromId = live.currentPageIdByLease.get(grant.leaseId) ?? live.currentPageIdByRun.get(runId)
+  const entry = manager.adoptPage(live, runId, decided.page, 'popup', grant.leaseId)
+  if (entry.retarget) await entry.retarget.catch(() => undefined)
+  await timePageWait('landing_settle', () => waitForAdoptedPageReady(decided.page).catch(() => undefined), () => decided.page.url())
+  await appendRunEvents(manager.dbHandle, runId, [
+    {
+      type: 'run.page_handoff',
+      payload: { fromPageId: fromId ?? null, toPageId: entry.pageId, reason: 'popup' },
+      stepRunId: evidence?.stepRunId,
+      attemptId: evidence?.attemptId,
+    },
+  ]).catch(() => undefined)
+  await recordInlineLogEvidence(manager.dbHandle, {
+    runId,
+    stepRunId: evidence?.stepRunId,
+    attemptId: evidence?.attemptId,
+    payload: { kind: 'page_handoff', fromPageId: fromId ?? null, toPageId: entry.pageId, reason: 'popup' },
+  }).catch(() => undefined)
+  return { ok: true, output: { pageAfter: 'popup', pageId: entry.pageId } }
+}
+
+function objectOutputOf(result: BrowserCommandResult): Record<string, unknown> {
+  const output = 'output' in result ? result.output : undefined
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return {}
+  return output as Record<string, unknown>
+}
+
 export async function runSurfaceCommand(this: SessionManagerContext, 
     grant: SessionGrant,
     page: import('playwright').Page,
@@ -569,70 +648,37 @@ export async function runSurfaceCommand(this: SessionManagerContext,
       }
       return { ok: true, output: { value: read.sample } as never }
     }
-    if (command.type !== 'click' || command.pageAfter !== 'popup') {
+    if (command.type !== 'click' || command.pageAfter === 'same') {
       return executeOnPage(page, command, signal, evidence)
     }
+    const required = command.pageAfter === 'popup'
     let clickResult: BrowserCommandResult = { ok: false, error: { code: 'PAGE_HANDOFF_NO_POPUP', category: 'EXECUTOR', retryable: false, safeMessage: '点击未完成' } }
-    const popped = await waitForPopupsFrom(page, async () => {
-      clickResult = await executeOnPage(page, { ...command, pageAfter: 'same' }, signal, evidence)
-    })
-    if (!clickResult.ok) return clickResult
-    const sessionId = this.leaseToSession.get(grant.leaseId) ?? grant.sessionId
-    const live = this.lives.get(sessionId)
-    const runId = this.leaseToRun.get(grant.leaseId) ?? evidence?.runId
-    if (!live || !runId) {
-      return {
-        ok: false,
-        error: {
-          code: 'PAGE_HANDOFF_NO_POPUP',
-          category: 'EXECUTOR',
-          retryable: false,
-          safeMessage: '页面交接缺少会话上下文',
-        },
-      }
-    }
-    const urls = await Promise.all(
-      popped.map(async (item) => ({
-        page: item,
-        url:
-          item.url() ||
-          (await item
-            .waitForLoadState('domcontentloaded')
-            .then(() => item.url())
-            .catch(() => '')),
-      })),
-    )
-    const decided = pickPopupHandoff(urls)
-    if (!decided.ok) {
-      return {
-        ok: false,
-        error: {
-          code: decided.code,
-          // 点击已经发出，交接结果未知：必须进核查，禁止当普通 EXECUTOR 失败重放点击。
-          category: 'UNKNOWN',
-          retryable: false,
-          safeMessage: handoffMessage(decided.code),
-        },
-      }
-    }
-    const fromId = live.currentPageIdByLease.get(grant.leaseId) ?? live.currentPageIdByRun.get(runId)
-    const entry = this.adoptPage(live, runId, decided.page, 'popup', grant.leaseId)
-    if (entry.retarget) await entry.retarget.catch(() => undefined)
-    await appendRunEvents(this.dbHandle, runId, [
-      {
-        type: 'run.page_handoff',
-        payload: { fromPageId: fromId ?? null, toPageId: entry.pageId, reason: 'popup' },
-        stepRunId: evidence?.stepRunId,
-        attemptId: evidence?.attemptId,
+    const popped = await waitForPopupsFrom(
+      page,
+      async () => {
+        clickResult = await executeOnPage(
+          page,
+          required ? { ...command, pageAfter: 'same' } : command,
+          signal,
+          evidence,
+        )
       },
-    ]).catch(() => undefined)
-    await recordInlineLogEvidence(this.dbHandle, {
-      runId,
-      stepRunId: evidence?.stepRunId,
-      attemptId: evidence?.attemptId,
-      payload: { kind: 'page_handoff', fromPageId: fromId ?? null, toPageId: entry.pageId, reason: 'popup' },
-    }).catch(() => undefined)
-    return { ok: true, output: { pageAfter: 'popup', pageId: entry.pageId } }
+      required ? 1_500 : 0,
+    )
+    if (!clickResult.ok) return clickResult
+    const handed = await completePopupHandoff(this, grant, popped, evidence)
+    if (!handed.ok) return required ? handed : clickResult
+    const extra = objectOutputOf(clickResult)
+    const handedOut = objectOutputOf(handed)
+    return {
+      ok: true,
+      output: {
+        ...(typeof extra.popupOpened === 'boolean' ? { popupOpened: extra.popupOpened } : {}),
+        ...(typeof extra.popupUrl === 'string' ? { popupUrl: extra.popupUrl } : {}),
+        pageAfter: 'popup',
+        pageId: typeof handedOut.pageId === 'string' ? handedOut.pageId : '',
+      },
+    }
   }
 
 export function adoptPage(this: SessionManagerContext, 

@@ -225,6 +225,12 @@ function durationFacts(overrides: Partial<RunDurationFacts> = {}): RunDurationFa
     unclassifiedMs: 0,
     queueMs: 1_000,
     overheadMs: 7_000,
+    modelMs: 0,
+    pageMs: null,
+    overlapMs: 0,
+    residualMs: 16_000,
+    pagePartial: false,
+    compositionIncompleteReasons: [],
     workerLost: false,
     complete: true,
     incompleteReason: null,
@@ -244,6 +250,15 @@ function durationNode(overrides: Partial<NodeDurationFacts> & Pick<NodeDurationF
     attemptCount: 1,
     iterationCount: 1,
     maxResolution: null,
+    modelMs: 0,
+    pageMs: null,
+    overlapMs: 0,
+    residualMs: overrides.activeMs ?? 0,
+    modelCallCount: 0,
+    pageWaitCount: 0,
+    pagePartial: false,
+    compositionComplete: true,
+    compositionIncompleteReasons: [],
     ...overrides,
   }
 }
@@ -378,7 +393,7 @@ describe('RunDetailPage', () => {
     mocks.fetchRunDuration.mockResolvedValue(durationReadout({
       nodes: [
         durationNode({ nodeKey: `step:${step.stepId}`, name: '读取页面', activeMs: 2_900 }),
-        durationNode({ nodeKey: 'step:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: '提交页面', ordinal: 1, activeMs: 6_100, attemptCount: 2 }),
+        durationNode({ nodeKey: 'step:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: '提交页面', ordinal: 1, activeMs: 6_100, attemptCount: 2, modelMs: 3_000, residualMs: 3_100, modelCallCount: 1 }),
       ],
     }))
     signIn(['run:read'])
@@ -397,6 +412,8 @@ describe('RunDetailPage', () => {
     // 百分比以顶层节点执行耗时合计为分母：6.1 / 9.0 ≈ 68%
     expect(text).toContain('68%')
     expect(text).toContain('重试 1')
+    expect(text).toContain('模型 3.0s')
+    expect(text).toContain('页面未测')
     expect(text).not.toContain('尚未执行')
   })
 

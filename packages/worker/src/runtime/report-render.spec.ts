@@ -55,6 +55,43 @@ describe('报告渲染与交付（自包含 HTML 双模板）', () => {
     expect(html).not.toMatch(/href=["']https?:\/\//)
   })
 
+  it('步骤表用快照里的执行耗时，并拆出模型与其余', () => {
+    const html = renderReportHtml({
+      ...document,
+      source: {
+        ...(document.source as Record<string, JsonValue>),
+        startedAt: '2026-09-19T11:00:00.000Z',
+        finishedAt: '2026-09-19T11:00:10.000Z',
+        stepRuns: [
+          {
+            id: 'sr-1',
+            stepId: 'step-check',
+            name: '订单金额检查',
+            status: 'SUCCEEDED',
+            outcomeStatus: 'FAIL',
+            attempts: [{ id: 'attempt-1', status: 'SUCCEEDED' }],
+          },
+        ],
+        duration: {
+          totalMs: 10_000,
+          activeMs: 8_000,
+          modelMs: 5_000,
+          pageMs: null,
+          residualMs: 3_000,
+          overlapMs: 0,
+          nodes: {
+            'step:step-check': { activeMs: 8_000, modelMs: 5_000, pageMs: null, residualMs: 3_000, overlapMs: 0, modelCallCount: 1 },
+          },
+        },
+      },
+    } as unknown as ReportDocument)
+    expect(html).toContain('总耗时')
+    expect(html).toContain('执行 8.0s')
+    expect(html).toContain('模型 5.0s')
+    expect(html).toContain('8.0s（模型 5.0s · 页面未测 · 其余 3.0s）')
+    expect(html).toContain('页面未测')
+  })
+
   it('页面健康：有违规才出现卡片、章节与步骤内清单；无违规时 HTML 里没有任何页面健康内容', () => {
     const base = {
       ...document,

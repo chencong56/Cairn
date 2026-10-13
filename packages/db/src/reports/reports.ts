@@ -62,6 +62,7 @@ import { validateReportConfigAssets } from './profiles.js'
 import { revokeReportTrees } from './cleanup.js'
 import { appendRunEvents } from '../observe/events.js'
 import { buildDurationPeriodReport } from '../runs/duration-report.js'
+import { readRunDurationFacts } from '../runs/duration-facts.js'
 
 function subjectOf(row: {
   subjectKind: ReportSubject['kind']
@@ -398,6 +399,33 @@ function pageHealthSourceBlock(results: readonly { contractId: string; meaning: 
   return items.length > 0 ? { pageHealth: { items } as JsonValue } : {}
 }
 
+async function captureDurationSnapshot(db: Db, runId: string): Promise<{ duration?: Record<string, JsonValue> }> {
+  const readout = await readRunDurationFacts(db, runId)
+  if (!readout) return {}
+  const nodes: Record<string, JsonValue> = {}
+  for (const node of readout.nodes) {
+    nodes[node.nodeKey] = {
+      activeMs: node.activeMs,
+      modelMs: node.modelMs,
+      pageMs: node.pageMs,
+      residualMs: node.residualMs,
+      overlapMs: node.overlapMs,
+      modelCallCount: node.modelCallCount,
+    }
+  }
+  return {
+    duration: {
+      totalMs: readout.facts.totalMs,
+      activeMs: readout.facts.activeMs,
+      modelMs: readout.facts.modelMs,
+      pageMs: readout.facts.pageMs,
+      residualMs: readout.facts.residualMs,
+      overlapMs: readout.facts.overlapMs,
+      nodes,
+    },
+  }
+}
+
 type CapturedSource = { targetId: string; defaults: ReportConfig; payload: Record<string, JsonValue>; terminal: boolean; evidencePending: boolean; titleVars: Partial<Record<ReportTitleVariable, string>> }
 export async function captureSource(db: Db, subject: ReportSubject, actorId?: string): Promise<CapturedSource> {
   await assertReportSourceReadable(db, subject, actorId)
@@ -473,6 +501,7 @@ export async function captureSource(db: Db, subject: ReportSubject, actorId?: st
           attempts: step.attempts.map((attempt) => ({ id: attempt.id, status: attempt.status,
             error: attempt.error ? { code: attempt.error.code, message: attempt.error.safeMessage } : null })),
         })),
+        ...(await captureDurationSnapshot(db, run.id)),
       } as Record<string, JsonValue>,
       terminal: ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status),
       evidencePending: run.evidenceStatus === 'PENDING',

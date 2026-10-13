@@ -115,6 +115,7 @@ export const outcomeStepDurationRuleSchema = z.strictObject({
   kind: z.literal('step_duration'),
   op: z.enum(['lte', 'lt']),
   valueMs: z.number().int().nonnegative(),
+  component: z.enum(['wall', 'model', 'page']).optional(),
 })
 export type OutcomeStepDurationRule = z.infer<typeof outcomeStepDurationRuleSchema>
 
@@ -122,6 +123,7 @@ export const outcomeRunDurationRuleSchema = z.strictObject({
   kind: z.literal('run_duration'),
   op: z.enum(['lte', 'lt']),
   valueMs: z.number().int().nonnegative(),
+  component: z.enum(['wall', 'model', 'page']).optional(),
 })
 export type OutcomeRunDurationRule = z.infer<typeof outcomeRunDurationRuleSchema>
 

@@ -598,8 +598,7 @@ export function ScenarioDetailPage() {
     }
     toast.message('挂起的步骤无法对应到当前草稿，未改选中步')
   }, [holdingDraftStepId, holdingStepId, trialRun])
-  // 试跑中点击打开了新页但步骤没声明「点击后页面」：后续步骤仍在原页，会找不到新页元素。
-  // 自动补成「切换到弹出窗口」并提示重新试跑，让正式运行与编排所见一致。
+  // 试跑中点击打开了新页：运行时已跟随；这里把草稿写成「切换到弹出窗口」，让编排所见与正式运行一致。
   useEffect(() => {
     if (!trialRun || !canWrite || trialRun.scenarioId !== scenarioId) return
     for (const stepRun of trialRun.stepRuns) {
@@ -615,7 +614,7 @@ export function ScenarioDetailPage() {
       const step = authoringSteps(draft.v2Document).find((item) => item.id === stepRun.stepId)
       if (!step || step.type !== 'click' || step.input.pageAfter) continue
       draft.updateStep({ ...step, input: { ...step.input, pageAfter: 'popup' } })
-      toast.message(`「${step.name}」打开了新页面，已设为「切换到弹出窗口」，请重新试跑让后续步骤在新页执行`)
+      toast.message(`「${step.name}」打开了新页面，已记为「切换到弹出窗口」`)
     }
   }, [trialRun, canWrite, scenarioId, draft])
   const canRecord = canWrite && canReadTarget

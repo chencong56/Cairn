@@ -344,7 +344,7 @@ export function StepFields({
           <div className='flex items-center gap-1.5'>
             <Label>点击后页面</Label>
             <FieldHelp label='点击后页面'>
-              指定点击后期望保持当前页面或切换到弹出的新窗口/新标签页。
+              未指定时，若点击只打开一个新标签页，后续步骤会跟到新页。选「保持当前页」则留在原页；选「切换到弹出窗口」则必须出现新页，否则本步失败。
             </FieldHelp>
             <span className='rounded bg-muted px-1.5 py-0.2 text-caption font-medium text-muted-foreground'>选填</span>
           </div>
@@ -366,7 +366,7 @@ export function StepFields({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value='unset'>未指定（保持当前页）</SelectItem>
+              <SelectItem value='unset'>未指定（打开新标签则跟随）</SelectItem>
               <SelectItem value='same'>保持当前页</SelectItem>
               <SelectItem value='popup'>切换到弹出窗口</SelectItem>
             </SelectContent>
@@ -1280,6 +1280,59 @@ export function StepFields({
             </div>
           </div>
         )}
+      </div>
+    )
+  }
+
+  if (step.type === 'check_duration') {
+    return (
+      <div className='space-y-2'>
+        <div className='grid gap-3 sm:grid-cols-2'>
+          <div className='space-y-2'>
+            <Label htmlFor={fieldElementId(step.id, ['input', 'valueMs'])}>耗时上限（毫秒）</Label>
+            <Input
+              id={fieldElementId(step.id, ['input', 'valueMs'])}
+              type='number'
+              min={0}
+              value={step.input.valueMs}
+              disabled={disabled}
+              onChange={(event) =>
+                onChange({
+                  ...step,
+                  input: { ...step.input, valueMs: Math.max(0, Math.trunc(Number(event.target.value) || 0)) },
+                })
+              }
+            />
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor={fieldElementId(step.id, ['input', 'component'])}>计量口径</Label>
+            <Select
+              value={step.input.component ?? 'wall'}
+              disabled={disabled}
+              onValueChange={(component) =>
+                onChange({
+                  ...step,
+                  input: {
+                    ...step.input,
+                    component: component === 'wall' ? undefined : (component as 'model' | 'page'),
+                  },
+                })
+              }
+            >
+              <SelectTrigger id={fieldElementId(step.id, ['input', 'component'])} aria-label='耗时计量口径'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='wall'>墙钟（默认）</SelectItem>
+                <SelectItem value='model'>模型调用</SelectItem>
+                <SelectItem value='page'>页面等待</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <p className='text-label text-muted-foreground'>
+          墙钟看最后一次尝试起止。模型 / 页面读现场账本；页面未采集时结果为「无法判定」，不会写成 0。
+        </p>
       </div>
     )
   }

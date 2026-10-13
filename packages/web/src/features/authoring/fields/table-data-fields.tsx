@@ -178,7 +178,7 @@ export function TableDataFields({
   }
 
   const popupNotice = observe.viewingPopup()
-    ? '你现在看的是弹出页。执行时这一步在“当前页”运行：请先把上一步点击的“点击后页面”设为“切换到弹出窗口”，或用“运行到此步前置”。'
+    ? '你现在看的是弹出页。未指定时执行会跟随新标签；若要留在原页，把上一步「点击后页面」设为「保持当前页」，或用「运行到此步前置」。'
     : null
 
   const summary = coverageSummary(preview)

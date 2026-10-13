@@ -299,4 +299,98 @@ describe('耗时事实计算器：编排节点汇总', () => {
     expect(nodes.find((node) => node.nodeKey === 'scenario_checks')).toMatchObject({ kind: 'scenario_checks', parentKey: null, activeMs: 100 })
     expect(nodes.find((node) => node.nodeKey === 'check:c-total')).toMatchObject({ parentKey: 'scenario_checks' })
   })
+
+  it('模型调用按 attempt 计入所属节点，父节点累加；无页面时其余 = 执行 − 模型', () => {
+    const { facts, nodes } = computeRunDurationFacts(input({
+      run: { finishedAt: at(10) },
+      events: [status(0, 'RUNNING'), status(10, 'SUCCEEDED')],
+      snapshot: { steps: [step('s-open', '打开页面'), step('s-row', '处理一行')], moduleManifest: undefined, candidateGroups: undefined, outcomeManifest: undefined },
+      stepRuns: [
+        { id: 'sr-open', stepId: 's-open', name: '打开页面', ordinal: 0, scopePath: '', status: 'SUCCEEDED' },
+        { id: 'sr-row', stepId: 's-row', name: '处理一行', ordinal: 1, scopePath: '', status: 'SUCCEEDED' },
+      ],
+      attempts: [
+        { id: 'a-open', stepRunId: 'sr-open', startedAt: at(0.5), finishedAt: at(2.5) },
+        { id: 'a-row', stepRunId: 'sr-row', startedAt: at(3), finishedAt: at(8) },
+      ],
+      aiCalls: [
+        { attemptId: 'a-row', durationMs: 3_000, startedAt: at(3.2), endedAt: at(6.2), phase: 'completed' },
+        { attemptId: 'a-row', durationMs: 500, startedAt: at(6.3), endedAt: at(6.8), phase: 'failed' },
+      ],
+    }))
+    expect(nodes.find((node) => node.nodeKey === 'step:s-row')).toMatchObject({
+      activeMs: 5_000,
+      modelMs: 3_500,
+      pageMs: null,
+      overlapMs: 0,
+      residualMs: 1_500,
+      modelCallCount: 2,
+      compositionComplete: true,
+    })
+    expect(nodes.find((node) => node.nodeKey === 'step:s-open')).toMatchObject({ modelMs: 0, residualMs: 2_000 })
+    expect(facts).toMatchObject({ modelMs: 3_500, pageMs: null, residualMs: 3_500, compositionIncompleteReasons: [] })
+  })
+
+  it('没有 attempt 的模型调用不计入节点，运行级标 model_unassigned；缺 duration 标 model_duration_missing', () => {
+    const { facts, nodes } = computeRunDurationFacts(input({
+      run: { finishedAt: at(10) },
+      events: [status(0, 'RUNNING'), status(10, 'SUCCEEDED')],
+      snapshot: { steps: [step('s-open', '打开页面')], moduleManifest: undefined, candidateGroups: undefined, outcomeManifest: undefined },
+      stepRuns: [{ id: 'sr-open', stepId: 's-open', name: '打开页面', ordinal: 0, scopePath: '', status: 'SUCCEEDED' }],
+      attempts: [{ id: 'a-open', stepRunId: 'sr-open', startedAt: at(1), finishedAt: at(4) }],
+      aiCalls: [
+        { attemptId: null, durationMs: 2_000, startedAt: at(1), endedAt: at(3), phase: 'completed' },
+        { attemptId: 'a-open', durationMs: null, startedAt: at(2), endedAt: at(3), phase: 'completed' },
+      ],
+    }))
+    expect(nodes.find((node) => node.nodeKey === 'step:s-open')).toMatchObject({
+      modelMs: 0,
+      residualMs: 3_000,
+      compositionComplete: false,
+      compositionIncompleteReasons: ['model_duration_missing'],
+    })
+    expect(facts.modelMs).toBe(0)
+    expect(facts.compositionIncompleteReasons).toEqual(expect.arrayContaining(['model_unassigned', 'model_duration_missing']))
+    expect(facts.compositionIncompleteReasons).not.toContain('model_interval_missing')
+  })
+
+  it('有采集标记才写 pageMs（含 0）；无标记保持 null；混合 attempt 标 pagePartial', () => {
+    const snapshot = { steps: [step('s-open', '打开页面')], moduleManifest: undefined, candidateGroups: undefined, outcomeManifest: undefined }
+    const unmarked = computeRunDurationFacts(input({
+      run: { finishedAt: at(10) },
+      events: [status(0, 'RUNNING'), status(10, 'SUCCEEDED')],
+      snapshot,
+      stepRuns: [{ id: 'sr-open', stepId: 's-open', name: '打开页面', ordinal: 0, scopePath: '', status: 'SUCCEEDED' }],
+      attempts: [{ id: 'a-open', stepRunId: 'sr-open', startedAt: at(1), finishedAt: at(4) }],
+      pageWaits: [{ attemptId: 'a-open', startedAt: at(1.2), endedAt: at(2), reason: 'navigate' }],
+    }))
+    expect(unmarked.nodes[0]).toMatchObject({ pageMs: null, pagePartial: false, overlapMs: 0 })
+
+    const markedZero = computeRunDurationFacts(input({
+      run: { finishedAt: at(10) },
+      events: [status(0, 'RUNNING'), status(10, 'SUCCEEDED')],
+      snapshot,
+      stepRuns: [{ id: 'sr-open', stepId: 's-open', name: '打开页面', ordinal: 0, scopePath: '', status: 'SUCCEEDED' }],
+      attempts: [{ id: 'a-open', stepRunId: 'sr-open', startedAt: at(1), finishedAt: at(4) }],
+      pageWaits: [{ attemptId: 'a-open', startedAt: at(1), endedAt: at(1), reason: 'collector_ready' }],
+    }))
+    expect(markedZero.nodes[0]).toMatchObject({ pageMs: 0, pageWaitCount: 0, pagePartial: false })
+    expect(markedZero.facts.pageMs).toBe(0)
+
+    const mixed = computeRunDurationFacts(input({
+      run: { finishedAt: at(10) },
+      events: [status(0, 'RUNNING'), status(10, 'SUCCEEDED')],
+      snapshot,
+      stepRuns: [{ id: 'sr-open', stepId: 's-open', name: '打开页面', ordinal: 0, scopePath: '', status: 'SUCCEEDED' }],
+      attempts: [
+        { id: 'a-1', stepRunId: 'sr-open', startedAt: at(1), finishedAt: at(3) },
+        { id: 'a-2', stepRunId: 'sr-open', startedAt: at(3), finishedAt: at(6) },
+      ],
+      pageWaits: [
+        { attemptId: 'a-2', startedAt: at(3), endedAt: at(3), reason: 'collector_ready' },
+        { attemptId: 'a-2', startedAt: at(3.2), endedAt: at(4.2), reason: 'navigate' },
+      ],
+    }))
+    expect(mixed.nodes[0]).toMatchObject({ pageMs: 1_000, pagePartial: true, pageWaitCount: 1 })
+  })
 })

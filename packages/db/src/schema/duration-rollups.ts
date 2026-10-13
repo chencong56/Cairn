@@ -20,6 +20,8 @@ export type ScenarioDailySketches = ScenarioDetailSketches & {
   totalOk: DurationSketch
   /** 不属于场景集的运行的开跑前排队（任意状态）。 */
   queueStandalone: DurationSketch
+  model: DurationSketch
+  page: DurationSketch
 }
 
 /** 节点日汇总里尝试次数、迭代次数的精确计数。 */
@@ -52,6 +54,8 @@ export const durationScenarioDaily = cairnSchema.table(
     overheadSketch: jsonb('overhead_sketch').$type<DurationSketch>().notNull(),
     queueStandaloneSketch: jsonb('queue_standalone_sketch').$type<DurationSketch>().notNull(),
     totalOkSketch: jsonb('total_ok_sketch').$type<DurationSketch>().notNull(),
+    modelSketch: jsonb('model_sketch').$type<DurationSketch>(),
+    pageSketch: jsonb('page_sketch').$type<DurationSketch>(),
     detailSketches: jsonb('detail_sketches').$type<ScenarioDetailSketches>().notNull(),
     firstFinishedAt: timestamp('first_finished_at', { withTimezone: true }).notNull(),
     lastFinishedAt: timestamp('last_finished_at', { withTimezone: true }).notNull(),
@@ -85,6 +89,8 @@ export const durationNodeDaily = cairnSchema.table(
     assisted: integer('assisted').notNull(),
     iterationSum: bigint('iteration_sum', { mode: 'number' }).notNull(),
     activeSketch: jsonb('active_sketch').$type<DurationSketch>().notNull(),
+    modelSketch: jsonb('model_sketch').$type<DurationSketch>(),
+    pageSketch: jsonb('page_sketch').$type<DurationSketch>(),
     perIterationSketch: jsonb('per_iteration_sketch').$type<DurationSketch | null>(),
     counts: jsonb('counts').$type<NodeDailyCounts>().notNull(),
     resolutions: jsonb('resolutions').$type<Record<string, number>>().notNull(),

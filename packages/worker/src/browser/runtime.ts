@@ -917,6 +917,15 @@ export class SurfaceLostError extends Error {
   }
 }
 
+/** 页面仍在，但 FramePath 在预算内没对上。这是定位 miss，不是页面已丢失。 */
+export class FramePathUnresolvedError extends Error {
+  readonly code = 'FRAME_UNRESOLVED' as const
+  constructor(message: string) {
+    super(message)
+    this.name = 'FramePathUnresolvedError'
+  }
+}
+
 export type FrameResolve = { frame: Frame; trail: string[] }
 
 export async function resolveFramePath(
@@ -937,37 +946,62 @@ export async function resolveFramePath(
 
 /**
  * iframe 会先 attach 再导航，中间那段窗口里 `frame.url()` 是空串，按 urlPattern 一次快照就是 0 匹配。
- * 定位候选那层本来就有等待窗口（`countCandidate`），FramePath 没有等于把「还没加载完」判成「Frame 已失效」。
- * 匹配到多个不等待：那是 Descriptor 写得不够准，多等不会变清晰。
+ * 导航还会把刚 attach 的 Frame 拆掉，`frameElement()` / evaluate 会报 detached。
+ * 这些都不是「页面已丢失」：继续等到截止。页面本身关了才抛 SURFACE_LOST。
+ *
+ * 加载中也可能短暂出现多个候选（旧框还在、新框刚挂上）。未到截止前不按「多个」终局。
+ * 截止时仍是多个，才是 Descriptor 不够准。
  *
  * urlPattern 对当前 URL 或 iframe.src（跳转后属性常仍是入口地址）任一命中即可。
  * url 对不上时，只有 selector / name 在父文档里唯一命中才放行，避免进错并列 iframe。
  */
 async function waitForChildFrame(parent: Frame, step: FrameStep, deadline: number): Promise<Frame> {
   for (;;) {
-    const matches: Frame[] = []
-    for (const frame of parent.childFrames()) {
-      if (await frameMatches(frame, step)) matches.push(frame)
+    const owner = parent.page()
+    if (pageClosed(owner)) throw new SurfaceLostError('页面已关闭')
+    let matches: Frame[] = []
+    try {
+      for (const frame of parent.childFrames()) {
+        if (await frameMatches(frame, step)) matches.push(frame)
+      }
+    } catch (error) {
+      if (error instanceof SurfaceLostError) throw error
+      if (isSurfaceLost(error)) {
+        if (pageClosed(owner)) throw new SurfaceLostError(error instanceof Error ? error.message : '页面已关闭')
+        matches = []
+      } else {
+        throw error
+      }
     }
     if (matches.length === 1) return matches[0]!
-    if (matches.length > 1) throw new SurfaceLostError('FramePath 匹配到多个 frame')
-    if (Date.now() > deadline) throw new SurfaceLostError('FramePath 找不到对应 frame')
+    if (Date.now() > deadline) {
+      if (pageClosed(owner)) throw new SurfaceLostError('页面已关闭')
+      if (matches.length > 1) throw new SurfaceLostError('FramePath 匹配到多个 frame')
+      throw new FramePathUnresolvedError('FramePath 找不到对应 frame')
+    }
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
 }
 
 async function frameMatches(frame: Frame, step: FrameStep): Promise<boolean> {
-  const url = frame.url()
-  const name = frame.name()
+  if (pageClosed(frame.page())) throw new SurfaceLostError('页面已关闭')
+  let url = ''
+  let name = ''
+  try {
+    url = frame.url()
+    name = frame.name()
+  } catch (error) {
+    if (isSurfaceLost(error)) return false
+    throw error
+  }
   if (step.name && name !== step.name) return false
 
   let element
   try {
     element = await frame.frameElement()
   } catch (error) {
-    if (isSurfaceLost(error)) {
-      throw new SurfaceLostError(error instanceof Error ? error.message : 'Frame 已失效')
-    }
+    if (isSurfaceLost(error)) return false
+    throw error
   }
 
   try {
@@ -983,9 +1017,7 @@ async function frameMatches(frame: Frame, step: FrameStep): Promise<boolean> {
         srcAttr = srcs.attr
         srcProp = srcs.prop
       } catch (error) {
-        if (isSurfaceLost(error)) {
-          throw new SurfaceLostError(error instanceof Error ? error.message : 'Frame 已失效')
-        }
+        if (isSurfaceLost(error)) return false
       }
     }
     const urlOk = !step.urlPattern || frameUrlPatternHits(step.urlPattern, url, srcAttr, srcProp)
@@ -1004,9 +1036,7 @@ async function frameMatches(frame: Frame, step: FrameStep): Promise<boolean> {
         selectorHit = matched.hit
         selectorUnique = matched.unique
       } catch (error) {
-        if (isSurfaceLost(error)) {
-          throw new SurfaceLostError(error instanceof Error ? error.message : 'Frame 已失效')
-        }
+        if (isSurfaceLost(error)) return false
         return false
       }
       if (!selectorHit) return false
@@ -1016,6 +1046,9 @@ async function frameMatches(frame: Frame, step: FrameStep): Promise<boolean> {
     if (step.selector) return selectorUnique
     if (step.name) return await nameUniquelyMatches(frame, name, element)
     return false
+  } catch (error) {
+    if (isSurfaceLost(error)) return false
+    throw error
   } finally {
     await element?.dispose().catch(() => undefined)
   }
@@ -1334,9 +1367,10 @@ export async function isLocatorVisible(locator: Locator): Promise<boolean> {
 export function watchActionNavigation(page: Page): {
   /** graceMs：动作返回后等多久看是否发起导航（按键提交表单时请求晚于按键返回）。 */
   settle: (options?: { maxWaitMs?: number; graceMs?: number }) => Promise<string | null>
+  didNavigate: () => boolean
   dispose: () => void
 } {
-  if (typeof page.on !== 'function') return { settle: async () => null, dispose: () => undefined }
+  if (typeof page.on !== 'function') return { settle: async () => null, didNavigate: () => false, dispose: () => undefined }
   const pending = new Set<Request>()
   let latest: Request | undefined
   let failure: string | null = null
@@ -1376,6 +1410,7 @@ export function watchActionNavigation(page: Page): {
       }
       return failure
     },
+    didNavigate: () => Boolean(latest),
     dispose() {
       page.off('request', onRequest)
       page.off('response', onResponse)
@@ -1390,7 +1425,7 @@ export async function waitForPopup(page: Page, action: () => Promise<void>, time
   return pending
 }
 
-/** 只收集 opener 为当前页的新窗口；默认 click 仍走 waitForPopup。 */
+/** 收集本次动作打开的站点新页。opener 可用时只收当前页弹出的；target=_blank 默认 noopener 时退回本次新开页。 */
 export async function waitForPopupsFrom(
   page: Page,
   action: () => Promise<void>,
@@ -1400,19 +1435,100 @@ export async function waitForPopupsFrom(
   const pending: Promise<void>[] = []
   const onPage = (opened: Page) => {
     pending.push(
-      opened.opener().then((parent) => {
-        if (parent === page) found.push(opened)
-      }),
+      (async () => {
+        if (await isInternalPage(opened)) return
+        found.push(opened)
+      })(),
     )
   }
   page.context().on('page', onPage)
   try {
     await action()
-    await new Promise((resolve) => setTimeout(resolve, timeoutMs))
+    if (timeoutMs > 0) await new Promise((resolve) => setTimeout(resolve, timeoutMs))
     await Promise.all(pending)
-    return found.filter((item) => !item.isClosed())
+    const open = found.filter((item) => !item.isClosed())
+    const fromOpener: Page[] = []
+    for (const item of open) {
+      const parent = await item.opener().catch(() => null)
+      if (parent === page) fromOpener.push(item)
+    }
+    return fromOpener.length > 0 ? fromOpener : open
   } finally {
     page.context().off('page', onPage)
+  }
+}
+
+const ADOPTED_PAGE_SETTLE_MS = 8_000
+const FRAME_TREE_QUIET_MS = 400
+const VISIBLE_CONTENT_MIN_CHARS = 2
+
+function frameTreeSignature(page: Page): string {
+  try {
+    return page
+      .frames()
+      .map((frame) => {
+        try {
+          return `${frame.name()}\t${frame.url()}`
+        } catch {
+          return '?'
+        }
+      })
+      .join('\n')
+  } catch {
+    return ''
+  }
+}
+
+function frameUrlBlank(url: string): boolean {
+  return !url || url === 'about:blank' || url === 'about:srcdoc'
+}
+
+async function pageHasVisibleContent(page: Page): Promise<boolean> {
+  try {
+    const text = (await page.locator('body').innerText()).replace(/\s+/g, '').trim()
+    return text.length >= VISIBLE_CONTENT_MIN_CHARS
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 新标签刚打开时往往只有空壳，嵌套 iframe 还在 attach / 导航。
+ * 交接后等到文档落地，且父文档里的 iframe 都有地址、frame 树安静一小段，再让下一步开始定位。
+ * 没有 iframe 的页面还要等可见正文出现；纯白空壳不提前放行，预算用尽再交给定位阶梯。
+ */
+export async function waitForAdoptedPageReady(page: Page, timeoutMs = ADOPTED_PAGE_SETTLE_MS): Promise<void> {
+  if (pageClosed(page)) return
+  const deadline = Date.now() + Math.max(0, timeoutMs)
+  const remaining = () => Math.max(0, deadline - Date.now())
+  await page.waitForLoadState('domcontentloaded', { timeout: remaining() }).catch(() => undefined)
+  let lastSig = frameTreeSignature(page)
+  let quietSince = Date.now()
+  while (Date.now() < deadline && !pageClosed(page)) {
+    const sig = frameTreeSignature(page)
+    if (sig !== lastSig) {
+      lastSig = sig
+      quietSince = Date.now()
+    }
+    const treeQuiet = Date.now() - quietSince >= FRAME_TREE_QUIET_MS
+    let iframeInDom = 0
+    try {
+      iframeInDom = await page.locator('iframe, frame').count()
+    } catch {
+      return
+    }
+    const children = page.frames().filter((frame) => frame !== page.mainFrame())
+    const anyBlank = children.some((frame) => {
+      try {
+        return frameUrlBlank(frame.url())
+      } catch {
+        return true
+      }
+    })
+    const framesReady = treeQuiet && iframeInDom > 0 && children.length >= iframeInDom && !anyBlank
+    if (framesReady) return
+    if (treeQuiet && iframeInDom === 0 && (await pageHasVisibleContent(page))) return
+    await new Promise((resolve) => setTimeout(resolve, 50))
   }
 }
 

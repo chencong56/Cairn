@@ -99,6 +99,24 @@ function formatDuration(ms: number | null | undefined): string {
   return `${m}m ${rem}s`
 }
 
+function numberOrNull(value: JsonValue | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function formatStepComposition(node: Record<string, JsonValue> | undefined, fallbackMs: number | null): string {
+  const activeMs = numberOrNull(node?.activeMs) ?? fallbackMs
+  if (activeMs == null) return '-'
+  const modelMs = numberOrNull(node?.modelMs) ?? 0
+  const pageMs = numberOrNull(node?.pageMs)
+  const residualMs = numberOrNull(node?.residualMs) ?? 0
+  const parts: string[] = []
+  if (modelMs > 0) parts.push(`模型 ${formatDuration(modelMs)}`)
+  if (pageMs == null) parts.push('页面未测')
+  else if (pageMs > 0) parts.push(`页面 ${formatDuration(pageMs)}`)
+  if (parts.length > 0 && residualMs > 0) parts.push(`其余 ${formatDuration(residualMs)}`)
+  return parts.length ? `${formatDuration(activeMs)}（${parts.join(' · ')}）` : formatDuration(activeMs)
+}
+
 function record(value: JsonValue | undefined): Record<string, JsonValue> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
@@ -342,9 +360,16 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
 
   const started = source.startedAt ?? source.createdAt
   const finished = source.finishedAt
-  const durationMs = started && finished ? Math.max(0, new Date(String(finished)).getTime() - new Date(String(started)).getTime()) : null
+  const wallMs = started && finished ? Math.max(0, new Date(String(finished)).getTime() - new Date(String(started)).getTime()) : null
+  const durationFacts = record(source.duration)
+  const durationNodes = record(durationFacts.nodes)
+  const totalMs = numberOrNull(durationFacts.totalMs) ?? wallMs
+  const activeMs = numberOrNull(durationFacts.activeMs)
+  const modelMs = numberOrNull(durationFacts.modelMs) ?? 0
+  const pageMs = numberOrNull(durationFacts.pageMs)
+  const hasDurationFacts = Object.keys(durationFacts).length > 0
 
-  const summaryText = `${document.title} | 业务结论: ${labelFor(verdict)} | 步骤: ${passedSteps}/${totalSteps} 通过 | 耗时: ${formatDuration(durationMs)}`
+  const summaryText = `${document.title} | 业务结论: ${labelFor(verdict)} | 步骤: ${passedSteps}/${totalSteps} 通过 | 耗时: ${formatDuration(totalMs)}`
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -408,9 +433,14 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
         </div>
 
         <div class="stat-card">
-          <div class="stat-label">总执行耗时</div>
-          <div class="stat-value">${formatDuration(durationMs)}</div>
-          <div class="stat-subtext">开始: ${formatDate(started, timeZone).split(' ')[1] || '-'}</div>
+          <div class="stat-label">总耗时</div>
+          <div class="stat-value">${formatDuration(totalMs)}</div>
+          <div class="stat-subtext">${[
+            activeMs != null ? `执行 ${formatDuration(activeMs)}` : '',
+            modelMs > 0 ? `模型 ${formatDuration(modelMs)}` : '',
+            hasDurationFacts && pageMs == null ? '页面未测' : pageMs != null && pageMs > 0 ? `页面 ${formatDuration(pageMs)}` : '',
+            `开始: ${formatDate(started, timeZone).split(' ')[1] || '-'}`,
+          ].filter(Boolean).join(' · ')}</div>
         </div>
 
         <div class="stat-card">
@@ -464,7 +494,9 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
                 const sStatus = String(step.status ?? 'UNKNOWN')
                 const stepAttempts = records(step.attempts)
                 const lastAttempt = stepAttempts[stepAttempts.length - 1]
-                const stepDuration = lastAttempt?.durationMs != null ? formatDuration(Number(lastAttempt.durationMs)) : '-'
+                const nodeKey = step.stepId ? `step:${String(step.stepId)}` : ''
+                const fallbackMs = lastAttempt?.durationMs != null ? Number(lastAttempt.durationMs) : null
+                const stepDuration = formatStepComposition(record(durationNodes[nodeKey]), Number.isFinite(fallbackMs) ? fallbackMs : null)
                 const hasImg = screenshots.some((img) => img.caption && img.caption.includes(String(step.name)))
 
                 return `

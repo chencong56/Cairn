@@ -198,6 +198,12 @@ export const authControlTokenBodySchema = z.strictObject({
 })
 export type AuthControlTokenBody = z.infer<typeof authControlTokenBodySchema>
 
+/** 认证等待中由用户再次发起自动登录；持有控制权时带上 token 以便先交还输入权。 */
+export const retryAutoLoginBodySchema = z.strictObject({
+  token: z.string().min(16).max(128).optional(),
+})
+export type RetryAutoLoginBody = z.infer<typeof retryAutoLoginBodySchema>
+
 export const authControlHeartbeatResponseSchema = z.strictObject({
   expiresAt: utcInstantSchema,
   epoch: z.number().int().positive(),

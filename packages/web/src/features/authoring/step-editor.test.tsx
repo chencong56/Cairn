@@ -195,6 +195,9 @@ describe('StepEditor', () => {
       .element(screen.getByRole('combobox', { name: '点击后页面' }))
       .toBeInTheDocument()
     await screen.getByRole('combobox', { name: '点击后页面' }).click()
+    await expect
+      .element(screen.getByRole('option', { name: '未指定（打开新标签则跟随）' }))
+      .toBeInTheDocument()
     await screen.getByRole('option', { name: '切换到弹出窗口' }).click()
     const calls = onChange.mock.calls
     const next = calls[calls.length - 1]?.[0] as Step

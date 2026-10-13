@@ -89,6 +89,8 @@ describe('detectScenarioInsights', () => {
 
   it('flags slower / faster at ±20%', () => {
     expect(kinds(detectScenarioInsights(SCENARIO, scenarioStats({ activeP50: cmp(12_000, 10_000) })))).toEqual(['slower'])
+    expect(detectScenarioInsights(SCENARIO, scenarioStats({ activeP50: cmp(12_000, 10_000) }))[0]?.message).toContain('执行变慢')
+    expect(detectScenarioInsights(SCENARIO, scenarioStats({ activeP50: cmp(12_000, 10_000) }))[0]?.message).not.toContain('页面或系统性能变化')
     expect(kinds(detectScenarioInsights(SCENARIO, scenarioStats({ activeP50: cmp(11_900, 10_000) })))).toEqual([])
     expect(kinds(detectScenarioInsights(SCENARIO, scenarioStats({ activeP50: cmp(8_000, 10_000) })))).toEqual(['faster'])
     // 样本不足时 deltaPct 为 null，不下结论
@@ -150,5 +152,11 @@ describe('detectNodeInsights', () => {
     expect(kinds(detectNodeInsights(NODE, nodeStats({ retryRate: cmp(0.2, 0.05, 20, 15) })))).toEqual(['retry_increase'])
     expect(kinds(detectNodeInsights(NODE, nodeStats({ assistedRate: cmp(0.4, 0.1, 20, 30) })))).toEqual(['assist_increase'])
     expect(detectNodeInsights(NODE, nodeStats({ retryRate: cmp(0.1, 0.05, 20, 5) }))).toEqual([])
+  })
+
+  it('单次模型 / 页面 P50 涨超 20% 才发 model_increase / page_increase', () => {
+    expect(kinds(detectNodeInsights(NODE, nodeStats({ modelPerAttempt: cmp(6_000, 4_000) })))).toEqual(['model_increase'])
+    expect(kinds(detectNodeInsights(NODE, nodeStats({ pagePerAttempt: cmp(3_000, 2_000) })))).toEqual(['page_increase'])
+    expect(kinds(detectNodeInsights(NODE, nodeStats({ modelPerAttempt: cmp(4_400, 4_000) })))).toEqual([])
   })
 })

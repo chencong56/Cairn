@@ -375,6 +375,78 @@ describe('解析阶梯', () => {
     expect(appendResolutionDecision.mock.calls.at(-1)?.[1].decision.rungs.some((rung: { rung: string }) => rung.rung === 'M')).toBe(false)
   })
 
+  it('页面已关闭的 SURFACE_LOST 不升到 AI 级；活页面 FramePath miss 可以', async () => {
+    expect(isDeterministicMiss({
+      ok: false,
+      error: { code: 'SURFACE_LOST', category: 'INFRASTRUCTURE', retryable: true, safeMessage: '页面已丢失' },
+      diagnostics: { outcome: 'SURFACE_LOST', candidatesTried: [] },
+    })).toBe(false)
+    expect(isDeterministicMiss({
+      ok: false,
+      error: { code: 'TARGET_NOT_FOUND', category: 'EXECUTOR', retryable: true, safeMessage: '未找到' },
+      diagnostics: { outcome: 'NOT_FOUND', candidatesTried: [] },
+    })).toBe(true)
+    const framed = clickStep()
+    framed.input = {
+      target: { framePath: [{ urlPattern: '/goReportMgt' }], candidates: [{ by: 'text', value: '通信发展报表' }] },
+    }
+    const execute = vi.fn(async (command: BrowserCommand) =>
+      commandHasResolvableTarget(command) && command.target.candidates[0]?.by === 'css' ? found() : missing(),
+    )
+    const locate = vi.fn(async () => ({
+      ok: true,
+      route: 'text' as const,
+      candidate: { by: 'text' as const, value: '通信发展报表' },
+      center: [10, 20] as [number, number],
+      callNs: [1],
+    }))
+    const bindResolvedFromCandidate = vi.fn(async () => ({ ok: true, texts: ['通信发展报表'], tagName: 'A' }))
+    const outcome = await runResolutionLadder({
+      handle: {} as never,
+      ctx: ctx(framed, 'prefer_deterministic'),
+      step: framed,
+      command: commandFor(framed),
+      browser: {
+        bindResolvedFromCandidate,
+        clearResolved: vi.fn(async () => undefined),
+      } as unknown as BrowserPort,
+      ai: { locate } as unknown as AiPort,
+      consumption: { afterBaseline: async () => ({ kind: 'unchanged' as const }) } as unknown as MapConsumptionService,
+      execute,
+    })
+    expect(outcome.kind).toBe('success')
+    expect(locate).toHaveBeenCalledTimes(1)
+    expect(execute).toHaveBeenCalledTimes(2)
+  })
+
+  it('规则已解析到 frame 后未找到目标，AI 仍记 FRAME_UNSUPPORTED', async () => {
+    const framed = clickStep()
+    framed.input = {
+      target: { framePath: [{ selector: '#goReportMgt' }], candidates: [{ by: 'text', value: '通信发展报表' }] },
+    }
+    const execute = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'TARGET_NOT_FOUND', category: 'EXECUTOR' as const, retryable: true, safeMessage: '未找到' },
+      diagnostics: { outcome: 'NOT_FOUND' as const, candidatesTried: [], framePathResolved: ['main', '#goReportMgt'] },
+    }))
+    const locate = vi.fn()
+    const outcome = await runResolutionLadder({
+      handle: {} as never,
+      ctx: ctx(framed, 'prefer_deterministic'),
+      step: framed,
+      command: commandFor(framed),
+      browser: {} as BrowserPort,
+      ai: { locate } as unknown as AiPort,
+      consumption: { afterBaseline: async () => ({ kind: 'unchanged' as const }) } as unknown as MapConsumptionService,
+      execute,
+    })
+    expect(outcome.kind).toBe('failed')
+    expect(locate).not.toHaveBeenCalled()
+    expect(appendResolutionDecision.mock.calls.at(-1)?.[1].decision.rungs.some(
+      (rung: { outcome: string }) => rung.outcome === 'FRAME_UNSUPPORTED',
+    )).toBe(true)
+  })
+
   it('断言失败或弹窗交接失败不升到 AI 级', async () => {
     expect(isDeterministicMiss({
       ok: false,

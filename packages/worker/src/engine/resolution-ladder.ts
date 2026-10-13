@@ -221,9 +221,14 @@ async function runLocatorPlan(input: {
       }
       continue
     }
+    const framePathUnresolved =
+      lastResult != null &&
+      lastResult.diagnostics?.outcome === 'NOT_FOUND' &&
+      (lastResult.diagnostics.framePathResolved?.length ?? 0) === 0
     const aiOutcome = await tryAiRung({
       handle, ctx, step, command, target: command.target, effective, semantic,
       ai, browser, execute, rungs, plan, route: route === 'text_ai' ? 'text' : 'vision',
+      allowFramedFallback: framePathUnresolved,
     })
     if (aiOutcome.kind === 'success' || aiOutcome.kind === 'failed') return aiOutcome.outcome
     if (aiOutcome.error) lastError = aiOutcome.error
@@ -246,6 +251,7 @@ async function tryAiRung(input: {
   browser: BrowserPort
   execute: (command: BrowserCommand) => Promise<BrowserCommandResult>
   rungs: ResolutionRungRecord[]
+  allowFramedFallback?: boolean
 }): Promise<
   | { kind: 'success'; outcome: StepExecutionOutcome }
   | { kind: 'failed'; outcome: StepExecutionOutcome }
@@ -291,7 +297,9 @@ async function tryAiRung(input: {
     rungs.push({ rung: 'A', outcome: 'CANCELLED', spentMs: spent() })
     return persistFailed('CANCELLED', resolutionError('CANCELLED', '步骤已取消'))
   }
-  if (target.framePath.length > 0) {
+  // 规则已经进到具体 frame 再 miss，AI 首期仍不进子文档。
+  // FramePath 在活页面上没解析出来时，当前页就是执行面，允许 AI 看整页。
+  if (target.framePath.length > 0 && !input.allowFramedFallback) {
     rungs.push({ rung: 'A', outcome: 'FRAME_UNSUPPORTED', spentMs: spent() })
     return { kind: 'skip', reason: 'FRAME_UNSUPPORTED', error: resolutionError('FRAME_UNSUPPORTED', 'AI 定位首期只支持主文档') }
   }

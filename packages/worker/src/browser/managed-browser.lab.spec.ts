@@ -331,7 +331,7 @@ describe.skipIf(!enabled)('S-LIVE 受管浏览器探针', { timeout: 180_000 }, 
     await manager.release(grant.leaseId, 's-live')
   })
 
-  it('门户→报表中心→明细：未声明 pageAfter 时留在原页；声明 popup 后逐页用非 AI 规则提取表格与列表', async () => {
+  it('门户→报表中心→明细：显式 same 留在原页；未声明与声明 popup 都跟随新页', async () => {
     const { grant } = await acquireProbe()
     try {
     const origin = new URL(baseUrl).origin
@@ -353,16 +353,17 @@ describe.skipIf(!enabled)('S-LIVE 受管浏览器探针', { timeout: 180_000 }, 
       },
     }
 
-    // 1) 未声明：新页被标记，但执行页没变，表格找不到（用户遇到的现象）
+    // 1) 显式 same：新页不跟随，表格找不到
     const home = manager.pageForGrant(grant)
-    const undeclared = await manager.execute(grant, { type: 'click', target: cssTarget('#menu-report') })
-    expect(undeclared).toMatchObject({ ok: true, output: { popupOpened: true } })
+    const stay = await manager.execute(grant, { type: 'click', target: cssTarget('#menu-report'), pageAfter: 'same' })
+    expect(stay.ok).toBe(true)
+    expect(stay.ok && stay.output).toEqual({})
     expect(manager.pageForGrant(grant)).toBe(home)
     expect((await manager.execute(grant, regionTable)).ok).toBe(false)
 
-    // 2) 声明 popup：交接到报表中心，表格 + 列表都能提取
-    const toReport = await manager.execute(grant, { type: 'click', target: cssTarget('#menu-report'), pageAfter: 'popup' })
-    expect(toReport.ok ? null : toReport.error).toBeNull()
+    // 2) 未声明：自动交接到报表中心，表格 + 列表都能提取
+    const undeclared = await manager.execute(grant, { type: 'click', target: cssTarget('#menu-report') })
+    expect(undeclared).toMatchObject({ ok: true, output: { popupOpened: true, pageAfter: 'popup' } })
     expect(manager.pageForGrant(grant)?.url()).toContain('/portal-report.html')
     const region = await manager.execute(grant, regionTable)
     expect(region.ok ? null : region.error).toBeNull()

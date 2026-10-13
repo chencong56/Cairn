@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   inputAuthControl: vi.fn(),
   releaseAuthControl: vi.fn(),
   resumeRunAuth: vi.fn(),
+  retryAutoLogin: vi.fn(),
   subscribeBrowserFrames: vi.fn(),
   navigate: vi.fn(),
   fetchPlatformConfig: vi.fn(),

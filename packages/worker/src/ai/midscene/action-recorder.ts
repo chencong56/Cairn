@@ -10,6 +10,7 @@ import {
 } from '@cairn/shared'
 import { appendAiTaskEvent, type DbHandle } from '@cairn/db'
 import { inspectElementCandidate } from '../../browser/element-candidate-inspector.js'
+import { currentPageWaitCollector } from '../../browser/page-wait-collector.js'
 
 export interface ActionRecorderOptions {
   page: Page
@@ -306,6 +307,8 @@ export class ActionRecorder {
   private currentParamsSummary: Record<string, JsonValue> | null = null
   private documentEpoch = 1
   private isDestroyed = false
+  /** 动作真正发给浏览器的时刻：onDispatch 收尾之后，不含截图与元素检查。 */
+  private actionIssuedAt: number | null = null
 
   private onRequest = (request: any) => {
     try {
@@ -407,6 +410,7 @@ export class ActionRecorder {
       grant: this.opts.grant,
       sessionLease: this.opts.sessionLease,
     })
+    this.actionIssuedAt = Date.now()
   }
 
   /** 派发失败：动作抛错，SDK 不会再走收尾钩子，在这里补 failed。 */
@@ -439,6 +443,7 @@ export class ActionRecorder {
     }).catch(() => undefined)
     this.pendingOrdinal = null
     this.pendingActionName = null
+    this.actionIssuedAt = null
   }
 
   /**
@@ -482,9 +487,14 @@ export class ActionRecorder {
     // 写请求窗口随动作收尾闭合；下一个动作的派发重新开窗。
     this.currentWriteSignalCount = 0
     this.currentWriteSignalPaths = []
+    const issuedAt = this.actionIssuedAt
     this.pendingOrdinal = null
     this.pendingActionName = null
     this.currentPageBefore = null
+    this.actionIssuedAt = null
+    if (issuedAt != null) {
+      await currentPageWaitCollector()?.record('action_settle', new Date(issuedAt), new Date(), this.opts.page.url())
+    }
   }
 
   private contextValues(): string[] | undefined {

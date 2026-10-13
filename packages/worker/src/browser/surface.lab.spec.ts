@@ -158,7 +158,7 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
     }
   })
 
-  it('FrameStep.selector 按父文档匹配 iframe，错选择器走 SURFACE_LOST', async ({ skip }) => {
+  it('FrameStep.selector 按父文档匹配 iframe，错选择器走 NOT_FOUND', async ({ skip }) => {
     if (!hasBrowser) skip()
     const page = await open('/nested.html')
     await page.waitForSelector('#outer-frame')
@@ -183,7 +183,7 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
     })
     expect(wrong.ok).toBe(false)
     if (wrong.ok) throw new Error('ok')
-    expect(wrong.error.code).toBe('SURFACE_LOST')
+    expect(wrong.error.code).toBe('TARGET_NOT_FOUND')
 
     const mismatch = await executeOnPage(page, {
       type: 'click',
@@ -193,7 +193,7 @@ describe('Browser Surface × target-surface-lab（L2）', { timeout: 180_000 }, 
     })
     expect(mismatch.ok).toBe(false)
     if (mismatch.ok) throw new Error('ok')
-    expect(mismatch.error.code).toBe('SURFACE_LOST')
+    expect(mismatch.error.code).toBe('TARGET_NOT_FOUND')
   })
 
   it('找不到 / 多匹配 / 页面关闭分别给出结构化错误', async ({ skip }) => {

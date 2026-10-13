@@ -170,4 +170,13 @@ describe('占用说明', () => {
     expect(describeQueuedTrialWait({ hold: { mine: false, actorName: 'Bob' } })).toContain('Bob')
     expect(describeQueuedTrialWait({ hold: null, waitReasonCopy: '会话已达上限。' })).toContain('会话已达上限')
   })
+
+  it('describeQueuedTrialWait 没有执行节点时不说会自动开始', () => {
+    expect(
+      describeQueuedTrialWait({ hold: null, waitReason: 'NO_ELIGIBLE_WORKER', waitReasonCopy: '当前没有可领取的执行节点。' }),
+    ).toMatch(/没有可用的执行节点/)
+    expect(
+      describeQueuedTrialWait({ hold: null, waitReason: 'NO_ELIGIBLE_WORKER', waitReasonCopy: '当前没有可领取的执行节点。' }),
+    ).not.toMatch(/自动开始/)
+  })
 })

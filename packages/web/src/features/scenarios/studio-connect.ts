@@ -76,6 +76,7 @@ export function deriveSessionPreparationStage(input: {
   errorCode?: string | null
   prepareFailed?: boolean
   errorMessage?: string | null
+  waitReason?: string | null
 }): SessionPreparationStageInfo {
   if (input.sessionOpen) {
     return {
@@ -97,6 +98,28 @@ export function deriveSessionPreparationStage(input: {
 
   const status = input.operationStatus
   if (status === 'QUEUED') {
+    if (input.waitReason === 'NO_ELIGIBLE_WORKER') {
+      return {
+        currentStage: 'queued',
+        stageBadge: '无法开始',
+        stepIndex: 0,
+        failedStepIndex: 0,
+        title: '没有可用的执行节点',
+        detail: '执行节点进程未在线，这次准备不会被领取。请先启动 Worker，或取消这次准备。',
+        statusTone: 'warning',
+      }
+    }
+    if (input.waitReason === 'WORKER_PROTOCOL_MISSING') {
+      return {
+        currentStage: 'queued',
+        stageBadge: '无法开始',
+        stepIndex: 0,
+        failedStepIndex: 0,
+        title: '没有可用的执行节点',
+        detail: '在线的执行节点版本不支持此操作，这次准备不会被领取。请检查执行节点，或取消这次准备。',
+        statusTone: 'warning',
+      }
+    }
     return {
       currentStage: 'queued',
       stageBadge: '排队中',
@@ -281,6 +304,7 @@ export function formatOperationTimeout(input: {
   nowMs?: number
   defaultLoginTimeoutSeconds?: number
   authWaitSeconds?: number
+  waitReason?: string | null
 }): OperationTimeoutInfo {
   const now = input.nowMs ?? Date.now()
   const createdRaw = input.createdAt ? new Date(input.createdAt).getTime() : now
@@ -306,6 +330,17 @@ export function formatOperationTimeout(input: {
   }
 
   if (input.status === 'QUEUED') {
+    if (input.waitReason === 'NO_ELIGIBLE_WORKER' || input.waitReason === 'WORKER_PROTOCOL_MISSING') {
+      return {
+        type: 'queue',
+        remainingSeconds: null,
+        elapsedSeconds: elapsed,
+        hint:
+          input.waitReason === 'WORKER_PROTOCOL_MISSING'
+            ? '在线节点不支持此操作，排队不会开始'
+            : '没有在线的执行节点，排队不会开始',
+      }
+    }
     if (input.queueDeadlineAt) {
       const deadline = new Date(input.queueDeadlineAt).getTime()
       const remaining = Math.max(0, Math.floor((deadline - now) / 1000))

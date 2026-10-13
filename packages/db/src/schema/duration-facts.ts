@@ -1,5 +1,6 @@
-import { bigint, boolean, index, integer, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { bigint, boolean, index, integer, jsonb, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import type {
+  DurationCompositionIncompleteReason,
   DurationIncompleteReason,
   DurationNodeKind,
   DurationResolutionLevel,
@@ -37,6 +38,12 @@ export const runDurationFacts = cairnSchema.table(
     unclassifiedMs: bigint('unclassified_ms', { mode: 'number' }),
     queueMs: bigint('queue_ms', { mode: 'number' }),
     overheadMs: bigint('overhead_ms', { mode: 'number' }),
+    modelMs: bigint('model_ms', { mode: 'number' }).notNull().default(0),
+    pageMs: bigint('page_ms', { mode: 'number' }),
+    overlapMs: bigint('overlap_ms', { mode: 'number' }),
+    residualMs: bigint('residual_ms', { mode: 'number' }).notNull().default(0),
+    pagePartial: boolean('page_partial').notNull().default(false),
+    compositionIncompleteReasons: jsonb('composition_incomplete_reasons').$type<DurationCompositionIncompleteReason[]>().notNull().default([]),
     workerLost: boolean('worker_lost').notNull(),
     complete: boolean('complete').notNull(),
     incompleteReason: text('incomplete_reason').$type<DurationIncompleteReason>(),
@@ -70,6 +77,15 @@ export const runNodeDurationFacts = cairnSchema.table(
     attemptCount: integer('attempt_count').notNull(),
     iterationCount: integer('iteration_count').notNull(),
     maxResolution: text('max_resolution').$type<DurationResolutionLevel>(),
+    modelMs: bigint('model_ms', { mode: 'number' }).notNull().default(0),
+    pageMs: bigint('page_ms', { mode: 'number' }),
+    overlapMs: bigint('overlap_ms', { mode: 'number' }),
+    residualMs: bigint('residual_ms', { mode: 'number' }).notNull().default(0),
+    modelCallCount: integer('model_call_count').notNull().default(0),
+    pageWaitCount: integer('page_wait_count').notNull().default(0),
+    pagePartial: boolean('page_partial').notNull().default(false),
+    compositionComplete: boolean('composition_complete').notNull().default(true),
+    compositionIncompleteReasons: jsonb('composition_incomplete_reasons').$type<DurationCompositionIncompleteReason[]>().notNull().default([]),
   },
   (t) => [
     primaryKey({ name: 'run_node_duration_facts_pk', columns: [t.runId, t.nodeKey] }),

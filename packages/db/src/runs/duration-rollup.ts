@@ -33,7 +33,7 @@ import type { DurationRollupBackfillState, NodeDailyCounts, ScenarioDailySketche
  */
 
 /** 汇总口径版本：改了聚合方式就加一，作业会整体重建。 */
-export const DURATION_ROLLUP_CALC_VERSION = 1
+export const DURATION_ROLLUP_CALC_VERSION = 2
 const STATE_ID = 'default'
 
 // ---------------------------------------------------------------------------
@@ -60,6 +60,8 @@ export interface RunSample {
   reviewMs: number | null
   queueMs: number | null
   overheadMs: number | null
+  modelMs: number
+  pageMs: number | null
   complete: boolean
 }
 
@@ -79,6 +81,8 @@ export interface NodeSample {
   attemptCount: number
   iterationCount: number
   maxResolution: DurationResolutionLevel | null
+  modelMs: number
+  pageMs: number | null
   finishedAt: Date
   runFinishedAt: Date
   scenarioVersionId: string
@@ -110,7 +114,12 @@ export interface ScenarioDayAgg {
 }
 
 /** 节点日聚合的草图：每次迭代的耗时只在有节点不是恰好迭代一次时另存，否则与执行耗时相同。 */
-export type NodeAggSketches = { active: DurationSketch; perIteration: DurationSketch | null }
+export type NodeAggSketches = {
+  active: DurationSketch
+  perIteration: DurationSketch | null
+  model: DurationSketch
+  page: DurationSketch
+}
 
 export interface NodeDayAgg {
   scenarioId: string
@@ -194,6 +203,14 @@ function scenarioAggOf(statDay: string, list: RunSample[], exactLimit: number): 
         list.filter((row) => row.suiteRunId === null).map((row) => row.queueMs),
         exactLimit,
       ),
+      model: durationSketchOf(
+        samples.map((row) => row.modelMs),
+        exactLimit,
+      ),
+      page: durationSketchOf(
+        samples.filter((row) => row.pageMs !== null).map((row) => row.pageMs),
+        exactLimit,
+      ),
     },
     firstFinishedAt: firstAt,
     lastFinishedAt: lastAt,
@@ -242,6 +259,14 @@ function nodeAggOf(statDay: string, list: NodeSample[], hasChildren: boolean, ex
             exactLimit,
           )
         : null,
+      model: durationSketchOf(
+        ok.map((node) => node.modelMs),
+        exactLimit,
+      ),
+      page: durationSketchOf(
+        ok.filter((node) => node.pageMs !== null).map((node) => node.pageMs),
+        exactLimit,
+      ),
     },
     counts: {
       attempt: durationCountsOf(ok.map((node) => node.attemptCount)),
@@ -284,7 +309,7 @@ export interface ScenarioTotals {
   sketches: ScenarioDailySketches
 }
 
-const SCENARIO_SKETCH_KEYS = ['active', 'total', 'authWait', 'requeue', 'review', 'queue', 'overhead', 'totalOk', 'queueStandalone'] as const
+const SCENARIO_SKETCH_KEYS = ['active', 'total', 'authWait', 'requeue', 'review', 'queue', 'overhead', 'totalOk', 'queueStandalone', 'model', 'page'] as const
 
 function mergeSketchFields<K extends string>(keys: readonly K[], items: readonly Record<K, DurationSketch>[], exactLimit: number): Record<K, DurationSketch> {
   return Object.fromEntries(keys.map((key) => [key, mergeDurationSketches(items.map((item) => item[key]), exactLimit)])) as Record<K, DurationSketch>
@@ -317,7 +342,7 @@ export interface NodeTotals {
   retried: number
   assisted: number
   iterationSum: number
-  sketches: { active: DurationSketch; perIteration: DurationSketch }
+  sketches: { active: DurationSketch; perIteration: DurationSketch; model: DurationSketch; page: DurationSketch }
   counts: NodeDailyCounts
   resolutions: Record<string, number>
 }
@@ -342,7 +367,18 @@ export function nodeTotalsOf(aggs: readonly NodeDayAgg[], exactLimit = DURATION_
     retried: aggs.reduce((total, agg) => total + agg.retried, 0),
     assisted: aggs.reduce((total, agg) => total + agg.assisted, 0),
     iterationSum: aggs.reduce((total, agg) => total + agg.iterationSum, 0),
-    sketches: { active, perIteration },
+    sketches: {
+      active,
+      perIteration,
+      model: mergeDurationSketches(
+        aggs.map((agg) => agg.sketches.model),
+        exactLimit,
+      ),
+      page: mergeDurationSketches(
+        aggs.map((agg) => agg.sketches.page),
+        exactLimit,
+      ),
+    },
     counts: {
       attempt: mergeDurationCounts(aggs.map((agg) => agg.counts.attempt)),
       iteration: mergeDurationCounts(aggs.map((agg) => agg.counts.iteration)),
@@ -383,6 +419,8 @@ export async function loadRunFactRows(db: Db, where: SQL | undefined, limit?: nu
       reviewMs: f.reviewMs,
       queueMs: f.queueMs,
       overheadMs: f.overheadMs,
+      modelMs: f.modelMs,
+      pageMs: f.pageMs,
       complete: f.complete,
     })
     .from(f)
@@ -416,6 +454,8 @@ export async function loadNodeFactRows(db: Db, where: SQL | undefined, limit?: n
       attemptCount: n.attemptCount,
       iterationCount: n.iterationCount,
       maxResolution: n.maxResolution,
+      modelMs: n.modelMs,
+      pageMs: n.pageMs,
       finishedAt: n.finishedAt,
       runFinishedAt: f.finishedAt,
       scenarioVersionId: f.scenarioVersionId,
@@ -507,6 +547,8 @@ export async function recomputeDurationRollupDay(db: Db, scenarioId: string, sta
         overheadSketch: compactDurationSketch(agg.sketches.overhead),
         queueStandaloneSketch: compactDurationSketch(agg.sketches.queueStandalone),
         totalOkSketch: compactDurationSketch(agg.sketches.totalOk),
+        modelSketch: compactDurationSketch(agg.sketches.model),
+        pageSketch: compactDurationSketch(agg.sketches.page),
         detailSketches: {
           total: compactDurationSketch(agg.sketches.total),
           authWait: compactDurationSketch(agg.sketches.authWait),
@@ -541,6 +583,8 @@ export async function recomputeDurationRollupDay(db: Db, scenarioId: string, sta
           assisted: agg.assisted,
           iterationSum: agg.iterationSum,
           activeSketch: compactDurationSketch(agg.sketches.active),
+          modelSketch: compactDurationSketch(agg.sketches.model),
+          pageSketch: compactDurationSketch(agg.sketches.page),
           perIterationSketch: agg.sketches.perIteration ? compactDurationSketch(agg.sketches.perIteration) : null,
           counts: agg.counts,
           resolutions: agg.resolutions,
@@ -706,7 +750,7 @@ async function hasDirtyDays(db: Db, scenarioIds: string[], fromDay: string, toDa
 }
 
 /** 汇总里的草图分列：页面只读前四项，分项（detail）只在周期报告给变慢 / 变快场景归因时读。 */
-export type ScenarioSketchField = 'active' | 'overhead' | 'queueStandalone' | 'totalOk' | 'detail'
+export type ScenarioSketchField = 'active' | 'overhead' | 'queueStandalone' | 'totalOk' | 'model' | 'page' | 'detail'
 export const PAGE_SKETCH_FIELDS: readonly ScenarioSketchField[] = ['active', 'overhead', 'queueStandalone', 'totalOk']
 
 /** 场景日聚合：统计时区且汇总就绪时读汇总（只读需要的草图列），否则现读明细（有上限）在内存里聚合。 */
@@ -749,6 +793,8 @@ export async function loadScenarioAggs(
         ...(fields.has('overhead') ? { overheadSketch: s.overheadSketch } : {}),
         ...(fields.has('queueStandalone') ? { queueStandaloneSketch: s.queueStandaloneSketch } : {}),
         ...(fields.has('totalOk') ? { totalOkSketch: s.totalOkSketch } : {}),
+        ...(fields.has('model') ? { modelSketch: s.modelSketch } : {}),
+        ...(fields.has('page') ? { pageSketch: s.pageSketch } : {}),
         ...(fields.has('detail') ? { detailSketches: s.detailSketches } : {}),
       })
       .from(s)
@@ -761,11 +807,13 @@ export async function loadScenarioAggs(
         ),
       )
     const aggs: ScenarioDayAgg[] = rows.map((row) => {
-      const { activeSketch, overheadSketch, queueStandaloneSketch, totalOkSketch, detailSketches, ...rest } = row as typeof row & {
+      const { activeSketch, overheadSketch, queueStandaloneSketch, totalOkSketch, modelSketch, pageSketch, detailSketches, ...rest } = row as typeof row & {
         activeSketch?: DurationSketch
         overheadSketch?: DurationSketch
         queueStandaloneSketch?: DurationSketch
         totalOkSketch?: DurationSketch
+        modelSketch?: DurationSketch | null
+        pageSketch?: DurationSketch | null
         detailSketches?: { total: DurationSketch; authWait: DurationSketch; requeue: DurationSketch; review: DurationSketch; queue: DurationSketch }
       }
       return {
@@ -775,6 +823,8 @@ export async function loadScenarioAggs(
           overhead: overheadSketch ?? empty,
           queueStandalone: queueStandaloneSketch ?? empty,
           totalOk: totalOkSketch ?? empty,
+          model: modelSketch ?? empty,
+          page: pageSketch ?? empty,
           total: detailSketches?.total ?? empty,
           authWait: detailSketches?.authWait ?? empty,
           requeue: detailSketches?.requeue ?? empty,
@@ -831,10 +881,15 @@ export async function loadNodeAggs(
           input.trigger === 'all' ? undefined : eq(nd.triggerSource, input.trigger),
         ),
       )
-    return rows.map(({ updatedAt: _updatedAt, activeSketch, perIterationSketch, ...row }) => ({
+    return rows.map(({ updatedAt: _updatedAt, activeSketch, perIterationSketch, modelSketch, pageSketch, ...row }) => ({
       ...row,
       parentKey: null,
-      sketches: { active: activeSketch, perIteration: perIterationSketch ?? null },
+      sketches: {
+        active: activeSketch,
+        perIteration: perIterationSketch ?? null,
+        model: modelSketch ?? emptyDurationSketch(),
+        page: pageSketch ?? emptyDurationSketch(),
+      },
     }))
   }
   const { runNodeDurationFacts: n, runDurationFacts: f } = schemaFor(db)

@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronRight, Clock, Flame, MinusCircle, XCircle } from '
 import {
   DURATION_COMPONENT_LABELS,
   describeDurationTag,
+  exclusiveSlicesOf,
   formatDurationShort,
   type DurationAttribution,
   type DurationComponentKey,
@@ -100,6 +101,27 @@ function ExpandButton({ open, onToggle }: { open: boolean; onToggle: () => void 
   )
 }
 
+function NodeDurationBar({ node, pct }: { node: NodeDurationFacts; pct: number }) {
+  const slices = exclusiveSlicesOf(node)
+  const failed = node.status === 'FAILED'
+  const empty = node.activeMs <= 0
+  if (failed || empty || (slices.mode === 'two' && node.modelMs <= 0)) {
+    return <div className={cn('h-full w-full', failed ? 'bg-status-error' : pct >= 30 ? 'bg-status-warning' : 'bg-primary/70')} />
+  }
+  if (slices.mode === 'undetermined') {
+    return <div className='h-full w-full bg-muted-foreground/25' title='重叠未测' />
+  }
+  const widthOf = (value: number) => `${node.activeMs > 0 ? Math.min(100, (value / node.activeMs) * 100) : 0}%`
+  return (
+    <>
+      {slices.modelOnly > 0 ? <div className='h-full bg-primary' style={{ width: widthOf(slices.modelOnly) }} title={`模型独占 ${ms(slices.modelOnly)}`} /> : null}
+      {slices.overlap > 0 ? <div className='h-full bg-primary/60' style={{ width: widthOf(slices.overlap) }} title={`重叠 ${ms(slices.overlap)}`} /> : null}
+      {slices.pageOnly > 0 ? <div className='h-full bg-status-warning' style={{ width: widthOf(slices.pageOnly) }} title={`页面独占 ${ms(slices.pageOnly)}`} /> : null}
+      {slices.residual > 0 ? <div className='h-full flex-1 bg-primary/30' title={`其余 ${ms(slices.residual)}`} /> : null}
+    </>
+  )
+}
+
 const BREAKDOWN: Array<[DurationComponentKey, keyof RunDurationReadout['facts']]> = [
   ['active', 'activeMs'],
   ['authWait', 'authWaitMs'],
@@ -163,17 +185,28 @@ export function RunDurationSection({ run, onSelectStep }: { run: RunDetailDto; o
             {KIND_LABELS[node.kind] ? <Badge variant='outline' className='shrink-0'>{KIND_LABELS[node.kind]}</Badge> : null}
           </div>
           <div className='mx-3 flex min-w-0 flex-1 items-center gap-2'>
-            <div className='h-2 flex-1 overflow-hidden rounded-full bg-muted/50'>
+            <div className='flex h-2 flex-1 overflow-hidden rounded-full bg-muted/50'>
               <div
-                className={cn('h-full rounded-full transition-[width] motion-reduce:transition-none', node.status === 'FAILED' ? 'bg-status-error' : pct >= 30 ? 'bg-status-warning' : 'bg-primary/70')}
+                className='flex h-full overflow-hidden rounded-full transition-[width] motion-reduce:transition-none'
                 style={{ width: `${pct > 0 ? Math.max(2, pct) : 0}%` }}
-              />
+              >
+                <NodeDurationBar node={node} pct={pct} />
+              </div>
             </div>
           </div>
           <div className='flex shrink-0 items-center justify-end gap-2 text-right'>
             {retries > 0 ? <span className='text-caption text-status-warning'>重试 {retries}</span> : null}
             {node.iterationCount > 1 ? <span className='text-caption text-muted-foreground'>迭代 {node.iterationCount}</span> : null}
-            <span className='w-14 font-mono text-caption font-medium text-foreground'>{node.status === 'RUNNING' && node.activeMs === 0 ? '进行中' : ms(node.activeMs)}</span>
+            <span className='min-w-14 font-mono text-caption font-medium text-foreground'>
+              {node.status === 'RUNNING' && node.activeMs === 0 ? '进行中' : ms(node.activeMs)}
+              {node.modelMs > 0 ? <span className='ml-1 text-3xs font-normal text-muted-foreground'>模型 {ms(node.modelMs)}</span> : null}
+              {node.pageMs == null ? (
+                <span className='ml-1 text-3xs font-normal text-muted-foreground'>页面未测</span>
+              ) : node.pageMs > 0 ? (
+                <span className='ml-1 text-3xs font-normal text-muted-foreground'>页面 {ms(node.pageMs)}</span>
+              ) : null}
+              {node.overlapMs == null ? <span className='ml-1 text-3xs font-normal text-muted-foreground'>重叠未测</span> : null}
+            </span>
             <span className='w-8 text-right font-mono text-3xs text-muted-foreground'>{pct}%</span>
           </div>
         </div>
@@ -229,7 +262,31 @@ export function RunDurationSection({ run, onSelectStep }: { run: RunDetailDto; o
                 </span>
               )
             })}
+            {data.facts.modelMs > 0 ? (
+              <span>
+                模型 <strong className='font-mono text-foreground'>{ms(data.facts.modelMs)}</strong>
+              </span>
+            ) : null}
+            {data.facts.pageMs == null ? (
+              <span>页面未测</span>
+            ) : (
+              <span>
+                页面 <strong className='font-mono text-foreground'>{ms(data.facts.pageMs)}</strong>
+              </span>
+            )}
+            {data.facts.overlapMs != null && data.facts.overlapMs > 0 ? (
+              <span>
+                重叠 <strong className='font-mono text-foreground'>{ms(data.facts.overlapMs)}</strong>
+              </span>
+            ) : null}
+            {data.facts.residualMs > 0 && (data.facts.modelMs > 0 || data.facts.pageMs != null) ? (
+              <span>
+                其余 <strong className='font-mono text-foreground'>{ms(data.facts.residualMs)}</strong>
+              </span>
+            ) : null}
+            {data.facts.pagePartial ? <Badge variant='outline'>部分步骤页面已测</Badge> : null}
             {data.facts.workerLost ? <Badge variant='outline' className='text-status-warning'>出现过执行节点失联</Badge> : null}
+            <span className='basis-full text-3xs text-muted-foreground'>页面 = 平台为等待页面可用而阻塞的时间，不是 document.load</span>
           </div>
           {!data.facts.complete && data.facts.incompleteReason ? (
             <p className='text-label text-muted-foreground'>{INCOMPLETE_LABELS[data.facts.incompleteReason] ?? '耗时分解不完整'}</p>

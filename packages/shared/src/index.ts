@@ -1765,6 +1765,19 @@ export {
   type AiResult,
   type AiCallEvidence,
 } from './ai-runtime.js'
+export {
+  PAGE_WAIT_KIND,
+  PAGE_WAIT_REASONS,
+  pageWaitReasonSchema,
+  pageWaitEvidenceSchema,
+  isPageWaitEvidence,
+  DURATION_CHECK_COMPONENTS,
+  durationCheckComponentSchema,
+  durationCheckComponentOf,
+  type PageWaitReason,
+  type PageWaitEvidence,
+  type DurationCheckComponent,
+} from './page-wait.js'
 export { originsFromTargetUrls, urlBelongsToTargetOrigins, loginScopeFromTargetUrl } from './origin.js'
 export {
   MAX_FRAME_DEPTH,
@@ -3049,6 +3062,7 @@ export {
   acquireAuthControlBodySchema,
   acquireAuthControlResponseSchema,
   authControlTokenBodySchema,
+  retryAutoLoginBodySchema,
   authControlHeartbeatResponseSchema,
   authControlInputBodySchema,
   authControlInputReceiptSchema,
@@ -3068,6 +3082,7 @@ export {
   type AcquireAuthControlBody,
   type AcquireAuthControlResponse,
   type AuthControlTokenBody,
+  type RetryAutoLoginBody,
   type AuthControlInputBody,
   type AuthControlInputReceipt,
   type ManagedBrowserErrorCode,

@@ -73,7 +73,7 @@ import {
 } from './session-live.js'
 import { abandonOccupancy, acquireExclusive, applyReuse, bindOccupancy, ensureAuth, ensureProfileAuth, enterWaitingForAuth, evictIfAtCapacity, finishClaimedAcquire, launchAndOpen, liveSessionIdForOwner, loadTargetAuth, recoverAuth, recoverAuthHeld, resolveLoginCredential, unbindOccupancy, waitInterruptible, withHeldOccupancy } from './session-claim.js'
 import { attachSessionAuthObserver } from './session-idle-observer.js'
-import { attachMaintenanceOperation, attachValidationOperation, completeOccupiedAuth, finishMaintenance, markMaintenanceOutcomeUnknown, markSessionLost, persistProfileObservation, resolveAccountCredential, resolveAccountSecrets, runMaintenanceAuth, verifyOccupiedOwner } from './session-maintenance-runtime.js'
+import { attachMaintenanceOperation, attachValidationOperation, completeOccupiedAuth, finishMaintenance, markMaintenanceOutcomeUnknown, markSessionLost, persistProfileObservation, resolveAccountCredential, resolveAccountSecrets, retryOccupiedAutoLogin, runMaintenanceAuth, verifyOccupiedOwner } from './session-maintenance-runtime.js'
 import { settleOccupiedLanding, type SettleOccupiedLandingInput } from './landing-settle.js'
 import { acquireRunAuthControl, applyRecoveryRule, executeAuthInput, expiredAuthObservation, failInRunAuthRecovery, heartbeatRunAuthControl, inputRunAuthControl, observeInRunAuth, observeInRunAuthHeld, releaseRunAuthControl, restoreAuthGateFromCheckpoint, resumeRunAuth, verifyInRunAuth } from './session-auth-control.js'
 import { adoptPage, assertCommand, closeManagedPage, closeRunPage, ensureRunPage, execute, invalidate, pageForGrant, runManagedPage, runSurfaceCommand, startTracingForLease, stopTracingForLease, withManagedPage } from './session-command.js'
@@ -566,6 +566,13 @@ export class BrowserSessionManager {
     _input?: { actorId: string; token?: string },
   ): Promise<AuthObservation> {
     return completeOccupiedAuth.call(this, ownerId, _input)
+  }
+
+  async retryOccupiedAutoLogin(
+    ownerId: string,
+    input?: { actorId: string; token?: string },
+  ): Promise<AuthObservation> {
+    return retryOccupiedAutoLogin.call(this, ownerId, input)
   }
 
   async attachMaintenanceOperation(input: {

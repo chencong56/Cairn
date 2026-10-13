@@ -344,6 +344,26 @@ function sketchCompare(current: DurationSketch, base: DurationSketch, p: number)
   return { current: c, base: b, deltaPct: durationDeltaPct(c, b, current.n, base.n), currentSamples: current.n, baseSamples: base.n }
 }
 
+function perAttemptCompare(
+  current: ReturnType<typeof nodeTotalsOf>,
+  base: ReturnType<typeof nodeTotalsOf>,
+  key: 'model' | 'page',
+): DurationComparison {
+  const attemptsNow = Math.max(1, durationCountsQuantile(current.counts.attempt, 50) ?? 1)
+  const attemptsBase = Math.max(1, durationCountsQuantile(base.counts.attempt, 50) ?? 1)
+  const cRaw = quantile(current.sketches[key], 50)
+  const bRaw = quantile(base.sketches[key], 50)
+  const c = cRaw == null ? null : Math.round(cRaw / attemptsNow)
+  const b = bRaw == null ? null : Math.round(bRaw / attemptsBase)
+  return {
+    current: c,
+    base: b,
+    deltaPct: durationDeltaPct(c, b, current.sketches[key].n, base.sketches[key].n),
+    currentSamples: current.sketches[key].n,
+    baseSamples: base.sketches[key].n,
+  }
+}
+
 function waitRatioOfTotals(totals: { waitSumMs: number; totalSumMs: number; waitSamples: number }): { value: number | null; samples: number } {
   return { value: rate(totals.waitSumMs, totals.totalSumMs), samples: totals.waitSamples }
 }
@@ -611,6 +631,8 @@ export function nodeRowsOf(
               assistedRate,
               medianIterations: { current: durationCountsQuantile(t.counts.iteration, 50), base: durationCountsQuantile(tb.counts.iteration, 50) },
               perIterationP50: { current: quantile(t.sketches.perIteration, 50), base: quantile(tb.sketches.perIteration, 50) },
+              modelPerAttempt: perAttemptCompare(t, tb, 'model'),
+              pagePerAttempt: perAttemptCompare(t, tb, 'page'),
             },
           )
         : []
@@ -625,6 +647,8 @@ export function nodeRowsOf(
       samples: t.ok,
       baseSamples: tb.ok,
       activeP50: p50.current,
+      modelP50: quantile(t.sketches.model, 50),
+      pageP50: quantile(t.sketches.page, 50),
       activeP95: quantile(t.sketches.active, 95),
       baseP50: p50.base,
       deltaPct: p50.deltaPct,

@@ -15,6 +15,7 @@ import {
   appendSessionEvent,
   getSessionOperation,
   getSessionById,
+  findAuthWaitLeaseForOperation,
 } from '@cairn/db'
 import { BrowserSessionManager, SessionLeaseError } from './session-manager'
 import { createBrowserPort } from './port'
@@ -30,6 +31,17 @@ vi.mock('@cairn/db', async (load) => ({
   loadAccountForExecution: vi.fn(async () => ({ id: 'a' })),
   loadTargetForExecution: vi.fn(async () => ({ id: 't', entryUrl: 'https://example.com', authMethod: 'password', captchaMode: 'none' })),
   occupyAutoLoginBudget: vi.fn(async () => ({ ok: false })),
+  findAuthWaitLeaseForOperation: vi.fn(async () => ({
+    id: 'lease',
+    sessionId: 's',
+    sessionGeneration: 1,
+    sessionFencingToken: 1,
+    expiresAt: new Date(Date.now() + 60_000),
+    purpose: 'AUTH_WAIT',
+    ownerKind: 'OPERATION',
+    runId: null,
+    operationId: 'op',
+  })),
   abandonSessionKeepAlive: vi.fn(async () => {}),
   recordAutoLoginOutcome: vi.fn(async () => {}),
   freezeAuthVerificationForRun: vi.fn(async () => ({ capability: 'IDENTITY_VERIFIED', profileRevision: 1 })),
@@ -1438,4 +1450,117 @@ it('completeOccupiedAuth 核验通过时收尾维护并释放租约', async () =
     'SUCCEEDED',
     expect.objectContaining({ type: 'auth.verified' }),
   )
+})
+
+it('retryOccupiedAutoLogin 成功时核验并收尾，且不占用自动登录额度', async () => {
+  manager.liveSessionIdForOwner = vi.fn(() => 's')
+  manager.ensureRunPage = vi.fn(() => ({ page: { url: () => 'https://example.com/dashboard' } }))
+  manager.verifyOccupiedOwner = vi.fn(async () => ({
+    authState: 'AUTHENTICATED',
+    identityState: 'VERIFIED',
+    observedIdentity: 'user',
+    unknownClass: null,
+    evidenceSummary: null,
+    authProfileRevision: 1,
+  }))
+  manager.settleOccupiedLanding = vi.fn(async () => undefined)
+  manager.finishMaintenance = vi.fn(async () => undefined)
+  manager.release = vi.fn(async () => undefined)
+  manager.releaseRunAuthControl = vi.fn(async () => undefined)
+  vi.mocked(getSessionOperation).mockResolvedValue({
+    id: 'op-retry',
+    kind: 'PREPARE',
+    targetId: 't',
+    targetAccountId: 'a',
+    status: 'WAITING_FOR_AUTH',
+    kindParams: {},
+  } as any)
+  vi.mocked(getSessionById).mockResolvedValue({
+    id: 's',
+    generation: 1,
+    authState: 'EXPIRED',
+    identityState: 'UNVERIFIED',
+    authProfileRevision: null,
+    observedTier: null,
+  } as any)
+  vi.mocked(findAuthWaitLeaseForOperation).mockResolvedValue({
+    id: 'lease',
+    sessionId: 's',
+    sessionGeneration: 1,
+    sessionFencingToken: 1,
+    expiresAt: new Date(Date.now() + 60_000),
+    purpose: 'AUTH_WAIT',
+    ownerKind: 'OPERATION',
+    runId: null,
+    operationId: 'op-retry',
+  } as any)
+  manager.leaseToRun.set('lease', 'op-retry')
+
+  const res = await manager.retryOccupiedAutoLogin('op-retry', { actorId: 'u1' })
+  expect(res.authState).toBe('AUTHENTICATED')
+  expect(occupyAutoLoginBudget).not.toHaveBeenCalled()
+  expect(manager.finishMaintenance).toHaveBeenCalledWith(
+    'op-retry',
+    { targetId: 't', targetAccountId: 'a' },
+    'SUCCEEDED',
+    expect.objectContaining({ type: 'auth.verified' }),
+  )
+})
+
+it('retryOccupiedAutoLogin 失败时保持等待并抛出原因', async () => {
+  manager.liveSessionIdForOwner = vi.fn(() => 's')
+  manager.ensureRunPage = vi.fn(() => ({ page: { url: () => 'https://example.com/login' } }))
+  manager.finishMaintenance = vi.fn(async () => undefined)
+  vi.mocked(attemptLoginCredentials).mockResolvedValue({ authenticated: false, submit: 'ambiguous' })
+  vi.mocked(getSessionOperation).mockResolvedValue({
+    id: 'op-retry-fail',
+    kind: 'PREPARE',
+    targetId: 't',
+    targetAccountId: 'a',
+    status: 'WAITING_FOR_AUTH',
+    kindParams: {},
+  } as any)
+  vi.mocked(getSessionById).mockResolvedValue({
+    id: 's',
+    generation: 1,
+    authState: 'EXPIRED',
+    identityState: 'UNVERIFIED',
+    authProfileRevision: null,
+    observedTier: null,
+  } as any)
+  vi.mocked(findAuthWaitLeaseForOperation).mockResolvedValue({
+    id: 'lease',
+    sessionId: 's',
+    sessionGeneration: 1,
+    sessionFencingToken: 1,
+    expiresAt: new Date(Date.now() + 60_000),
+    purpose: 'AUTH_WAIT',
+    ownerKind: 'OPERATION',
+    runId: null,
+    operationId: 'op-retry-fail',
+  } as any)
+
+  await expect(manager.retryOccupiedAutoLogin('op-retry-fail', { actorId: 'u1' })).rejects.toMatchObject({
+    code: 'AUTH_PROBE_UNKNOWN',
+  })
+  expect(occupyAutoLoginBudget).not.toHaveBeenCalled()
+  expect(manager.finishMaintenance).not.toHaveBeenCalled()
+  expect(setSessionAuthSummary).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ lastAuthError: 'AUTH_PROBE_UNKNOWN', recordSuccess: false }),
+  )
+})
+
+it('retryOccupiedAutoLogin 非等待认证时拒绝', async () => {
+  vi.mocked(getSessionOperation).mockResolvedValue({
+    id: 'op-running',
+    kind: 'PREPARE',
+    targetId: 't',
+    targetAccountId: 'a',
+    status: 'RUNNING',
+    kindParams: {},
+  } as any)
+  await expect(manager.retryOccupiedAutoLogin('op-running', { actorId: 'u1' })).rejects.toMatchObject({
+    code: 'AUTH_INPUT_REJECTED',
+  })
 })

@@ -12,6 +12,7 @@ import type {
 import type { Locator, Page } from './runtime'
 import {
   BrowserCapabilityMissingError,
+  FramePathUnresolvedError,
   SurfaceLostError,
   clickLocator,
   countCandidateNow,
@@ -26,6 +27,7 @@ import {
   readLocatorMany,
   resolveFramePath,
   scopeForAnchor,
+  waitForAdoptedPageReady,
   screenshotPage,
   selectLocator,
   uploadToLocator,
@@ -36,6 +38,7 @@ import {
 import { sampleTableOnPage } from './table-observe.js'
 import { sampleTableV2 } from './table-read-v2.js'
 import { candidateTries, errorForOutcome, pickResolvedCandidate } from './resolver'
+import { currentPageWaitCollector, timePageWait } from './page-wait-collector.js'
 import { isPageLevelAssertExpect, isTableReadPlanV2, redactAuthUrl, safeDownloadFileName, sanitizeAriaSnapshot } from '@cairn/shared'
 import { matchAriaSnapshot } from './aria-match.js'
 
@@ -155,7 +158,8 @@ export async function executeOnPage(
   let diagnostics: ResolverDiagnostics = { outcome: 'FOUND', candidatesTried: [] }
   try {
     if (command.type === 'navigate') {
-      const result = await navigatePage(page, command.url)
+      const result = await timePageWait('navigate', () => navigatePage(page, command.url), () => page.url())
+      await timePageWait('landing_settle', () => waitForAdoptedPageReady(page).catch(() => undefined), () => page.url())
       return { ok: true, output: { url: result.href } }
     }
 
@@ -164,7 +168,11 @@ export async function executeOnPage(
       return { ok: true, output: { waitedMs: command.durationMs ?? 0 } }
     }
     if (command.type === 'wait' && command.kind === 'url') {
-      await waitOnPage(page, { kind: 'url', urlPattern: command.urlPattern, timeoutMs: command.timeoutMs }, signal)
+      await timePageWait(
+        'wait_condition',
+        () => waitOnPage(page, { kind: 'url', urlPattern: command.urlPattern, timeoutMs: command.timeoutMs }, signal),
+        () => page.url(),
+      )
       return { ok: true, output: { url: page.url() } }
     }
     if (command.type === 'keyboard' && !command.target) {
@@ -414,10 +422,13 @@ export async function executeOnPage(
       })
       if (lost) return { ...lost, diagnostics }
       if (popup) {
-        // P5：点击可以打开 popup，但不把新窗收成后续步骤的当前 Surface。
         const popupPage = popup as import('playwright').Page
-        await popupPage.waitForLoadState('domcontentloaded').catch(() => undefined)
-        // 作者没声明点击后页面时，只标记“打开了新页”，供编排侧提示并补全 pageAfter；执行行为不变。
+        await timePageWait(
+          'load_state',
+          () => popupPage.waitForLoadState('domcontentloaded').catch(() => undefined),
+          () => popupPage.url(),
+        )
+        // 未声明 pageAfter 时标出新页，由 session-command 收养为后续步骤的当前页；显式 same 则不标记、不跟随。
         if (command.pageAfter === undefined) {
           return { ok: true, output: { popupOpened: true, popupUrl: redactAuthUrl(popupPage.url()) ?? '' }, diagnostics }
         }
@@ -499,16 +510,22 @@ export async function executeOnPage(
     }
 
     if (command.type === 'wait') {
-      await waitOnPage(
-        page,
-        {
-          kind: command.kind,
-          locator: locatedLocator,
-          text: command.text,
-          timeoutMs: command.timeoutMs,
-        },
-        signal,
-      )
+      const wait = () =>
+        waitOnPage(
+          page,
+          {
+            kind: command.kind,
+            locator: locatedLocator,
+            text: command.text,
+            timeoutMs: command.timeoutMs,
+          },
+          signal,
+        )
+      if (command.kind === 'url' || command.kind === 'visible' || command.kind === 'hidden' || command.kind === 'text') {
+        await timePageWait('wait_condition', wait, () => page.url())
+      } else {
+        await wait()
+      }
       return { ok: true, output: {}, diagnostics }
     }
 
@@ -756,6 +773,13 @@ export async function locate(
       diagnostics: { outcome: picked.outcome, candidatesTried: tried, framePathResolved: trail },
     }
   } catch (error) {
+    if (error instanceof FramePathUnresolvedError) {
+      return {
+        kind: 'miss',
+        outcome: 'NOT_FOUND',
+        diagnostics: { outcome: 'NOT_FOUND', candidatesTried: [] },
+      }
+    }
     if (error instanceof SurfaceLostError || isClosedMessage(error)) {
       return {
         kind: 'miss',
@@ -931,7 +955,11 @@ async function withActionNavigation(
   const navigation = watchActionNavigation(page)
   try {
     await action()
+    const settleStartedAt = new Date()
     const failure = await navigation.settle({ graceMs })
+    if (navigation.didNavigate()) {
+      await currentPageWaitCollector()?.record('nav_request', settleStartedAt, new Date(), page.url())
+    }
     if (!failure) return null
     return {
       ok: false,

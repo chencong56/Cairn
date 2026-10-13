@@ -16,7 +16,7 @@ const KIND_LABELS: Partial<Record<DurationNodeRow['kind'], string>> = {
   scenario_checks: '场景级检查',
 }
 
-const COLUMN_COUNT = 10
+const COLUMN_COUNT = 12
 
 /** 展开后才读的子节点行（按单场景读明细，与顶层同一时间窗与对比）。 */
 function ChildRows({
@@ -116,6 +116,8 @@ export function NodeTable({
             </div>
           </TableCell>
           <TableCell className='font-mono tabular-nums'>{formatMs(node.activeP50)}</TableCell>
+          <TableCell className='font-mono tabular-nums'>{formatMs(node.modelP50)}</TableCell>
+          <TableCell className='font-mono tabular-nums'>{formatMs(node.pageP50)}</TableCell>
           <TableCell className='font-mono tabular-nums'>{formatMs(node.activeP95)}</TableCell>
           <TableCell>{low ? <span className='text-label'>样本不足</span> : <DeltaText pct={node.deltaPct} />}</TableCell>
           <TableCell className='w-32'>
@@ -161,6 +163,8 @@ export function NodeTable({
               <TableRow>
                 <TableHead>步骤</TableHead>
                 <TableHead>P50</TableHead>
+                <TableHead>模型 P50</TableHead>
+                <TableHead>页面 P50</TableHead>
                 <TableHead>P95</TableHead>
                 <TableHead>对比</TableHead>
                 <TableHead>走势</TableHead>

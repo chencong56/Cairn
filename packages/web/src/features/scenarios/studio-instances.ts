@@ -66,8 +66,15 @@ export function findLiveManualHold(
 
 export function describeQueuedTrialWait(input: {
   hold: LiveManualHold | null
+  waitReason?: string | null
   waitReasonCopy?: string
 }): string {
+  if (input.waitReason === 'NO_ELIGIBLE_WORKER') {
+    return '试跑还没开始：当前没有可用的执行节点，不会被领取。请先启动 Worker，或在本页中止这次试跑。'
+  }
+  if (input.waitReason === 'WORKER_PROTOCOL_MISSING') {
+    return '试跑还没开始：在线的执行节点版本不支持此次领取，不会自动开始。请检查执行节点，或在本页中止试跑。'
+  }
   if (input.hold?.mine) {
     return '试跑还没开始。你正在这个浏览器里手动操作；点画面上的「退出操作」，或稍等系统接管后会自动开始。'
   }

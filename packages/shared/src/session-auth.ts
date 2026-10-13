@@ -924,6 +924,7 @@ const AUTH_ISSUE_LABELS: Record<string, string> = {
   AUTH_HOLD_UNBOUND: '认证占用已失效',
   AUTH_CONTROL_HELD: '当前控制权由其他用户持有',
   AUTH_CONTROL_INVALID: '认证控制令牌已失效',
+  AUTH_STILL_REQUIRED: '尚未检测到登录成功，请在画面中完成登录后再核验',
   RUN_NOT_WAITING_FOR_AUTH: '运行不在等待认证状态',
   WORKER_GENERATION_MISMATCH: '执行节点实例已发生变化',
   AUTH_CREDENTIAL_UNREADABLE: '账号凭据无法读取，请检查主密钥或重新保存凭据',

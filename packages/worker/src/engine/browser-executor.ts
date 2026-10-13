@@ -49,6 +49,7 @@ import type {
   StepExecutionOutcome,
   StepExecutor,
 } from './step-executor.js'
+import { PageWaitCollector, runWithPageWaitCollector } from '../browser/page-wait-collector.js'
 
 const MIME_BY_EXT: Record<string, string> = {
   '.pdf': 'application/pdf',
@@ -87,6 +88,17 @@ export class BrowserStepExecutor implements StepExecutor {
   ) {}
 
   async execute(ctx: StepExecutionContext): Promise<StepExecutionOutcome> {
+    const collector = new PageWaitCollector({
+      db: this.handle,
+      runId: ctx.runId,
+      stepRunId: ctx.stepRunId,
+      attemptId: ctx.attemptId,
+    })
+    return runWithPageWaitCollector(collector, () => this.executeWithPageWait(ctx, collector))
+  }
+
+  private async executeWithPageWait(ctx: StepExecutionContext, collector: PageWaitCollector): Promise<StepExecutionOutcome> {
+    await collector.markReady()
     const { step, input, signal, sessionGrant, targetId, runId, stepRunId, attemptId, evidencePolicy } = ctx
 
     // 文件来源的表格提取：读下载步骤存下的文件，不需要浏览器会话

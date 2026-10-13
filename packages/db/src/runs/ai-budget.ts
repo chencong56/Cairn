@@ -136,6 +136,8 @@ export async function completeAiModelCall(
       errorCode: input.errorCode ?? null,
       intent: input.intent ?? null,
       route: input.route ?? null,
+      startedAt: payload.startedAt ? new Date(payload.startedAt) : input.durationMs != null ? new Date(Date.parse(endedAt) - input.durationMs) : null,
+      endedAt: new Date(endedAt),
     })
   } catch (error) {
     console.error('[db] scenario_ai_calls 写入失败，不影响 evidence', error instanceof Error ? error.message : error)

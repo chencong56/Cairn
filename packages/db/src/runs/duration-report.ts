@@ -18,6 +18,7 @@ import {
   durationPeriodSelfLabel,
   formatDurationShort,
   summarizeDurationDifference,
+  composeActiveDuration,
   type DurationComparison,
   type DurationComparisonSide,
   type DurationInsight,
@@ -100,6 +101,9 @@ function periodSide(runs: readonly ScenarioDayAgg[], nodes: readonly NodeDayAgg[
       if (t.ok === 0) return []
       const latest = list.reduce((best, node) => (node.lastFinishedAt > best.lastFinishedAt ? node : best))
       const resolution = topKey(t.resolutions)
+      const activeMs = durationSketchQuantile(t.sketches.active, 50) ?? 0
+      const modelMs = durationSketchQuantile(t.sketches.model, 50) ?? 0
+      const pageMs = durationSketchQuantile(t.sketches.page, 50)
       return [
         {
           nodeKey: latest.nodeKey,
@@ -108,11 +112,17 @@ function periodSide(runs: readonly ScenarioDayAgg[], nodes: readonly NodeDayAgg[
           name: latest.name,
           ordinal: latest.ordinal,
           status: 'SUCCEEDED',
-          activeMs: durationSketchQuantile(t.sketches.active, 50) ?? 0,
+          activeMs,
           windowMs: null,
           attemptCount: durationCountsQuantile(t.counts.attempt, 50) ?? 0,
           iterationCount: durationCountsQuantile(t.counts.iteration, 50) ?? 0,
           maxResolution: (resolution === null || resolution === 'none' ? null : resolution) as DurationResolutionLevel | null,
+          ...composeActiveDuration({ activeMs, modelMs, pageMs, overlapMs: 0 }),
+          modelCallCount: 0,
+          pageWaitCount: 0,
+          pagePartial: false,
+          compositionComplete: true,
+          compositionIncompleteReasons: [],
         },
       ]
     }),

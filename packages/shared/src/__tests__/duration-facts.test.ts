@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   attributeDurationDifference,
+  composeActiveDuration,
+  composeAttemptDuration,
+  exclusiveSlicesOf,
   formatDurationShort,
   nodeDurationFactsSchema,
   runDurationFactsSchema,
@@ -20,6 +23,15 @@ function node(partial: Partial<NodeDurationFacts> & Pick<NodeDurationFacts, 'nod
     attemptCount: 1,
     iterationCount: 1,
     maxResolution: 'deterministic',
+    modelMs: 0,
+    pageMs: null,
+    overlapMs: 0,
+    residualMs: partial.activeMs,
+    modelCallCount: 0,
+    pageWaitCount: 0,
+    pagePartial: false,
+    compositionComplete: true,
+    compositionIncompleteReasons: [],
     ...partial,
   }
 }
@@ -91,6 +103,85 @@ describe('耗时差异归因', () => {
 
   it('时长短文案覆盖毫秒到小时', () => {
     expect([850, 4_200, 42_000, 192_000, 3_900_000].map(formatDurationShort)).toEqual(['850ms', '4.2s', '42s', '3m12s', '1h05m'])
+  })
+
+  it('重试拉高累计模型耗时但不标模型变慢；单次模型变慢才打标签', () => {
+    const base = side({}, [node({ nodeKey: 'step:query', name: '查询报表', activeMs: 10_000, modelMs: 4_000, residualMs: 6_000, attemptCount: 1 })])
+    const retries = side({ totalMs: 32_000, activeMs: 30_000 }, [
+      node({ nodeKey: 'step:query', name: '查询报表', activeMs: 30_000, modelMs: 12_000, residualMs: 18_000, attemptCount: 3 }),
+    ])
+    expect(attributeDurationDifference(base, retries).nodes[0]!.tags).toEqual([{ kind: 'retries', from: 0, to: 2 }])
+
+    const slower = side({ totalMs: 28_000, activeMs: 26_000 }, [
+      node({ nodeKey: 'step:query', name: '查询报表', activeMs: 18_000, modelMs: 8_000, residualMs: 10_000, attemptCount: 1 }),
+    ])
+    const tags = attributeDurationDifference(base, slower).nodes[0]!.tags
+    expect(tags).toEqual([{ kind: 'model', from: 4_000, to: 8_000 }])
+    expect(summarizeDurationDifference(attributeDurationDifference(base, slower))).toContain('单次模型 4.0s→8.0s')
+  })
+
+  it('执行耗时拆成互斥切片：无页面时其余 = 执行 − 模型，重叠为 0', () => {
+    expect(composeActiveDuration({ activeMs: 10_000, modelMs: 4_000, pageMs: null, overlapMs: 2_000 })).toEqual({
+      modelMs: 4_000,
+      pageMs: null,
+      overlapMs: 0,
+      residualMs: 6_000,
+    })
+    expect(composeActiveDuration({ activeMs: 10_000, modelMs: 4_000, pageMs: 5_000, overlapMs: 2_000 })).toEqual({
+      modelMs: 4_000,
+      pageMs: 5_000,
+      overlapMs: 2_000,
+      residualMs: 3_000,
+    })
+    expect(exclusiveSlicesOf({ modelMs: 4_000, pageMs: null, overlapMs: 0, residualMs: 6_000 })).toMatchObject({
+      mode: 'two',
+      modelOnly: 4_000,
+      residual: 6_000,
+    })
+    expect(exclusiveSlicesOf({ modelMs: 4_000, pageMs: 5_000, overlapMs: 2_000, residualMs: 3_000 })).toEqual({
+      mode: 'four',
+      modelOnly: 2_000,
+      overlap: 2_000,
+      pageOnly: 3_000,
+      residual: 3_000,
+    })
+    expect(exclusiveSlicesOf({ modelMs: 4_000, pageMs: 2_000, overlapMs: null, residualMs: 6_000 }).mode).toBe('undetermined')
+  })
+
+  it('单次 attempt：无采集标记时 page 保持 null；有标记才写 0；模型缺起止且已有页面则重叠未测', () => {
+    const unmarked = composeAttemptDuration({
+      activeMs: 5_000,
+      modelCalls: [{ durationMs: 2_000, startedAt: null, endedAt: null }],
+      pageMarked: false,
+      pageIntervals: [],
+    })
+    expect(unmarked).toMatchObject({ modelMs: 2_000, pageMs: null, overlapMs: 0, residualMs: 3_000 })
+    expect(unmarked.reasons).not.toContain('model_interval_missing')
+
+    const markedEmpty = composeAttemptDuration({
+      activeMs: 5_000,
+      modelCalls: [],
+      pageMarked: true,
+      pageIntervals: [],
+    })
+    expect(markedEmpty).toMatchObject({ pageMs: 0, overlapMs: 0, residualMs: 5_000 })
+
+    const missingIntervals = composeAttemptDuration({
+      activeMs: 5_000,
+      modelCalls: [{ durationMs: 2_000, startedAt: null, endedAt: null }],
+      pageMarked: true,
+      pageIntervals: [{ start: 1_000, end: 3_000 }],
+    })
+    expect(missingIntervals).toMatchObject({ modelMs: 2_000, pageMs: 2_000, overlapMs: null })
+    expect(missingIntervals.reasons).toContain('model_interval_missing')
+
+    const overlapped = composeAttemptDuration({
+      activeMs: 5_000,
+      modelCalls: [{ durationMs: 2_000, startedAt: 1_000, endedAt: 3_000 }],
+      pageMarked: true,
+      pageIntervals: [{ start: 2_000, end: 4_000 }],
+    })
+    expect(overlapped).toMatchObject({ modelMs: 2_000, pageMs: 2_000, overlapMs: 1_000, residualMs: 2_000 })
   })
 
   it('事实契约：分解可为空，节点键长度受限', () => {

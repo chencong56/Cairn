@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>延后跳转门户</title></head>
+<body>
+<h1>入口页</h1>
+<iframe id="goReportMgt" name="goReportMgt" src="/frame-loading.html" width="900" height="400"></iframe>
+<script>
+  setTimeout(() => {
+    const frame = document.getElementById('goReportMgt')
+    if (frame) frame.src = '/frame-inner.html'
+  }, 450)
+</script>
+</body>
+</html>

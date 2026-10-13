@@ -6,6 +6,7 @@ import {
   evaluateTableExpectation,
   TABLE_SAMPLE_PROTOCOL,
   isTablePreviewOnly,
+  durationCheckComponentOf,
   type TableSample,
   type FixtureStepType,
   type JsonValue,
@@ -291,11 +292,45 @@ export class FixtureStepExecutor implements StepExecutor {
     }
 
     if (step.type === 'check_duration') {
-      const { sourceStepId, op, valueMs, runTotal } = step.input as {
+      const { sourceStepId, op, valueMs, runTotal, component: componentRaw } = step.input as {
         sourceStepId?: string
         op: 'lte' | 'lt'
         valueMs: number
         runTotal?: boolean
+        component?: 'wall' | 'model' | 'page'
+      }
+      const component = durationCheckComponentOf(componentRaw)
+      if (component !== 'wall') {
+        if (!ctx.loadDurationComponents) {
+          return durationUnavailable(sourceStepId, op, valueMs, Boolean(runTotal), component)
+        }
+        const loaded = await ctx.loadDurationComponents({
+          sourceStepId,
+          runTotal: Boolean(runTotal),
+          scopePath: runTotal ? null : ctx.scopePath,
+          excludeStepId: step.id,
+        })
+        const actualDurationMs = loaded[component]
+        if (actualDurationMs === null || !Number.isFinite(actualDurationMs)) {
+          return durationUnavailable(sourceStepId, op, valueMs, Boolean(runTotal), component)
+        }
+        const passed = op === 'lte' ? actualDurationMs <= valueMs : actualDurationMs < valueMs
+        const output = { passed, actual: actualDurationMs, expected: { op, valueMs, component } }
+        if (passed) return { kind: 'success', output }
+        return {
+          kind: 'failed',
+          output,
+          error: {
+            code: 'ASSERT_FAILED',
+            category: 'EXECUTOR',
+            retryable: false,
+            safeMessage: runTotal
+              ? `全程${component === 'model' ? '模型' : '页面'}耗时 ${actualDurationMs}ms 超出阈值 (${op} ${valueMs}ms)`
+              : `步骤${component === 'model' ? '模型' : '页面'}耗时 ${actualDurationMs}ms 超出阈值 (${op} ${valueMs}ms)`,
+          },
+          timedOut: false,
+          aborted: false,
+        }
       }
       if (!ctx.loadStepStates) {
         return durationUnavailable(sourceStepId, op, valueMs, Boolean(runTotal))
@@ -395,17 +430,19 @@ function durationUnavailable(
   op: 'lte' | 'lt',
   valueMs: number,
   runTotal?: boolean,
+  component?: 'wall' | 'model' | 'page',
 ): StepExecutionOutcome {
+  const axis = component === 'model' ? '模型' : component === 'page' ? '页面等待' : ''
   return {
     kind: 'failed',
-    output: { passed: false, actual: null, expected: { op, valueMs } },
+    output: { passed: false, actual: null, expected: { op, valueMs, ...(component && component !== 'wall' ? { component } : {}) } },
     error: {
       code: 'DURATION_UNAVAILABLE',
       category: 'EXECUTOR',
       retryable: false,
       safeMessage: runTotal
-        ? '未能获取场景全程执行耗时记录，结果无法判定'
-        : `未能获取步骤「${sourceStepId}」的执行耗时记录，结果无法判定`,
+        ? `未能获取场景全程${axis || '执行'}耗时记录，结果无法判定`
+        : `未能获取步骤「${sourceStepId}」的${axis || '执行'}耗时记录，结果无法判定`,
     },
     timedOut: false,
     aborted: false,

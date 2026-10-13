@@ -9,6 +9,8 @@ import type { Db, DbHandle } from '../client.js'
 import { schemaFor } from '../native.js'
 import { appendRunEvents } from '../observe/events.js'
 import type { RunRow } from '../schema/execution.js'
+import { liveDurationOf } from './duration-live.js'
+import { listAiCallsForAttempts, listPageWaitsForAttempts } from './page-wait.js'
 
 export async function settleRunOutput(
   db: DbHandle | Db,
@@ -83,6 +85,33 @@ export async function settleRunOutput(
 
   const failedAttempt = attemptRows.find((a) => a.status === 'FAILED')
   const error = failedAttempt?.error as { safeMessage?: string; message?: string; code?: string } | undefined
+  const attemptIds = attemptRows.map((attempt) => attempt.id)
+  const [durationCalls, durationWaits] = await Promise.all([
+    listAiCallsForAttempts(underlyingDb, attemptIds),
+    listPageWaitsForAttempts(underlyingDb, attemptIds),
+  ])
+  const durationByStepId = Object.fromEntries(
+    stepRows.map((step) => [
+      step.stepId,
+      liveDurationOf(
+        [
+          {
+            stepId: step.stepId,
+            startedAt: step.startedAt,
+            finishedAt: step.finishedAt,
+            attempts: (attemptsByStepRunId.get(step.id) ?? []).map((attempt) => ({
+              id: attempt.id,
+              startedAt: attempt.startedAt,
+              finishedAt: attempt.finishedAt,
+            })),
+          },
+        ],
+        durationCalls,
+        durationWaits,
+        { sourceStepId: step.stepId },
+      ),
+    ]),
+  )
 
   const output = assembleRunOutput({
     definition: {
@@ -97,6 +126,7 @@ export async function settleRunOutput(
     error,
     now: row.finishedAt ?? new Date(),
     runStartedAt: row.startedAt,
+    durationComponents: { byStepId: durationByStepId },
   })
 
   await underlyingDb.transaction(async (tx) => {

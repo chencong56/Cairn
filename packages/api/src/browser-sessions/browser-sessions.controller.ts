@@ -20,6 +20,7 @@ import {
   acquireAuthControlBodySchema,
   authControlInputBodySchema,
   authControlTokenBodySchema,
+  retryAutoLoginBodySchema,
   browserSessionListQuerySchema,
   disposeSessionBodySchema,
   requestSessionOperationBodySchema,
@@ -30,6 +31,7 @@ import {
   type AcquireAuthControlBody,
   type AuthControlInputBody,
   type AuthControlTokenBody,
+  type RetryAutoLoginBody,
   type BrowserSessionListQuery,
   type DisposeSessionBody,
   type ObserveOperation,
@@ -229,6 +231,17 @@ export class SessionOperationsController {
     @Body(new ZodValidationPipe(authControlTokenBodySchema)) body: AuthControlTokenBody,
   ) {
     return this.sessions.completeAuth(operationId, actor, body)
+  }
+
+  @Post(':operationId/retry-auto-login')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('session:control')
+  retryAutoLogin(
+    @Param('operationId', new ZodValidationPipe(entityIdSchema)) operationId: string,
+    @CurrentAccount() actor: RequestAccount,
+    @Body(new ZodValidationPipe(retryAutoLoginBodySchema)) body: RetryAutoLoginBody,
+  ) {
+    return this.sessions.retryAutoLogin(operationId, actor, body)
   }
 
   @Post(':operationId/auth-control/acquire')

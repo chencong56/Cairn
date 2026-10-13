@@ -224,7 +224,7 @@ export { pageAfterSchema, type PageAfter } from './managed-browser.js'
 
 export const clickInputSchema = z.strictObject({
   target: targetDescriptorSchema,
-  /** 缺省保持旧行为：可等待 popup 但不收养为当前页。 */
+  /** 缺省：打开恰好一个新标签时跟随；same 留在当前页；popup 必须交接。 */
   pageAfter: pageAfterSchema.optional(),
   button: z.enum(['left', 'right', 'middle']).optional(),
   clickCount: z.union([z.literal(1), z.literal(2)]).optional(),
@@ -808,6 +808,8 @@ export const checkDurationInputSchema = z
     runTotal: z.literal(true).optional(),
     op: z.enum(['lte', 'lt']),
     valueMs: z.number().int().nonnegative(),
+    /** 默认墙钟。model / page 读现场账本，不读耗时事实表。 */
+    component: z.enum(['wall', 'model', 'page']).optional(),
   })
   .superRefine((val, ctx) => {
     if (!val.runTotal && !val.sourceStepId) {

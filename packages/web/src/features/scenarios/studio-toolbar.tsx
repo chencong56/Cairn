@@ -178,7 +178,10 @@ export function StudioToolbar({
   const isTrialRunning = Boolean(
     trialRun && ['QUEUED', 'RUNNING', 'RECOVERING', 'WAITING_FOR_AUTH', 'HOLDING'].includes(trialRun.status),
   )
-  const trialLiveLabel = isTrialQueued ? '试跑排队中' : '试跑中…'
+  const trialNoExecutor =
+    trialRun?.placement?.waitReason === 'NO_ELIGIBLE_WORKER' ||
+    trialRun?.placement?.waitReason === 'WORKER_PROTOCOL_MISSING'
+  const trialLiveLabel = trialNoExecutor ? '没有执行节点' : isTrialQueued ? '试跑排队中' : '试跑中…'
   const canCancelTrial = canCancelTrialProp ?? Boolean(onCancelTrial)
   const [isCancelHovered, setIsCancelHovered] = useState(false)
 
@@ -455,7 +458,13 @@ export function StudioToolbar({
                 onClick={onCancelTrial}
                 onMouseEnter={() => setIsCancelHovered(true)}
                 onMouseLeave={() => setIsCancelHovered(false)}
-                title={isTrialQueued ? '试跑还在排队，尚未开始执行；点击可中止' : '试跑执行中，点击可中止'}
+                title={
+                  trialNoExecutor
+                    ? '当前没有可用的执行节点，试跑不会开始；点击可中止'
+                    : isTrialQueued
+                      ? '试跑还在排队，尚未开始执行；点击可中止'
+                      : '试跑执行中，点击可中止'
+                }
               >
                 {cancellingTrial ? (
                   <>
@@ -480,7 +489,13 @@ export function StudioToolbar({
                 variant='outline'
                 className='h-8 px-2.5 text-label text-muted-foreground gap-1.5'
                 disabled
-                title={isTrialQueued ? '试跑还在排队，尚未开始执行' : '试跑执行中…'}
+                title={
+                  trialNoExecutor
+                    ? '当前没有可用的执行节点，试跑不会开始'
+                    : isTrialQueued
+                      ? '试跑还在排队，尚未开始执行'
+                      : '试跑执行中…'
+                }
               >
                 <Loader2 className='size-3.5 animate-spin text-primary' />
                 <span>{trialLiveLabel}</span>

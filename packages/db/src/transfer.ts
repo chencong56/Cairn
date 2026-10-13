@@ -66,6 +66,7 @@ export const TRANSFER_TABLE_ORDER = [
   "objectStoreProbes",
   "monitorSamples",
   "scenarioAiCalls",
+  "scenarioPageWaits",
   "monitoringAlerts",
   "scenarioSuites",
   "scenarioSuiteDrafts",

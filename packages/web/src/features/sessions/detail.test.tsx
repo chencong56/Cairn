@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   inputAuthControl: vi.fn(),
   releaseAuthControl: vi.fn(),
   resumeRunAuth: vi.fn(),
+  retryAutoLogin: vi.fn(),
   subscribeBrowserFrames: vi.fn(),
   requestAccountSessionOperation: vi.fn(),
   setAccountSessionRetention: vi.fn(),
@@ -145,6 +146,7 @@ describe('SessionDetailPage', () => {
     })
     mocks.releaseAuthControl.mockResolvedValue({ released: true })
     mocks.resumeRunAuth.mockResolvedValue({ ok: true })
+    mocks.retryAutoLogin.mockResolvedValue({ ok: true })
     mocks.fetchSessionEvents.mockResolvedValue({ items: [], nextCursor: null })
   })
 
@@ -258,7 +260,12 @@ describe('SessionDetailPage', () => {
       queueDeadlineAt: '2026-09-24T01:14:19.000Z',
       queuePosition: 0,
     })
-    expect(noWorker).toMatchObject({ tone: 'warning', showWorkersLink: true, expired: false })
+    expect(noWorker).toMatchObject({
+      headline: '准备会话 · 无法开始',
+      tone: 'warning',
+      showWorkersLink: true,
+      expired: false,
+    })
     expect(noWorker.lines[0]).toBe('没有在线的执行节点，操作不会开始')
 
     const expired = describeOperationBanner({
@@ -344,7 +351,7 @@ describe('SessionDetailPage', () => {
         </QueryClientProvider>
       </ThemeProvider>,
     )
-    await expect.element(screen.getByText('准备会话 · 排队中')).toBeInTheDocument()
+    await expect.element(screen.getByText('准备会话 · 无法开始')).toBeInTheDocument()
     await expect.element(screen.getByText('没有在线的执行节点，操作不会开始')).toBeInTheDocument()
     await expect.element(screen.getByText('查看执行节点')).toBeInTheDocument()
     await expect.element(screen.getByRole('button', { name: '取消操作' })).toBeInTheDocument()
@@ -411,8 +418,10 @@ describe('SessionDetailPage', () => {
       </ThemeProvider>,
     )
     await expect.element(screen.getByText('准备会话 · 等待登录')).toBeInTheDocument()
+    await expect.element(screen.getByRole('button', { name: '再自动登录' })).toBeInTheDocument()
     await screen.getByRole('button', { name: '处理登录' }).click()
     await expect.element(screen.getByRole('button', { name: '完成认证' })).toBeInTheDocument()
+    await expect.element(screen.getByText(/只核验当前页是否已经登录成功/)).toBeInTheDocument()
     for (const width of [1440, 1024, 390]) {
       await page.viewport(width, 900)
       expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)

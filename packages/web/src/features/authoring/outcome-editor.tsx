@@ -483,6 +483,34 @@ const CONTEXT_COMPARE_OPTIONS = [
   { op: 'lte', label: '不大于' },
 ] as const
 
+function DurationComponentSelect({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string
+  value: 'wall' | 'model' | 'page' | undefined
+  disabled?: boolean
+  onChange: (component: 'wall' | 'model' | 'page') => void
+}) {
+  return (
+    <div className='space-y-2'>
+      <Label htmlFor={id}>计量口径</Label>
+      <Select value={value ?? 'wall'} disabled={disabled} onValueChange={(next) => onChange(next as 'wall' | 'model' | 'page')}>
+        <SelectTrigger id={id} aria-label='耗时计量口径'>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value='wall'>墙钟（默认）</SelectItem>
+          <SelectItem value='model'>模型调用</SelectItem>
+          <SelectItem value='page'>页面等待</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
 /** 上下文变量与步骤耗时条件不看页面对象，单独编辑，避免被当成「对象存在」静默丢改动。 */
 function NonPageRuleFields({
   contract,
@@ -533,9 +561,15 @@ function NonPageRuleFields({
               }}
             />
           </div>
+          <DurationComponentSelect
+            id={`outcome-run-duration-component-${contract.id}`}
+            value={rule.component}
+            disabled={disabled}
+            onChange={(component) => onChange({ ...contract, rule: { ...rule, component } })}
+          />
         </div>
         <p className='text-label text-muted-foreground'>
-          从首个已执行步骤开始到最后一个业务步骤完成计（不含收尾检查步骤）；取不到耗时时结果为「无法判定」，不会中止运行。
+          从首个已执行步骤开始到最后一个业务步骤完成计（不含收尾检查步骤）；取不到耗时时结果为「无法判定」，不会中止运行。页面未采集时不能当 0。
         </p>
         <Button
           type='button'
@@ -570,9 +604,15 @@ function NonPageRuleFields({
               }}
             />
           </div>
+          <DurationComponentSelect
+            id={`outcome-duration-component-${contract.id}`}
+            value={rule.component}
+            disabled={disabled}
+            onChange={(component) => onChange({ ...contract, rule: { ...rule, component } })}
+          />
         </div>
         <p className='text-label text-muted-foreground'>
-          按本步骤最后一次尝试的起止时间计（含页面等待）；取不到耗时时结果为「无法判定」。
+          默认按本步骤最后一次尝试的墙钟计；可选模型或页面等待（现场账本）。页面未采集时结果为「无法判定」。
         </p>
         <Button
           type='button'

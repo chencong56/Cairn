@@ -497,6 +497,7 @@ describe('登录等待原因与页面位置', () => {
     ).toBe('credential')
     expect(describeAuthWaitStage('credential')).toBe('账号或密码不正确')
     expect(describeAuthIssue('credential')).toBe('账号或密码未通过核验')
+    expect(describeAuthIssue('AUTH_STILL_REQUIRED')).toBe('尚未检测到登录成功，请在画面中完成登录后再核验')
   })
 
   it('明确原因优先于没提交，额度用尽不是看不到表单', () => {
