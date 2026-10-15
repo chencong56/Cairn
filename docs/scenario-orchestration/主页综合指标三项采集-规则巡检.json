@@ -1,0 +1,296 @@
+{
+  "scenarioId": "01a13b08-bfe6-75d6-86c3-37faf2990937",
+  "name": "主页综合指标三项采集-规则巡检",
+  "status": "active",
+  "purpose": "user",
+  "revision": 3,
+  "document": {
+    "authoringSchemaVersion": 2,
+    "schemaVersion": 1,
+    "inputs": [],
+    "locatorPlan": {
+      "v": 2,
+      "order": [
+        "rule"
+      ]
+    },
+    "outputs": {
+      "summaryTemplate": "主页综合指标三项均有数据：起租站址数 ${leased_sites}，平均每站租户数 ${avg_tenants}，塔类租户数 ${tower_tenants}",
+      "metrics": [
+        {
+          "key": "leased_sites",
+          "name": "起租站址数",
+          "fromContextKey": "leasedSitesCard",
+          "unit": "站"
+        },
+        {
+          "key": "avg_tenants",
+          "name": "平均每站租户数",
+          "fromContextKey": "avgTenantsCard",
+          "unit": "户/站"
+        },
+        {
+          "key": "tower_tenants",
+          "name": "塔类租户数",
+          "fromContextKey": "towerTenantsCard",
+          "unit": "户"
+        }
+      ],
+      "dataRowFields": [
+        {
+          "columnKey": "起租站址数",
+          "columnHeader": "起租站址数",
+          "fromContextKey": "leasedSitesCard"
+        },
+        {
+          "columnKey": "平均每站租户数",
+          "columnHeader": "平均每站租户数",
+          "fromContextKey": "avgTenantsCard"
+        },
+        {
+          "columnKey": "塔类租户数",
+          "columnHeader": "塔类租户数",
+          "fromContextKey": "towerTenantsCard"
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "kind": "step",
+        "step": {
+          "id": "e6000006-0000-4000-8000-000000000001",
+          "name": "打开OA首页",
+          "type": "navigate",
+          "input": {
+            "url": "http://eipxcuat.tower0788.cn:9000/eip/index"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e6000006-0000-4000-8000-000000000003",
+          "name": "确认右侧综合指标区可见",
+          "type": "wait",
+          "input": {
+            "kind": "visible",
+            "timeoutMs": 30000,
+            "target": {
+              "semantic": "OA 首页右侧综合指标区域标题，只确认可见，不点击",
+              "framePath": [
+                {
+                  "urlPattern": "bi-new"
+                }
+              ],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "综合指标"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e6000006-0000-4000-8000-000000000004",
+          "name": "提取起租站址数",
+          "type": "extract",
+          "outputKey": "leasedSitesCard",
+          "input": {
+            "as": "text",
+            "target": {
+              "semantic": "OA 首页右侧综合指标区域下方「起租站址数」卡片，含当前值与增长值，不点击综合指标",
+              "framePath": [
+                {
+                  "urlPattern": "bi-new"
+                }
+              ],
+              "candidates": [
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(., \"起租站址数\")][translate(., \"0123456789\", \"\") != .][not(.//*[contains(., \"起租站址数\") and translate(., \"0123456789\", \"\") != .])]"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 20000
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e6000006-0000-4000-8000-000000000005",
+          "name": "提取平均每站租户数",
+          "type": "extract",
+          "outputKey": "avgTenantsCard",
+          "input": {
+            "as": "text",
+            "target": {
+              "semantic": "OA 首页右侧综合指标区域下方「平均每站租户数」卡片，含当前值与增长值，不点击综合指标",
+              "framePath": [
+                {
+                  "urlPattern": "bi-new"
+                }
+              ],
+              "candidates": [
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(., \"平均每站租户数\")][translate(., \"0123456789\", \"\") != .][not(.//*[contains(., \"平均每站租户数\") and translate(., \"0123456789\", \"\") != .])]"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 20000
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e6000006-0000-4000-8000-000000000006",
+          "name": "提取塔类租户数",
+          "type": "extract",
+          "outputKey": "towerTenantsCard",
+          "input": {
+            "as": "text",
+            "target": {
+              "semantic": "OA 首页右侧综合指标区域下方「塔类租户数」卡片，含当前值与增长值；不要和净增租户数混淆，不点击综合指标",
+              "framePath": [
+                {
+                  "urlPattern": "bi-new"
+                }
+              ],
+              "candidates": [
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(., \"塔类租户数\") and not(contains(., \"净增租户数\"))][translate(., \"0123456789\", \"\") != .][not(.//*[contains(., \"塔类租户数\") and translate(., \"0123456789\", \"\") != .])]"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 20000
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e6000006-0000-4000-8000-000000000013",
+          "name": "判断起租站址数有数据",
+          "type": "assert",
+          "input": {
+            "expect": {
+              "kind": "visible"
+            },
+            "target": {
+              "semantic": "起租站址数卡片含数字即为有数据",
+              "framePath": [
+                {
+                  "urlPattern": "bi-new"
+                }
+              ],
+              "candidates": [
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(., \"起租站址数\")][translate(., \"0123456789\", \"\") != .][not(.//*[contains(., \"起租站址数\") and translate(., \"0123456789\", \"\") != .])]"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e6000006-0000-4000-8000-000000000015",
+          "name": "判断平均每站租户数有数据",
+          "type": "assert",
+          "input": {
+            "expect": {
+              "kind": "visible"
+            },
+            "target": {
+              "semantic": "平均每站租户数卡片含数字即为有数据",
+              "framePath": [
+                {
+                  "urlPattern": "bi-new"
+                }
+              ],
+              "candidates": [
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(., \"平均每站租户数\")][translate(., \"0123456789\", \"\") != .][not(.//*[contains(., \"平均每站租户数\") and translate(., \"0123456789\", \"\") != .])]"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "e6000006-0000-4000-8000-000000000017",
+          "name": "判断塔类租户数有数据",
+          "type": "assert",
+          "input": {
+            "expect": {
+              "kind": "visible"
+            },
+            "target": {
+              "semantic": "塔类租户数卡片含数字即为有数据，不要和净增租户数混淆",
+              "framePath": [
+                {
+                  "urlPattern": "bi-new"
+                }
+              ],
+              "candidates": [
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(., \"塔类租户数\") and not(contains(., \"净增租户数\"))][translate(., \"0123456789\", \"\") != .][not(.//*[contains(., \"塔类租户数\") and translate(., \"0123456789\", \"\") != .])]"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      }
+    ],
+    "runtimeInvariants": [
+      {
+        "id": "e6000006-0000-4000-8000-000000000090",
+        "kind": "network_health",
+        "meaning": "页面接口不得报错",
+        "network": {
+          "ignore": [
+            "/favicon.ico"
+          ]
+        },
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      },
+      {
+        "id": "e6000006-0000-4000-8000-000000000091",
+        "kind": "script_errors",
+        "meaning": "页面脚本不得出现未捕获异常",
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      }
+    ]
+  }
+}

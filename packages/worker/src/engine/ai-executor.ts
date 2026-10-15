@@ -43,7 +43,7 @@ export class AiStepExecutor implements StepExecutor {
     if ('contextBindings' in step && Array.isArray((step as any).contextBindings)) {
       const bindings = (step as any).contextBindings as import('@cairn/shared').ContextBinding[]
       for (const binding of bindings) {
-        const value = resolveBindingValue(ctx.context, binding)
+        const value = resolveBindingValue(ctx.context, binding, snapshot.steps)
         if ((value === undefined || value === null) && binding.required !== false) {
           return fail({
             code: 'AI_REQUIRED_CONTEXT_MISSING',
@@ -146,6 +146,17 @@ export class AiStepExecutor implements StepExecutor {
   }
 }
 
+export function instructionWithBoundContext(
+  instruction: string | undefined,
+  contextValues?: Record<string, JsonValue>,
+): string | undefined {
+  if (!instruction) return instruction
+  if (!contextValues || Object.keys(contextValues).length === 0) return instruction
+  const lines = Object.entries(contextValues).map(([name, value]) => `${name}=${JSON.stringify(value)}`)
+  const merged = `${instruction}\n\n已绑定上下文：\n${lines.join('\n')}`
+  return merged.length <= 4096 ? merged : merged.slice(0, 4096)
+}
+
 function commandFor(
   step: Step,
   snapshot: RunSnapshot,
@@ -155,7 +166,7 @@ function commandFor(
   const config = snapshot.aiExecution!
   const instruction =
     step.type === 'ai_action' || step.type === 'ai_extract' || step.type === 'ai_assert'
-      ? ('instruction' in step.input ? step.input.instruction : undefined)
+      ? ('instruction' in step.input ? instructionWithBoundContext(step.input.instruction, contextValues) : undefined)
       : ''
   return aiCommandSchema.parse({
     type: step.type as AiCommand['type'],
@@ -176,6 +187,7 @@ function commandFor(
 export function resolveBindingValue(
   context: Readonly<Record<string, JsonValue>>,
   binding: import('@cairn/shared').ContextBinding,
+  steps?: readonly { id: string; outputKey?: string }[],
 ): JsonValue | undefined {
   const { source, path, projection } = binding
 
@@ -200,9 +212,18 @@ export function resolveBindingValue(
       const stepId = parts[0]
       const field = parts[1]
       if (stepId) {
-        base = field
-          ? (context.steps as any)?.[stepId]?.[field] ?? context[`${stepId}.${field}`]
-          : context[stepId] ?? (context.steps as any)?.[stepId]
+        const outputKey = steps?.find((step) => step.id === stepId)?.outputKey
+        const fromSteps = (context.steps as any)?.[stepId]
+        const fromOutput = outputKey ? context[outputKey] : undefined
+        const fromId = context[stepId]
+        if (field) {
+          base = fromSteps?.[field] ?? context[`${stepId}.${field}`]
+          if (base === undefined && fromOutput !== undefined && fromOutput !== null && typeof fromOutput === 'object') {
+            base = (fromOutput as Record<string, unknown>)[field]
+          }
+        } else {
+          base = fromSteps ?? fromOutput ?? fromId
+        }
       }
     }
   }

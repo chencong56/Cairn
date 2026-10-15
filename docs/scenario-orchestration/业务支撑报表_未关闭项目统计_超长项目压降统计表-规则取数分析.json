@@ -1,0 +1,664 @@
+{
+  "scenarioId": "01a13b28-bd9d-7166-bfc7-d9c29b00ead4",
+  "name": "业务支撑报表/未关闭项目统计/超长项目压降统计表-规则取数分析",
+  "status": "active",
+  "purpose": "user",
+  "revision": 4,
+  "document": {
+    "authoringSchemaVersion": 2,
+    "schemaVersion": 1,
+    "locatorPlan": {
+      "v": 2,
+      "order": [
+        "rule",
+        "text_ai",
+        "vision_ai"
+      ]
+    },
+    "inputs": [
+      {
+        "key": "queryDate",
+        "label": "本期统计日期",
+        "type": "string",
+        "required": true,
+        "description": "第一次取数日期，默认当天 YYYY-MM-DD",
+        "defaultGenerator": {
+          "kind": "date_relative",
+          "offsetDaysMin": 0,
+          "offsetDaysMax": 0,
+          "format": "YYYY-MM-DD"
+        }
+      },
+      {
+        "key": "prevDate",
+        "label": "上期统计日期",
+        "type": "string",
+        "required": true,
+        "description": "第二次取数日期，默认前一天 YYYY-MM-DD",
+        "defaultGenerator": {
+          "kind": "date_relative",
+          "offsetDaysMin": -1,
+          "offsetDaysMax": -1,
+          "format": "YYYY-MM-DD"
+        }
+      }
+    ],
+    "outputs": {
+      "summaryTemplate": "超长项目压降统计表环比：本期 ${currentReductionRate}%（${queryDate}）相对上期 ${prevReductionRate}%（${prevDate}），变动 ${reductionRateChangePp} 个百分点",
+      "metrics": [
+        {
+          "key": "current_reduction_rate",
+          "name": "本期超长项目本月压降率",
+          "fromContextKey": "currentReductionRate",
+          "unit": "%"
+        },
+        {
+          "key": "prev_reduction_rate",
+          "name": "上期超长项目本月压降率",
+          "fromContextKey": "prevReductionRate",
+          "unit": "%"
+        },
+        {
+          "key": "reduction_rate_change_pp",
+          "name": "压降率环比变动（百分点）",
+          "fromContextKey": "reductionRateChangePp",
+          "unit": "百分点"
+        }
+      ],
+      "dataRowFields": [
+        {
+          "columnKey": "本期日期",
+          "columnHeader": "本期统计日期",
+          "fromContextKey": "queryDate"
+        },
+        {
+          "columnKey": "本期超长项目本月压降率",
+          "columnHeader": "本期超长项目本月压降率",
+          "fromContextKey": "currentReductionRate"
+        },
+        {
+          "columnKey": "上期日期",
+          "columnHeader": "上期统计日期",
+          "fromContextKey": "prevDate"
+        },
+        {
+          "columnKey": "上期超长项目本月压降率",
+          "columnHeader": "上期超长项目本月压降率",
+          "fromContextKey": "prevReductionRate"
+        },
+        {
+          "columnKey": "压降率环比变动",
+          "columnHeader": "压降率环比变动（百分点）",
+          "fromContextKey": "reductionRateChangePp"
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000001",
+          "name": "打开报表中心",
+          "type": "navigate",
+          "input": {
+            "url": "http://bi-new.tower0788.cn:18181/ctbass/frameIndex.do?show_logout=true&open_priv_id=10100010&open_priv_name=%E6%8A%A5%E8%A1%A8%E4%B8%AD%E5%BF%83&open_svc_addr=%2Fctb_thematic_web%2FtowerSkip%2FgoReportMgt%3Fflag%3Dundefined%26type_id%3Dundefined"
+          },
+          "effectType": "SIDE_EFFECT"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000002",
+          "name": "等待报表中心树可见",
+          "type": "wait",
+          "input": {
+            "kind": "visible",
+            "timeoutMs": 30000,
+            "target": {
+              "semantic": "报表中心左侧树的一级分类「业务支撑报表」已出现，只确认可见，不点击",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "业务支撑报表"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000003",
+          "name": "展开业务支撑报表",
+          "type": "click",
+          "input": {
+            "target": {
+              "semantic": "左侧报表中心树的一级分类节点「业务支撑报表」，点击展开，不要点其它一级分类",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "业务支撑报表"
+                }
+              ]
+            }
+          },
+          "effectType": "SIDE_EFFECT",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000004",
+          "name": "等待未关闭项目统计可见",
+          "type": "wait",
+          "input": {
+            "kind": "visible",
+            "timeoutMs": 20000,
+            "target": {
+              "semantic": "「业务支撑报表」展开后的子节点「未关闭项目统计」已出现，只确认可见，不点击",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "未关闭项目统计"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 20000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000005",
+          "name": "选择未关闭项目统计",
+          "type": "click",
+          "input": {
+            "target": {
+              "semantic": "「业务支撑报表」展开后的子节点「未关闭项目统计」，点击选中它，不要点同级其它子分类",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "未关闭项目统计"
+                }
+              ]
+            }
+          },
+          "effectType": "SIDE_EFFECT",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000006",
+          "name": "等待超长项目压降统计表可见",
+          "type": "wait",
+          "input": {
+            "kind": "visible",
+            "timeoutMs": 20000,
+            "target": {
+              "semantic": "右侧报表列表中的报表名称「超长项目压降统计表」已出现，只确认可见，不点击",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "超长项目压降统计表"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 20000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000007",
+          "name": "打开超长项目压降统计表",
+          "type": "click",
+          "input": {
+            "target": {
+              "semantic": "右侧报表列表中的报表名称「超长项目压降统计表」，点击打开该报表；不要点名称相近的明细表或其它报表",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "超长项目压降统计表"
+                }
+              ]
+            }
+          },
+          "effectType": "SIDE_EFFECT",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000008",
+          "name": "等待统计日期条件可见",
+          "type": "wait",
+          "input": {
+            "kind": "visible",
+            "timeoutMs": 30000,
+            "target": {
+              "semantic": "报表查询条件区中的统计日期输入框已出现，只确认可见，不填写",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "label",
+                  "value": "统计日期"
+                },
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(normalize-space(.), \"统计日期\") or contains(normalize-space(.), \"统计日\") or contains(normalize-space(.), \"查询日期\")]//input[not(@type=\"hidden\")][1] | //label[contains(., \"统计日期\") or contains(., \"统计日\") or contains(., \"查询日期\")]/following::input[not(@type=\"hidden\")][1]"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000009",
+          "name": "填写本期统计日期",
+          "type": "fill",
+          "input": {
+            "from": "queryDate",
+            "target": {
+              "semantic": "报表查询条件区中的统计日期输入框（常见标签为统计日期、统计日、查询日期或日期），填入本期日期 YYYY-MM-DD；不要填顶部全局搜索框",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "label",
+                  "value": "统计日期"
+                },
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(normalize-space(.), \"统计日期\") or contains(normalize-space(.), \"统计日\") or contains(normalize-space(.), \"查询日期\")]//input[not(@type=\"hidden\")][1] | //label[contains(., \"统计日期\") or contains(., \"统计日\") or contains(., \"查询日期\")]/following::input[not(@type=\"hidden\")][1]"
+                }
+              ]
+            }
+          },
+          "effectType": "SIDE_EFFECT",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000010",
+          "name": "点击查询本期",
+          "type": "click",
+          "input": {
+            "target": {
+              "semantic": "报表页中部查询条件区下方粉红色的「查询」按钮。页面顶部搜索框右侧还有红色「一键查询」，那是全局搜索，绝对不要点它",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "查询"
+                },
+                {
+                  "by": "css",
+                  "value": "xpath=//button[normalize-space(.)=\"查询\" or normalize-space(.//text())=\"查询\"][not(contains(normalize-space(.), \"一键\"))][1] | //*[self::a or self::span or self::div][normalize-space(.)=\"查询\"][not(contains(., \"一键\"))][1]"
+                }
+              ]
+            }
+          },
+          "effectType": "SIDE_EFFECT",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000011",
+          "name": "等待本期查询结果",
+          "type": "wait",
+          "input": {
+            "kind": "visible",
+            "timeoutMs": 30000,
+            "target": {
+              "semantic": "查询结果表中的列名或单元格「超长项目本月压降率」已出现，只确认可见，不点击",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "超长项目本月压降率"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000012",
+          "name": "提取本期超长项目本月压降率",
+          "type": "ai_extract",
+          "outputKey": "currentExtract",
+          "input": {
+            "instruction": "当前页是报表「超长项目压降统计表」按本期统计日期查询后的结果。从表格中读取字段「超长项目本月压降率」的数值。优先取合计/汇总行；若无合计行则取第一行数据。把百分号去掉，只返回数字，例如页面显示 12.5% 则返回 12.5；显示 12.5 也返回 12.5。表格为空、找不到该列或出现错误提示时不要编造数字。",
+            "outputSchema": {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "reductionRate",
+                  "type": "number",
+                  "required": true
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 60000
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000013",
+          "name": "写入本期压降率",
+          "type": "compute",
+          "outputKey": "currentReductionRate",
+          "input": {
+            "expression": {
+              "kind": "ref",
+              "key": "currentExtract",
+              "field": "reductionRate"
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000014",
+          "name": "填写上期统计日期",
+          "type": "fill",
+          "input": {
+            "from": "prevDate",
+            "target": {
+              "semantic": "报表查询条件区中的统计日期输入框（常见标签为统计日期、统计日、查询日期或日期），填入上期日期 YYYY-MM-DD；覆盖刚才填写的本期日期，不要填顶部全局搜索框",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "label",
+                  "value": "统计日期"
+                },
+                {
+                  "by": "css",
+                  "value": "xpath=//*[contains(normalize-space(.), \"统计日期\") or contains(normalize-space(.), \"统计日\") or contains(normalize-space(.), \"查询日期\")]//input[not(@type=\"hidden\")][1] | //label[contains(., \"统计日期\") or contains(., \"统计日\") or contains(., \"查询日期\")]/following::input[not(@type=\"hidden\")][1]"
+                }
+              ]
+            }
+          },
+          "effectType": "SIDE_EFFECT",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000015",
+          "name": "点击查询上期",
+          "type": "click",
+          "input": {
+            "target": {
+              "semantic": "报表页中部查询条件区下方粉红色的「查询」按钮。页面顶部搜索框右侧还有红色「一键查询」，那是全局搜索，绝对不要点它",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "查询"
+                },
+                {
+                  "by": "css",
+                  "value": "xpath=//button[normalize-space(.)=\"查询\" or normalize-space(.//text())=\"查询\"][not(contains(normalize-space(.), \"一键\"))][1] | //*[self::a or self::span or self::div][normalize-space(.)=\"查询\"][not(contains(., \"一键\"))][1]"
+                }
+              ]
+            }
+          },
+          "effectType": "SIDE_EFFECT",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000016",
+          "name": "等待上期查询结果",
+          "type": "wait",
+          "input": {
+            "kind": "visible",
+            "timeoutMs": 30000,
+            "target": {
+              "semantic": "上期查询结果表中的列名或单元格「超长项目本月压降率」已出现，只确认可见，不点击",
+              "framePath": [],
+              "candidates": [
+                {
+                  "by": "text",
+                  "value": "超长项目本月压降率"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 30000,
+            "deepLocate": true
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000017",
+          "name": "提取上期超长项目本月压降率",
+          "type": "ai_extract",
+          "outputKey": "prevExtract",
+          "input": {
+            "instruction": "当前页是报表「超长项目压降统计表」按上期统计日期查询后的结果。从表格中读取字段「超长项目本月压降率」的数值。优先取合计/汇总行；若无合计行则取第一行数据。把百分号去掉，只返回数字，例如页面显示 12.5% 则返回 12.5；显示 12.5 也返回 12.5。表格为空、找不到该列或出现错误提示时不要编造数字。",
+            "outputSchema": {
+              "kind": "object",
+              "fields": [
+                {
+                  "name": "reductionRate",
+                  "type": "number",
+                  "required": true
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 60000
+          }
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000018",
+          "name": "写入上期压降率",
+          "type": "compute",
+          "outputKey": "prevReductionRate",
+          "input": {
+            "expression": {
+              "kind": "ref",
+              "key": "prevExtract",
+              "field": "reductionRate"
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000019",
+          "name": "计算压降率环比变动",
+          "type": "compute",
+          "outputKey": "reductionRateChangePp",
+          "input": {
+            "expression": {
+              "kind": "call",
+              "fn": "diff",
+              "args": [
+                {
+                  "kind": "ref",
+                  "key": "currentReductionRate"
+                },
+                {
+                  "kind": "ref",
+                  "key": "prevReductionRate"
+                }
+              ]
+            }
+          },
+          "effectType": "READ_ONLY"
+        }
+      },
+      {
+        "kind": "step",
+        "step": {
+          "id": "c7000007-0000-4000-8000-000000000020",
+          "name": "环比断言超长项目本月压降率",
+          "type": "ai_assert",
+          "input": {
+            "instruction": "比较本期与上期的「超长项目本月压降率」。currentRate 是本期（queryDate），prevRate 是上期（prevDate），单位都是百分数数值（例如 12.5 表示 12.5%）。计算环比变动 = currentRate - prevRate（百分点）。判定：若 |currentRate - prevRate| > 10，即上下浮动超过 10 个百分点，则 passed=false，reason 必须包含「发现异常」，并写明两期日期、两期数值和变动幅度；否则 passed=true，reason 说明未超过 ±10 个百分点。不要用页面上当前表格替代已提取的两期数值。"
+          },
+          "contextBindings": [
+            {
+              "name": "queryDate",
+              "source": "input.queryDate",
+              "path": "queryDate",
+              "required": true
+            },
+            {
+              "name": "prevDate",
+              "source": "input.prevDate",
+              "path": "prevDate",
+              "required": true
+            },
+            {
+              "name": "currentRate",
+              "source": "steps.c7000007-0000-4000-8000-000000000012",
+              "path": "reductionRate",
+              "required": true
+            },
+            {
+              "name": "prevRate",
+              "source": "steps.c7000007-0000-4000-8000-000000000017",
+              "path": "reductionRate",
+              "required": true
+            }
+          ],
+          "effectType": "READ_ONLY",
+          "policy": {
+            "timeoutMs": 60000
+          }
+        },
+        "outcomes": [
+          {
+            "id": "c7000007-0000-4000-8000-000000000021",
+            "rule": {
+              "kind": "ai",
+              "instruction": "「超长项目本月压降率」本期相对上期的绝对值变动不超过 10 个百分点；超过则提示发现异常"
+            },
+            "scope": "step",
+            "meaning": "超长项目本月压降率环比上下浮动不超过 10 个百分点",
+            "severity": "MUST",
+            "provenance": "manual",
+            "onViolation": "continue"
+          }
+        ]
+      }
+    ],
+    "runtimeInvariants": [
+      {
+        "id": "c7000007-0000-4000-8000-000000000090",
+        "kind": "network_health",
+        "meaning": "页面接口不得报错",
+        "network": {
+          "ignore": [
+            "/favicon.ico"
+          ],
+          "requestFailed": false,
+          "statusClasses": [
+            "5xx"
+          ]
+        },
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      },
+      {
+        "id": "c7000007-0000-4000-8000-000000000091",
+        "kind": "script_errors",
+        "meaning": "页面脚本不得出现未捕获异常",
+        "severity": "SHOULD",
+        "evaluateAt": "each_step",
+        "onViolation": "continue"
+      }
+    ]
+  }
+}

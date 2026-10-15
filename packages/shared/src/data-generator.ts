@@ -271,6 +271,22 @@ export function evaluateGenerator(spec: DataGeneratorSpec): JsonValue {
   }
 }
 
+export function applyDefaultGenerators<T extends Record<string, unknown>>(
+  inputs: readonly ScenarioInputDecl[] | undefined,
+  runInput: T,
+): T & Record<string, JsonValue> {
+  const filled: Record<string, unknown> = { ...runInput }
+  for (const decl of inputs ?? []) {
+    if (
+      (filled[decl.key] === undefined || filled[decl.key] === null || filled[decl.key] === '') &&
+      decl.defaultGenerator
+    ) {
+      filled[decl.key] = evaluateGenerator(decl.defaultGenerator)
+    }
+  }
+  return filled as T & Record<string, JsonValue>
+}
+
 export function evaluateGeneratorWithUniqueness(
   spec: DataGeneratorSpec,
   key: string,

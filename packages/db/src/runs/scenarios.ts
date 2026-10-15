@@ -20,6 +20,7 @@ import {
   scenarioCopyName,
   syncSha256,
   ScenarioValidationError,
+  applyDefaultGenerators,
   assertRunFromResolved,
   deletePreviewResponseSchema,
   isAuthoringDocumentV2,
@@ -1721,8 +1722,9 @@ export async function prepareTrialVersion(
           expandResult.outcomeManifest ?? { entries: [] },
         ),
       )
+      const runInput = applyDefaultGenerators(authoringDoc.inputs, input.runInput)
       try {
-        assertRunFromResolved(compiled.definition.steps, input.runInput)
+        assertRunFromResolved(compiled.definition.steps, runInput)
       } catch (error) {
         if (error instanceof ScenarioValidationError) throw badRequest(error.code, error.message)
         throw error

@@ -291,7 +291,8 @@ export async function observeRun(this: SessionManagerContext, input: { runId: st
         ? stepRunFor(detail.stepRuns, checkpointStepId)
         : undefined
       const lastAttempt = stepRun?.attempts[stepRun.attempts.length - 1]
-      await insertLogEvidence(this.dbHandle, {
+      // 会话态（还没有试跑）没有运行事实可挂证据，快照只回传，不落库。
+      if (detail) await insertLogEvidence(this.dbHandle, {
         evidenceId,
         runId: input.runId,
         stepRunId: stepRun?.id,

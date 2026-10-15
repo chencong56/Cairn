@@ -261,6 +261,28 @@ describe.each(DRIVERS)('%s 场景草稿 / 发布 / 试跑（集成）', { timeou
     expect(trials).toHaveLength(0)
   })
 
+  it('声明了 defaultGenerator 的输入试跑时自动填充', async () => {
+    const scenario = await createScenarioWithVersion(handle.db, {
+      targetId,
+      name: '生成器填充',
+      inputs: [
+        {
+          key: 'orderId',
+          label: '单号',
+          defaultGenerator: { kind: 'fixed', value: 'ORD-GEN' },
+        },
+      ],
+      steps: [echoStep(newId(), '读单号', { input: { from: 'orderId' } })],
+      actor: { id: actorId },
+    })
+    const trial = await createTrialRunFromDraft(handle.db, scenario.id, {
+      revision: 1,
+      actor: { id: actorId },
+    })
+    expect(trial.created).toBe(true)
+    expect(trial.detail.context.orderId).toBe('ORD-GEN')
+  })
+
   it('试跑建 Run 失败时不留下半成品 trial 版本', async () => {
     const scenario = await createScenarioWithVersion(handle.db, {
       targetId,

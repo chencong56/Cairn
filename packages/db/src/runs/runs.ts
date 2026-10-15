@@ -52,7 +52,7 @@ import {
   authCheckpointSchema,
   authGateClosedError,
   computeContextVersion,
-  evaluateGenerator,
+  applyDefaultGenerators,
   type AiExecutionConfig,
   type AttemptDto,
   type CleanupStatus,
@@ -1140,17 +1140,10 @@ export async function writeRunWithSnapshot(
   if (target.status === 'disabled')
     throw conflict('TARGET_DISABLED', '目标系统已停用，不能创建新运行')
 
-  const runInput: Record<string, any> = { ...(input.input ?? {}) }
-  if (version.authoringDocument?.inputs) {
-    for (const decl of version.authoringDocument.inputs) {
-      if (
-        (runInput[decl.key] === undefined || runInput[decl.key] === null || runInput[decl.key] === '') &&
-        decl.defaultGenerator
-      ) {
-        runInput[decl.key] = evaluateGenerator(decl.defaultGenerator)
-      }
-    }
-  }
+  const runInput: Record<string, any> = applyDefaultGenerators(
+    version.authoringDocument?.inputs,
+    input.input ?? {},
+  )
   // 缺键的 Run 建出来也只能跑到那一步才失败，白占一次会话和登录。
   // 键列表随错误一起回给调用方：开放接口那侧没有控制台可看。
   const unresolved = unresolvedRunInputs(version.definition.steps, runInput)

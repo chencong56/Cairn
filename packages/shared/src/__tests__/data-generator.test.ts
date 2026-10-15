@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   generatorTemplateIssues,
+  applyDefaultGenerators,
   evaluateGenerator,
   evaluateGeneratorWithUniqueness,
   materializeBatchInputs,
@@ -107,5 +108,17 @@ describe('Data Generator Engine (DC-01, DC-02)', () => {
 
     expect(String(materialized[2]!['orderNo'])).toMatch(/^ORD_\d{8}$/)
     expect(materialized[1]!['orderNo']).not.toBe(materialized[2]!['orderNo'])
+  })
+
+  it('applyDefaultGenerators 只填空缺键，不覆盖已给值', () => {
+    const inputs: ScenarioInputDecl[] = [
+      { key: 'queryDate', label: '本期', type: 'string', required: true, defaultGenerator: { kind: 'fixed', value: '2026-10-15' } },
+      { key: 'prevDate', label: '上期', type: 'string', required: true, defaultGenerator: { kind: 'fixed', value: '2026-10-14' } },
+      { key: 'orderId', label: '单号', type: 'string', required: true },
+    ]
+    const filled = applyDefaultGenerators(inputs, { queryDate: '2026-01-01', orderId: '' })
+    expect(filled.queryDate).toBe('2026-01-01')
+    expect(filled.prevDate).toBe('2026-10-14')
+    expect(filled.orderId).toBe('')
   })
 })
