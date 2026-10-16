@@ -14,8 +14,11 @@
 | `check-stack.mjs` | `pnpm check:stack` | 本机 api / worker / web 进程探活；不启动进程，也不进 CI |
 | `use-env.mjs` | `pnpm env:use local\|remote`、`pnpm env:status` | 底层合并：公开画像 ∪ 密钥文件对齐 `.env.example` 后写出 `.env`。日常用 `pnpm dev:env` |
 | `dev-env.mjs` | `pnpm dev:env use local\|remote`、`status`/`check`/`restart`/`down` | 日常开发画像：合并配置、拒绝发布端口、起停本机热重载进程并探活。`restart` 会按当前画像重合并公开文件 + 密钥后再拉起 |
+| `worker-role-config.mjs` | `node tools/worker-role-config.mjs <role>` | 解析 Worker 角色（executor / scheduler / analyzer /ops）端口与环境变量，供 `scripts/worker-roles.sh` 与 `check-stack.mjs` 共用 |
+| `database-transfer.mjs` | `node tools/database-transfer.mjs export\|import` | 停写状态下的逻辑数据导出与导入归档（详见 `deploy/database-backends.md`） |
 | `../deploy/cairn` | `./deploy/cairn release\|status\|rollback`；`dev-infra up\|status\|down` | 发布读 `deploy/targets/cluster.conf`。开发组件另起。都不是 pnpm 脚本 |
 | `probe-demonstration-files.mjs` | `node tools/probe-demonstration-files.mjs` | 本机 Web／API／对象存储的 JSON、YAML 文件导入、图片审查、参数／成功条件回填与单步重教；含 390px 窄屏检查 |
+| `probe-outbound.mjs` | `node tools/probe-outbound.mjs` | 消息推送真实闭环探针：隔离数据库、Nest API、Vite 与回环 TLS SMTP／HTTPS 接收器端到端校验 |
 | `verify-changed.mjs` | `pnpm verify:changed` | 智能分层验证：根据改动影响半径智能选择 L1 局部验证或 L2 全量升级，提示 L3 专项领域测试；支持 `--dry-run` 与 `--files`；`--related` 为 L0 内循环档（见下表） |
 
 `pnpm check` 含依赖、迁移、数据库可移植、架构不变量、菜单对账，以及规则与探活判定单测；它不挂在 `pnpm test` / `test:*` 前面，单包测试不必先构建全仓。`.github/workflows/ci.yml` 在 push 与 PR 上按顺序执行（install → build → check → lint → typecheck → migrate → test），本机要跑全套就 `pnpm check && pnpm test`。`pnpm check:stack` 探本机正在跑的进程，不进 CI。源码遍历与「测试文件」口径统一在 `lib/source-scan.mjs`，各检查脚本不各写一份。
@@ -110,7 +113,7 @@ pnpm dev:env use remote
 
 ### 消息推送一期真实闭环探针
 
-`node tools/probe-outbound.mjs`（`node tools/probe-notifications.mjs` 保留为兼容别名）使用已构建的 shared／db／API／worker 包，启动隔离数据库、真实 Nest API、Vite（默认 5197，可用 `CAIRN_OUTBOUND_PROBE_WEB_PORT` 或 `CAIRN_NOTIFICATION_PROBE_WEB_PORT` 覆盖）和仅监听回环地址的 TLS SMTP／HTTPS 接收器。它不会使用运行中应用的业务数据或真实收件人。运行前确认数据库可达、Node 支持 `tls.setDefaultCACertificates`，并已安装项目的 Playwright Chromium。
+`node tools/probe-outbound.mjs` 使用已构建的 shared／db／API／worker 包，启动隔离数据库、真实 Nest API、Vite（默认 5197，可用 `CAIRN_OUTBOUND_PROBE_WEB_PORT` 或 `CAIRN_NOTIFICATION_PROBE_WEB_PORT` 覆盖）和仅监听回环地址的 TLS SMTP／HTTPS 接收器。它不会使用运行中应用的业务数据或真实收件人。运行前确认数据库可达、Node 支持 `tls.setDefaultCACertificates`，并已安装项目的 Playwright Chromium。
 
 探针通过页面保存渠道、测试发送和场景订阅，核对逐收件人部分成功、DATA 后断连、人工重复风险确认、稳定消息编号、真实 Webhook HMAC（协议版本为 `cairn.outbound@1`）、权限及 SSE 撤权；同时检查桌面、390px 和键盘路径。结果与截图写入 `.run/outbound-phase-one/`。运行证据等待使用前移 61 秒的测试时钟，不以此声称验证真实业务邮箱入箱。
 

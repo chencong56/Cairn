@@ -138,7 +138,11 @@ start_one() {
   if rec_pid="$(recorded_pid "$svc")"; then
     local cur_mode="unknown"
     [[ -f "$(mode_file "$svc")" ]] && cur_mode="$(cat "$(mode_file "$svc")")"
-    echo "  已在运行  cairn-$svc (pid $rec_pid, port $port, mode: $cur_mode)"
+    if [[ "$svc" == "web" ]]; then
+      echo "  已在运行  cairn-$svc (pid $rec_pid, port $port, mode: $cur_mode)  http://127.0.0.1:${port}"
+    else
+      echo "  已在运行  cairn-$svc (pid $rec_pid, port $port, mode: $cur_mode)"
+    fi
     return
   fi
 
@@ -174,7 +178,11 @@ start_one() {
   # 稍等 0.5s 确认启动未立即失败
   sleep 0.5
   if kill -0 "$pid" 2>/dev/null; then
-    echo "  ✅ 已启动 (dev 模式)  cairn-$svc (pid $pid, port $port)  日志 logs/$svc.log"
+    if [[ "$svc" == "web" ]]; then
+      echo "  ✅ 已启动 (dev 模式)  cairn-$svc (pid $pid, port $port)  http://127.0.0.1:${port}  日志 logs/$svc.log"
+    else
+      echo "  ✅ 已启动 (dev 模式)  cairn-$svc (pid $pid, port $port)  日志 logs/$svc.log"
+    fi
   else
     echo "  ✗ cairn-$svc 启动后立即退出，请检查日志: tail -n 30 logs/$svc.log" >&2
     rm -f "$(pid_file "$svc")" "$(mode_file "$svc")"

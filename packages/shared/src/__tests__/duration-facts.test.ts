@@ -3,8 +3,12 @@ import {
   attributeDurationDifference,
   composeActiveDuration,
   composeAttemptDuration,
+  durationCompositionNote,
+  durationResidualHelp,
   exclusiveSlicesOf,
+  remainderMs,
   formatDurationShort,
+  usedModelDuration,
   nodeDurationFactsSchema,
   runDurationFactsSchema,
   summarizeDurationDifference,
@@ -145,7 +149,16 @@ describe('耗时差异归因', () => {
       pageOnly: 3_000,
       residual: 3_000,
     })
+    expect(remainderMs(10_000, 4_000, null)).toBe(6_000)
+    expect(remainderMs(10_000, 4_000, 5_000)).toBe(1_000)
+    expect(remainderMs(null, 4_000, 5_000)).toBeNull()
     expect(exclusiveSlicesOf({ modelMs: 4_000, pageMs: 2_000, overlapMs: null, residualMs: 6_000 }).mode).toBe('undetermined')
+    expect(usedModelDuration({ modelMs: 0, modelCallCount: 0 })).toBe(false)
+    expect(usedModelDuration({ modelMs: 1, modelCallCount: 0 })).toBe(true)
+    expect(usedModelDuration({ modelMs: 0, modelCallCount: 1 })).toBe(true)
+    expect(durationCompositionNote(false)).toContain('其余 = 单步总耗时 − 已测页面')
+    expect(durationCompositionNote(true)).toContain('− 已测模型 − 已测页面')
+    expect(durationResidualHelp(false)).toContain('截图、元素定位、显式休眠')
   })
 
   it('单次 attempt：无采集标记时 page 保持 null；有标记才写 0；模型缺起止且已有页面则重叠未测', () => {

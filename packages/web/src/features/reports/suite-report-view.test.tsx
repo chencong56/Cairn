@@ -120,6 +120,8 @@ describe('SuiteReportView 交互控制台与四层总报表', () => {
     await expect.element(page.getByRole('cell', { name: '下单与结算' })).toBeVisible()
     await expect.element(page.getByText('满减优惠券领取')).toBeVisible()
     await expect.element(page.getByText('skuId:')).toBeVisible()
+    await expect.element(page.getByText('3.2s')).toBeVisible()
+    await expect.element(page.getByText('8.8s')).toBeVisible()
 
     // Filter to ANOMALOUS only
     const anomalousFilterBtn = page.getByRole('button', { name: '仅看异常 (1)' })

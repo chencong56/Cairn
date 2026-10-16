@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>月度收入与支出（图表）</title>
+<style>body{font-family:-apple-system,'PingFang SC',sans-serif;margin:24px} #chart{width:720px;height:360px} canvas{max-width:720px}</style>
+</head>
+<body>
+<h2>月度收入与支出</h2>
+<p id="lib-note"></p>
+<div id="chart"></div>
+<script>
+/* 靶场图表页：从 /grids/api/series 取数，用真实的 ECharts / Chart.js 画图；图里的数字不在页面文字上。 */
+(async () => {
+  const q = new URLSearchParams(location.search)
+  const lib = q.get('lib') === 'chartjs' ? 'chartjs' : 'echarts'
+  document.getElementById('lib-note').textContent = lib === 'chartjs' ? 'Chart.js' : 'ECharts'
+  const load = (src) => new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = src
+    s.onload = resolve
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+  const res = await fetch(`/grids/api/series${location.search}`)
+  const body = await res.json()
+  const { months, series } = body.data
+  const host = document.getElementById('chart')
+  if (lib === 'chartjs') {
+    await load('/grids/vendor/chart.umd.js')
+    const canvas = document.createElement('canvas')
+    canvas.id = 'chart-canvas'
+    host.replaceWith(canvas)
+    new window.Chart(canvas, {
+      type: 'bar',
+      data: { labels: months, datasets: series.map((s) => ({ label: s.name, data: s.data })) },
+      options: { animation: false },
+    })
+  } else {
+    await load('/grids/vendor/echarts.min.js')
+    const chart = window.echarts.init(host)
+    chart.setOption({
+      animation: false,
+      tooltip: {},
+      legend: { data: series.map((s) => s.name) },
+      xAxis: { type: 'category', data: months },
+      yAxis: { type: 'value' },
+      series: series.map((s) => ({ name: s.name, type: s.type === 'line' ? 'line' : 'bar', data: s.data })),
+    })
+  }
+  document.body.dataset.ready = '1'
+})()
+</script>
+</body>
+</html>

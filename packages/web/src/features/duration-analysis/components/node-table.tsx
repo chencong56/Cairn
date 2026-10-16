@@ -1,9 +1,18 @@
 import * as React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight } from 'lucide-react'
-import { DURATION_MIN_SAMPLES, type DurationNodeRow } from '@cairn/shared'
+import {
+  DURATION_MIN_SAMPLES,
+  durationCompositionNote,
+  durationResidualHelp,
+  exclusiveSlicesOf,
+  remainderMs,
+  usedModelDuration,
+  type DurationNodeRow,
+} from '@cairn/shared'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { FieldHelp } from '@/components/ui/field-help'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { formatMs, formatRatio } from '../format'
@@ -16,7 +25,36 @@ const KIND_LABELS: Partial<Record<DurationNodeRow['kind'], string>> = {
   scenario_checks: '场景级检查',
 }
 
-const COLUMN_COUNT = 12
+function residualOf(node: DurationNodeRow): number | null {
+  return node.residualP50 ?? remainderMs(node.activeP50, node.modelP50, node.pageP50)
+}
+
+function CompositionMeter({ node, showModel }: { node: DurationNodeRow; showModel: boolean }) {
+  const active = node.activeP50
+  if (active == null || active <= 0) return <span className='text-muted-foreground'>—</span>
+  const residual = residualOf(node) ?? 0
+  const slices = exclusiveSlicesOf({
+    modelMs: node.modelP50 ?? 0,
+    pageMs: node.pageP50,
+    overlapMs: 0,
+    residualMs: residual,
+  })
+  const widthOf = (ms: number) => `${Math.min(100, (ms / active) * 100)}%`
+  const title = showModel
+    ? `模型 ${formatMs(node.modelP50)} · 页面 ${formatMs(node.pageP50)} · 其余 ${formatMs(residual)}`
+    : `页面 ${formatMs(node.pageP50)} · 其余 ${formatMs(residual)}`
+  return (
+    <div
+      className='flex h-1.5 w-16 overflow-hidden rounded-full bg-muted/60'
+      aria-hidden
+      title={title}
+    >
+      {slices.modelOnly > 0 ? <span className='h-full bg-ai-accent' style={{ width: widthOf(slices.modelOnly) }} /> : null}
+      {slices.pageOnly > 0 ? <span className='h-full bg-primary/70' style={{ width: widthOf(slices.pageOnly) }} /> : null}
+      {slices.residual > 0 ? <span className='h-full bg-muted-foreground/25' style={{ width: widthOf(slices.residual) }} /> : null}
+    </div>
+  )
+}
 
 /** 展开后才读的子节点行（按单场景读明细，与顶层同一时间窗与对比）。 */
 function ChildRows({
@@ -25,17 +63,19 @@ function ChildRows({
   fetchChildren,
   renderRow,
   depth,
+  columnCount,
 }: {
   parentKey: string
   queryKey: readonly unknown[]
   fetchChildren: (parentKey: string) => Promise<DurationNodeRow[]>
   renderRow: (node: DurationNodeRow, depth: number) => React.ReactNode
   depth: number
+  columnCount: number
 }) {
   const query = useQuery({ queryKey: [...queryKey, parentKey], queryFn: () => fetchChildren(parentKey) })
   const note = (text: React.ReactNode) => (
     <TableRow>
-      <TableCell colSpan={COLUMN_COUNT} className='text-label text-muted-foreground'>
+      <TableCell colSpan={columnCount} className='text-label text-muted-foreground'>
         <span style={{ paddingLeft: depth * 16 + 24 }}>{text}</span>
       </TableCell>
     </TableRow>
@@ -69,6 +109,11 @@ export function NodeTable({
 }) {
   const [sort, setSort] = React.useState<'order' | 'delta'>('order')
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set())
+  const showModel = React.useMemo(
+    () => nodes.some((node) => usedModelDuration({ modelMs: node.modelP50 })),
+    [nodes],
+  )
+  const columnCount = showModel ? 11 : 10
   const top = React.useMemo(() => {
     const list = nodes.filter((node) => node.parentKey === null)
     return sort === 'delta' ? [...list].sort((a, b) => (b.deltaPct ?? -Infinity) - (a.deltaPct ?? -Infinity)) : list
@@ -86,6 +131,7 @@ export function NodeTable({
     const expandable = node.hasChildren && Boolean(fetchChildren)
     const open = expandable && expanded.has(node.nodeKey)
     const low = node.samples < DURATION_MIN_SAMPLES
+    const residual = residualOf(node)
     return (
       <React.Fragment key={node.nodeKey}>
         <TableRow className={cn('cursor-pointer', low && 'text-text-muted')} onClick={() => onOpen(node)}>
@@ -95,14 +141,14 @@ export function NodeTable({
                 <Button
                   variant='ghost'
                   size='icon'
-                  className='size-5 shrink-0'
+                  className='size-5 shrink-0 active:scale-95'
                   aria-label={open ? '收起子节点' : '展开子节点'}
                   onClick={(event) => {
                     event.stopPropagation()
                     toggle(node.nodeKey)
                   }}
                 >
-                  <ChevronRight className={cn('size-3.5 transition-transform motion-reduce:transition-none', open && 'rotate-90')} />
+                  <ChevronRight className={cn('size-3.5 transition-transform duration-150 ease-out motion-reduce:transition-none', open && 'rotate-90')} />
                 </Button>
               ) : (
                 <span className='inline-block size-5 shrink-0' />
@@ -113,26 +159,30 @@ export function NodeTable({
               {KIND_LABELS[node.kind] ? <Badge variant='outline' className='shrink-0'>{KIND_LABELS[node.kind]}</Badge> : null}
               {node.tags.includes('new') ? <Badge variant='outline' className='shrink-0 text-status-info'>新增</Badge> : null}
               {node.tags.includes('removed') ? <Badge variant='outline' className='shrink-0'>已删除</Badge> : null}
+              {(node.retryRate ?? 0) > 0 ? <span className='shrink-0 text-3xs text-status-warning'>重试 {formatRatio(node.retryRate)}</span> : null}
+              {node.avgIterations != null && node.avgIterations > 1 ? <span className='shrink-0 text-3xs text-muted-foreground'>迭代 {node.avgIterations}</span> : null}
+              {(node.assistedRate ?? 0) > 0 ? <span className='shrink-0 text-3xs text-muted-foreground'>定位 {formatRatio(node.assistedRate)}</span> : null}
             </div>
           </TableCell>
           <TableCell className='font-mono tabular-nums'>{formatMs(node.activeP50)}</TableCell>
-          <TableCell className='font-mono tabular-nums'>{formatMs(node.modelP50)}</TableCell>
+          {showModel ? <TableCell className='font-mono tabular-nums'>{formatMs(node.modelP50)}</TableCell> : null}
           <TableCell className='font-mono tabular-nums'>{formatMs(node.pageP50)}</TableCell>
+          <TableCell className='font-mono tabular-nums text-text-secondary'>{formatMs(residual)}</TableCell>
+          <TableCell className='w-20'>
+            <CompositionMeter node={node} showModel={showModel} />
+          </TableCell>
           <TableCell className='font-mono tabular-nums'>{formatMs(node.activeP95)}</TableCell>
           <TableCell>{low ? <span className='text-label'>样本不足</span> : <DeltaText pct={node.deltaPct} />}</TableCell>
-          <TableCell className='w-32'>
+          <TableCell className='w-28'>
             <Sparkline series={node.sparkline} height={24} />
           </TableCell>
           <TableCell className='tabular-nums'>{node.samples}</TableCell>
-          <TableCell className='tabular-nums'>{formatRatio(node.retryRate)}</TableCell>
-          <TableCell className='tabular-nums'>{node.avgIterations === null ? '—' : node.avgIterations}</TableCell>
-          <TableCell className='tabular-nums'>{formatRatio(node.assistedRate)}</TableCell>
           <TableCell>
             <InsightBadges insights={node.insights} limit={2} />
           </TableCell>
         </TableRow>
         {open && fetchChildren ? (
-          <ChildRows parentKey={node.nodeKey} queryKey={childrenQueryKey ?? ['duration-node-children']} fetchChildren={fetchChildren} renderRow={renderRow} depth={depth + 1} />
+          <ChildRows parentKey={node.nodeKey} queryKey={childrenQueryKey ?? ['duration-node-children']} fetchChildren={fetchChildren} renderRow={renderRow} depth={depth + 1} columnCount={columnCount} />
         ) : null}
       </React.Fragment>
     )
@@ -142,14 +192,28 @@ export function NodeTable({
     <section className='flex flex-col gap-3 rounded-lg border border-border-card bg-card p-5 shadow-card'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <div>
-          <h2 className='text-section font-semibold text-text-primary'>每一步耗时</h2>
-          <p className='mt-0.5 text-label text-muted-foreground'>按编排节点汇总：模块按调用合并、循环合并（记平均迭代次数）、检查计入所属步骤；点击一行看这一步的历史</p>
+          <h2 className='text-section font-semibold tracking-tight text-text-primary'>每一步耗时</h2>
+          <p className='mt-0.5 text-label text-muted-foreground'>
+            {showModel ? '单步拆成模型、页面与其余。' : '没有模型调用，只拆页面与其余。'}
+            重试、迭代、定位只在有值时出现。点击一行看这一步的历史
+          </p>
+          <p className='mt-1 text-3xs leading-relaxed text-muted-foreground'>{durationCompositionNote(showModel)}</p>
         </div>
         <div className='flex items-center gap-1 rounded-md border border-border-card bg-surface-subtle p-0.5'>
-          <Button size='sm' variant={sort === 'order' ? 'secondary' : 'ghost'} className='h-7 px-2.5 text-label' onClick={() => setSort('order')}>
+          <Button
+            size='sm'
+            variant={sort === 'order' ? 'secondary' : 'ghost'}
+            className='h-7 px-2.5 text-label active:scale-[0.97] motion-reduce:transform-none'
+            onClick={() => setSort('order')}
+          >
             编排顺序
           </Button>
-          <Button size='sm' variant={sort === 'delta' ? 'secondary' : 'ghost'} className='h-7 px-2.5 text-label' onClick={() => setSort('delta')}>
+          <Button
+            size='sm'
+            variant={sort === 'delta' ? 'secondary' : 'ghost'}
+            className='h-7 px-2.5 text-label active:scale-[0.97] motion-reduce:transform-none'
+            onClick={() => setSort('delta')}
+          >
             按涨幅
           </Button>
         </div>
@@ -162,16 +226,25 @@ export function NodeTable({
             <TableHeader>
               <TableRow>
                 <TableHead>步骤</TableHead>
-                <TableHead>P50</TableHead>
-                <TableHead>模型 P50</TableHead>
-                <TableHead>页面 P50</TableHead>
+                <TableHead>单步 P50</TableHead>
+                {showModel ? <TableHead>模型</TableHead> : null}
+                <TableHead>
+                  <span className='inline-flex items-center gap-1'>
+                    页面
+                    <FieldHelp>平台为等待页面可用而阻塞的时间，不是 document.load。未采集时写 —，不写成 0。</FieldHelp>
+                  </span>
+                </TableHead>
+                <TableHead>
+                  <span className='inline-flex items-center gap-1'>
+                    其余
+                    <FieldHelp>{durationResidualHelp(showModel)}</FieldHelp>
+                  </span>
+                </TableHead>
+                <TableHead>组成</TableHead>
                 <TableHead>P95</TableHead>
                 <TableHead>对比</TableHead>
                 <TableHead>走势</TableHead>
                 <TableHead>样本</TableHead>
-                <TableHead>重试率</TableHead>
-                <TableHead>平均迭代</TableHead>
-                <TableHead>地图 / AI 定位</TableHead>
                 <TableHead>问题</TableHead>
               </TableRow>
             </TableHeader>

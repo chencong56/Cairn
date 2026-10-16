@@ -91,10 +91,12 @@ export function summarizeEnv(text) {
   const hint = assignmentValue(text, 'CAIRN_CHANGE_HINT') || 'auto'
   const redis = assignmentValue(text, 'CAIRN_REDIS_URL')
   const displayRedis = redis.replace(/:\/\/[^@/]+@/, '://***@')
+  const webPort = assignmentValue(text, 'CAIRN_WEB_PORT') || '5173'
   return {
     database: `${host}:${port}/${name}`,
     object,
     changeHint: `${hint}${displayRedis ? ` (redis: ${displayRedis})` : ''}`,
+    webUrl: `http://127.0.0.1:${webPort}`,
     dbHost: host,
     dbPort: port,
     redisUrl: redis,

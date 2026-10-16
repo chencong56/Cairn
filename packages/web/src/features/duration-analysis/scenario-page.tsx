@@ -88,10 +88,11 @@ export function ScenarioDurationPage() {
         <PageSkeleton />
       ) : (
         <>
-          <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6'>
+          <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4'>
             <KpiCard label='执行耗时 P50' value={formatMs(data.kpis.activeP50.current)} comparison={data.kpis.activeP50} />
             <KpiCard label='执行耗时 P95' value={formatMs(data.kpis.activeP95.current)} comparison={data.kpis.activeP95} />
             <KpiCard label='总耗时 P50' value={formatMs(data.kpis.totalP50.current)} comparison={data.kpis.totalP50} />
+            <KpiCard label='步骤外开销 P50' value={formatMs(data.kpis.overheadP50.current)} comparison={data.kpis.overheadP50} />
             <KpiCard label='等待占比' value={formatRatio(data.kpis.waitRatio.current)} comparison={data.kpis.waitRatio} ratio />
             <KpiCard label='开跑前排队 P50' value={formatMs(data.kpis.queueP50.current)} comparison={data.kpis.queueP50} />
             <KpiCard label='运行 / 样本' value={`${data.kpis.runs} / ${data.kpis.samples}`} hint='样本为成功且分解完整的运行' />

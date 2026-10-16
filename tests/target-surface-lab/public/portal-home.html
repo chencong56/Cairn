@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>运营门户（弹出页靶场 · 入口）</title>
+  </head>
+  <body>
+    <h1 id="portal-title">运营数据展示系统</h1>
+    <nav>
+      <!-- 菜单项在新标签页打开报表中心，模拟“点击菜单跳到新系统” -->
+      <button type="button" id="menu-report">报表中心</button>
+    </nav>
+    <script>
+      document.getElementById('menu-report').addEventListener('click', () => {
+        window.open('/portal-report.html', '_blank')
+      })
+    </script>
+  </body>
+</html>

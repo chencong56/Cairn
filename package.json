@@ -16,7 +16,7 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "test:unit": "turbo run test --filter=@cairn/shared --filter=@cairn/authoring --filter=@cairn/map --filter=@cairn/secret --filter=@cairn/storage",
+    "test:unit": "turbo run test --filter=@cairn/shared --filter=@cairn/authoring --filter=@cairn/map --filter=@cairn/secret --filter=@cairn/storage --filter=@cairn/table-file",
     "test:db": "turbo run test --filter=@cairn/db",
     "test:db:compatibility": "pnpm --filter @cairn/db test:compatibility",
     "test:api": "turbo run test --filter=@cairn/api",

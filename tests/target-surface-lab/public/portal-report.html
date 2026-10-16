@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>报表中心（弹出页靶场 · 第二跳）</title>
+  </head>
+  <body>
+    <h1 id="report-title">区域收入报表</h1>
+    <table id="region-table">
+      <thead>
+        <tr><th>区域</th><th>收入(万元)</th><th>同比</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>辽宁</td><td>24145.16</td><td>3.5%</td></tr>
+        <tr><td>上海</td><td>23050.99</td><td>-1.2%</td></tr>
+        <tr><td>贵州</td><td>22820.29</td><td>0.8%</td></tr>
+      </tbody>
+    </table>
+    <ul id="kpi-list">
+      <li class="kpi">拆站率 0.20%</li>
+      <li class="kpi">维护扣罚比例 0.22%</li>
+      <li class="kpi">超期未立项批复项目数 3915个</li>
+    </ul>
+    <button type="button" id="open-detail">查看明细</button>
+    <script>
+      document.getElementById('open-detail').addEventListener('click', () => {
+        window.open('/portal-detail.html', '_blank')
+      })
+    </script>
+  </body>
+</html>

@@ -14,7 +14,10 @@ import { entityIdSchema, utcInstantSchema } from './wire.js'
  * - 运行开销 = 执行耗时 − 顶层节点执行耗时之和（钳为 ≥ 0）。
  * - 节点执行耗时 = 该节点在本次运行内全部 attempt 时长之和（含重试）。
  * - 执行耗时再拆：模型 ∪ 页面 ∪ 其余；重叠单独记账，不从执行耗时里减两次。
- *   模型 ∪ 页面 ∪ 其余；重叠单独记账。无采集标记时 pageMs = null，不把未测量写成 0。
+ *   无采集标记时 pageMs = null，不把未测量写成 0。
+ *   其余是余数，不是新采集维度：墙钟减去已测模型区间与已测页面区间的并集。
+ *   主要包括截图、元素定位、显式休眠、点击输入动作本身，以及步骤内编排；
+ *   页面未测时，其余里仍含真实页面等待。没有这些区间的单独计时，不能再拆成真列。
  *
  * 精度边界：事件时间取写入进程的本机时钟，起止时间取数据库时钟；时间线只用运行事件一个来源，
  * 负区间钳为 0。执行节点失联到被回收之前仍是 RUNNING（最长一个租约周期），以 workerLost 标记提示。
@@ -210,6 +213,57 @@ export function composeActiveDuration(input: {
     overlapMs,
     residualMs: Math.max(0, input.activeMs - (modelMs + pageMs - overlapMs)),
   }
+}
+
+/** 步骤表短名。 */
+export const DURATION_COMPOSITION_LABELS = Object.freeze({
+  active: '单步总耗时',
+  model: '模型',
+  page: '页面',
+  residual: '其余',
+})
+
+const RESIDUAL_CONTENTS =
+  '主要包括截图、元素定位、显式休眠、点击输入动作本身，以及步骤内编排。页面未测时，其余里仍含真实页面等待。'
+
+export const DURATION_COMPOSITION_HELP = Object.freeze({
+  active: '这一步从开始到结束的墙钟。',
+  model: '已归到这一步的模型调用时长。没有调用时不出现这一列。',
+  page: '平台为等待页面可用而阻塞的时间，不是 document.load。未采集时写 —，不写成 0。',
+  residual: `单步总耗时减去已测的模型调用和页面等待。${RESIDUAL_CONTENTS}`,
+})
+
+/** 这一步（或这次运行）是否用过模型。没用不出现模型列。 */
+export function usedModelDuration(input: { modelMs?: number | null; modelCallCount?: number | null }): boolean {
+  return (input.modelMs ?? 0) > 0 || (input.modelCallCount ?? 0) > 0
+}
+
+export function durationResidualHelp(showModel: boolean): string {
+  return showModel
+    ? DURATION_COMPOSITION_HELP.residual
+    : `单步总耗时减去已测的页面等待。${RESIDUAL_CONTENTS}`
+}
+
+/** 表下口径，别人问「其余是什么」时用这一句。 */
+export function durationCompositionNote(showModel: boolean): string {
+  return showModel
+    ? `其余 = 单步总耗时 − 已测模型 − 已测页面。${RESIDUAL_CONTENTS}`
+    : `其余 = 单步总耗时 − 已测页面。${RESIDUAL_CONTENTS}`
+}
+
+/** 展示用其余：执行 − 模型 − 页面（页面未测则只减模型）。分析行没有重叠分位时用这个扫列。 */
+export function remainderMs(
+  activeMs: number | null | undefined,
+  modelMs: number | null | undefined,
+  pageMs: number | null | undefined,
+): number | null {
+  if (activeMs == null || !Number.isFinite(activeMs)) return null
+  return composeActiveDuration({
+    activeMs,
+    modelMs: modelMs ?? 0,
+    pageMs: pageMs ?? null,
+    overlapMs: 0,
+  }).residualMs
 }
 
 export type ExclusiveDurationSlices = {

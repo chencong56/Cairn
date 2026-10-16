@@ -247,7 +247,7 @@ export function SuiteReportView({
           <div>
             <h3 className='text-title'>核心业务巡检对照总表</h3>
             <p className='text-label text-muted-foreground'>
-              横向汇总各子场景的业务指标、抓取数据与结论。
+              横向汇总各子场景的业务指标、抓取数据、结论与耗时。
             </p>
           </div>
           {/* 状态筛选切换 */}
@@ -255,7 +255,7 @@ export function SuiteReportView({
             <Button
               variant={filter === 'ALL' ? 'secondary' : 'ghost'}
               size='sm'
-              className='h-7 text-label'
+              className='h-7 text-label active:scale-[0.97] motion-reduce:transform-none'
               onClick={() => setFilter('ALL')}
             >
               全部 ({summaryBlock.gridRows.length})
@@ -263,7 +263,7 @@ export function SuiteReportView({
             <Button
               variant={filter === 'ANOMALOUS' ? 'secondary' : 'ghost'}
               size='sm'
-              className='h-7 text-label text-destructive'
+              className='h-7 text-label text-destructive active:scale-[0.97] motion-reduce:transform-none'
               onClick={() => setFilter('ANOMALOUS')}
             >
               仅看异常 ({summaryBlock.anomalousCount})
@@ -271,7 +271,7 @@ export function SuiteReportView({
             <Button
               variant={filter === 'WARNING' ? 'secondary' : 'ghost'}
               size='sm'
-              className='h-7 text-label text-warning'
+              className='h-7 text-label text-warning active:scale-[0.97] motion-reduce:transform-none'
               onClick={() => setFilter('WARNING')}
             >
               仅看警告 ({summaryBlock.warningCount})
@@ -279,7 +279,7 @@ export function SuiteReportView({
             <Button
               variant={filter === 'NORMAL' ? 'secondary' : 'ghost'}
               size='sm'
-              className='h-7 text-label text-success'
+              className='h-7 text-label text-success active:scale-[0.97] motion-reduce:transform-none'
               onClick={() => setFilter('NORMAL')}
             >
               仅看正常 ({summaryBlock.normalCount})
@@ -287,7 +287,7 @@ export function SuiteReportView({
             <Button
               variant={filter === 'UNDETERMINED' ? 'secondary' : 'ghost'}
               size='sm'
-              className='h-7 text-label'
+              className='h-7 text-label active:scale-[0.97] motion-reduce:transform-none'
               onClick={() => setFilter('UNDETERMINED')}
             >
               仅看未判定 ({summaryBlock.undeterminedCount})
@@ -303,7 +303,8 @@ export function SuiteReportView({
               <TableHead className='w-44'>检查项</TableHead>
               <TableHead className='w-24'>状态</TableHead>
               <TableHead>核心业务数据 / 指标</TableHead>
-              <TableHead className='w-52'>结论与耗时</TableHead>
+              <TableHead className='w-36'>结论</TableHead>
+              <TableHead className='sticky right-0 w-16 bg-surface-header text-right'>耗时</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -364,11 +365,9 @@ export function SuiteReportView({
                   </TableCell>
                   <TableCell>
                     <div className='text-body text-foreground'>{row.summary || '-'}</div>
-                    {row.durationMs != null ? (
-                      <div className='mt-0.5 text-label text-muted-foreground'>
-                        耗时：{(row.durationMs / 1000).toFixed(1)}s
-                      </div>
-                    ) : null}
+                  </TableCell>
+                  <TableCell className='sticky right-0 bg-card text-right font-mono tabular-nums text-label text-text-secondary'>
+                    {row.durationMs != null ? `${(row.durationMs / 1000).toFixed(1)}s` : '—'}
                   </TableCell>
                 </TableRow>
               )

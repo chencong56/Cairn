@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>AG Grid 靶场</title>
+<style>body{font-family:-apple-system,"PingFang SC",sans-serif;margin:16px}#grid{height:420px;width:100%}</style></head>
+<body>
+<h2>站点清单（AG Grid）</h2>
+<div id="grid"></div>
+<script src="/grids/vendor/ag-grid-community.min.js"></script>
+<script src="/grids/common.js"></script>
+<script>
+  const { params, fmt, fetchSites } = GridLab
+  const def = (field, headerName, extra = {}) => ({ field, headerName, ...extra })
+  const base = [
+    def('id', '编号', params.pinned ? { pinned: 'left', width: 90 } : { width: 90 }),
+    def('name', '站点名称'),
+    def('region', '区域'),
+  ]
+  const nums = [
+    def('qty', '数量', { type: 'numericColumn' }),
+    def('amount', '金额（元）', { type: 'numericColumn', valueFormatter: (p) => (typeof p.value === 'number' ? fmt(p.value) : p.value) }),
+  ]
+  const rest = [def('status', '状态', params.pinned ? { pinned: 'right', width: 100 } : {}), def('date', '日期')]
+  const columnDefs = params.group
+    ? [{ headerName: '基础信息', children: base }, { headerName: '业务数据', children: nums }, ...rest]
+    : [...base, ...nums, ...rest]
+  const opts = {
+    columnDefs,
+    rowData: [],
+    loading: true,
+    rowSelection: { mode: 'multiRow' },
+    defaultColDef: { flex: 1, minWidth: 110, cellDataType: false },
+    ...(params.paged ? { pagination: true, paginationPageSize: 20 } : {}),
+  }
+  const api = agGrid.createGrid(document.getElementById('grid'), opts)
+  fetchSites().then(({ rows, total }) => {
+    api.setGridOption('rowData', rows)
+    if (total) api.setGridOption('pinnedBottomRowData', [{ name: '合计', qty: total.qty, amount: total.amount }])
+    api.setGridOption('loading', false)
+  })
+</script>
+</body></html>

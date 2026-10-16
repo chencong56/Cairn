@@ -1,0 +1,26 @@
+{
+  "code": "gin-vue-admin",
+  "name": "Gin-Vue-Admin 演示站",
+  "entryUrl": "http://demo.gin-vue-admin.com/",
+  "loginUrl": "https://demo.gin-vue-admin.com/#/login",
+  "authMethod": "password",
+  "captchaMode": "image",
+  "status": "active",
+  "loginFields": {
+    "username": { "by": "css", "value": "input[placeholder*=\"用户名\"]" },
+    "password": { "by": "css", "value": "input[placeholder*=\"密码\"]" },
+    "submit": { "by": "css", "value": "button:has-text(\"登 录\"), button.el-button--primary" }
+  },
+  "captcha": {
+    "type": "IMAGE",
+    "image": {
+      "imageLocator": { "by": "css", "value": "img[src^=\"data:image\"]" },
+      "inputLocator": { "by": "css", "value": "input[placeholder*=\"验证码\"]" }
+    }
+  },
+  "account": {
+    "username": "admin",
+    "displayName": "Gin-Vue-Admin 演示账号",
+    "status": "active"
+  }
+}

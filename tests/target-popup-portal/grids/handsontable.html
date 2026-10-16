@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Handsontable 靶场</title>
+<link rel="stylesheet" href="/grids/vendor/handsontable.full.min.css">
+<style>body{font-family:-apple-system,"PingFang SC",sans-serif;margin:16px}</style></head>
+<body>
+<h2>站点清单（Handsontable）</h2>
+<div id="grid"></div>
+<script src="/grids/vendor/handsontable.full.min.js"></script>
+<script src="/grids/common.js"></script>
+<script>
+  const { params, fmt, COLS, fetchSites } = GridLab
+  const toData = (rows, total) => {
+    const d = rows.map((r) => [r.id, r.name, r.region, r.qty, fmt(r.amount), r.status, r.date])
+    if (total) d.push(['合计', '', '', total.qty, fmt(total.amount), '', ''])
+    return d
+  }
+  const hot = new Handsontable(document.getElementById('grid'), {
+    data: [],
+    colHeaders: COLS.map((c) => c.title),
+    columns: COLS.map(() => ({})), // 声明列数：数据为空时表头仍然渲染（业务系统通常都会声明 columns）
+    rowHeaders: true,
+    height: 400,
+    width: '100%',
+    readOnly: true,
+    stretchH: 'all',
+    colWidths: 120,
+    licenseKey: 'non-commercial-and-evaluation',
+    ...(params.pinned ? { fixedColumnsStart: 1, fixedRowsTop: 0 } : {}),
+    ...(params.group
+      ? { nestedHeaders: [[{ label: '基础信息', colspan: 3 }, { label: '业务数据', colspan: 2 }, '', ''], COLS.map((c) => c.title)] }
+      : {}),
+  })
+  fetchSites().then(({ rows, total }) => hot.loadData(toData(rows, total)))
+</script>
+</body></html>

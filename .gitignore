@@ -5,12 +5,14 @@ node_modules/
 
 # ── 构建产物 ──────────────────────────────────
 dist/
+dist-ssr/
 build/
 out/
 output/
 *.tsbuildinfo
 .turbo/
 .vite/
+.tanstack/
 
 # ── 测试与覆盖率 ───────────────────────────────
 coverage/
@@ -19,6 +21,8 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+.vitest-attachments/
+**/__screenshots__/
 
 # ── 浏览器运行时产物 ────────────────────────────
 # Midscene 默认把报告与截图写在这里。架构文档铁律：
@@ -34,11 +38,9 @@ docs/arch/
 docs/spec/
 docs/reviews/
 docs/plan/
-# design 目录本机维护，但 check:design 的豁免基线必须随仓库分发（CI/新克隆依赖），单独放行
+# design 目录默认本机维护，docs/design/front/ 正式前端设计规范与 check:design 随仓库分发
 docs/design/*
 !docs/design/front/
-docs/design/front/*
-!docs/design/front/design-baseline.json
 # 含明文凭据的部署记录（远端 shsnc-ah3、本机 Podman 等），不入库
 docs/deploy/
 # 联调 / L3 外部目标系统清单：URL、账号、口令，不入库
@@ -94,6 +96,7 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 
 # ── AI 助手与开发工具 ────────────────────────────
 # 开发工具与本机配置，不进产品仓库
@@ -103,11 +106,13 @@ Thumbs.db
 .agents
 .cursorignore
 .ccgui
-# 本机临时试验不入库；已入库的联调 / L2 / L3 夹具单独放行
-tests/
+skills-lock.json
+# tests/ 下的正式联调靶场与 E2E 入库；仅忽略本机私有覆盖配置与临时试验目录
+tests/**/*.local.*
+tests/tmp/
 
 # ── 整仓二开快照 ────────────────────────────────
-# 上面的 tests/*、.vscode/* 会误伤 vendor 里的上游源码。
+# 上面的 .vscode/* 等会误伤 vendor 里的上游源码。
 # 先放行快照，再压住安装与构建产物（不要并进根 workspace）。
 !vendor/**/tests/
 !vendor/**/tests/**
@@ -120,5 +125,4 @@ vendor/**/.pnpm-store/
 
 # 仅供阅读的上游源码参考（覆盖前面的 vendor 放行规则）
 /vendor/ref/
-/deploy/singe/
 deploy/cluster/dist/

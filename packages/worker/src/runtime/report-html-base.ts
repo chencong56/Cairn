@@ -82,7 +82,7 @@ export const SHARED_STYLES = `
     border: 1px solid var(--border-color);
     background: var(--bg-card);
     color: var(--text-secondary);
-    transition: all 0.15s ease;
+    transition: transform 100ms ease-out, color 120ms ease-out, background-color 120ms ease-out, border-color 120ms ease-out;
     user-select: none;
   }
   .btn:hover {
@@ -90,6 +90,7 @@ export const SHARED_STYLES = `
     color: var(--text-primary);
     border-color: #cbd5e1;
   }
+  .btn:active { transform: scale(0.97); }
   .btn-primary {
     background: #0284c7;
     color: #ffffff;
@@ -114,8 +115,15 @@ export const SHARED_STYLES = `
     font-size: 24px;
     font-weight: 700;
     color: var(--text-primary);
-    margin-bottom: 8px;
-    line-height: 1.3;
+    margin-bottom: 6px;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+  .header-kicker {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    letter-spacing: 0;
   }
   .header-meta {
     display: flex;
@@ -243,9 +251,10 @@ export const SHARED_STYLES = `
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    transition: all 0.15s ease;
+    transition: transform 100ms ease-out, color 120ms ease-out, background-color 120ms ease-out;
   }
   .pill:hover { color: var(--text-primary); }
+  .pill:active { transform: scale(0.97); }
   .pill.active {
     background: #ffffff;
     color: var(--color-brand);
@@ -275,15 +284,34 @@ export const SHARED_STYLES = `
     background: #f8fafc;
     color: var(--text-secondary);
     font-weight: 600;
-    padding: 12px 14px;
+    padding: 12px 10px;
     border-bottom: 1px solid var(--border-color);
     white-space: nowrap;
   }
   td {
-    padding: 12px 14px;
+    padding: 12px 10px;
     border-bottom: 1px solid var(--border-subtle);
     color: var(--text-primary);
     vertical-align: middle;
+  }
+  th.num, td.num {
+    width: 72px;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  th.num.lead { width: 88px; }
+  td.num.lead { font-weight: 600; }
+  td.num.muted { color: var(--text-secondary); }
+  .table-note {
+    margin: 0;
+    padding: 10px 14px 12px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-subtle);
   }
   tr:last-child td { border-bottom: none; }
   tr:hover td { background-color: #fbfcfe; }
@@ -580,6 +608,10 @@ export const SHARED_STYLES = `
     font-size: 13px;
     color: #374151;
     line-height: 1.6;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pill, .btn { transition: none; transform: none !important; }
   }
 
   /* Media Print Optimizations */

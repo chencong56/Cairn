@@ -103,6 +103,7 @@ function printSummary(summary) {
   console.log(`  数据库    ${summary.database}`)
   console.log(`  对象存储  ${summary.object}`)
   console.log(`  变化提示  ${summary.changeHint}`)
+  console.log(`  Web 地址  ${summary.webUrl}`)
 }
 
 function useProfile(name) {

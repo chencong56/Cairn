@@ -1,0 +1,26 @@
+{
+  "name": "target-popup-portal",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "识途目标系统联调夹具：菜单在新标签页打开子系统的模拟门户，非正式 Runtime。",
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "test": "node check.mjs",
+    "build:grids": "node build-grids.mjs"
+  },
+  "devDependencies": {
+    "ag-grid-community": "^33",
+    "antd": "^5",
+    "bootstrap": "^5.3.8",
+    "chart.js": "^4.5.1",
+    "echarts": "^5.0.0",
+    "esbuild": "^0.25",
+    "exceljs": "^4.4.0",
+    "handsontable": "^14",
+    "iconv-lite": "^0.6.3",
+    "react": "^18",
+    "react-dom": "^18"
+  }
+}

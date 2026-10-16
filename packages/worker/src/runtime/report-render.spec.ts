@@ -40,11 +40,15 @@ describe('报告渲染与交付（自包含 HTML 双模板）', () => {
 
     const html = renderReportHtml(document, images)
     expect(html).toContain('<!DOCTYPE html>')
+    expect(html).toContain('class="header-title">订单巡检</h1>')
     expect(html).toContain('商城 2026-09-19 运行报告')
     expect(html).toContain('订单金额检查')
     expect(html).toContain('执行成功')
     expect(html).toContain('异常')
     expect(html).toContain('data:image/jpeg;base64,')
+    expect(html).toContain('操作快照（点击放大）')
+    expect(html).not.toContain('有快照')
+    expect(html).not.toContain('<th style="width:72px;">截图</th>')
     expect(html).toContain('@media print')
     expect(html).toContain('openLightbox')
     expect(html).toContain('filterItems')
@@ -88,8 +92,71 @@ describe('报告渲染与交付（自包含 HTML 双模板）', () => {
     expect(html).toContain('总耗时')
     expect(html).toContain('执行 8.0s')
     expect(html).toContain('模型 5.0s')
-    expect(html).toContain('8.0s（模型 5.0s · 页面未测 · 其余 3.0s）')
-    expect(html).toContain('页面未测')
+    expect(html).toContain('<th class="num lead">单步总耗时</th>')
+    expect(html).toContain('<th class="num">模型</th>')
+    expect(html).toContain('>页面</th>')
+    expect(html).toContain('>其余</th>')
+    expect(html).toContain('<td class="num lead">8.0s</td>')
+    expect(html).toContain('<td class="num">5.0s</td>')
+    expect(html).toContain('<td class="num muted">—</td>')
+    expect(html).toContain('<td class="num muted">3.0s</td>')
+    expect(html).not.toContain('<th style="width:72px;">截图</th>')
+    expect(html).toContain('其余 = 单步总耗时 − 已测模型 − 已测页面')
+    expect(html).toContain('截图、元素定位、显式休眠')
+    expect(html).toContain('仅执行成功 (1)')
+    expect(html).toContain('仅断言通过 (0)')
+    expect(html).toContain('<th style="width:88px;">断言</th>')
+    expect(html).not.toContain('<th style="width:88px;">业务结论</th>')
+    expect(html).toContain('data-status="OK"')
+    expect(html).toContain('data-outcome="FAIL"')
+    expect(html).toContain('data-anomaly="FAIL"')
+    expect(html).toContain('class="header-title">订单巡检</h1>')
+  })
+
+  it('没有模型调用时不出现模型列，其余写明是扣掉页面后的余数', () => {
+    const html = renderReportHtml({
+      ...document,
+      source: {
+        ...(document.source as Record<string, JsonValue>),
+        startedAt: '2026-09-19T11:00:00.000Z',
+        finishedAt: '2026-09-19T11:00:10.000Z',
+        stepRuns: [
+          {
+            id: 'sr-1',
+            stepId: 'step-open',
+            name: '打开门户首页',
+            status: 'SUCCEEDED',
+            outcomeStatus: 'NOT_EVALUATED',
+            attempts: [{ id: 'attempt-1', status: 'SUCCEEDED', durationMs: 10_000 }],
+          },
+        ],
+        duration: {
+          totalMs: 10_000,
+          activeMs: 10_000,
+          modelMs: 0,
+          pageMs: 449,
+          residualMs: 9_551,
+          overlapMs: 0,
+          nodes: {
+            'step:step-open': { activeMs: 10_000, modelMs: 0, pageMs: 449, residualMs: 9_551, overlapMs: 0, modelCallCount: 0 },
+          },
+        },
+      },
+    } as unknown as ReportDocument)
+    expect(html).toContain('<th class="num lead">单步总耗时</th>')
+    expect(html).not.toContain('<th class="num">模型</th>')
+    expect(html).toContain('>页面</th>')
+    expect(html).toContain('>其余</th>')
+    expect(html).toContain('<td class="num lead">10.0s</td>')
+    expect(html).toContain('<td class="num muted">449ms</td>')
+    expect(html).toContain('<td class="num muted">9.6s</td>')
+    expect(html).not.toContain('<td class="num">0ms</td>')
+    expect(html).not.toContain('<th style="width:72px;">截图</th>')
+    expect(html).not.toContain('<th style="width:88px;">断言</th>')
+    expect(html).not.toContain('<th style="width:88px;">业务结论</th>')
+    expect(html).not.toContain('仅断言通过')
+    expect(html).toContain('其余 = 单步总耗时 − 已测页面')
+    expect(html).not.toContain('− 已测模型 − 已测页面')
   })
 
   it('页面健康：有违规才出现卡片、章节与步骤内清单；无违规时 HTML 里没有任何页面健康内容', () => {
@@ -226,7 +293,10 @@ describe('报告渲染与交付（自包含 HTML 双模板）', () => {
     expect(html).toContain('50')
     expect(html).toContain('差 (POOR)')
     expect(html).toContain('68%')
+    expect(html).toContain('class="header-title">业务晨检</h1>')
     expect(html).toContain('核心业务巡检对照总表')
+    expect(html).toContain('<th class="num">耗时</th>')
+    expect(html).toContain('3.2s')
     expect(html).toContain('跨场景聚合核心异常')
     expect(html).toContain('支付通道超时未响应')
     expect(html).toContain('01a0f40a-ff20-73bb-af3a-25003a00ea11')

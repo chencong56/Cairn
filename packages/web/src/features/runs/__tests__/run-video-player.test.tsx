@@ -289,7 +289,7 @@ describe('RunVideoPlayer', () => {
 
     // 截取 7 步仿真截图
     await page.screenshot({
-      path: 'src/features/runs/__tests__/__screenshots__/trial-video-simulation-7steps.png',
+      path: '__screenshots__/trial-video-simulation-7steps.png',
     })
 
     // 点击下一步，验证切到第 2 步并高亮
@@ -299,7 +299,7 @@ describe('RunVideoPlayer', () => {
 
     // 截取第 2 步高亮切换截图
     await page.screenshot({
-      path: 'src/features/runs/__tests__/__screenshots__/trial-video-simulation-step2-active.png',
+      path: '__screenshots__/trial-video-simulation-step2-active.png',
     })
   })
 
@@ -347,7 +347,7 @@ describe('RunVideoPlayer', () => {
 
     // 截取 15 步仿真截图
     await page.screenshot({
-      path: 'src/features/runs/__tests__/__screenshots__/trial-video-simulation-15steps.png',
+      path: '__screenshots__/trial-video-simulation-15steps.png',
     })
   })
 })

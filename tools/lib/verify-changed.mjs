@@ -10,10 +10,11 @@ export const ALLOWED_EDGES = {
   '@cairn/authoring': ['@cairn/shared'],
   '@cairn/storage': ['@cairn/shared'],
   '@cairn/secret': ['@cairn/shared'],
+  '@cairn/table-file': ['@cairn/shared'],
   '@cairn/db': ['@cairn/shared', '@cairn/authoring'],
   '@cairn/map': ['@cairn/shared', '@cairn/authoring'],
-  '@cairn/api': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage'],
-  '@cairn/worker': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage'],
+  '@cairn/api': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage', '@cairn/table-file'],
+  '@cairn/worker': ['@cairn/db', '@cairn/authoring', '@cairn/map', '@cairn/secret', '@cairn/shared', '@cairn/storage', '@cairn/table-file'],
   '@cairn/web': ['@cairn/shared', '@cairn/authoring'],
   '@cairn/extension-playwright-crx': ['@cairn/shared', '@cairn/authoring'],
 }
@@ -47,6 +48,7 @@ export function mapPathToPackage(filePath) {
   if (normalized.startsWith('packages/authoring/')) return '@cairn/authoring'
   if (normalized.startsWith('packages/storage/')) return '@cairn/storage'
   if (normalized.startsWith('packages/secret/')) return '@cairn/secret'
+  if (normalized.startsWith('packages/table-file/')) return '@cairn/table-file'
   if (normalized.startsWith('packages/db/')) return '@cairn/db'
   if (normalized.startsWith('packages/map/')) return '@cairn/map'
   if (normalized.startsWith('packages/api/')) return '@cairn/api'
@@ -276,6 +278,7 @@ const RELATED_RUNNERS = {
   '@cairn/authoring': [{ args: '' }],
   '@cairn/storage': [{ args: '' }],
   '@cairn/secret': [{ args: '' }],
+  '@cairn/table-file': [{ args: '' }],
   '@cairn/map': [{ args: '' }],
   '@cairn/db': [{ args: '' }],
   '@cairn/api': [{ args: '' }],

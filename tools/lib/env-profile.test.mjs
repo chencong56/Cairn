@@ -12,6 +12,7 @@ import {
   inspectSecretsFile,
   mergeProfile,
   readActiveProfileName,
+  summarizeEnv,
   hitsPublishGuard,
   forbiddenSecretLinesInTarget,
   applyTestDbPin,
@@ -20,6 +21,13 @@ import {
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const exampleText = readFileSync(join(root, '.env.example'), 'utf8')
 const guard = JSON.parse(readFileSync(join(root, 'deploy/dev-env.guard.json'), 'utf8'))
+
+test('summarizeEnv 返回默认与自定义端口的 webUrl', () => {
+  const defaultSummary = summarizeEnv('CAIRN_DB_HOST=100.64.0.8\nCAIRN_DB_PORT=25432\nCAIRN_DB_NAME=cairn\n')
+  assert.equal(defaultSummary.webUrl, 'http://127.0.0.1:5173')
+  const customSummary = summarizeEnv('CAIRN_DB_HOST=127.0.0.1\nCAIRN_WEB_PORT=5188\n')
+  assert.equal(customSummary.webUrl, 'http://127.0.0.1:5188')
+})
 
 test('keysOf 同时统计未注释与注释形态的键', () => {
   const keys = keysOf([

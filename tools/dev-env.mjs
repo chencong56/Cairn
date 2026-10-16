@@ -113,6 +113,7 @@ function printStatus(name, summary) {
   console.log(`  数据库    ${summary.database}`)
   console.log(`  对象存储  ${summary.object}`)
   console.log(`  变化提示  ${summary.changeHint}`)
+  console.log(`  Web 地址  ${summary.webUrl}`)
 }
 
 function activeSummary() {
@@ -175,13 +176,16 @@ async function check() {
 
 function restart() {
   if (!existsSync(ACTIVE)) die('没有 .env。先 pnpm dev:env use local 或 remote。')
-  const { name } = activeSummary()
+  const active = activeSummary()
+  let { name, summary } = active
   if (name === 'local' || name === 'remote') {
     const prepared = prepareProfile(name)
     if (name === 'remote') assertNotPublish(prepared.summary)
     writeActiveEnv(prepared.text)
+    summary = prepared.summary
   }
   run('./scripts/dev.sh', ['restart'])
+  printStatus(name, summary)
 }
 
 function down() {

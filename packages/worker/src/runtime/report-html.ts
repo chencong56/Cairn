@@ -1,4 +1,11 @@
-import type { JsonValue, ReportAiInterpretation, ReportDocument } from '@cairn/shared'
+import {
+  durationCompositionNote,
+  durationResidualHelp,
+  usedModelDuration,
+  type JsonValue,
+  type ReportAiInterpretation,
+  type ReportDocument,
+} from '@cairn/shared'
 import { suiteScoreUnavailableReason, suiteSummaryForReport, suiteVerdictForReport } from './report-content.js'
 import { SHARED_STYLES, escapeHtml } from './report-html-base.js'
 import { renderDurationPeriodHtml } from './report-duration-html.js'
@@ -103,18 +110,47 @@ function numberOrNull(value: JsonValue | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function formatStepComposition(node: Record<string, JsonValue> | undefined, fallbackMs: number | null): string {
+function stepOutcomeEvaluated(status: string): boolean {
+  return status === 'PASS' || status === 'FAIL' || status === 'WARN' || status === 'UNKNOWN'
+}
+
+function durationFactsUsedModel(
+  durationFacts: Record<string, JsonValue>,
+  durationNodes: Record<string, JsonValue>,
+): boolean {
+  if (usedModelDuration({ modelMs: numberOrNull(durationFacts.modelMs) })) return true
+  return Object.values(durationNodes).some((node) => {
+    const row = record(node)
+    return usedModelDuration({
+      modelMs: numberOrNull(row.modelMs),
+      modelCallCount: numberOrNull(row.modelCallCount),
+    })
+  })
+}
+
+function stepCompositionOf(node: Record<string, JsonValue> | undefined, fallbackMs: number | null): {
+  active: string
+  model: string
+  page: string
+  residual: string
+} {
   const activeMs = numberOrNull(node?.activeMs) ?? fallbackMs
-  if (activeMs == null) return '-'
+  if (activeMs == null) return { active: '—', model: '—', page: '—', residual: '—' }
   const modelMs = numberOrNull(node?.modelMs) ?? 0
   const pageMs = numberOrNull(node?.pageMs)
-  const residualMs = numberOrNull(node?.residualMs) ?? 0
-  const parts: string[] = []
-  if (modelMs > 0) parts.push(`模型 ${formatDuration(modelMs)}`)
-  if (pageMs == null) parts.push('页面未测')
-  else if (pageMs > 0) parts.push(`页面 ${formatDuration(pageMs)}`)
-  if (parts.length > 0 && residualMs > 0) parts.push(`其余 ${formatDuration(residualMs)}`)
-  return parts.length ? `${formatDuration(activeMs)}（${parts.join(' · ')}）` : formatDuration(activeMs)
+  const residualMs = numberOrNull(node?.residualMs) ?? Math.max(0, activeMs - modelMs - (pageMs ?? 0))
+  return {
+    active: formatDuration(activeMs),
+    model: formatDuration(modelMs),
+    page: pageMs == null ? '—' : formatDuration(pageMs),
+    residual: formatDuration(residualMs),
+  }
+}
+
+function reportLeadTitle(stored: string, lead: unknown): { title: string; kicker: string | null } {
+  const name = typeof lead === 'string' ? lead.trim() : ''
+  if (name && !stored.startsWith(name)) return { title: name, kicker: stored }
+  return { title: stored, kicker: null }
 }
 
 function record(value: JsonValue | undefined): Record<string, JsonValue> {
@@ -355,8 +391,10 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
   const evidenceStatus = String(source.evidenceStatus ?? 'UNKNOWN')
 
   const totalSteps = stepRuns.length
-  const passedSteps = stepRuns.filter((s) => s.outcomeStatus === 'PASS' && s.status === 'SUCCEEDED').length
+  const succeededSteps = stepRuns.filter((s) => s.status === 'SUCCEEDED').length
+  const outcomePassSteps = stepRuns.filter((s) => s.outcomeStatus === 'PASS' && s.status === 'SUCCEEDED').length
   const failedSteps = stepRuns.filter((s) => s.outcomeStatus === 'FAIL' || s.status === 'FAILED').length
+  const unevaluatedSteps = stepRuns.filter((s) => s.status === 'SUCCEEDED' && s.outcomeStatus !== 'PASS' && s.outcomeStatus !== 'FAIL').length
 
   const started = source.startedAt ?? source.createdAt
   const finished = source.finishedAt
@@ -368,8 +406,12 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
   const modelMs = numberOrNull(durationFacts.modelMs) ?? 0
   const pageMs = numberOrNull(durationFacts.pageMs)
   const hasDurationFacts = Object.keys(durationFacts).length > 0
+  const showModel = durationFactsUsedModel(durationFacts, durationNodes)
+  const showStepOutcome = stepRuns.some((step) => stepOutcomeEvaluated(String(step.outcomeStatus ?? '')))
 
-  const summaryText = `${document.title} | 业务结论: ${labelFor(verdict)} | 步骤: ${passedSteps}/${totalSteps} 通过 | 耗时: ${formatDuration(totalMs)}`
+  const heading = reportLeadTitle(document.title, source.scenarioName)
+  const overheadMs = numberOrNull(durationFacts.overheadMs)
+  const summaryText = `${heading.title} | 业务结论: ${labelFor(verdict)} | 步骤执行成功: ${succeededSteps}/${totalSteps} · 业务通过 ${outcomePassSteps} | 耗时: ${formatDuration(totalMs)}`
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -403,8 +445,9 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
 
     <!-- Title & Identity Card -->
     <div class="header-card">
-      <h1 class="header-title">${escapeHtml(document.title)}</h1>
-      ${document.subtitle ? `<div style="font-size:14px;color:var(--text-secondary);margin-bottom:12px;">${escapeHtml(document.subtitle)}</div>` : ''}
+      <h1 class="header-title">${escapeHtml(heading.title)}</h1>
+      ${heading.kicker ? `<div class="header-kicker">${escapeHtml(heading.kicker)}</div>` : ''}
+      ${document.subtitle ? `<div class="header-kicker">${escapeHtml(document.subtitle)}</div>` : ''}
       <div class="header-meta">
         <div class="meta-item"><strong>目标系统：</strong>${escapeHtml(source.targetName ?? '-')}</div>
         <div class="meta-item"><strong>场景名称：</strong>${escapeHtml(source.scenarioName ?? '-')}</div>
@@ -427,9 +470,14 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
         </div>
 
         <div class="stat-card">
-          <div class="stat-label">步骤通过率</div>
-          <div class="stat-value">${passedSteps} <span style="font-size:14px;color:var(--text-muted);font-weight:400;">/ ${totalSteps}</span></div>
-          <div class="stat-subtext">${totalSteps > 0 ? Math.round((passedSteps / totalSteps) * 100) : 0}% 步骤成功流转</div>
+          <div class="stat-label">步骤执行</div>
+          <div class="stat-value">${succeededSteps} <span style="font-size:14px;color:var(--text-muted);font-weight:400;">/ ${totalSteps}</span></div>
+          <div class="stat-subtext">${[
+            `${totalSteps > 0 ? Math.round((succeededSteps / totalSteps) * 100) : 0}% 执行成功`,
+            `业务通过 ${outcomePassSteps}`,
+            unevaluatedSteps > 0 ? `未评估 ${unevaluatedSteps}` : '',
+            failedSteps > 0 ? `异常 ${failedSteps}` : '',
+          ].filter(Boolean).join(' · ')}</div>
         </div>
 
         <div class="stat-card">
@@ -438,7 +486,8 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
           <div class="stat-subtext">${[
             activeMs != null ? `执行 ${formatDuration(activeMs)}` : '',
             modelMs > 0 ? `模型 ${formatDuration(modelMs)}` : '',
-            hasDurationFacts && pageMs == null ? '页面未测' : pageMs != null && pageMs > 0 ? `页面 ${formatDuration(pageMs)}` : '',
+            hasDurationFacts && pageMs == null ? '页面 —' : pageMs != null ? `页面 ${formatDuration(pageMs)}` : '',
+            overheadMs != null && overheadMs > 0 ? `步骤外 ${formatDuration(overheadMs)}` : '',
             `开始: ${formatDate(started, timeZone).split(' ')[1] || '-'}`,
           ].filter(Boolean).join(' · ')}</div>
         </div>
@@ -470,8 +519,9 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
         </div>
         <div class="filter-pills no-print">
           <button class="pill active" onclick="filterItems('.step-row', 'data-status', 'ALL', this)">全部 (${totalSteps})</button>
-          <button class="pill" onclick="filterItems('.step-row', 'data-status', 'FAIL', this)">仅异常 (${failedSteps})</button>
-          <button class="pill" onclick="filterItems('.step-row', 'data-status', 'PASS', this)">仅通过 (${passedSteps})</button>
+          <button class="pill" onclick="filterItems('.step-row', 'data-anomaly', 'FAIL', this)">仅异常 (${failedSteps})</button>
+          <button class="pill" onclick="filterItems('.step-row', 'data-status', 'OK', this)">仅执行成功 (${succeededSteps})</button>
+          ${showStepOutcome ? `<button class="pill" onclick="filterItems('.step-row', 'data-outcome', 'PASS', this)">仅断言通过 (${outcomePassSteps})</button>` : ''}
         </div>
       </div>
 
@@ -482,10 +532,12 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
               <tr>
                 <th style="width:50px;">序号</th>
                 <th>步骤 / 断言描述</th>
-                <th style="width:110px;">执行状态</th>
-                <th style="width:100px;">业务结论</th>
-                <th style="width:100px;">单步耗时</th>
-                <th style="width:90px;">截图</th>
+                <th style="width:96px;">执行状态</th>
+                ${showStepOutcome ? '<th style="width:88px;">断言</th>' : ''}
+                <th class="num lead">单步总耗时</th>
+                ${showModel ? '<th class="num">模型</th>' : ''}
+                <th class="num" title="平台为等待页面可用而阻塞的时间，不是 document.load">页面</th>
+                <th class="num" title="${escapeHtml(durationResidualHelp(showModel))}">其余</th>
               </tr>
             </thead>
             <tbody>
@@ -496,25 +548,30 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
                 const lastAttempt = stepAttempts[stepAttempts.length - 1]
                 const nodeKey = step.stepId ? `step:${String(step.stepId)}` : ''
                 const fallbackMs = lastAttempt?.durationMs != null ? Number(lastAttempt.durationMs) : null
-                const stepDuration = formatStepComposition(record(durationNodes[nodeKey]), Number.isFinite(fallbackMs) ? fallbackMs : null)
-                const hasImg = screenshots.some((img) => img.caption && img.caption.includes(String(step.name)))
+                const composition = stepCompositionOf(record(durationNodes[nodeKey]), Number.isFinite(fallbackMs) ? fallbackMs : null)
+                const execKey = sStatus === 'FAILED' ? 'FAIL' : sStatus === 'SUCCEEDED' ? 'OK' : 'OTHER'
+                const outcomeKey = sOutcome === 'PASS' || sOutcome === 'FAIL' ? sOutcome : 'OTHER'
+                const anomalyKey = sOutcome === 'FAIL' || sStatus === 'FAILED' ? 'FAIL' : 'OK'
 
                 return `
-                <tr class="step-row" data-status="${sOutcome === 'FAIL' || sStatus === 'FAILED' ? 'FAIL' : 'PASS'}">
+                <tr class="step-row" data-status="${execKey}" data-outcome="${outcomeKey}" data-anomaly="${anomalyKey}">
                   <td class="table-num">${idx + 1}</td>
                   <td>
                     <strong>${escapeHtml(step.name)}</strong>
                     ${step.skipReason ? `<div style="font-size:11px;color:var(--text-muted);">跳过原因：${escapeHtml(step.skipReason)}</div>` : ''}
                   </td>
                   <td><span class="badge ${badgeClass(sStatus)}">${labelFor(sStatus)}</span></td>
-                  <td><span class="badge ${badgeClass(sOutcome)}">${labelFor(sOutcome)}</span></td>
-                  <td>${stepDuration}</td>
-                  <td>${hasImg ? `<span class="badge badge-info" style="font-size:11px;">有快照</span>` : '-'}</td>
+                  ${showStepOutcome ? `<td>${stepOutcomeEvaluated(sOutcome) ? `<span class="badge ${badgeClass(sOutcome)}">${labelFor(sOutcome)}</span>` : '—'}</td>` : ''}
+                  <td class="num lead">${composition.active}</td>
+                  ${showModel ? `<td class="num">${composition.model}</td>` : ''}
+                  <td class="num muted">${composition.page}</td>
+                  <td class="num muted">${composition.residual}</td>
                 </tr>`
               }).join('')}
             </tbody>
           </table>
         </div>
+        <p class="table-note">${escapeHtml(durationCompositionNote(showModel))}</p>
       </div>
     </div>
 
@@ -572,7 +629,7 @@ export function renderSingleScenarioHtml(document: ReportDocument, images: Repor
             </div>
             <div class="step-header-right">
               <span class="badge ${badgeClass(sStatus)}">${labelFor(sStatus)}</span>
-              <span class="badge ${badgeClass(sOutcome)}">${labelFor(sOutcome)}</span>
+              ${stepOutcomeEvaluated(sOutcome) ? `<span class="badge ${badgeClass(sOutcome)}">${labelFor(sOutcome)}</span>` : ''}
               <svg class="step-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
           </summary>
@@ -732,8 +789,11 @@ export function renderSuiteInspectionHtml(document: ReportDocument, images: Repo
   const findings = suiteSummary?.aggregatedFindings ?? []
   const items = records(source.items)
 
+  const heading = reportLeadTitle(document.title, source.suiteName)
   const scoreText = scoreAvailable ? `${healthScore}分（${labelFor(healthGrade)}）` : `未评分（${scoreReason}）`
-  const summaryText = `${document.title} | 业务检查得分: ${scoreText} | 检查项: ${normalCount}/${totalCount} 正常、${undeterminedCount} 未判定、${skippedCount} 跳过 | 并发节约: ${savedPercent}%`
+  const summaryText = `${heading.title} | 业务检查得分: ${scoreText} | 检查项: ${normalCount}/${totalCount} 正常、${undeterminedCount} 未判定、${skippedCount} 跳过 | 并发节约: ${savedPercent}%`
+  const durationByMember = Object.fromEntries(gridRows.map((row) => [String(row.memberId ?? ''), row.durationMs]))
+  const schedulingMs = wallClockMs > childDurationMs ? wallClockMs - childDurationMs : 0
 
   const gradeColor = healthScore === null ? '#64748b' : healthScore >= 90 ? '#059669' : healthScore >= 75 ? '#0284c7' : healthScore >= 60 ? '#d97706' : '#dc2626'
 
@@ -769,8 +829,9 @@ export function renderSuiteInspectionHtml(document: ReportDocument, images: Repo
 
     <!-- Title Card -->
     <div class="header-card">
-      <h1 class="header-title">${escapeHtml(document.title)}</h1>
-      ${document.subtitle ? `<div style="font-size:14px;color:var(--text-secondary);margin-bottom:12px;">${escapeHtml(document.subtitle)}</div>` : ''}
+      <h1 class="header-title">${escapeHtml(heading.title)}</h1>
+      ${heading.kicker ? `<div class="header-kicker">${escapeHtml(heading.kicker)}</div>` : ''}
+      ${document.subtitle ? `<div class="header-kicker">${escapeHtml(document.subtitle)}</div>` : ''}
       <div class="header-meta">
         <div class="meta-item"><strong>目标系统：</strong>${escapeHtml(source.targetName ?? '-')}</div>
         <div class="meta-item"><strong>场景集名称：</strong>${escapeHtml(source.suiteName ?? '-')}</div>
@@ -807,7 +868,7 @@ export function renderSuiteInspectionHtml(document: ReportDocument, images: Repo
         <div class="stat-card">
           <div class="stat-label">真实执行耗时 (墙钟)</div>
           <div class="stat-value">${formatDuration(wallClockMs)}</div>
-          <div class="stat-subtext">串行累计工时: ${formatDuration(childDurationMs)}</div>
+          <div class="stat-subtext">成员合计 ${formatDuration(childDurationMs)}${schedulingMs > 0 ? ` · 调度与收尾 ${formatDuration(schedulingMs)}` : ''}</div>
         </div>
 
         <div class="stat-card">
@@ -850,7 +911,8 @@ export function renderSuiteInspectionHtml(document: ReportDocument, images: Repo
                 <th style="width:160px;">检查项</th>
                 <th style="width:90px;">状态</th>
                 <th>核心业务数据 / 指标</th>
-                <th>结论与耗时</th>
+                <th>结论</th>
+                <th class="num">耗时</th>
               </tr>
             </thead>
             <tbody>
@@ -874,10 +936,8 @@ export function renderSuiteInspectionHtml(document: ReportDocument, images: Repo
                     ${dKeys.map((k) => `<span class="kv-tag"><span class="kv-key">${escapeHtml(k)}:</span><span class="kv-val">${escapeHtml(typeof dataRow[k] === 'object' ? JSON.stringify(dataRow[k]) : String(dataRow[k]))}</span></span>`).join('')}
                     ${!mKeys.length && !dKeys.length ? '<span style="color:var(--text-muted);">-</span>' : ''}
                   </td>
-                  <td>
-                    <div>${escapeHtml(row.summary || '-')}</div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">耗时: ${dur}</div>
-                  </td>
+                  <td>${escapeHtml(row.summary || '—')}</td>
+                  <td class="num">${dur}</td>
                 </tr>`
               }).join('')}
             </tbody>
@@ -932,6 +992,7 @@ export function renderSuiteInspectionHtml(document: ReportDocument, images: Repo
                 <th style="width:110px;">准入状态</th>
                 <th style="width:110px;">运行状态</th>
                 <th style="width:110px;">业务结论</th>
+                <th class="num">耗时</th>
                 <th>子运行编号</th>
               </tr>
             </thead>
@@ -943,6 +1004,7 @@ export function renderSuiteInspectionHtml(document: ReportDocument, images: Repo
                   <td><span class="badge ${badgeClass(item.admission)}">${labelFor(item.admission)}</span></td>
                   <td><span class="badge ${badgeClass(item.runStatus)}">${labelFor(item.runStatus)}</span></td>
                   <td><span class="badge ${badgeClass(item.outcomeStatus)}">${labelFor(item.outcomeStatus)}</span></td>
+                  <td class="num">${item.durationMs != null ? formatDuration(Number(item.durationMs)) : durationByMember[String(item.memberId ?? '')] != null ? formatDuration(Number(durationByMember[String(item.memberId ?? '')])) : '—'}</td>
                   <td><code style="font-size:11px;">${escapeHtml(item.childRunId ?? '-')}</code></td>
                 </tr>
               `).join('')}

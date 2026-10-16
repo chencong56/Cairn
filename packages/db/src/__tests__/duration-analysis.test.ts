@@ -89,8 +89,9 @@ describe.each(DRIVERS)('%s 耗时分析读模型', { timeout: 120_000 }, (driver
       expect(result.buckets.reduce((sum, b) => sum + b.failed, 0)).toBe(1)
 
       const byKey = new Map(result.nodes.map((n) => [n.nodeKey, n]))
-      expect(byKey.get(`step:${STEP_A}`)).toMatchObject({ activeP50: 4_000, baseP50: 4_000, deltaPct: 0, samples: 12 })
-      expect(byKey.get(`step:${STEP_B}`)).toMatchObject({ activeP50: 9_000, baseP50: 6_000, deltaPct: 50 })
+      expect(result.kpis.overheadP50.current).toEqual(expect.any(Number))
+      expect(byKey.get(`step:${STEP_A}`)).toMatchObject({ activeP50: 4_000, residualP50: 4_000, baseP50: 4_000, deltaPct: 0, samples: 12 })
+      expect(byKey.get(`step:${STEP_B}`)).toMatchObject({ activeP50: 9_000, residualP50: 9_000, baseP50: 6_000, deltaPct: 50 })
       expect(byKey.get(`step:${STEP_B}`)?.sparkline).toHaveLength(result.buckets.length)
 
       expect(result.insights.map((i) => [i.kind, i.nodeKey])).toEqual(

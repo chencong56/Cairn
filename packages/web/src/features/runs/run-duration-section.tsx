@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronRight, Clock, Flame, MinusCircle, XCircle } from '
 import {
   DURATION_COMPONENT_LABELS,
   describeDurationTag,
+  durationCompositionNote,
   exclusiveSlicesOf,
   formatDurationShort,
   type DurationAttribution,
@@ -286,7 +287,9 @@ export function RunDurationSection({ run, onSelectStep }: { run: RunDetailDto; o
             ) : null}
             {data.facts.pagePartial ? <Badge variant='outline'>部分步骤页面已测</Badge> : null}
             {data.facts.workerLost ? <Badge variant='outline' className='text-status-warning'>出现过执行节点失联</Badge> : null}
-            <span className='basis-full text-3xs text-muted-foreground'>页面 = 平台为等待页面可用而阻塞的时间，不是 document.load</span>
+            <span className='basis-full text-3xs text-muted-foreground'>
+              页面 = 平台为等待页面可用而阻塞的时间，不是 document.load。{durationCompositionNote(data.facts.modelMs > 0)}
+            </span>
           </div>
           {!data.facts.complete && data.facts.incompleteReason ? (
             <p className='text-label text-muted-foreground'>{INCOMPLETE_LABELS[data.facts.incompleteReason] ?? '耗时分解不完整'}</p>

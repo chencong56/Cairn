@@ -1,0 +1,27 @@
+{
+  "code": "vben-admin",
+  "name": "Vben Admin 演示站",
+  "entryUrl": "https://www.vben.pro/",
+  "loginUrl": "https://www.vben.pro/#/auth/login",
+  "authMethod": "password",
+  "captchaMode": "slider",
+  "status": "active",
+  "loginFields": {
+    "username": { "by": "css", "value": "input[placeholder*=\"用户名\"], input[placeholder*=\"账号\"]" },
+    "password": { "by": "css", "value": "input[placeholder*=\"密码\"]" },
+    "submit": { "by": "css", "value": "button:has-text(\"登 录\"), button[type=\"submit\"]" }
+  },
+  "captcha": {
+    "type": "SLIDER",
+    "slider": {
+      "knobLocator": { "by": "css", "value": ".cursor-move, .slider-knob, .drag-btn" },
+      "containerLocator": { "by": "css", "value": "div:has(.vben-spine-text), .slider-container" },
+      "mode": "TRACK"
+    }
+  },
+  "account": {
+    "username": "vben",
+    "displayName": "Vben 演示账号",
+    "status": "active"
+  }
+}

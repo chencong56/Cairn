@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
@@ -17,6 +18,7 @@ function row(overrides: Partial<DurationNodeRow>): DurationNodeRow {
     activeP50: 4_000,
     modelP50: null,
     pageP50: null,
+    residualP50: null,
     activeP95: 4_500,
     baseP50: 4_000,
     deltaPct: 0,
@@ -30,7 +32,7 @@ function row(overrides: Partial<DurationNodeRow>): DurationNodeRow {
   }
 }
 
-function wrap(node: React.ReactNode) {
+function wrap(node: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
 }
@@ -49,7 +51,11 @@ describe('耗时节点表', () => {
         childrenQueryKey={['test-children']}
       />,
     )
-    await expect.element(screen.getByText('页面 P50')).toBeInTheDocument()
+    await expect.element(screen.getByText('单步 P50')).toBeInTheDocument()
+    await expect.element(screen.getByText('组成')).toBeInTheDocument()
+    expect(screen.getByText('模型', { exact: true }).elements()).toHaveLength(0)
+    await expect.element(screen.getByText('没有模型调用，只拆页面与其余。')).toBeInTheDocument()
+    await expect.element(screen.getByText(/其余 = 单步总耗时 − 已测页面/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '展开子节点' }).elements()).toHaveLength(1)
     expect(fetchChildren).not.toHaveBeenCalled()
 
@@ -61,5 +67,20 @@ describe('耗时节点表', () => {
 
     await screen.getByRole('button', { name: '收起子节点' }).click()
     await expect.element(screen.getByText('输入账号')).not.toBeInTheDocument()
+  })
+
+  it('拆出模型、页面与其余；零重试不占位', async () => {
+    const screen = await wrap(
+      <NodeTable
+        nodes={[row({ modelP50: 1_500, pageP50: 800, residualP50: 1_700 })]}
+        onOpen={vi.fn()}
+      />,
+    )
+    await expect.element(screen.getByText('1.5s')).toBeInTheDocument()
+    await expect.element(screen.getByText('800ms')).toBeInTheDocument()
+    await expect.element(screen.getByText('1.7s')).toBeInTheDocument()
+    await expect.element(screen.getByText('模型', { exact: true })).toBeInTheDocument()
+    await expect.element(screen.getByText(/其余 = 单步总耗时 − 已测模型 − 已测页面/)).toBeInTheDocument()
+    await expect.element(screen.getByText('重试 0%')).not.toBeInTheDocument()
   })
 })
